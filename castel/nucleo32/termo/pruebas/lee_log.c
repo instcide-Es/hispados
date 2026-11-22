@@ -58,6 +58,7 @@ static void datos(char *l, int *t)
 				snprintf(sen[ns].nombre, sizeof sen[0].nombre, "%s", n);
 				sen[ns].cpu = !strncmp(n, "Nucleo", 6) || !strncmp(n, "Paquete", 7) || !strncmp(n, "Procesador", 10) || !strncmp(n, "Simulado", 8);
 				sen[ns].limite = VE_NO;
+				sen[ns].no_fiable = sen[ns].solo_carga = 0;
 				ns++;
 			}
 			if (k < ns)

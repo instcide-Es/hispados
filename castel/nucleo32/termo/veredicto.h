@@ -16,6 +16,7 @@ struct ve_sensor {
 	int cpu;		/* 1: del procesador (o simulado) */
 	int limite;		/* el suyo, o VE_NO */
 	int no_fiable;		/* lo que da no es creíble: ni para la parada ni para el veredicto */
+	int solo_carga;		/* solo da algo mientras se carga (los demás núcleos): no mide el enfriamiento */
 };
 
 /* la prueba entera: lo que se sabe de cada sensor */

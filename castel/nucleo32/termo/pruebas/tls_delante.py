@@ -30,7 +30,7 @@ ossl('req', '-x509', '-new', '-key', 'raiz.key', '-sha256', '-days', '3650', '-s
 ossl('x509', '-in', 'raiz.pem', '-outform', 'DER', '-out', 'RAIZ.CER')
 ossl('ecparam', '-name', 'prime256v1', '-genkey', '-noout', '-out', 'srv.key')
 ossl('req', '-new', '-key', 'srv.key', '-subj', '/CN=10.0.2.2', '-out', 'srv.csr')
-open(os.path.join(C, 'srv.ext'), 'w').write('subjectAltName=IP:10.0.2.2\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n')
+open(os.path.join(C, 'srv.ext'), 'w').write('subjectAltName=DNS:10.0.2.2,IP:10.0.2.2\nbasicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\n')
 ossl('x509', '-req', '-in', 'srv.csr', '-CA', 'raiz.pem', '-CAkey', 'raiz.key', '-CAcreateserial', '-days', '3650', '-sha256',
      '-extfile', 'srv.ext', '-out', 'srv.pem')
 ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

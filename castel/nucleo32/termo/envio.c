@@ -296,7 +296,9 @@ static void apunta_mandado(const char *nombre, u32 tam)
 	}
 }
 
-/* un archivo, al servidor u: 0 bien; 1 lo rechaza (no se repite); 2 se puede repetir */
+/* un archivo, al servidor u: 0 bien; 1 lo rechaza (no se repite); 2 se puede
+ * repetir; 3 con ese servidor no hay manera (el certificado, la hora, el
+ * nombre, sin TLS.BIN): el otro, si lo hay */
 static int manda(const struct url *u, const char *lote, const char *nombre, const u8 *d, u32 n, char *por_que, int cabe)
 {
 	static const char lim[] = "----HispaTermo7d1f0b2a9c";
@@ -327,7 +329,7 @@ static int manda(const struct url *u, const char *lote, const char *nombre, cons
 	c = conecta(u, por_que, cabe);
 	if (ES_ERROR_RED(c)) {
 		free(cuerpo);
-		return 2;
+		return c == TLS_CERTIFICADO || c == TLS_SIN_HORA || c == SIN_TLS || c == NO_RESUELVE ? 3 : 2;
 	}
 	r = envia(u, c, (const u8 *)cab_http, (u32)m);
 	if (!r)
@@ -521,15 +523,31 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 			iguales++;
 			continue;
 		}
-		for (i = 0; i < 4 * n_servidores && r == 2; i++) {
-			static const u32 espera[4] = { 0, 2, 5, 10 };
+		{
+			int vez = 0, probados = 1;
 
-			if (i % 4)
-				sc(SC_DORMIR, espera[i % 4] * jg_hz, 0, 0);
-			di("Enviando %s (%d de %d, %u octetos)%s...", nombres[k], k + 1, nn, n, i ? ", otra vez" : "");
-			r = manda(&us[sv], lote, nombres[k], b, n, por_que, sizeof por_que);
-			if (r == 2 && i % 4 == 3 && n_servidores > 1)
-				sv = 1 - sv;	/* (cuatro veces mal: el otro servidor) */
+			for (i = 0; i < 4 * n_servidores && r == 2; i++, vez++) {
+				static const u32 espera[4] = { 0, 2, 5, 10 };
+
+				if (vez % 4)
+					sc(SC_DORMIR, espera[vez % 4] * jg_hz, 0, 0);
+				di("Enviando %s (%d de %d, %u octetos)%s...", nombres[k], k + 1, nn, n, vez ? ", otra vez" : "");
+				r = manda(&us[sv], lote, nombres[k], b, n, por_que, sizeof por_que);
+				/* (cuatro veces mal, o con este no hay manera: el otro servidor) */
+				if ((r == 3 || (r == 2 && vez % 4 == 3)) && n_servidores > 1 && probados < 2) {
+					sv = 1 - sv;
+					probados++;
+					vez = -1;
+					r = 2;
+				}
+			}
+			if (r == 3) {
+				/* (con ningún servidor: lo demás tampoco va a ir) */
+				free(b);
+				malos++;
+				di("%s: no se ha podido enviar: %s.", nombres[k], por_que);
+				break;
+			}
 		}
 		free(b);
 		if (r == 0) {

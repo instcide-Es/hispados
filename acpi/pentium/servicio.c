@@ -563,6 +563,58 @@ static void ta_lee_vent(int i)
 	}
 }
 
+/* (TERMO) los ASUS: \_SB.ATKD.WMNB (0, DSTS, {id, 0}) -> lo que dice el EC de
+ * ese «dispositivo» (como asus-wmi de Linux). Solo DSTS (0x53545344), que es
+ * leer; nunca DEVS (0x53564544), que escribe. ~0: no existe; sin el bit
+ * 0x00010000: no está. -1 si no vale */
+static ACPI_HANDLE ta_atkd;
+
+static int64_t ta_asus(u32 id)
+{
+	ACPI_OBJECT a[3], r;
+	ACPI_OBJECT_LIST l = { 3, a };
+	ACPI_BUFFER b = { sizeof r, &r };
+	static u8 entrada[8];
+	u32 v;
+
+	entrada[0] = id, entrada[1] = id >> 8, entrada[2] = id >> 16, entrada[3] = id >> 24;
+	entrada[4] = entrada[5] = entrada[6] = entrada[7] = 0;
+	a[0].Type = ACPI_TYPE_INTEGER;
+	a[0].Integer.Value = 0;
+	a[1].Type = ACPI_TYPE_INTEGER;
+	a[1].Integer.Value = 0x53545344;	/* DSTS */
+	a[2].Type = ACPI_TYPE_BUFFER;
+	a[2].Buffer.Length = 8;
+	a[2].Buffer.Pointer = entrada;
+	if (ACPI_FAILURE(AcpiEvaluateObjectTyped(ta_atkd, "WMNB", &l, &b, ACPI_TYPE_INTEGER)))
+		return -1;
+	v = (u32)r.Integer.Value;
+	if (v == 0xFFFFFFFEu || v == 0xFFFFFFFFu || !(v & 0x00010000))
+		return -1;
+	return v;
+}
+
+static void ta_lee_asus(void)
+{
+	int64_t v;
+	u32 antes = ec_ignoradas;
+
+	ta.asus_vent_cpu = ta.asus_vent_gpu = ta.asus_temp = TA_NO;
+	if (!ta.asus_hay)
+		return;
+	v = ta_asus(0x00110013);
+	if (v >= 0 && (v & 0xFFFF) < 200)
+		ta.asus_vent_cpu = (int32_t)(v & 0xFFFF) * 100;
+	v = ta_asus(0x00110014);
+	if (v >= 0 && (v & 0xFFFF) < 200)
+		ta.asus_vent_gpu = (int32_t)(v & 0xFFFF) * 100;
+	v = ta_asus(0x00110011);
+	if (v >= 0 && (v & 0xFFFF) >= 2732 && (v & 0xFFFF) <= 4232)
+		ta.asus_temp = (int32_t)(v & 0xFFFF) - 2732;
+	if (ec_ignoradas != antes)
+		ta.asus_escribe = 1;
+}
+
 /* lo de un texto del SMBIOS (el número k de los de detrás de la ficha) */
 static void ta_texto_smbios(char *d, u32 cabe, const u8 *f, u32 k)
 {
@@ -663,6 +715,9 @@ static void ta_lee(void)
 			AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_un_ventilador, NULL, NULL, NULL);
 		}
 		reg("ACPI: (TERMO) %u zonas térmicas y %u ventiladores\n", ta.nzonas, ta.nvent);
+		ta.asus_hay = ACPI_SUCCESS(AcpiGetHandle(ACPI_ROOT_OBJECT, "\\_SB.ATKD", &ta_atkd)) && ACPI_SUCCESS(AcpiGetHandle(ta_atkd, "WMNB", &(ACPI_HANDLE){ 0 }));
+		if (ta.asus_hay)
+			reg("ACPI: (TERMO) ASUS: \\_SB.ATKD.WMNB (se leen con DSTS los ventiladores y la temperatura)\n");
 	}
 	/* (TERMO) el EC, de solo lectura mientras tanto; y cuánto se tarda y por
 	 * qué falla cada zona, apuntado (la primera vez y cuando cambia) */
@@ -682,6 +737,7 @@ static void ta_lee(void)
 		}
 		for (i = 0; i < ta.nvent; i++)
 			ta_lee_vent(i);
+		ta_lee_asus();			/* (TERMO) los ASUS, por WMI (DSTS) */
 		ec_solo_lectura = 0;
 		ta.ec_hay = estado.ec_hay;
 		ta.ec_lecturas += estado.ec_lecturas - l0;

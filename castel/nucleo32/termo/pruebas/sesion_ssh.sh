@@ -11,15 +11,15 @@ fase() { echo "FASE $1" >> "$R"; }
 : > "$R"
 echo "TERM=$TERM COLORTERM=${COLORTERM:-} LANG=${LANG:-} colores=$(tput colors 2> /dev/null)" >> "$R"
 echo "tamano=$(stty size)" >> "$R"
-fase colores; bash "$P/colores.sh"; sleep 4
-fase htop; timeout 7 htop -d 10; sleep 1
-fase vim; timeout 7 vim -u NONE -N -c 'syntax on' -c 'set number' -c 'set nomodified' "$P/../veredicto.c"; reset -I 2> /dev/null; sleep 1
-fase less; timeout 6 less "$P/../veredicto.h"; sleep 1
+fase colores; COLORES_RESP="$R" bash "$P/colores.sh"; sleep 4
+fase htop; timeout --foreground 7 htop -d 10; sleep 1
+fase vim; timeout --foreground 7 vim -n -u NONE -N -c 'syntax on' -c 'set number' -c 'set nomodified' "$P/../vt.c"; sleep 1
+fase less; timeout --foreground 6 less "$P/../vt.h"; sleep 1
 clear
 fase teclas
 echo "Pulse teclas (8 s)..."
 stty raw -echo
-timeout 8 dd bs=1 count=64 2> /dev/null | od -An -tx1 | tr -s ' \n' ' ' > "$R.teclas"
+timeout --foreground 8 dd bs=1 count=64 2> /dev/null | od -An -tx1 | tr -s ' \n' ' ' > "$R.teclas"
 stty sane
 echo "teclas=$(cat "$R.teclas")" >> "$R"
 trap 'echo "winch=$(stty size)" >> "$R"' WINCH

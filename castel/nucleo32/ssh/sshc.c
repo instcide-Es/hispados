@@ -107,6 +107,7 @@ static int abre_ventana(const char *t)
 		ventana = 0;
 		return -1;
 	}
+	sc(80, ventana, 0, 0);		/* (arriba a la izquierda: que quepa entera) */
 	vt_inicia(&V, cols, filas);
 	en_vt = 1;
 	vuelca_v(1);
@@ -172,6 +173,30 @@ static u32 tecla_espera(void)
 		if (e.clase == EV_TECLA)
 			return e.a;
 	}
+}
+
+/* (TERMO) -g ARCHIVO: lo que llega del otro lado, tal cual, a ese archivo al
+ * acabar (hasta 2 MB): para ver con vt_prueba lo que ha pintado el terminal */
+static char graba_ruta[80];
+static u8 graba[2 << 20];
+static u32 n_graba;
+
+static void graba_datos(const u8 *d, u32 n)
+{
+	if (!graba_ruta[0])
+		return;
+	if (n > sizeof graba - n_graba)
+		n = sizeof graba - n_graba;
+	memcpy(graba + n_graba, d, n);
+	if ((n_graba + n) / 32768 != n_graba / 32768)
+		h_escribe_archivo(graba_ruta, graba, n_graba + n);	/* (y cada 32 K, por si no acaba bien) */
+	n_graba += n;
+}
+
+static void graba_fin(void)
+{
+	if (graba_ruta[0] && n_graba)
+		h_escribe_archivo(graba_ruta, graba, n_graba);
 }
 
 static int suyo_v = -1;		/* el canal, si ya hay sesión (para window-change) */
@@ -1263,6 +1288,7 @@ static int sesion(void)
 				if (sin_pantalla)
 					a_la_consola(d, nd);
 				else if (en_vt) {
+					graba_datos(d, nd);
 					vt_entra(&V, d, nd);
 					if (V.sincro && !sincro_tic)
 						sincro_tic = (int)h_tics();
@@ -1490,6 +1516,16 @@ int principal(void)
 		else
 			h_ruta(carpeta, sizeof carpeta, "SSH");
 	}
+	if (h_empieza(p, "-g ")) {
+		int i = 0;
+
+		p += 3;
+		while (*p && *p != ' ' && i < (int)sizeof graba_ruta - 1)
+			graba_ruta[i++] = *p++;
+		graba_ruta[i] = 0;
+		while (*p == ' ')
+			p++;
+	}
 	if (h_empieza(p, "-p ")) {
 		p += 3;
 		puerto = 0;
@@ -1563,6 +1599,7 @@ int principal(void)
 		return 1;
 	}
 	r = sesion();
+	graba_fin();
 	h_cerrar_red(c);
 	crypto_wipe(S.k_ent, sizeof S.k_ent);
 	crypto_wipe(S.k_sal, sizeof S.k_sal);

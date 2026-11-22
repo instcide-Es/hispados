@@ -113,7 +113,7 @@ static int elige(const struct ve_prueba *p)
 		for (k = 0; k < p->ns; k++) {
 			int sube;
 
-			if (p->ini[k] == VE_NO || p->pico[k] == VE_NO || p->s[k].no_fiable)
+			if (p->pico[k] == VE_NO || p->s[k].no_fiable || p->s[k].solo_carga || (p->ini[k] == VE_NO))
 				continue;
 			if (pasada == 0 && !p->s[k].cpu)
 				continue;
@@ -256,9 +256,9 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 	PON("\n\n");
 	/* el veredicto */
 	if (seguridad)
-		PON("PELIGRO: se calienta demasiado. Limpie el polvo del ventilador y de las rejillas y cambie la pasta térmica del procesador. ");
+		PON("PELIGRO: se ha parado por seguridad, cerca de su límite. Los datos indican que no saca bien el calor: conviene que un técnico revise el ventilador, el polvo de las rejillas y la pasta térmica. ");
 	else if (lim != VE_NO && p->pico_ref >= lim - 200)
-		PON("Se calienta bastante: en carga es normal en un portátil, pero queda cerca del límite (%s); una limpieza le vendría bien. ", ve_grados(a, lim));
+		PON("Se calienta bastante: en carga es normal en un portátil, pero queda cerca del límite (%s); conviene revisar la limpieza del ventilador y de las rejillas. ", ve_grados(a, lim));
 	else if (sube < 50 && !simula)
 		PON("Casi no ha subido: o se enfría muy bien, o la carga de un solo núcleo no basta para calentarlo. ");
 	else if (lim != VE_NO)
@@ -278,9 +278,9 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 		else if (lejos && sube < 200)
 			PON("Al parar baja despacio, pero como no ha pasado de %s (lejos del límite) no es mala señal: muchos portátiles apenas mueven el ventilador con tan poco calor.", ve_grados(a, p->pico_ref));
 		else if (b60 == VE_NO || b60 < 50)
-			PON("Al parar baja muy despacio: el ventilador o el disipador no hacen bien su trabajo (polvo, ventilador que no gira o pasta seca).");
+			PON("Al parar baja muy despacio: los datos indican que el calor no sale bien; conviene revisar el ventilador (que gire), el polvo y la pasta térmica.");
 		else
-			PON("Al parar baja algo despacio: puede tener polvo.");
+			PON("Al parar baja algo despacio: puede que tenga algo de polvo.");
 	}
 }
 

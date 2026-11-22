@@ -29,8 +29,16 @@ printf '%s[38;2;136;136;136m│%s[0m ❯ %s[7m %s[0m                            
 printf '%s[38;2;136;136;136m╰──────────────────────────────────────────╯%s[0m\n' "$e" "$e"
 printf '  %s[2m⏵⏵ aceptar cambios (mayús+tab para cambiar)%s[0m\n' "$e" "$e"
 printf '%s[?2026l' "$e"
-# las preguntas: el tamaño, la posición del cursor, el fondo y el 2026
+# las preguntas: el tamaño, la posición del cursor, el fondo y el 2026; las
+# respuestas se leen (como haría un programa de verdad: si no, se quedarían
+# en la entrada y las tomaría por teclas el siguiente) y, con COLORES_RESP,
+# se apuntan
+[ -t 0 ] && stty raw -echo
 printf '%s[18t%s[6n%s]11;?%s\\%s[?2026$p%s[c' "$e" "$e" "$e" "$e" "$e" "$e"
+resp=
+[ -t 0 ] && IFS= read -r -t 3 -d c resp
+[ -t 0 ] && stty sane
+[ -n "${COLORES_RESP:-}" ] && printf 'respuestas=%s\n' "$(printf '%s' "$resp" | od -An -c | tr -s ' \n' ' ')" >> "$COLORES_RESP"
 printf 'LISTO\n'
 printf '%s[?25h' "$e"
 sleep 3

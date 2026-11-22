@@ -44,6 +44,24 @@ Con Linux:
   4. Sale un menú negro (GRUB); a los 5 segundos arranca solo la primera
      línea: «Termometro: medir la temperatura». A los pocos segundos se abre el
      escritorio y, en él, el Termómetro, solo.
+  MSI GT80 TITAN (el de 2015, con dos gráficas NVIDIA): el menú de arranque es
+  F11. Ese equipo es UEFI: si la memoria no sale en el menú, entre en la BIOS
+  (pulse Supr varias veces al encender), busque «Boot mode» / «CSM» y ponga
+  «Legacy» o «UEFI with CSM» (y «Secure Boot» en «Disabled» si lo pide);
+  guarde con F10. Al acabar se puede dejar como estaba. Las dos gráficas
+  NVIDIA (GTX 970M o 980M) salen como «GPU 1» y «GPU 2» si están encendidas
+  (si el interruptor de gráficos las tiene apagadas, lo dice). La prueba
+  calienta el procesador (todos sus núcleos), no las gráficas.
+  Para Windows: el último controlador oficial de NVIDIA para esas gráficas
+  (Maxwell, ya solo de seguridad: el 582.78) está en nvidia.com/Download,
+  «GeForce 900M Series (Notebooks)»; y lo de MSI, en
+  msi.com/Laptop/support/GT80-Titan-2QE.
+  ASUS ROG GL553V (y otros ASUS de 2016-2018): el menú de arranque es Esc al
+  encender; la BIOS, F2. Si la memoria no sale: en la BIOS, «Security» >
+  «Secure Boot» en «Disabled», «Boot» > «Fast Boot» en «Disabled» y «Launch
+  CSM» en «Enabled»; F10 para guardar. La gráfica NVIDIA (GTX 1050) es
+  «Optimus»: si está dormida, el Termómetro lo dice y no la despierta; los
+  ventiladores y la temperatura de ASUS salen por su WMI si la BIOS los da.
   Un portátil de la época de Windows 7 arranca así sin tocar nada más (no hace
   falta quitar el «Secure Boot»: esos equipos no lo tienen o lo traen apagado).
   Si se queda colgado al arrancar, apáguelo (botón 5 s) y elija en el menú
@@ -112,6 +130,13 @@ Con Linux:
                    último par de segundos.
     MMDDHHMM.TXT   el resumen de cada prueba de esfuerzo
     DDHHMMSS.BMP   la pantalla, si se pulsa F12 o el botón «Captura»
+    INFORME.TXT    EL INFORME DE LA ÚLTIMA PRUEBA, PARA EL TÉCNICO: el equipo,
+                   la fecha, cada sensor (en reposo, lo más alto y al acabar),
+                   lo que no era de fiar, si se paró por seguridad y lo que
+                   indican los datos. Con INFORME.BMP, la pantalla con la
+                   gráfica. Si hay que llevar el portátil a un técnico,
+                   llévele (o mándele) el archivo INFORME.TXT y el INFORME.BMP:
+                   no llevan datos personales.
   Si el portátil se apaga solo: vuelva a arrancar desde la memoria. El
   Termómetro avisa de que «la última vez no se cerró bien» y dice durante qué
   fase se apagó, a qué hora y a qué temperatura estaba.
@@ -126,6 +151,13 @@ Con Linux:
        Portatil-gamer/Termometro/) o por correo. Si puede, ponga en una nota la
        marca y el modelo del portátil (lo pone debajo, en la pegatina).
 
+  BATERÍA: si la tapa de abajo o el ratón táctil abomban, puede ser la batería
+  hinchada: no lo cargue y llévelo al técnico cuanto antes.
+  FRENOS Y ALIMENTACIÓN: el Termómetro apunta también si el procesador se
+  frena y por qué (temperatura, límite de potencia, una señal de la placa o
+  la alarma del regulador de tensión) y, si el portátil se apagó solo con el
+  procesador lejos de su límite, lo dice: entonces el apagado no parece por
+  temperatura y conviene revisar la alimentación (cargador, batería, placa).
   Si una cifra no es de fiar, lo dice en vez de inventar: «sin lectura fiable»
   (un sensor que no se mueve ni con la carga), una lectura imposible (no
   cuenta para la parada ni para el veredicto: «no se puede juzgar»), o, en

@@ -38,13 +38,15 @@
 static int mas_caliente(void);
 static void mira_envio(void);
 static int en_reposo(void);
+static int informe_frenos(char *d, int cabe);
 static void mira_anterior(void);
 static void log_arranque(void);
 static void log_escribe(const char *clase, const char *texto);
 static char ruta_log[64], anterior[700];
 static int log_malo;
 static u32 cuenta_s;
-static int fecha_mala, pidio_hora;	/* (TERMO) el año del reloj, si parece mal */
+static int fecha_mala, pidio_hora;
+static int ap_cargados;		/* (TERMO) los otros procesadores que cargan */	/* (TERMO) el año del reloj, si parece mal */
 /* (TERMO) lo ocupado (mide_ocupacion) */
 static int ocup_pct = -1, c0_pct = -1, c6_pct = -1;
 static u32 oc_ociosa, oc_tics, oc_mperf, oc_mperfh, oc_c6, oc_c6h;
@@ -70,6 +72,7 @@ static const char *busca(const char *t, const char *o)
 #define SC_SMN 222
 #define SC_ZONAS 223
 #define SC_CARGA 224
+#define SC_GPU 225	/* (TERMO) las gráficas NVIDIA Maxwell: solo leer (termo.cas) */
 #define SC_ENERGIA 154
 
 #define NO TA_NO
@@ -90,7 +93,7 @@ static const char *busca(const char *t, const char *o)
 static const u32 trazo_color[8] = { 0x1F4E9A, 0xC0392B, 0x2E8B57, 0x7D3C98, 0xB9770E, 0x117A8B, 0x444444, 0xD35400 };
 
 /* ---------------------------------------------------------------- los sensores */
-enum { CL_CPU, CL_ACPI, CL_SIM };
+enum { CL_CPU, CL_ACPI, CL_SIM, CL_GPU };
 struct sensor {
 	char nombre[48];	/* (UTF-8) */
 	char csv[32];		/* (sin acentos) */
@@ -304,6 +307,65 @@ static int lee_cpu(u32 msr)
 	return NO;
 }
 
+/* ---------------------------------------------------------------- las NVIDIA
+ * (TERMO) Las gráficas NVIDIA Maxwell (GTX 970M/980M del MSI GT80): el
+ * núcleo hace las comprobaciones de nouveau y lee la temperatura (la 225,
+ * solo leer). Aquí, «GPU 1», «GPU 2»... con su estado si no se puede. */
+struct ficha_gpu { u32 bdf, id, estado, boot, crudo, temp, critico, frena; };
+static const char *const estado_gpu[] = { "bien", "apagada (D3)", "sin la memoria activada", "BAR0 raro", "no es una Maxwell GM204/GM107",
+					  "sin sensor calibrado", "sensor apagado", "sensor forzado", "lectura imposible", "dormida (Optimus)" };
+static int gpu_estado[MAXS], gpu_frena[MAXS], gpu_critico[MAXS], hay_gpus;
+
+static const char *modelo_gpu(u32 id)
+{
+	switch (id >> 16) {
+	case 0x13D7: return "GTX 980M";
+	case 0x13D8: return "GTX 970M";
+	case 0x13D9: return "GTX 965M";
+	case 0x1C8C: return "GTX 1050 Ti";
+	case 0x1C8D: return "GTX 1050";
+	}
+	return "";
+}
+
+static void mira_gpus(void)
+{
+	struct ficha_gpu f;
+	u32 i;
+
+	for (i = 0; i < 4; i++) {
+		char n[48], c[16];
+		int k;
+		u32 r = sc(SC_GPU, i, (u32)&f, 0);
+
+		if (r != 1)
+			break;
+		snprintf(n, sizeof n, "GPU %u (NVIDIA %s)", i + 1, modelo_gpu(f.id)[0] ? modelo_gpu(f.id) : "10DE");
+		snprintf(c, sizeof c, "GPU %u", i + 1);
+		k = nuevo_sensor(n, c, CL_GPU, NO, 0);
+		if (k < 0)
+			break;
+		S[k].zona = (int)i;
+		hay_gpus++;
+		serie("termo: GPU %u: PCI %02X:%02X, %04X:%04X, PMC_BOOT_0 %08Xh, sensor %08Xh: %s\n", i + 1, f.bdf >> 16 & 0xFF, f.bdf >> 11 & 31, f.id & 0xFFFF,
+		      f.id >> 16, f.boot, f.crudo, f.estado < 10 ? estado_gpu[f.estado] : "?");
+	}
+}
+
+static void lee_gpu(int k)
+{
+	struct ficha_gpu f;
+
+	if (sc(SC_GPU, (u32)S[k].zona, (u32)&f, 0) != 1) {
+		S[k].t = NO;
+		return;
+	}
+	gpu_estado[k] = (int)f.estado;
+	gpu_critico[k] = f.estado == 0 && (f.critico & 1);
+	gpu_frena[k] = f.estado == 0 && ((f.frena >> 24) & 7);
+	S[k].t = f.estado == 0 && f.temp <= 130 ? (int)f.temp * 10 : NO;
+}
+
 /* ---------------------------------------------------------------- ACPI y la batería */
 static union { struct termo_acpi t; char b[TA_TAM]; } za;
 static int hay_zonas;
@@ -346,6 +408,18 @@ static void lee_zonas(void)
 			S[k].zona = (int)i;
 		}
 		S[k].t = za.t.zona[i].tmp;
+	}
+	/* (TERMO) los ASUS (WMI, DSTS): su temperatura, como un sensor más */
+	if (za.t.asus_hay && za.t.asus_temp != NO) {
+		int k;
+
+		for (k = 0; k < ns; k++)
+			if (S[k].clase == CL_ACPI && S[k].zona == 100)
+				break;
+		if (k == ns && (k = nuevo_sensor("Temperatura ASUS (WMI)", "ASUS WMI", CL_ACPI, NO, 0)) >= 0)
+			S[k].zona = 100;
+		if (k >= 0 && k < ns)
+			S[k].t = za.t.asus_escribe ? NO : za.t.asus_temp;
 	}
 	hay_bateria = sc(SC_ENERGIA, (u32)&en, 0, 0) == 1 && en.nbat > 0;
 }
@@ -569,6 +643,12 @@ static void csv_cabecera(void)
 		m += snprintf(b + m, sizeof b - (size_t)m, "%s (grados C);", n);
 	}
 	m += snprintf(b + m, sizeof b - (size_t)m, "frecuencia (MHz);bateria (%%);enchufado\r\n");
+	if (csv_listo) {
+		/* (TERMO) han llegado sensores nuevos (los núcleos de la carga): otra
+		 * línea de cabecera, con las columnas de ahora */
+		escribe(ruta_csv, b, (u32)m, 0);
+		return;
+	}
 	if (!escribe(ruta_csv, b, (u32)m, 1)) {
 		csv_malo = 1;
 		snprintf(aviso_archivo, sizeof aviso_archivo, "No se puede escribir %s (¿la memoria está protegida contra escritura?).", ruta_csv);
@@ -660,6 +740,8 @@ static void log_datos(void)
 	for (k = 0; k < ns; k++)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | %s=%s", S[k].csv, grados(g, S[k].t));
 	m += snprintf(b + m, sizeof b - (size_t)m, " | MHz=%u", mhz_ahora);
+	if (hay_zonas && za.t.asus_hay && (za.t.asus_vent_cpu != NO || za.t.asus_vent_gpu != NO))
+		m += snprintf(b + m, sizeof b - (size_t)m, " | vent_cpu=%d vent_gpu=%d", za.t.asus_vent_cpu == NO ? -1 : za.t.asus_vent_cpu, za.t.asus_vent_gpu == NO ? -1 : za.t.asus_vent_gpu);
 	if (ocup_pct >= 0)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | ocupado=%d%%", ocup_pct);
 	if (c0_pct >= 0)
@@ -744,6 +826,15 @@ static void mira_cambios(void)
 		suceso_log("ACPI (ACPI.BIN): %u zonas térmicas, %u ventiladores; equipo «%s %s», placa «%s %s», BIOS «%s»", za.t.nzonas, za.t.nvent,
 			   za.t.fabricante, za.t.producto, za.t.placa_fab, za.t.placa, za.t.bios);
 	}
+	for (k = 0; k < ns && cuenta_s == 4; k++)
+		if (S[k].clase == CL_GPU && S[k].t == NO)
+			suceso_log("sensor «%s»: sin dato: %s (no se escribe nada en la tarjeta)", S[k].nombre, gpu_estado[k] < 10 ? estado_gpu[gpu_estado[k]] : "?");
+	if (cuenta_s == 4 && !hay_gpus)
+		suceso_log("gráficas NVIDIA Maxwell: ninguna en el PCI%s", busca(za.t.producto, "GT80") ? " (en el GT80: el interruptor de gráficos las apaga)" : "");
+	if (hay_zonas && za.t.asus_hay && cuenta_s == 6)
+		suceso_log("ASUS (WMI, DSTS: solo leer): ventilador CPU %d, ventilador GPU %d r.p.m., temperatura %d décimas%s", za.t.asus_vent_cpu == NO ? -1 : za.t.asus_vent_cpu,
+			   za.t.asus_vent_gpu == NO ? -1 : za.t.asus_vent_gpu, za.t.asus_temp == NO ? -1 : za.t.asus_temp,
+			   za.t.asus_escribe ? "; el AML quiso escribir en el EC al leerlo: no se fía" : "");
 	if (hay_zonas && (cuenta_s == 10 || cuenta_s == 120) && za.t.ec_hay)
 		suceso_log("ACPI: el controlador embebido (EC), al leer las zonas: %u lecturas, %u sin respuesta a tiempo, %u escrituras del AML no hechas (solo lectura); una lectura entera tarda %u ms",
 			   za.t.ec_lecturas, za.t.ec_fallos, za.t.ec_ignoradas, za.t.ms_lectura);
@@ -901,6 +992,7 @@ static void mira_anterior(void)
 	struct entrada e;
 	u32 m, n, largo, desde;
 	char hora[12] = "", fase_a[16] = "", maxi[16] = "", h60[12] = "";
+	int lim_apagado = 1000;		/* (el límite más bajo de los del procesador; 100 °C si no se sabe) */
 	int lmin = NO, lmax = NO, cerrado = 0, k, nlin = 0;
 	const char *lineas[40];
 
@@ -935,6 +1027,9 @@ static void mira_anterior(void)
 	if (ES_ERROR(n))
 		n = 0;
 	b[n] = 0;
+	for (k = 0; k < ns; k++)
+		if (S[k].clase == CL_CPU && S[k].limite != NO && S[k].limite < lim_apagado)
+			lim_apagado = S[k].limite;
 	/* las líneas de DATOS (las últimas 40) y si hay CIERRE */
 	for (p = b; *p;) {
 		char *f = p;
@@ -992,16 +1087,25 @@ static void mira_anterior(void)
 			 "La última vez (registro %s) el Termómetro no se cerró: el equipo se apagó solo (o lo apagaron sin cerrarlo) durante %s, a las %s, con el más caliente a %s °C. "
 			 "En sus últimos 60 s (desde las %s) estuvo entre %s y %s.%s",
 			 mejor, fs, hora, maxi, h60, grados(a, lmin), grados(bb, lmax),
-			 (lmax != NO && lmax >= 850) || !strcmp(fase_a, "carga") ? " Si fue durante la prueba y estaba muy caliente, seguramente lo apagó la protección térmica: limpie el ventilador y cambie la pasta." : "");
+			 (lmax != NO && lmax >= lim_apagado - 200) ? " Estaba muy caliente: seguramente lo apagó la protección térmica; conviene revisar el ventilador, el polvo y la pasta térmica." :
+			 lmax != NO ? " Se apagó con el procesador por debajo de su límite: el apagado no parece por temperatura; conviene revisar la alimentación (cargador, batería, regulador de tensión de la placa)." : "");
 	}
 	ver_anterior = 1;
 	free(b);
 }
 
 /* la pantalla (F12), en .BMP de 24 bits */
+static void captura_en(const char *nombre);
+
 static void captura(void)
 {
-	char ruta[64];
+	captura_en(0);
+}
+
+/* la pantalla, en .BMP: con nombre (INFORME.BMP) o con la hora */
+static void captura_en(const char *nombre)
+{
+	char ruta[120];
 	u8 cab[54], *fila;
 	u32 a, me, d, h, mi, s, m, tf, total;
 	int y, x;
@@ -1009,7 +1113,10 @@ static void captura(void)
 	if (!carpeta[0] || csv_malo)
 		return;
 	fecha_hora(&a, &me, &d, &h, &mi, &s);
-	snprintf(ruta, sizeof ruta, "%s\\%02u%02u%02u%02u.BMP", carpeta, d, h, mi, s);
+	if (nombre)
+		snprintf(ruta, sizeof ruta, "%s\\%s", carpeta, nombre);
+	else
+		snprintf(ruta, sizeof ruta, "%s\\%02u%02u%02u%02u.BMP", carpeta, d, h, mi, s);
 	tf = ((u32)LZ.an * 3 + 3) & ~3u;
 	total = 54 + tf * (u32)LZ.al;
 	memset(cab, 0, sizeof cab);
@@ -1091,6 +1198,98 @@ static void temperaturas(int *t)
 		t[k] = k < ns ? S[k].t : VE_NO;
 }
 
+/* ---------------------------------------------------------------- (TERMO) los demás procesadores
+ * Con la carga, el núcleo despierta a los demás procesadores (termo.cas: «Los
+ * otros procesadores») y cada uno carga y lee su propio 19Ch. Aquí: cuántos,
+ * por qué no si no, y un sensor por cada núcleo (los hilos de un mismo
+ * núcleo, juntos: lo más caliente) que solo vale mientras se carga. */
+struct ap_ficha { u32 apic, estado, vueltas, msr, lecturas, latido, tsc, z; };
+struct ap_tabla { u32 n, motivo, base, r; struct ap_ficha e[16]; };
+static struct ap_tabla apt;
+static int hilos_nucleo = 1, nucleo_bsp;
+static const char *const motivo_ap[] = { "", "sin APIC", "el APIC está apagado (lo dejó así la BIOS)", "no se puede ver el APIC",
+					 "no hay sitio libre en la memoria baja", "el trampolín no cabe", "ningún otro procesador ha contestado (tiene uno, o no responden)" };
+
+static void cuenta_hilos(void)
+{
+	u32 r[4];
+	int logicos, nucleos = 1;
+
+	cpuid(1, r);
+	nucleo_bsp = (int)(r[1] >> 24);
+	logicos = (r[3] & (1u << 28)) ? (int)((r[1] >> 16) & 0xFF) : 1;
+	if (cpu.intel && cpu.max_hoja >= 4) {
+		__asm__ volatile("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(4), "c"(0));
+		nucleos = (int)(r[0] >> 26) + 1;
+	}
+	hilos_nucleo = cpu.intel && nucleos > 0 && logicos >= nucleos ? logicos / nucleos : 1;	/* (AMD: cada uno, como núcleo) */
+	if (hilos_nucleo < 1 || hilos_nucleo > 4)
+		hilos_nucleo = 1;
+	nucleo_bsp /= hilos_nucleo;
+}
+
+static void ap_sensores(void)
+{
+	u32 i;
+	int k;
+
+	if (sc(SC_CARGA, 4, (u32)&apt, 0) > 16 || apt.n == 0) {
+		ap_cargados = 0;
+		suceso_log("la carga, en este procesador solo: los demás no (%s)", apt.motivo < 7 ? motivo_ap[apt.motivo] : "?");
+		return;
+	}
+	ap_cargados = (int)apt.n;
+	for (i = 0; i < apt.n && i < 16; i++) {
+		int nucleo = (int)apt.e[i].apic / hilos_nucleo;
+		char n[48], c[24];
+
+		if (nucleo == nucleo_bsp || !cpu.intel || !cpu.dts)
+			continue;
+		for (k = 0; k < ns; k++)
+			if (S[k].clase == CL_CPU && S[k].zona == (0x10000 | nucleo))
+				break;
+		if (k < ns)
+			continue;
+		snprintf(n, sizeof n, "Núcleo %d del procesador (en la carga)", nucleo);
+		snprintf(c, sizeof c, "Nucleo %d", nucleo);
+		k = nuevo_sensor(n, c, CL_CPU, cpu.tjmax * 10, !cpu.tj_de_msr);
+		if (k >= 0)
+			S[k].zona = 0x10000 | nucleo;
+	}
+	suceso_log("la carga, en %d procesadores (este y %d más: %d núcleos, %d hilos por núcleo)", ap_cargados + 1, ap_cargados,
+		   (ap_cargados + 1) / hilos_nucleo, hilos_nucleo);
+	if (csv_listo)
+		csv_cabecera();
+}
+
+/* lo de los núcleos de la carga: cada 1 s, de la tabla del núcleo */
+static void lee_ap(void)
+{
+	int k;
+	u32 i;
+
+	if (fase != F_CARGA || sc(SC_CARGA, 4, (u32)&apt, 0) > 16) {
+		for (k = 0; k < ns; k++)
+			if (S[k].clase == CL_CPU && (S[k].zona & 0x10000))
+				S[k].t = NO;
+		return;
+	}
+	for (k = 0; k < ns; k++) {
+		int t = NO;
+
+		if (S[k].clase != CL_CPU || !(S[k].zona & 0x10000))
+			continue;
+		for (i = 0; i < apt.n && i < 16; i++)
+			if ((int)apt.e[i].apic / hilos_nucleo == (S[k].zona & 0xFFFF) && apt.e[i].lecturas && (apt.e[i].msr & 0x80000000u)) {
+				int v = (cpu.tjmax - (int)((apt.e[i].msr >> 16) & 0x7F)) * 10;
+
+				if (t == NO || v > t)
+					t = v;
+			}
+		S[k].t = t;
+	}
+}
+
 static void empieza(void)
 {
 	char a[40];
@@ -1109,7 +1308,8 @@ static void empieza(void)
 
 		for (k = 0; k < ns && k < VE_MAXS; k++) {
 			snprintf(vs[k].nombre, sizeof vs[k].nombre, "%s", S[k].nombre);
-			vs[k].cpu = S[k].clase != CL_ACPI;
+			vs[k].cpu = S[k].clase != CL_ACPI && S[k].clase != CL_GPU;
+			vs[k].solo_carga = 0;
 			vs[k].limite = S[k].limite;
 			vs[k].no_fiable = S[k].no_fiable;
 			S[k].fija = 0;
@@ -1120,6 +1320,23 @@ static void empieza(void)
 	}
 	carga_on = 1;
 	sc(SC_CARGA, 1, 1, 0);
+	/* (TERMO) los demás procesadores: sus núcleos, y otra vez la foto de
+	 * empezar, ya con ellos */
+	ap_sensores();
+	{
+		struct ve_sensor vs[VE_MAXS];
+		int t[VE_MAXS], k;
+
+		for (k = 0; k < ns && k < VE_MAXS; k++) {
+			snprintf(vs[k].nombre, sizeof vs[k].nombre, "%s", S[k].nombre);
+			vs[k].cpu = S[k].clase != CL_ACPI && S[k].clase != CL_GPU;
+			vs[k].limite = S[k].limite;
+			vs[k].no_fiable = S[k].no_fiable;
+			vs[k].solo_carga = S[k].clase == CL_CPU && (S[k].zona & 0x10000);
+		}
+		temperaturas(t);
+		ve_empieza(&VP, ns, vs, t);
+	}
 	/* la carga: un programa hijo (este mismo, con /CARGA) que no suelta el
 	 * procesador; si no se puede lanzar, aquí, entre pulso y pulso */
 	snprintf(a, sizeof a, "/CARGA=%d", dura_s + 60);
@@ -1154,6 +1371,15 @@ static void para_carga(int seguridad, int esc)
 	if (fase != F_CARGA)
 		return;
 	carga_on = 0;
+	if (ap_cargados && sc(SC_CARGA, 4, (u32)&apt, 0) <= 16) {
+		char v[200];
+		int m = 0;
+		u32 i;
+
+		for (i = 0; i < apt.n && i < 16 && m < (int)sizeof v - 20; i++)
+			m += snprintf(v + m, sizeof v - (size_t)m, " %u", apt.e[i].vueltas);
+		serie("termo: los demás procesadores, al parar: %u, vueltas de carga:%s\n", apt.n, v);
+	}
 	sc(SC_CARGA, 1, 0, 0);
 	seg_carga = (int)((jg_tics() - t_fase) / jg_hz);
 	por_seguridad = seguridad;
@@ -1176,6 +1402,77 @@ static void para_carga(int seguridad, int esc)
 		   seguridad ? "PARADA DE SEGURIDAD: " : esc ? "parada con Esc" : "se acabó el tiempo", seguridad ? motivo : "", grados(a, pico), grados(c, t_ini));
 }
 
+/* (TERMO) INFORME.TXT: lo de la última prueba, para enseñárselo a un técnico
+ * (el dueño del portátil se lo lleva): el equipo, la fecha, cada sensor en
+ * reposo, en carga y al acabar, lo que no era de fiar, la parada si la hubo
+ * y el veredicto, con prudencia. Sin datos de nadie. En UTF-8 (con su marca,
+ * para el Bloc de notas de Windows); y la pantalla con la gráfica, en
+ * INFORME.BMP */
+
+static void escribe_informe(void)
+{
+	static char t[6000];
+	char r[120], g1[24], g2[24], g3[24];
+	u32 a, me, d, h, mi, se;
+	int n = 0, k;
+#define IN(...) (n += snprintf(t + n, sizeof t - (size_t)n, __VA_ARGS__), n = n < (int)sizeof t ? n : (int)sizeof t - 1)
+
+	if (!carpeta[0] || csv_malo)
+		return;
+	fecha_hora(&a, &me, &d, &h, &mi, &se);
+	IN("\xEF\xBB\xBFINFORME DEL TERMÓMETRO DE HISPA-PENTIUM\r\n");
+	IN("=======================================\r\n\r\n");
+	IN("Fecha y hora de la prueba: %02u/%02u/%04u %02u:%02u (la del reloj del equipo%s)\r\n", d, me, a, h, mi, fecha_mala ? ": PARECE MAL" : "");
+	IN("Equipo: %s %s %s\r\n", za.t.fabricante, za.t.producto, za.t.version_eq);
+	IN("Placa: %s %s   BIOS: %s\r\n", za.t.placa_fab, za.t.placa, za.t.bios);
+	IN("Procesador: %s (TjMax %d °C, %s)\r\n", cpu.marca, cpu.tjmax, cpu.tj_de_msr ? "la que dice el procesador" : "de tabla");
+	IN("Prueba de esfuerzo: %s, %d s%s; carga de coma flotante en %d %s\r\n", por_seguridad ? "PARADA DE SEGURIDAD" : por_esc ? "parada a mano (Esc)" : "completa",
+	   seg_carga, por_seguridad ? "" : "", 1 + ap_cargados, ap_cargados ? "procesadores (hilos)" : "núcleo (Hispa-Pentium usa uno)");
+	if (por_seguridad)
+		IN("Motivo de la parada: %s\r\n", motivo);
+	IN("\r\nSENSOR                                  REPOSO    MÁXIMA    AL ACABAR  NOTA\r\n");
+	for (k = 0; k < ns && k < VE_MAXS; k++) {
+		const char *nota = S[k].no_fiable ? "lectura no fiable (no cuenta)" : S[k].fija ? "fija (no cambia; no cuenta)" :
+				   VP.n[k] == 0 ? "sin dato" : k == VP.ref ? "con este se mide" : "";
+
+		IN("%-38.38s  %-8s  %-8s  %-9s  %s\r\n", S[k].nombre, ve_grados(g1, VP.ini[k]), ve_grados(g2, VP.pico[k]), ve_grados(g3, S[k].t), nota);
+	}
+	{
+		char fr[1500];
+
+		IN("\r\nFRENADOS DEL PROCESADOR\r\n");
+		if (!cpu.intel || !cpu.dts)
+			IN("  (este procesador no dice por qué se frena)\r\n");
+		else if (informe_frenos(fr, sizeof fr))
+			IN("%s", fr);
+		else
+			IN("  Ninguno visto.\r\n");
+	}
+	if (hay_bateria && en.pct <= 100) {
+		IN("\r\nBatería: %u %%, %s", en.pct, en.ca == 1 ? "enchufado a la corriente" : en.ca == 0 ? "sin enchufar" : "");
+		if (en.salud_pct <= 150)
+			IN("; salud %u %% (lo que guarda llena frente a nueva)", en.salud_pct);
+		if (en.ciclos1 != 0xFFFF && en.ciclos1 != 0 && en.ciclos1 < 100000)
+			IN("; %u ciclos de carga", en.ciclos1);
+		IN("\r\n");
+		if (en.salud_pct < 50)
+			IN("  La batería está muy gastada (menos de la mitad de lo que guardaba nueva): conviene cambiarla. Si la tapa de abajo o el ratón táctil abomban, puede estar hinchada: llévelo al técnico cuanto antes.\r\n");
+	}
+	if (anterior[0])
+		IN("\r\nLA VEZ ANTERIOR\r\n  %s\r\n", anterior);
+	if (cpu.aproximada)
+		IN("Nota: el sensor de este procesador (Atom) es aproximado.\r\n");
+	IN("No se puede leer sin su controlador la temperatura de las tarjetas gráficas (NVIDIA/AMD), salvo que la BIOS la dé como zona ACPI.\r\n");
+	IN("\r\nRESULTADO\r\n---------\r\n%s\r\n", resumen);
+	IN("\r\nLos datos son los que dan los sensores del propio equipo; el registro completo (cada 2 s) está en los .CSV y .LOG de esta carpeta, y la pantalla con la gráfica en INFORME.BMP.\r\n");
+	IN("Hecho con el Termómetro de Hispa-Pentium (GPL-2.0 o posterior). No contiene datos personales.\r\n");
+#undef IN
+	snprintf(r, sizeof r, "%s\\INFORME.TXT", carpeta);
+	escribe(r, t, (u32)n, 1);
+	captura_en("INFORME.BMP");
+	suceso_log("informe para el técnico: %s y INFORME.BMP", r);
+}
+
 static void escribe_resumen(void)
 {
 	int k;
@@ -1183,6 +1480,7 @@ static void escribe_resumen(void)
 	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
 	for (k = 0; k < ns && k < VE_MAXS; k++)
 		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
+	escribe_informe();
 	serie("termo: resumen: %s\n", resumen);
 	suceso_log("RESULTADO: %s", resumen);
 	if (carpeta[0] && !csv_malo && ruta_txt[0]) {
@@ -1372,6 +1670,109 @@ static void mide_ocupacion(void)
 		ve_ocupacion(&VP, c0_pct >= 0 && c0_pct > ocup_pct ? c0_pct : ocup_pct);
 }
 
+/* ---------------------------------------------------------------- los frenos
+ * (TERMO) Por qué se frena el procesador (Intel; solo leer): IA32_THERM_STATUS
+ * (19Ch, el núcleo) e IA32_PACKAGE_THERM_STATUS (1B1h, el paquete), con su
+ * PROCHOT#/FORCEPR# (la placa pide frenar), el umbral crítico y el aviso de
+ * límite de potencia; y, de Haswell en adelante, MSR_CORE_PERF_LIMIT_REASONS
+ * (690h): PROCHOT, térmico, la alarma térmica del regulador de tensión (VR
+ * Therm Alert), la corriente (EDP), los límites de potencia PL1 y PL2... Cada
+ * 2 s: el estado (lo de ahora) se cuenta por fase; el registro (lo que queda
+ * anotado aunque ya no pase) se dice en el .LOG la primera vez. Para el
+ * MSI GT80: si se frena por la placa o por el regulador con el procesador
+ * fresco, apunta a la alimentación, no a la temperatura. */
+struct freno { u32 msr; int bit; const char *texto; int placa; };
+static const struct freno frenos[] = {
+	{ 0x19C, 2, "señal PROCHOT externa (la placa pide frenar al núcleo)", 1 },
+	{ 0x19C, 4, "temperatura crítica del núcleo", 0 },
+	{ 0x19C, 10, "aviso de límite de potencia del núcleo", 0 },
+	{ 0x1B1, 2, "señal PROCHOT externa (la placa pide frenar al procesador)", 1 },
+	{ 0x1B1, 4, "temperatura crítica del procesador", 0 },
+	{ 0x1B1, 10, "aviso de límite de potencia del procesador", 0 },
+	{ 0x690, 0, "PROCHOT (límites del núcleo)", 1 },
+	{ 0x690, 1, "temperatura (límites del núcleo)", 0 },
+	{ 0x690, 6, "alarma de temperatura del regulador de tensión (VRM)", 1 },
+	{ 0x690, 7, "corriente máxima del regulador de tensión", 1 },
+	{ 0x690, 8, "límite eléctrico (EDP)", 1 },
+	{ 0x690, 10, "límite de potencia PL1", 0 },
+	{ 0x690, 11, "límite de potencia PL2", 0 },
+};
+#define NFRENOS (int)(sizeof frenos / sizeof frenos[0])
+static int frenos_hay[3];		/* 19Ch, 1B1h, 690h: ¿se pueden leer? (-1 no) */
+static u32 frenos_cuenta[NFRENOS][3], frenos_log_dicho[NFRENOS];
+static int freno_frio;			/* por la placa con el procesador fresco */
+
+static void mira_frenos(void)
+{
+	static const u32 msrs[3] = { 0x19C, 0x1B1, 0x690 };
+	u32 v[3] = { 0, 0, 0 }, lo, hi;
+	int i, f = fase == F_CARGA ? 1 : fase == F_ENFRIA ? 2 : 0, cpu_max = NO, k;
+
+	if (!cpu.intel || !cpu.dts)
+		return;
+	for (i = 0; i < 3; i++) {
+		if (frenos_hay[i] < 0)
+			continue;
+		if (!lee_msr(msrs[i], &lo, &hi)) {
+			frenos_hay[i] = -1;
+			continue;
+		}
+		frenos_hay[i] = 1;
+		v[i] = lo;
+	}
+	for (k = 0; k < ns; k++)
+		if (S[k].clase == CL_CPU && !S[k].no_fiable && S[k].t != NO && (cpu_max == NO || S[k].t > cpu_max))
+			cpu_max = S[k].t;
+	for (i = 0; i < NFRENOS; i++) {
+		int m = frenos[i].msr == 0x19C ? 0 : frenos[i].msr == 0x1B1 ? 1 : 2, log = frenos[i].msr == 0x690 ? frenos[i].bit + 16 : frenos[i].bit + 1;
+
+		if (frenos_hay[m] <= 0)
+			continue;
+		if (v[m] & (1u << frenos[i].bit)) {
+			frenos_cuenta[i][f]++;
+			if (frenos[i].placa && cpu_max != NO && cpu.tjmax && cpu_max < cpu.tjmax * 10 - 200)
+				freno_frio = 1;
+		}
+		if ((v[m] & (1u << log)) && !frenos_log_dicho[i]) {
+			char g[24];
+
+			frenos_log_dicho[i] = 1;
+			suceso_log("el procesador se ha frenado (o está anotado que se frenó) por: %s%s; ahora, %s%s", frenos[i].texto,
+				   cuenta_s <= 4 ? " (ya estaba anotado al abrir el Termómetro)" : "", grados(g, cpu_max),
+				   frenos[i].placa && cpu_max != NO && cpu_max < cpu.tjmax * 10 - 200 ? ": con el procesador fresco, apunta a la alimentación o a la placa (regulador de tensión), no a la temperatura" : "");
+		}
+	}
+}
+
+/* lo de los frenos, para el informe (0 si no hay nada) */
+static int informe_frenos(char *d, int cabe)
+{
+	static const char *const nf[3] = { "en reposo", "en carga", "enfriando" };
+	int i, n = 0, j;
+
+	for (i = 0; i < NFRENOS; i++) {
+		u32 t = frenos_cuenta[i][0] + frenos_cuenta[i][1] + frenos_cuenta[i][2];
+
+		if (!t && !frenos_log_dicho[i])
+			continue;
+		n += snprintf(d + n, (size_t)(cabe - n), "  - Por %s: ", frenos[i].texto);
+		if (t) {
+			n += snprintf(d + n, (size_t)(cabe - n), "visto %u veces (cada 2 s):", t);
+			for (j = 0; j < 3; j++)
+				if (frenos_cuenta[i][j])
+					n += snprintf(d + n, (size_t)(cabe - n), " %s %u", nf[j], frenos_cuenta[i][j]);
+		} else
+			n += snprintf(d + n, (size_t)(cabe - n), "anotado por el procesador (desde que se encendió), no visto en la prueba");
+		n += snprintf(d + n, (size_t)(cabe - n), "\r\n");
+		if (n >= cabe - 200)
+			break;
+	}
+	if (freno_frio)
+		n += snprintf(d + n, (size_t)(cabe - n), "  Se ha frenado por una señal de la placa o del regulador de tensión con el procesador lejos de su límite: "
+			      "los datos apuntan más a la alimentación (cargador, batería, regulador de tensión de la placa) que a la temperatura. Conviene que lo revise un técnico.\r\n");
+	return n;
+}
+
 /* ---------------------------------------------------------------- leer todo */
 
 static void lee_todo(void)
@@ -1381,6 +1782,9 @@ static void lee_todo(void)
 	for (k = 0; k < ns; k++)
 		if (S[k].clase == CL_CPU)
 			S[k].t = lee_cpu((u32)S[k].zona);
+		else if (S[k].clase == CL_GPU)
+			lee_gpu(k);
+	lee_ap();
 	if (simula)
 		simula_paso();
 	for (k = 0; k < ns; k++) {
@@ -1442,6 +1846,7 @@ static void pulso(void)
 	if (cuenta_s % 2 == 0) {
 		lee_zonas();
 		mide_ocupacion();
+		mira_frenos();
 		mira_envio();
 		if (!csv_listo && !csv_malo && cuenta_s >= 6)
 			csv_cabecera();
@@ -1460,6 +1865,16 @@ static void pulso(void)
 		lento_dicho++;
 		suceso_log("AVISO: leer y apuntar ha tardado %u ms (la lectura de ACPI, la última: %u ms)", ahora * 1000 / jg_hz, hay_zonas ? za.t.ms_lectura : 0);
 	}
+}
+
+static const char *nucleos_texto(void)
+{
+	static char t[64];
+
+	if (!ap_cargados)
+		return "solo 1 núcleo cargado";
+	snprintf(t, sizeof t, "%d procesadores cargados (%d por núcleo)", ap_cargados + 1, hilos_nucleo);
+	return t;
 }
 
 /* ---------------------------------------------------------------- pintar */
@@ -1622,6 +2037,7 @@ static void vuelca_cambios(void)
 			for (y = 0; y < al; y++)
 				memcpy(antes_p + (size_t)y * an, LZ.p + (size_t)y * LZ.paso, (size_t)an * 4);
 		jg_todo_sucio();
+		jg_cambio = 0;
 		puntos_subidos += (u32)(an * al);
 		return;
 	}
@@ -1653,6 +2069,8 @@ static void vuelca_cambios(void)
 			y0 = -1;
 		}
 	}
+	/* (jg_sucio pide otro cuadro: no hace falta, lo sucio se sube ahora) */
+	jg_cambio = 0;
 }
 
 static int nota(int y, const char *t, u32 c)
@@ -1736,7 +2154,10 @@ static void pinta(void)
 		lz_texto(&LZ, cn, y + 7, s->nombre, C_TINTA, 1);
 		if (s->fija)
 			lz_texto(&LZ, cn + ancho_texto(s->nombre, 1) + 6, y + 7, "(fija, no cambia)", C_GRIS, 1);
-		lz_negrita(&LZ, ca, y + 7, s->no_fiable ? "sin lectura fiable" : grados(g, s->t), s->no_fiable ? C_PELIGRO : C_TINTA, 1);
+		if (s->clase == CL_GPU && s->t == NO && gpu_estado[k] > 0 && gpu_estado[k] < 10)
+			lz_texto(&LZ, ca, y + 7, estado_gpu[gpu_estado[k]], C_GRIS, 1);
+		else
+			lz_negrita(&LZ, ca, y + 7, s->no_fiable ? "sin lectura fiable" : grados(g, s->t), s->no_fiable ? C_PELIGRO : C_TINTA, 1);
 		lz_texto(&LZ, cmi, y + 7, grados(g, s->min), C_TINTA, 1);
 		lz_texto(&LZ, cma, y + 7, grados(g, s->max), C_TINTA, 1);
 		if (s->limite != NO)
@@ -1779,11 +2200,18 @@ static void pinta(void)
 		lineas += nota(y + 4 + 16 * lineas, "Las zonas térmicas de ACPI: esperando al servicio de ACPI (ACPI.BIN)...", C_GRIS);
 	else if (za.t.nzonas == 0)
 		lineas += nota(y + 4 + 16 * lineas, "La BIOS de este equipo no tiene zonas térmicas de ACPI.", C_GRIS);
-	{
-		int m = snprintf(a, sizeof a, "Gráfica dedicada (NVIDIA/AMD): no se puede leer sin su controlador; solo sale si la BIOS la da como zona ACPI.");
-
-		(void)m;
+	if (!hay_gpus) {
+		if (busca(za.t.producto, "GT80"))
+			snprintf(a, sizeof a, "GPU NVIDIA desactivada (interruptor de gráficos del GT80): con las NVIDIA encendidas se miden aquí.");
+		else
+			snprintf(a, sizeof a, "Gráfica dedicada: las NVIDIA Maxwell (GTX 9xxM) se miden; las demás, solo si la BIOS las da como zona ACPI.");
 		lineas += nota(y + 4 + 16 * lineas, a, C_GRIS);
+	} else {
+		for (k = 0; k < ns; k++)
+			if (S[k].clase == CL_GPU && (gpu_frena[k] || gpu_critico[k])) {
+				snprintf(a, sizeof a, "%s: %s", S[k].nombre, gpu_critico[k] ? "en temperatura CRÍTICA (lo dice la tarjeta)" : "frenada por temperatura (deducido de la tarjeta)");
+				lineas += nota(y + 4 + 16 * lineas, a, C_PELIGRO);
+			}
 	}
 	{
 		int m = 0;
@@ -1804,8 +2232,15 @@ static void pinta(void)
 			else
 				m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador %u: %s", i + 1, v->encendido == 1 ? "en marcha" : v->encendido == 0 ? "parado" : "sin datos");
 		}
-		if (hay_zonas && za.t.nvent == 0)
-			m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador: la BIOS no lo da por ACPI (que se oiga)");
+			if (hay_zonas && za.t.asus_hay) {
+				if (za.t.asus_vent_cpu != NO)
+					m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador CPU (ASUS): %d r.p.m.", za.t.asus_vent_cpu);
+				if (za.t.asus_vent_gpu != NO)
+					m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador GPU (ASUS): %d r.p.m.", za.t.asus_vent_gpu);
+				if (za.t.asus_vent_cpu == NO && za.t.asus_vent_gpu == NO)
+					m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventiladores ASUS (WMI): no disponible");
+			} else if (hay_zonas && za.t.nvent == 0)
+				m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador: la BIOS no lo da por ACPI (que se oiga)");
 		lineas += nota(y + 4 + 16 * lineas, a, C_TINTA);
 	}
 	y += 8 + 16 * lineas;
@@ -1821,7 +2256,7 @@ static void pinta(void)
 			int seg = (int)((jg_tics() - t_fase) / jg_hz);
 
 			snprintf(a, sizeof a, "CALENTANDO: %s de %s  ·  el más caliente: %s  ·  Esc para parar  ·  %s", tiempo(g, seg), tiempo(h, dura_s),
-				 grados(g2, mas_caliente()), solo_aqui ? "carga sin tarea propia (~80 %)" : "solo 1 núcleo cargado");
+				 grados(g2, mas_caliente()), solo_aqui ? "carga sin tarea propia (~80 %)" : nucleos_texto());
 			lz_rect(&LZ, 10, ym, W - 20, 26, C_CALIENTE);
 			trama(10, ym, W - 20, 26, E_CALIENTE, aclara(C_CALIENTE, -40));
 			lz_rect(&LZ, 14, ym + 4, ancho_texto(a, 1) + 8, 18, 0xFFFFFF);
@@ -1963,6 +2398,8 @@ static void mira_envio(void)
 }
 
 /* SSH.INI: equipo=, puerto=, usuario= */
+static int graba_ssh;	/* (SSH.INI: grabar=si) lo que llega, a TERMO\SSH\GRABA.BIN (las pruebas) */
+
 static int lee_ssh_ini(char *eq, int ceq, char *us, int cus, u32 *pu)
 {
 	char r[120], t[600], *p;
@@ -1990,6 +2427,8 @@ static int lee_ssh_ini(char *eq, int ceq, char *us, int cus, u32 *pu)
 			snprintf(eq, (size_t)ceq, "%s", p + 7);
 		else if (!strncmp(p, "usuario=", 8))
 			snprintf(us, (size_t)cus, "%s", p + 8);
+		else if (!strncmp(p, "grabar=si", 9))
+			graba_ssh = 1;
 		else if (!strncmp(p, "puerto=", 7))
 			for (*pu = 0, p += 7; *p >= '0' && *p <= '9'; p++)
 				*pu = *pu * 10 + (u32)(*p - '0');
@@ -2020,7 +2459,10 @@ static void lanza_terminal(void)
 		snprintf(aviso_envio, sizeof aviso_envio, "%s", sin_red_texto);
 		return;
 	}
-	snprintf(a, sizeof a, "-k %s\\SSH -p %u %s@%s", carpeta, pu, us, eq);
+	if (graba_ssh)
+		snprintf(a, sizeof a, "-k %s\\SSH -g %s\\SSH\\GRABA.BIN -p %u %s@%s", carpeta, carpeta, pu, us, eq);
+	else
+		snprintf(a, sizeof a, "-k %s\\SSH -p %u %s@%s", carpeta, pu, us, eq);
 	x = sc(SC_LANZAR_SUELTO, (u32)"\\SSH.BIN", (u32)a, 0);
 	if (ES_ERROR(x))
 		x = sc(SC_LANZAR_SUELTO, (u32)"\\HISPA\\SSH.BIN", (u32)a, 0);
@@ -2227,6 +2669,8 @@ int principal(void)
 	dura_s = arg_entero("/DURA", minutos * 60);
 	enfria_max = arg_entero("/ENFRIA", 180);
 	mira_procesador();
+	cuenta_hilos();
+	mira_gpus();
 	if (simula) {
 		nuevo_sensor("Procesador simulado (prueba)", "Simulado", CL_SIM, 1000, 0);
 		nuevo_sensor("Zona simulada (prueba)", "Zona simulada", CL_SIM, 950, 0);

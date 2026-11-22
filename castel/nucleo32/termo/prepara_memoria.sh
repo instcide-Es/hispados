@@ -34,12 +34,13 @@ RES=$(printf '%s' "$TESTIGO" | sha256sum | cut -d' ' -f1)
   printf '; del testigo en el servidor y ya no vale.\r\n'
   for s in $SERV; do printf 'servidor=%s\r\n' "$s"; done
   printf 'equipo=%s\r\ntestigo=%s\r\n' "$EQ" "$TESTIGO"
-  [ "${TERMO_PRUEBA:-}" = si ] && printf 'prueba=si\r\n'
+  if [ "${TERMO_PRUEBA:-}" = si ]; then printf 'prueba=si\r\n'; fi
 } > "$D/ENVIO.INI"
 {
   printf '; (TERMO) el botón «Terminal»: SSH con la llave de la memoria (TERMO\\SSH\\ID_ED.SSH)\r\n'
   printf '; hacia este equipo. Se puede cambiar con el Bloc de notas de Windows.\r\n'
   printf 'equipo=%s\r\npuerto=%s\r\nusuario=%s\r\n' "$SE" "$SP" "$SU"
+  if [ "${TERMO_SSH_GRABAR:-}" = si ]; then printf 'grabar=si\r\n'; fi
 } > "$D/SSH.INI"
 head -c 32 /dev/urandom > "$D/SSH/ID_ED.SSH"
 PUB=$(python3 -I - "$D/SSH/ID_ED.SSH" <<'PY'

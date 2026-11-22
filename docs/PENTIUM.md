@@ -8316,6 +8316,11 @@ la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
 | Toshiba NB250 | Atom N455 | el sensor clavado en 6 °C, también en carga; reloj en 2010 | «sin lectura fiable»; «no da la temperatura del procesador»; aviso de la fecha y hora por Internet |
 | MacBook Air 2012 («Mac Nº3») | i5-3427U (Ivy Bridge, TjMax 105 del MSR) | lee bien; no bajaba al parar; el puntero parpadeaba | lo ocupado en cada línea; no se juzga el enfriamiento sin reposo; volcar solo lo que cambia (pendiente: EDID por GMBUS, SMC de Apple) |
 | ThinkPad A275 | AMD PRO A12-8830B (15h, 60h+) | 114,3 °C fijos y PARADA DE SEGURIDAD falsa | el registro bueno (SMN D8200CA4h por B8h/BCh); nada de PELIGRO con lecturas no creíbles |
+| **MSI GT80 Titan 2QD/2QE** (el objetivo, sin probar aún) | i7 Haswell HQ, 4 núcleos / 8 hilos, TjMax del MSR; 2 × GTX 970M/980M (GM204) en SLI | — | la carga en todos los procesadores (los AP, despertados solo para la prueba); un sensor por núcleo; las GPU por el BAR0 (solo leer, receta de nouveau); los frenos (PROCHOT, VR Therm Alert, PL1/PL2, 690h); el informe para el técnico; en el LEEME, Supr/F11 y CSM |
+
+| **ASUS ROG GL553V** (de Carlos, objetivo) | i7-7700HQ Kaby Lake (4/8); GTX 1050/1050 Ti (GP107, Optimus) | — | la GPU Pascal (20460h, solo leer) sin despertarla si duerme (Optimus: el enlace del puerto); ventiladores y temperatura por el WMI de ASUS (DSTS, nunca DEVS); en el LEEME, Esc/F2 y «Launch CSM» |
+
+Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
 
 ## 15. Las pruebas
 

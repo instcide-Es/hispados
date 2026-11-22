@@ -45,6 +45,12 @@ struct termo_acpi {
 	 * escrituras que el AML ha querido hacer y no se han hecho (al leer las
 	 * zonas, el EC es de solo lectura); lo que tarda una lectura (ms) */
 	uint32_t ec_hay, ec_lecturas, ec_fallos, ec_ignoradas, ms_lectura;
+	/* (TERMO) los ASUS (ROG GL553V...): por WMI, \_SB.ATKD.WMNB con DSTS (solo
+	 * leer; nunca DEVS): los ventiladores (r.p.m.) y la temperatura (décimas
+	 * de °C); TA_NO si no lo tiene o no vale; asus_hay: 1 si está WMNB;
+	 * asus_escribe: el AML ha querido escribir en el EC al leerlo (no fiable) */
+	int32_t asus_vent_cpu, asus_vent_gpu, asus_temp;
+	uint32_t asus_hay, asus_escribe;
 };
 
 _Static_assert(sizeof(struct termo_acpi) <= TA_TAM, "termo_acpi: no cabe en lo que copia el núcleo");

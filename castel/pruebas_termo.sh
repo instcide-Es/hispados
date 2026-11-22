@@ -87,7 +87,7 @@ termo_anfitrion() {
   # el terminal de SSH.BIN
   python3 -I $AQUI/nucleo32/juegos/datos386.py $B/datos386.h $B/letra.h
   if gcc -O1 -Wall -Wextra -Wno-unused-parameter -I$B -I$AQUI/nucleo32/ssh $AQUI/nucleo32/ssh/vt.c $AQUI/nucleo32/ssh/pruebas/vt_prueba.c -o $B/vt_prueba 2> $B/gccvt.txt; then
-    python3 -I $AQUI/nucleo32/ssh/pruebas/graba.py 100 30 $B/colores.bin 4 bash $AQUI/nucleo32/ssh/pruebas/colores.sh
+    python3 -I $AQUI/nucleo32/ssh/pruebas/graba.py 100 30 $B/colores.bin 5 bash $AQUI/nucleo32/ssh/pruebas/colores.sh
     $B/vt_prueba 100 30 $B/colores.bin $B/colores.ppm 0 0 2 2 0 6 > $B/colores.txt
     if grep -q '^fila 02: ╭──────────────────────────────────────────╮' $B/colores.txt && grep -q '^fila 06: ⏺ Leyendo termo.c' $B/colores.txt \
        && grep -q '^fila 11: ✻ Pensando… (esc para parar)' $B/colores.txt && grep -q '^fila 13: │ ❯' $B/colores.txt \
@@ -100,7 +100,7 @@ termo_anfitrion() {
       command -v $r > /dev/null || continue
       case $r in
       htop) python3 -I $AQUI/nucleo32/ssh/pruebas/graba.py 100 30 $B/htop.bin 4 htop -d 10 ;;
-      vim) python3 -I $AQUI/nucleo32/ssh/pruebas/graba.py 100 30 $B/vim.bin 4 vim -u NONE -N -c 'syntax on' -c 'set number' $AQUI/nucleo32/ssh/vt.h ;;
+      vim) python3 -I $AQUI/nucleo32/ssh/pruebas/graba.py 100 30 $B/vim.bin 4 vim -n -u NONE -N -c 'syntax on' -c 'set number' $AQUI/nucleo32/ssh/vt.h ;;
       less) python3 -I $AQUI/nucleo32/ssh/pruebas/graba.py 100 30 $B/less.bin 3 less $AQUI/nucleo32/ssh/vt.h ;;
       esac
       $B/vt_prueba 100 30 $B/$r.bin $B/$r.ppm > $B/$r.txt
@@ -180,7 +180,7 @@ mira "(EC) la zona TZ02 lee del controlador embebido (que en QEMU no contesta): 
   "termo: suceso: ACPI: el controlador embebido (EC), al leer las zonas: [0-9]* lecturas, [1-9][0-9]* sin respuesta a tiempo, [1-9][0-9]* escrituras del AML no hechas"
 mira "Calentar (5 min): la tarea hija carga; a 91 °C de 100, la parada de seguridad; luego el enfriamiento y el resumen" \
   "termo: calentar 300 s (la carga en una tarea hija)" "termo: carga en marcha" "termo: fin de la carga a los [0-9]* s (PARADA DE SEGURIDAD); pico 91,0 °C" \
-  "termo: carga parada" "termo: resumen: PARADA DE SEGURIDAD" "PELIGRO: se calienta demasiado"
+  "termo: carga parada" "termo: resumen: PARADA DE SEGURIDAD" "PELIGRO: se ha parado por seguridad" "termo: suceso: informe para el técnico: X:.TERMO.INFORME.TXT y INFORME.BMP"
 if grep -q 'termo: estado fase=reposo .* sin_motivo=0$' $S && ! grep -q 'sin_motivo=[1-9]' $S; then
   ok "(PARPADEO) el ratón que solo pasa por encima del Termómetro no hace pintar nada (sin_motivo=0 en cada estado) y lo pintado se sube por trozos ($(sed -n 's/.* subidos=\([0-9]*\).*/\1/p' $S | tail -n 1) puntos en total)"
 else ko "(PARPADEO) se pinta sin motivo: $(grep -o 'pintados=.*' $S | tail -n 1)"; fi
@@ -215,6 +215,24 @@ mira "al arrancar otra vez: «la última vez se apagó durante la prueba, a 80 �
   "termo: aviso: La última vez .*durante la PRUEBA DE ESFUERZO (calentando), a las [0-9:]*, con el más caliente a 80,0 °C" \
   "termo: MSR 19Ch sin sensor: "
 [ -w /dev/kvm ] && mira "con KVM: el MSR 19Ch, que este procesador no tiene, da la excepción 13 y el núcleo la recoge" "termo: MSR 19Ch sin sensor: no lo tiene (lectura recogida por el núcleo)"
+# 6. (TERMO) los demás procesadores: -smp 4 (como el MSI GT80: 4 núcleos), sin y con KVM
+mdel -i $Y/termo.img@@1M ::TERMO/INFORME.TXT > /dev/null 2>&1
+termo_qemu $Y/termo.img t4 140 "-smp 4 -cpu Haswell" "44:sendkey 1" "46:sendkey c" "60:$C" "60:o /b 0x71 91" "72:$C" "72:o /b 0x71 50" "100:screendump $Y/smp.ppm"
+mira "-smp 4 (sin KVM): al calentar, el núcleo despierta a los otros 3 procesadores, cargan (sus vueltas suben) y se duermen otra vez al parar" \
+  "termo: suceso: la carga, en 4 procesadores (este y 3 más" "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$" \
+  "termo: suceso: informe para el técnico"
+if mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q 'en 4 procesadores (hilos)' && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^FRENADOS DEL PROCESADOR' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^RESULTADO'; then
+  ok "INFORME.TXT para el técnico: el equipo, la carga en 4 procesadores, cada sensor, los frenados y el resultado"
+else ko "INFORME.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | head -n 12 | tr '\n' ' ')"; fi
+if [ -w /dev/kvm ]; then
+  termo_qemu $Y/termo.img t5 90 "-enable-kvm -cpu host -smp 4" "40:sendkey 1" "42:sendkey c" "56:$C" "56:o /b 0x71 91"
+  mira "-smp 4 con KVM: lo mismo (los 3, a cargar y luego, dormidos)" "termo: suceso: la carga, en 4 procesadores (este y 3 más" \
+    "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9][0-9]*$"
+fi
+termo_qemu $Y/termo.img t6 70 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "56:$C" "56:o /b 0x71 91"
+mira "con un solo procesador: lo dice y carga solo este" "termo: suceso: la carga, en este procesador solo: los demás no (ningún otro procesador ha contestado"
+mira "(NVIDIA) sin gráficas NVIDIA (QEMU): lo dice, sin colgarse" "termo: suceso: gráficas NVIDIA Maxwell: ninguna en el PCI"
 # 4. «Enviar a Carlos»
 termo_enviar
 # 5. «Terminal»
@@ -270,7 +288,7 @@ termo_terminal() {
   R=$H/resultado.txt
   PS=$((32000 + RANDOM % 8000))
   ssh-keygen -q -t ed25519 -N '' -f $H/hk
-  if ! TERMO=1 USB_MB=32 TERMO_PARA=$H/para.txt TERMO_SSH_EQUIPO=10.0.2.2 TERMO_SSH_PUERTO=$PS TERMO_SSH_USUARIO=root TERMO_SSH_CONOCIDO=$H/hk.pub \
+  if ! TERMO=1 USB_MB=32 TERMO_PARA=$H/para.txt TERMO_SSH_EQUIPO=10.0.2.2 TERMO_SSH_PUERTO=$PS TERMO_SSH_USUARIO=root TERMO_SSH_CONOCIDO=$H/hk.pub TERMO_SSH_GRABAR=si \
        bash $AQUI/nucleo32/usb.sh $H/termo.img > $H/usb.txt 2>&1; then
     ko "«Terminal»: no se puede hacer la memoria: $(tail -n 1 $H/usb.txt)"; return
   fi
@@ -329,6 +347,7 @@ EOF
   python3 -I $AQUI/nucleo32/termo/pruebas/conduce.py $H $H/guion.txt -- qemu-system-x86_64 $cpu -nic user,model=e1000 -m 512 -display none -no-reboot \
     -acpitable file=$Y/termo.aml -device qemu-xhci -drive file=$H/termo.img,format=raw,if=none,id=u -device usb-storage,drive=u,bootindex=1 > $H/conduce.err 2>&1
   [ -s $H/sshd.pid ] && kill "$(cat $H/sshd.pid)" 2> /dev/null
+  mcopy -n -i $H/termo.img@@1M ::TERMO/SSH/GRABA.BIN $H/graba.bin 2> /dev/null
   tr -d '\r' < $H/serie.txt | iconv -f CP437 -t UTF-8 > $H/serie8.txt 2> /dev/null
   S=$H/serie8.txt
   mira "«Terminal» (la tecla T): SSH.BIN abre su ventana con el terminal nuevo y entra con la llave de la memoria (TERMO\\SSH), sin preguntar la huella (CONOCIDO.TXT)" \
@@ -338,6 +357,9 @@ EOF
   if grep -q '^TERM=xterm-256color COLORTERM=truecolor LANG=C.UTF-8 colores=256' $R 2> /dev/null && grep -q "^tamano=$C0$" $R; then
     ok "al otro lado: TERM=xterm-256color, COLORTERM=truecolor, LANG=C.UTF-8, 256 colores y el tamaño de la ventana ($C0)"
   else ko "lo que ve el otro lado: $(head -n 2 $R 2> /dev/null | tr '\n' ' ') (la ventana: $C0)"; fi
+  if grep -q '^respuestas= *033 \[ 8 ; .* t 033 \[ .* R 033 \] 1 1 ; r g b : 1 5 1 5 / 1 8 1 8 / 1 d 1 d 033 \\ 033 \[ ? 2 0 2 6 ; 2 \$ y 033 \[ ? 6 2 ; 2 2' $R 2> /dev/null; then
+    ok "las respuestas del terminal llegan al programa del otro lado (lo que pregunta Ink y compañía): el tamaño, el cursor, el color de fondo (OSC 11), el 2026 (DECRQM) y DA1"
+  else ko "las respuestas del terminal: $(grep '^respuestas=' $R 2> /dev/null)"; fi
   if grep -q '^teclas= *1b 5b 41 1b 5b 42 1b 03 1b 5b 5a 61 0d' $R 2> /dev/null; then
     ok "las teclas, en crudo, como un xterm: arriba, abajo, Esc, Ctrl+C, Mayús+Tab (ESC [ Z), una letra e Intro"
   else ko "las teclas: $(grep '^teclas=' $R 2> /dev/null)"; fi
