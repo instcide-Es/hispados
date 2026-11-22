@@ -74,7 +74,8 @@ mmd -i $Y/g.img ::CARTAS
 printf 'Querida Ana:\r\n' > $Y/ANA.TXT; printf 'Querido Juan:\r\n' > $Y/JUAN.TXT
 mcopy -i $Y/g.img $Y/ANA.TXT $Y/JUAN.TXT ::CARTAS/
 mcopy -i $Y/g.img $Y/BIN/COMPRIM.BIN $Y/LINUX.ZIP $Y/ZC.ZIP ::
-SES=(":pausa 2" ":doble 60 40" ":pausa 3" ":doble 330 160" ":pausa 2" ":doble 644 316" ":pausa 3" ":raton 790 590" ":captura z1"
+# (0.8.7) en C:\ está también AZAR.SEM (la semilla del azar, USUARIOS): LINUX.ZIP, en la cuarta fila
+SES=(":pausa 2" ":doble 60 40" ":pausa 3" ":doble 330 160" ":pausa 2" ":doble 260 390" ":pausa 3" ":raton 790 590" ":captura z1"
  ":doble 100 181" ":pausa 1" ":raton 790 590" ":captura z2" ":tecla backspace" ":pausa 1"
  ":clic 108 94" ":pausa 1" ":captura z3" ":tecla ret" ":pausa 3" ":captura z4" ":tecla esc" ":pausa 1"
  ":clic 120 201" ":clic 490 94" ":pausa 1" ":captura z5" ":tecla ret" ":pausa 3"
