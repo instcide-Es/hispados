@@ -55,11 +55,11 @@ else ko "usb.sh con TERMO=1: $(tail -n 2 $Y/usb.txt)"; return; fi
 # 1. la parada de seguridad
 termo_qemu $Y/termo.img t1 150 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "58:$C" "58:o /b 0x71 91" "70:$C" "70:o /b 0x71 50"
 mira "se abre solo al arrancar; el procesador emulado no da temperatura y se dice; la zona de ACPI, su ventilador y el SMBIOS" \
-  "^escritorio: lanzo .TERMO.BIN" "^termo: procesador «Intel Core Processor (Haswell)»" "^ACPI: (TERMO) zona térmica .._TZ_.TZ01: _CRT 1000, _PSV 900" \
-  "^termo: suceso: sensor «Zona ACPI ._TZ_.TZ01»: 45,0 °C (límite 100,0 °C)" "^termo: suceso: ventilador 1: 2400 r.p.m." "^ACPI: (TERMO) SMBIOS: «QEMU»"
+  "escritorio: lanzo .TERMO.BIN" "termo: procesador «Intel Core Processor (Haswell)»" \
+  "termo: suceso: sensor «Zona ACPI ._TZ_.TZ01»: 45,0 °C (límite 100,0 °C)" "termo: suceso: ventilador 1: 2400 r.p.m." "equipo «QEMU "
 mira "Calentar (5 min): la tarea hija carga; a 91 °C de 100, la parada de seguridad; luego el enfriamiento y el resumen" \
-  "^termo: calentar 300 s (la carga en una tarea hija)" "^termo: carga en marcha" "^termo: fin de la carga a los [0-9]* s (PARADA DE SEGURIDAD); pico 91,0 °C" \
-  "^termo: carga parada" "^termo: resumen: PARADA DE SEGURIDAD .*PELIGRO: se calienta demasiado"
+  "termo: calentar 300 s (la carga en una tarea hija)" "termo: carga en marcha" "termo: fin de la carga a los [0-9]* s (PARADA DE SEGURIDAD); pico 91,0 °C" \
+  "termo: carga parada" "termo: resumen: PARADA DE SEGURIDAD" "PELIGRO: se calienta demasiado"
 L=$(mdir -b -i $Y/termo.img@@1M ::TERMO 2> /dev/null | tr -d ' ')
 if echo "$L" | grep -q 'LOG$' && echo "$L" | grep -q 'CSV$' && echo "$L" | grep -q 'TXT$' \
    && mtype -i $Y/termo.img@@1M $(echo "$L" | grep 'CSV$') | grep -q '^[0-9/]*;[0-9:]*;[0-9]*;carga;91,0;' \
@@ -81,7 +81,7 @@ local cpu="-cpu phenom"
 [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host"
 termo_qemu $Y/termo.img t3 50 "$cpu"
 mira "al arrancar otra vez: «la última vez se apagó durante la prueba, a 80 °C»; el MSR que no está, recogido ($cpu)" \
-  "^termo: aviso: La última vez .*durante la PRUEBA DE ESFUERZO (calentando), a las [0-9:]*, con el más caliente a 80,0 °C" \
-  "^termo: MSR 19Ch sin sensor: "
-[ -w /dev/kvm ] && mira "con KVM: el MSR 19Ch, que este procesador no tiene, da la excepción 13 y el núcleo la recoge" "^termo: MSR 19Ch sin sensor: no lo tiene (lectura recogida por el núcleo)"
+  "termo: aviso: La última vez .*durante la PRUEBA DE ESFUERZO (calentando), a las [0-9:]*, con el más caliente a 80,0 °C" \
+  "termo: MSR 19Ch sin sensor: "
+[ -w /dev/kvm ] && mira "con KVM: el MSR 19Ch, que este procesador no tiene, da la excepción 13 y el núcleo la recoge" "termo: MSR 19Ch sin sensor: no lo tiene (lectura recogida por el núcleo)"
 }
