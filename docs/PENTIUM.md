@@ -419,7 +419,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 8 | **leer** del archivo EBX, a ECX, hasta EDX octetos | `leer` | los leídos (0: el final) |
 | 9 | **cerrar** el archivo EBX | `cerrar` | |
 | 10 | **lanzar** el programa de nombre EBX con los argumentos ECX | `lanzar` | el número de su tarea |
-| 11 | **esperar** a que acabe la tarea EBX (una lanzada por uno mismo) | `esperar` | su código de salida |
+| 11 | **esperar** a que acabe la tarea EBX (una lanzada por uno mismo); con ECX = 1, sin esperar (`acabada`: `SIGUE` si no ha acabado); (CORTES) con ECX = 2, **acabarla** a ella y a las que haya lanzado, esté esperando a lo que esté (la red, el disco): «Cancelar» y lo que no responde | `esperar`, `acabada`, `acabar_hija` | su código de salida |
 | 12 | la entrada siguiente de la carpeta EBX, a ECX (32 octetos) | `entrada` | 1, o 0 si no hay más |
 | 13 | lo que mide el archivo EBX | `largo_de` | |
 | 14 | los argumentos del programa, a EBX (caben ECX) | `argumentos` | su largo |
@@ -2566,11 +2566,14 @@ del sistema (con la memoria USB, `X:\ACPI.TXT`).
 **Apagar, en orden** (`escritorio.cas`, `apaga`; `energia.cas`):
 
 1. **Avisar a los programas**: a cada ventana de un programa, «cerrar» (como el
-   botón de la ventana), y hasta 2 s para que se cierren, sin dejar de mover
-   el escritorio. Si alguno no se cierra (el Bloc de notas con cambios sin
-   guardar avisa y se queda), **no se apaga**: un aviso lo dice («Hay un
-   programa sin cerrar: ¿algo sin guardar?»); al pedirlo **otra vez**, se le
-   cierra (como el Bloc al cerrar otra vez).
+   botón de la ventana), y hasta 3 s para que se cierren, sin dejar de mover
+   el escritorio. (CORTES) Si alguno no se cierra (el Bloc de notas con
+   cambios sin guardar pregunta; uno colgado ni lo lee), el cuadro **«Estos
+   programas no se han cerrado»**, con cada uno («no responde» o «espera una
+   respuesta»), **«Forzar el cierre»** y **«Cancelar»**; sin elegir nada, a
+   los 15 s se fuerza (a los 60 si alguno pregunta algo): sección 14 tervicies.
+   (Antes: «Hay un programa sin cerrar: ¿algo sin guardar?» y no se apagaba
+   hasta pedirlo otra vez.)
 2. La pantalla del final («Apagando el equipo...»), y los programas que
    queden (sin ventana) se acaban: sus archivos se cierran y lo escrito queda.
 3. **Vaciar los discos** (`asentar` de cada uno).
@@ -3537,7 +3540,8 @@ CNAME de la respuesta; 8 nombres sabidos durante 5 minutos); y **TCP**
 que llega; el MSS (1.460) en el SYN; la ventana que se anuncia es lo libre de
 lo recibido y se avisa cuando se abre; lo enviado se guarda hasta que llega su
 ACK y, si no llega a tiempo, se manda otra vez desde ahí, cada vez esperando el
-doble (de 1 a 32 s; a los 8 intentos, cortada); con la ventana de la otra punta
+doble (de 1 a 16 s; al séptimo sin respuesta, unos 63 s, cortada: sección 14
+vicies); con la ventana de la otra punta
 cerrada, un octeto de vez en cuando para preguntar; lo desordenado se tira (se
 repite el ACK); FIN en los dos sentidos, RST a lo que no es de ninguna
 conexión. Sin escuchar en un puerto (de momento solo se conecta), sin
@@ -8996,6 +9000,166 @@ para estirar lo elegido con el ratón; el texto se escribe al final (sin
 mover el cursor por dentro); Pintura 1.0 (.HVP) y Pintura 2 juntas en el
 menú hasta juntar con la 0.8.7 (arriba).
 
+## 14 tervicies. Los cortes de la red (rama red-cortes, «(CORTES)»)
+
+*22/11/2026.* Lo que vio Carlos en el **HP Mini 5103 con el Wi-Fi** (la 0.8.6
+y la 0.8.7): si el Wi-Fi se corta a mitad de bajar una actualización, la
+descarga se queda esperando para siempre aunque el Wi-Fi vuelva; «Cancelar»
+no la para; y al reiniciar desde el menú Inicio el equipo espera a que se
+cierre «Programas y actualizaciones», que no se cierra. (En el registro del
+servidor se ve: `BASE.HPQ` cortado a los 455.655 octetos de 1.080.349, a las
+18:24 del 22/11, y nada más hasta que se reinició el equipo, dos minutos
+después.)
+
+### Las causas
+
+1. **Cancelar no llegaba a la espera.** DESCARGA solo miraba `CANCELA.TXT`
+   cada 16 K que **llegaban**: parada la descarga, no lo veía nunca. PAQUETES
+   esperaba a DESCARGA con `esperar` (parado) y la ventana solo dejaba el
+   archivo: nadie podía acabar con una DESCARGA esperando a la red.
+2. **La ventana no se cerraba mientras trabajaba.** «Programas y
+   actualizaciones», con PAQUETES en marcha, no hacía caso del «cerrar»; y
+   al apagar, el escritorio esperaba 2 s, decía «Hay un programa sin cerrar:
+   ¿algo sin guardar?» y **no apagaba** (había que volver a pedirlo, sin
+   saberlo): sin salida a la vista.
+3. **TCP, con el camino muerto, tardaba o no acababa.** Lo enviado se
+   repetía hasta 8 veces, de 1 a 32 s (más de dos minutos); y una conexión
+   **que solo recibe** (una descarga: lo único que se manda son los ACK) no
+   tenía nada que repetir, así que, si el Wi-Fi se iba sin que el enlace
+   cayera del todo (o la IP cambiaba por DHCP), quedaba abierta para
+   siempre: solo la espera de 30 s de DESCARGA la cortaba, y entonces la
+   actualización fallaba entera (no se volvía a probar).
+4. **Ni reintento ni seguir.** Cortada, DESCARGA acababa con un error y lo
+   bajado no valía: con un Wi-Fi que va y viene, una actualización de 20 MB
+   no llegaba nunca.
+
+### Lo que se ha hecho
+
+**TCP en `RED.BIN`** (`rtcp.cas`, `rpila.cas`, `ured.cas`):
+- Lo que se manda y no confirma la otra punta, con **tope**: 1, 2, 4, 8, 16, 16
+  y 16 s, y al séptimo sin respuesta (unos 63 s) cortada, y lo apunta
+  («tcp: lo mandado al puerto N no llega (7 intentos): cortada»).
+- **Keepalive**: una conexión que no oye nada de la otra punta en 15 s (sin
+  nada por confirmar) le pregunta (un ACK con el número de antes, que obliga a
+  contestar), cada 5 s; a la cuarta sin respuesta (35 s) está muerta:
+  cortada con `CORTADA_RED` («tcp: la conexión con el puerto N no contesta
+  desde hace 35 s: cortada»). Una viva sin datos sigue (contesta).
+- **La red que cambia**: si DHCP da **otra IP u otra puerta de enlace** que
+  las de antes (al renovar, o tras perderla), las conexiones que iban por la
+  tarjeta se cortan con el error nuevo **`RED_CAMBIADA`** (`0xFFFFFFE0`: «la
+  red ha cambiado (otra IP u otra puerta de enlace): la conexión se ha
+  cortado»); las del túnel (WireGuard, Tailscale), no. Los vecinos (ARP),
+  olvidados. Al caer el enlace (cable o Wi-Fi) ya se cortaban todas con
+  `SIN_CABLE`, que ahora dice «la red no tiene enlace (¿está enchufado el
+  cable? ¿se ha desconectado el Wi-Fi?)».
+
+**DESCARGA** (`udescarg.cas`):
+- Lo que llega se espera **de medio segundo en medio segundo**: entre uno y
+  otro mira `CANCELA.TXT` (para **al momento**, llegue algo o no) y, a los
+  **30 s sin un octeto**, la conexión se da por cortada («se ha cortado la
+  conexión (30 s sin que llegue nada)»).
+- **Reintento**: cortada (sin enlace, la red cambiada, el servidor que
+  cierra, corta o calla, no contesta...), espera a que vuelva la red (hasta
+  **2 minutos** cada vez: «sin red: se espera a que vuelva para seguir»; en la
+  barra, «Sin red: esperando para seguir con BASE.HPQ») y un poco más cada
+  vez (1, 2, 4, 8 y 15 s), y vuelve a probar: hasta **8 intentos**.
+- **Sigue desde donde iba**: pide el resto con `Range: bytes=N-` e
+  `If-Range` (el `ETag` o el `Last-Modified` de la primera respuesta: que sea
+  el mismo archivo). Con `206` y su `Content-Range` desde N, sigue
+  escribiendo detrás; si el servidor contesta `200` (no deja, o el archivo ha
+  cambiado), **empieza de nuevo** (el archivo, a cero). El nginx de
+  actualiza.hispados.es lo admite (`curl -r 100-199` da `206 Partial
+  Content` con `Content-Range: bytes 100-199/7166`). Lo traído lo comprueba
+  PAQUETES como siempre: el tamaño y el SHA-256 del catálogo firmado, y los
+  de cada archivo.
+- **Cancelado**: borra lo bajado a medias y acaba con el código **3**.
+
+**PAQUETES** (`upaquete.cas`) espera a DESCARGA sin quedarse parado
+(`acabada` cada décima): si se pide cancelar y DESCARGA no ha parado sola en
+1,5 s, **la acaba** (la llamada 11 con ECX = 2, `acabar_hija`: nueva, solo
+para las tareas que uno ha lanzado, y con ellas las suyas; despierta a la que
+espera a la red o al disco). Lo traído a medias se borra y dice «cancelado:
+lo traído a medias se ha borrado y todo queda como estaba».
+
+**«Programas y actualizaciones»** (`uprogram.cas`): cerrarla (o apagar el
+equipo) mientras trabaja **cancela** lo que hace y luego se cierra; y si
+PAQUETES no para en 10 s tras «Cancelar» (5 si se ha cerrado la ventana), lo
+acaba (y a DESCARGA): lo que hubiera cambiado lo deshace su diario la próxima
+vez (sección 13).
+
+**Apagar y reiniciar** (`escritorio.cas`): se avisa a los programas y se
+espera 3 s; si alguno no se cierra, el cuadro **«Estos programas no se han
+cerrado:»** (como el de Windows), con cada uno y si **no responde** (no ha
+leído lo que se le ha mandado: su cola de sucesos tiene el «cerrar» sin leer)
+o **espera una respuesta** (lo ha leído y pregunta algo, como el Bloc con
+cambios sin guardar); «Si tienen algo sin guardar y se fuerza el cierre, se
+pierde»; y **«Forzar el cierre»** (Intro) o **«Cancelar»** (Esc: no se
+apaga). Si no se elige nada, **a los 15 s se fuerza** (a los 60 si alguno
+está preguntando algo): nunca se queda esperando sin salida. Forzar es acabar
+sus programas (sus archivos se cierran: lo escrito queda) y seguir como
+siempre: el sonido, acabar lo que quede, **vaciar los discos** (`asentar`) y
+apagar o reiniciar. Lo mismo al cerrar la sesión.
+
+**Https** (`biblioteca32/https.cas`): con `https_reintentar := cierto` (lo
+pone `HTTPS.BIN`; el Navegador no, que no puede quedarse esperando), un GET
+(o HEAD) que se corta porque la red se va se vuelve a pedir cuando vuelve
+(se espera `https_espera_red` tics, 30 s si no se dice; hasta 3 veces) y, con
+`https_pedir`, sigue desde donde iba con `Range` (si no, desde el principio).
+
+**WIFI.BIN**: al reconectar ya se lo decía a `RED.BIN` (el enlace, en cada
+vuelta: `O_WIFI_CAMBIO`), que pide la IP por DHCP con la puerta y el DNS
+nuevos; ahora, además, si la IP o la puerta son otras, corta lo de antes. Para
+probarlo sin la tarjeta, **`REDWIFI /SIMCORTE segundos [IP11|IP10]`** (solo con
+la radio simulada, `WifiSimulada=SI`): el punto de acceso de mentira
+desaparece esos segundos (ni balizas) y DHCP da la 192.168.77.11 (o, otra vez,
+la .10); `wifi/nucleo/sim.c` lleva `sim_ausente` y `sim_ip_otra`.
+
+### Las pruebas: la parte 37 (`SOLO=cortes`, `castel/pruebas_cortes.sh`)
+
+Con `nucleo32/servidor_cortes.py` (un servidor HTTP que, como nginx, admite
+`Range` e `If-Range`, y que corta la primera vez que se pide cada archivo
+grande: `/cierra/` manda la mitad y cierra, `/rst/` corta con un RST,
+`/norango/` cierra y no deja seguir, `/calla/` manda la mitad y se calla sin
+cerrar, `/lento/` va a unos 150 K/s):
+1. DESCARGAR con cada clase de corte y con el enlace caído 15 s en plena
+   descarga (`set_link nic0 off` en el monitor de QEMU): los cinco archivos,
+   de 3 MB, iguales octeto a octeto a los del servidor; al servidor, el resto
+   se le pide con `Range` una vez por corte.
+2. TCP: una conexión viva sin datos sigue 60 s (los keepalive tienen
+   respuesta); con el camino muerto y el enlace en pie (un `filter-buffer`
+   de QEMU que se queda las tramas), cortada a los 35 s, y el programa lo sabe.
+3. `PAQUETES INSTALA` de Internet un paquete de 3 MB con el enlace caído a
+   mitad: sigue, comprueba las sumas e instala (lo instalado, igual al del
+   paquete; BAJADAS, sin restos).
+4. En el escritorio, «Programas y actualizaciones» con el servidor callado a
+   mitad del .HPQ: **«Cancelar» corta la conexión en menos de 2 s** (lo mide
+   el servidor: el cliente cierra), la ventana responde y nada queda a medias;
+   y **«Reiniciar» del menú Inicio** en plena descarga parada: la ventana
+   cancela, se cierra sola y el equipo reinicia.
+5. Un programa colgado (no lee sus sucesos) al reiniciar: el cuadro con
+   «(no responde)», «Forzar el cierre» y «Cancelar»; Cancelar no reinicia; sin
+   elegir nada, a los 15 s se fuerza y reinicia; y el botón lo hace al momento.
+6. El Wi-Fi simulado: el punto de acceso desaparece 12 s (WIFI.BIN lo nota,
+   RED.BIN se queda sin enlace) y vuelve con otra IP (DHCP otra vez, IPCONFIG
+   la dice, PING va); y la IP que cambia sin caer el enlace (`IPCONFIG
+   /RENOVAR`): «la red ha cambiado».
+
+### Lo que probará Carlos en el HP Mini (el Wi-Fi de verdad no se emula)
+
+1. Con el Wi-Fi conectado, «Programas y actualizaciones» > Actualizar algo
+   grande (o `DESCARGAR http://actualiza.hispados.es/pentium/ESCBASE.HPQ` en
+   la Consola) y, a mitad, **apagar el router** (o alejarse): en unos 8-10 s,
+   «Sin red: esperando para seguir con ...»; al volver el Wi-Fi (el icono con
+   sus rayitas), «Se sigue desde el octeto N» y acaba bien (las sumas, buenas).
+2. Lo mismo y, mientras espera, **«Cancelar» (Esc)**: para en menos de 2 s,
+   la ventana responde y `C:\HISPA\PAQUETES\BAJADAS` queda vacía.
+3. Lo mismo y, mientras espera, **Inicio > Reiniciar**: reinicia solo (como
+   mucho, el cuadro «Estos programas no se han cerrado» unos segundos).
+4. Con el Wi-Fi que vuelve con otra IP (otro punto de acceso, o el router
+   reiniciado): `IPCONFIG` dice la nueva y el Navegador y `PING` van.
+5. Si algo falla: `IPCONFIG /TODO > RED.TXT` y `X:\WIFI.LOG` (lo apuntan RED.BIN
+   y WIFI.BIN: el enlace, DHCP, «tcp: ... cortada»).
+
 ## 15. Las pruebas
 
 `castel/pruebas.sh` (las partes 8 a 14; `SOLO=32 ./pruebas.sh` hace solo esas y la
@@ -9501,6 +9665,15 @@ ventana del juego a pantalla completa con el ratón de QEMU (JUEGOV); UDP con un
 eco y un cliente de aquí (REDUDP, `tests/juegos/eco_udp.py`), y el sonido
 grabado (SONJ: DirectSound sin cortes aunque el programa no haga nada, waveOut,
 el CD por MCI).
+
+**(CORTES) Los cortes de la red** (la parte 37, `SOLO=cortes`,
+`castel/pruebas_cortes.sh`, con `nucleo32/servidor_cortes.py`): DESCARGAR con
+el servidor que cierra, corta, calla o no deja seguir y con el enlace caído a
+mitad (sigue desde donde iba, con `Range`); TCP con el camino muerto
+(keepalive); PAQUETES con el enlace caído; «Cancelar» en menos de 2 s y
+«Reiniciar» en plena descarga en la ventana; «Forzar el cierre» de un programa
+colgado al apagar; y el Wi-Fi simulado que se va y vuelve con otra IP
+(sección 14 tervicies).
 
 ## 16. Por dónde seguir
 

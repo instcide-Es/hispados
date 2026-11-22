@@ -321,6 +321,12 @@
 #      «Editar con Pintura» en BMP y PCX), la rueda, Alt+letra, el
 #      portapapeles, maximizar, una ruta larga, \DOCUMENT y la zona protegida.
 # Necesita python3, nasm, qemu-system-i386, socat, mtools, mkfs.fat y fsck.fat
+#  37. (CORTES, SOLO=cortes) Los cortes de la red (pruebas_cortes.sh): DESCARGAR
+#      contra un servidor que cierra, corta, calla o no deja seguir, y con el
+#      enlace caído a mitad (sigue desde donde iba, con Range); TCP con el
+#      camino muerto (keepalive); PAQUETES con el enlace caído; «Cancelar» en
+#      menos de 2 s; «Reiniciar» en plena descarga; «Forzar el cierre» de un
+#      programa colgado; y el Wi-Fi simulado que se va y vuelve con otra IP.
 #  38. (USUARIOS, SOLO=usuarios) Los usuarios (pruebas_usuarios.sh): ARGON2
 #      con ASan en Linux, la serie de tools/hpq.py; un sistema de antes que
 #      da de alta usuarios con contraseña (Argon2id) y sus carpetas; el usuario
@@ -366,6 +372,7 @@
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
 #   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
 #   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
+#   SOLO=cortes ./pruebas.sh      la primera y la 37 ((CORTES) los cortes de la red; pruebas_cortes.sh)
 #   SOLO=usuarios ./pruebas.sh    la primera y la 38 (USUARIOS: los usuarios, la serie del catálogo, el azar; pruebas_usuarios.sh)
 #   SOLO=panel ./pruebas.sh       la primera y la 34 ((PANEL) el Panel de control y la hora por Internet; pruebas_panel.sh)
 #   SOLO=bloc ./pruebas.sh        la primera y la 35 (BLOC: el Bloc de notas 1.0)
@@ -438,6 +445,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_agenda.sh          # (AGENDA) la parte 43, como parte_agenda
 . $AQUI/pruebas_cuentas.sh         # (CUENTAS32) la parte 44, como parte_cuentas
 . $AQUI/pruebas_pintura.sh         # (PINTURA32) la parte 45, como parte_pintura
+. $AQUI/pruebas_cortes.sh          # (CORTES) la parte 37, como parte_cortes
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -460,7 +468,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3379,8 +3387,8 @@ CAPTURAS=$G MODULOS=$Y/ACPI.BIN,$Y/BLOC.BIN ARRANQUE="escritorio acpicada=1" QEM
   "${PUESTA[@]}" ":monitor cont" ":pausa 5" ":captura a1" ":raton 690 585" ":pausa 1.5" ":captura a2" \
   "${ENCHUFA[@]}" ":pausa 3" ":captura a3" ":clic 690 585" ":pausa 1" ":captura a4" ":raton 400 300" \
   "${GASTADA[@]}" ":pausa 3" ":raton 690 585" ":pausa 1.5" ":captura a5" ":raton 400 300" \
-  ":clic 40 585" ":clic 80 176" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 3" ":captura a6" \
-  ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 4" > $Y/apagar.sal 2>&1
+  ":clic 40 585" ":clic 80 176" ":pausa 2" ":escribe sin guardar" ":clic 40 585" ":clic 360 545" ":clic 275 327" ":pausa 5" ":captura a6" \
+  ":tecla ret" ":pausa 4" > $Y/apagar.sal 2>&1
 S=$Y/apagar.sal
 mira "el núcleo lanza el servicio de ACPI al arrancar, y este lee las tablas de QEMU y la batería de la SSDT de prueba (_BIF, _BIX, _BST)" \
   "^acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea [0-9]*" "^ACPI: SSDT .*HISPA  BATPRUEB" "^Batería 1: ._SB_.HBAT" \
@@ -3397,9 +3405,12 @@ miracap "al enchufar el cargador (con el recuadro abierto), se pone al día solo
 miracap "un clic en la pila quita el recuadro" a4 notexto 300 500 790 560 "Enchufado"
 miracap "con la batería gastada (la salud al 40 %), el aviso en terracota" a5 texto 300 480 790 560 "Salud: 40 % (guarda 5.000 de 12.500 mAh de cuando era nueva)" \
   texto 300 480 790 560 "La batería está gastada: dura menos de la mitad que nueva"
-miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc avisa, no se apaga y el escritorio lo dice" a6 \
-  texto 100 100 700 500 "Hay un programa sin cerrar: ¿algo sin guardar?"
-mira "«Apagar» otra vez: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+# (CORTES) ya no es «Hay un programa sin cerrar» y apagar otra vez: el cuadro
+# «Estos programas no se han cerrado», con «Forzar el cierre» (Intro)
+miracap "«Apagar» con el Bloc de notas sin guardar: el Bloc pregunta y el escritorio, «Estos programas no se han cerrado» (el Bloc espera una respuesta), con «Forzar el cierre»" a6 \
+  negrita 100 100 700 500 "Estos programas no se han cerrado:" texto 100 100 700 500 "(espera una respuesta)" negrita 100 100 700 500 "Forzar el cierre"
+mira "«Forzar el cierre»: se cierran los programas, se vacían los discos y el servicio apaga por ACPI (S5: _PTS, el modo ACPI, SLP_EN) y QEMU termina" \
+  "^escritorio: se fuerza el cierre de la tarea [0-9]* (.*Bloc de notas" \
   "^escritorio: apagar" "^energía: apagar (S5) por el servicio de ACPI" "^ACPI: preparar S5 (._S5, _PTS, _SST): AE_OK" \
   "^ACPI: modo ACPI (SMI_CMD B2h <- F1h): AE_OK" "^\[código 0\]"
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "ni una excepción del núcleo ni un error de ACPICA en toda la sesión"
@@ -5817,6 +5828,7 @@ if parte08 correo; then parte_correo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin C
 if parte08 agenda; then parte_agenda; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la Agenda)"; fi   # (AGENDA) la parte 43
 if parte08 cuentas; then parte_cuentas; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Cuentas 2)"; fi   # (CUENTAS32) la 44
 if parte08 pintura; then parte_pintura; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Pintura 2)"; fi   # (PINTURA32) la 45
+if parte08 cortes; then parte_cortes; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los cortes de la red)"; fi   # (CORTES)
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0

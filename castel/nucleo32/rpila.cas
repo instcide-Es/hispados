@@ -23,6 +23,11 @@ módulo Rpila
     público variable mi_ip, máscara, puerta, dns, servidor: nat32
     público variable concesión, dada_en: nat32  ; (segundos; en tics, cuándo)
     público variable con_dhcp: bool
+    ; (CORTES) la red ha cambiado (DHCP ha dado otra IP u otra puerta de
+    ; enlace que las de antes): ured.cas lo mira y corta las conexiones TCP
+    ; que iban por la tarjeta (ya no pueden seguir); y lo de antes, para verlo
+    público variable red_cambió: bool
+    variable ip_de_antes, puerta_de_antes: nat32
     público variable ent_ip: nat32              ; de quien viene lo que ha entrado (TCP)
     público variable ent_datos: puntero a byte
     público variable ent_largo: nat32
@@ -852,6 +857,14 @@ módulo Rpila
             dhcp_manda(3)
             dhcp_próximo := ahora() + 200
         sino si clase_m = 5 y (dhcp_estado = D_PIDIENDO o dhcp_estado = D_HECHO) entonces
+            ; (CORTES) ¿otra IP, u otra puerta, que las que se tenían?
+            si ip_de_antes <> 0 y (ofrecida <> ip_de_antes o (r <> 0 y r <> puerta_de_antes)) entonces
+                red_cambió := cierto
+                apunta("DHCP: la red ha cambiado (otra IP u otra puerta de enlace): las conexiones de antes se cortan")
+                vecinos_fuera()
+            fin
+            ip_de_antes := ofrecida
+            puerta_de_antes := r
             mi_ip := ofrecida
             máscara := m
             si máscara = 0 entonces máscara := 0x00FFFFFF fin
@@ -915,6 +928,9 @@ módulo Rpila
     público función dhcp_parar()
         dhcp_estado := D_PARADO
         mi_ip := 0
+        ; (CORTES) sin enlace ya se cortan todas: lo de antes no cuenta
+        ip_de_antes := 0
+        puerta_de_antes := 0
     fin
 
     ; =========================================================================
@@ -1129,6 +1145,12 @@ módulo Rpila
             si preguntas[i].usado entonces contestar(preguntas[i].hueco, preguntas[i].serie, SIN_CABLE, 0, 0, nulo, 0) fin
             preguntas[i].usado := falso
         fin
+        vecinos_fuera()
+    fin
+
+    ; (CORTES) los vecinos sabidos (ARP), olvidados: la red es otra
+    función vecinos_fuera()
+        variable i: nat32
         para i desde 0 hasta MAX_ARP - 1 hacer vecinos[i].hay := falso fin
     fin
 

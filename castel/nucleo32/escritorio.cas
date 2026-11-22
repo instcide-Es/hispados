@@ -234,6 +234,7 @@ módulo Escritorio
     variable ayuda_tapada: bool                 ; se ha pulsado un botón: no vuelve hasta salir y entrar
     variable ayuda_vista, energía_vista: nat32  ; (cambios_energía de lo que se ve)
     variable apagar_otra_vez: bool              ; la última vez no se cerró un programa: ahora se le cierra
+    variable v_forzar: nat32                    ; (CORTES) «Estos programas no se han cerrado»
 
     ; -------------------------------------------------------------------------
     ;  El tapiz
@@ -2164,25 +2165,143 @@ módulo Escritorio
     fin
 
     ; avisa a los programas (a sus ventanas: «cerrar») y espera, como mucho
-    ; dos segundos, a que se cierren, sin dejar de mover el escritorio (por
-    ; si alguno dice algo). Falso si alguno no se ha cerrado (el Bloc de
-    ; notas con cambios sin guardar avisa y se queda): entonces no se apaga,
-    ; y si se vuelve a pedir, se le cierra (como el Bloc al cerrar otra vez).
+    ; tres segundos, a que se cierren, sin dejar de mover el escritorio (por
+    ; si alguno dice algo). (CORTES) Si alguno no se cierra (el Bloc de notas
+    ; con cambios sin guardar pregunta; uno colgado ni lo lee), el cuadro
+    ; «Estos programas no se han cerrado», como el de Windows: «Forzar el
+    ; cierre» (se acaban y se sigue) o «Cancelar» (no se apaga). Si no se
+    ; elige nada, a los 15 s se fuerza (a los 60, si alguno está preguntando
+    ; algo). Falso si se cancela: entonces no se apaga
     función cierra_programas(): bool
         variable i, k: nat32
         para i desde 0 hasta MAX_VENTANAS - 1 hacer
             si ventanas[i].usada y ventanas[i].dueño <> 0 entonces pedir_cierre(ventanas[i].id) fin
         fin
         k := 0
-        mientras k < 200 y programas_con_ventana() hacer
+        mientras k < 300 y programas_con_ventana() hacer
             pulso()
             dormir(1)
             k := k + 1
         fin
-        si programas_con_ventana() y no apagar_otra_vez entonces
-            apagar_otra_vez := cierto
-            aviso("Hay un programa sin cerrar: ¿algo sin guardar?")
+        si programas_con_ventana() entonces devolver forzar_cierre() fin
+        devolver cierto
+    fin
+
+    ; (CORTES) ¿lee lo que le llega? (si tiene en su cola, sin leer, lo que se
+    ; le ha mandado, como el «cerrar», no responde)
+    función no_responde(i: nat32): bool
+        devolver ventanas[i].ent <> ventanas[i].sal
+    fin
+
+    constante AC_FORZAR = 240                   ; (CORTES) «Forzar el cierre» (lejos de los demás AC_: se miran aquí, no en haz)
+    constante AC_NO_FORZAR = 241                ; (CORTES) «Cancelar»
+    constante FORZAR_AN = 500
+    constante FORZAR_AL = 236
+
+    ; (CORTES) el cuadro de los programas que no se cierran, con lo que queda
+    ; para forzarlos («s»: segundos)
+    función pinta_forzar(s: nat32)
+        variable l: puntero a Lienzo
+        variable i, n, yy: nat32
+        variable d: arreglo [2] de nat32
+        l := lienzo_de(v_forzar)
+        si l = nulo entonces devolver fin
+        quita_pulsadores(v_forzar)
+        rectángulo(valor(l), 0, 0, FORZAR_AN, FORZAR_AL, 0xF4F8FE)
+        círculo(valor(l), 34, 34, 16, NARANJA)
+        rectángulo(valor(l), 32, 24, 4, 13, BLANCO)
+        rectángulo(valor(l), 32, 40, 4, 4, BLANCO)
+        texto_negrita(valor(l), 64, 16, "Estos programas no se han cerrado:", TINTA)
+        n := 0
+        yy := 40
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 y n < 4 entonces
+                copiar_hasta(renglón, dirección(ventanas[i].título[0]), 60)
+                si no_responde(i) entonces concatenar(renglón, " (no responde)") sino concatenar(renglón, " (espera una respuesta)") fin
+                texto(valor(l), 76, ent32(yy), renglón, TINTA)
+                yy := yy + 20
+                n := n + 1
+            fin
+        fin
+        texto(valor(l), 64, 128, "Si tienen algo sin guardar y se fuerza el cierre, se pierde.", TINTA_SUAVE)
+        d[0] := s
+        formatear(renglón, 96, "Si no se elige nada, se forzará dentro de %u s.", d)
+        texto(valor(l), 64, 148, renglón, TINTA_SUAVE)
+        pulsador(v_forzar, 64, 180, 190, 36, "Forzar el cierre", 0xFF9A5A, 0xD9601E, AC_FORZAR)
+        pulsador(v_forzar, 280, 180, 130, 36, "Cancelar", 0x5AA6F4, 0x2468C8, AC_NO_FORZAR)
+        repintada(v_forzar, 0, 0, FORZAR_AN, FORZAR_AL)
+    fin
+
+    función forzar_cierre(): bool
+        variable i, k, tope, decisión, seg_visto: nat32
+        variable e: Evento
+        variable t: puntero a Tarea
+        variable alguno_pregunta: bool
+        ; (lo que se espera: 15 s si ninguno responde; 60 si alguno pregunta algo)
+        alguno_pregunta := falso
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 y no no_responde(i) entonces alguno_pregunta := cierto fin
+        fin
+        tope := 15 * HZ
+        si alguno_pregunta entonces tope := 60 * HZ fin
+        cierra_cuadro(v_forzar)
+        v_forzar := cuadro("Apagar el equipo", FORZAR_AN, FORZAR_AL)
+        decisión := 0
+        si v_forzar <> 0 entonces pinta_forzar(tope div HZ) fin
+        sonar(SS_AVISO)                         ; (SONIDO)
+        escribir("escritorio: hay programas que no se cierran: «Forzar el cierre»\n")
+        k := 0
+        seg_visto := 0
+        mientras decisión = 0 hacer
+            pulso()
+            mientras v_forzar <> 0 y saca_evento(v_forzar, 0, e) hacer
+                si e.clase = EV_CERRAR o (e.clase = EV_TECLA y e.a = 27) entonces
+                    decisión := AC_NO_FORZAR
+                sino si e.clase = EV_TECLA y e.a = '\n' entonces
+                    decisión := AC_FORZAR
+                sino si e.clase = EV_RATÓN_BAJA entonces
+                    i := pulsador_en(v_forzar, ent32(e.a), ent32(e.b))
+                    si i = AC_FORZAR o i = AC_NO_FORZAR entonces decisión := i fin
+                fin
+            fin
+            ; (los que se cierran mientras tanto: si ya no queda ninguno, se sigue)
+            si no programas_con_ventana() entonces
+                cierra_cuadro(v_forzar)
+                devolver cierto
+            fin
+            si k >= tope entonces
+                escribir("escritorio: nadie ha elegido: se fuerza el cierre\n")
+                decisión := AC_FORZAR
+            fin
+            si k div HZ <> seg_visto y v_forzar <> 0 entonces
+                seg_visto := k div HZ
+                pinta_forzar((tope - k) div HZ)
+            fin
+            dormir(1)
+            k := k + 1
+        fin
+        cierra_cuadro(v_forzar)
+        si decisión = AC_NO_FORZAR entonces
+            escribir("escritorio: no se apaga (Cancelar)\n")
             devolver falso
+        fin
+        ; forzar: se acaban sus programas y se espera (2 s) a que se vayan
+        para i desde 0 hasta MAX_VENTANAS - 1 hacer
+            si ventanas[i].usada y ventanas[i].dueño <> 0 entonces
+                t := tarea_de(ventanas[i].dueño)
+                si t <> nulo entonces
+                    tomar_consola()
+                    imprimir2("escritorio: se fuerza el cierre de la tarea %u (%s)\n", t.id, nat32(dirección(ventanas[i].título[0])))
+                    soltar_consola()
+                    acabar_tarea(t)
+                fin
+            fin
+        fin
+        k := 0
+        mientras k < 200 y programas_con_ventana() hacer
+            pulso()
+            dormir(1)
+            k := k + 1
         fin
         devolver cierto
     fin
