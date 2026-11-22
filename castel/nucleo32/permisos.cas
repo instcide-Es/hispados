@@ -109,7 +109,7 @@ módulo Permisos
 
     constante LARGO = 24
     constante MAX_REGLAS = 128
-    constante MAX_PROGRAMAS = 24
+    constante MAX_PROGRAMAS = 32                 ; (0.8.7) con CORREO.BIN eran 25: el último se quedaba sin sello (hay hasta 31 sellos)
     constante MAX_FORMA = 160
 
     tipo Regla = estructura
