@@ -6264,8 +6264,20 @@ la prueba de «con el procesador ocupado» se hace con KVM, abajo.)
 
 ### Probarlo
 
-`SOLO=reproductor castel/pruebas.sh` (la parte 33, en `castel/pruebas_reproductor.sh`).
-En el anfitrión, a mano:
+`SOLO=reproductor castel/pruebas.sh` (la parte 33, en `castel/pruebas_reproductor.sh`;
+unos 11 minutos en el PC de Albinyana). En el anfitrión, con ASan y UBSan: los
+13 formatos de prueba frente a ffmpeg (los sin pérdida, iguales octeto a
+octeto; MP3, MP2 y Vorbis, por encima de 78 dB; IMA-ADPCM, 48 dB: la cuenta
+de Microsoft, no la de ffmpeg), el 5.1 a estéreo, sin huecos en WAV, FLAC, MP3
+y OGG, las imágenes de CD (.BIN y FLAC con su .CUE), el fundido, el MOD, buscar
+(FLAC y MP3 de tasa fija, a la muestra justa), el ecualizador (+6 dB en cada
+banda), el remuestreador, la velocidad, las etiquetas, las listas y **el fuzz**
+(`pruebas/fuzz.py`: archivos cambiados al azar por los decodificadores, las
+etiquetas, las listas y las hojas .CUE; encontró dos fallos de stb_vorbis con
+archivos malos —se miran sus comentarios antes y su memoria es de un sitio
+propio— y uno nuestro, ya arreglados). En QEMU: las tres tarjetas, el Atom, el
+CD por IDE y por SATA, el escritorio con otro programa gastando el procesador,
+Mi equipo (dos clics, soltar) y la bandeja. En el anfitrión, a mano:
 
 ```
 castel/nucleo32/reproductor/anfitrion.sh /tmp/repro asan

@@ -242,8 +242,8 @@ S=$Y/esc.txt
 mira "en el escritorio: REPRODUCE /VENTANA abre la ventana" "^reproductor: ventana 760x[0-9]*; 5 canciones; la tarjeta a 48000 Hz$"
 mira "y, a la vez, otro programa gasta todo el procesador (REPRODUCE /OCUPA 70; ${KVM})" "^reproductor: OCUPA: gasto el procesador 70 s$"
 # la pantalla (azul oscuro), Reproducir/Pausa (verde) y el icono de la nota en la bandeja
-miracap "la ventana: la «pantalla» con la carátula, los botones grandes (Pausa, en verde) y la nota del Reproductor en la bandeja" re1 \
-  rgb 40 80 15304F rgb 250 270 2E9E40 rgb 726 585 2468C8
+miracap "la ventana: la «pantalla» (azul oscuro), un botón grande (azul) y la nota del Reproductor en la bandeja" re1 \
+  rgb 520 140 1C426A 28 rgb 140 268 3F87DE 48 rgb 726 585 2468C8 12
 sigue_bien "en el escritorio (${KVM}), con otro programa gastando todo el procesador, la ventana arrastrándose y el modo pequeño" $Y/esc.wav $Y/ref_esc.wav
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en el escritorio, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
@@ -255,7 +255,7 @@ python3 -I $AQUI/ccastel.py $AQUI/nucleo32/uequipo.cas -o $Y/uequipo.asm > /dev/
 CAPTURAS=$G MEMORIA=256 MODULOS=$Y/ORDENES.BIN,$Y/CONSOLA.BIN,$Y/SONIDO.BIN,$Y/INICIO.WAV,$Y/REPRODUC.BIN,$Y/ESCALA.OGG,$Y/TONOS.CUE,$Y/TONOS.BIN,$Y/EQUIPO.BIN \
   ARRANQUE=escritorio QEMU_MAS="$KVM -audiodev wav,id=snd0,path=$Y/eq.wav,out.frequency=48000 -device intel-hda -device hda-duplex,audiodev=snd0" \
   $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 6" ":doble 60 40" ":pausa 3" ":doble 580 160" ":pausa 3" ":doble 452 160" ":pausa 5" ":captura re4" \
-  ":arrastra 300 42 300 330" ":pausa 2" ":arrastra 545 235 300 540" ":pausa 3" ":clicd 726 585" ":pausa 1" ":captura re5" ":tecla ret" ":pausa 2" > $Y/eq.sal 2>&1
+  ":arrastra 300 42 300 330" ":pausa 2" ":arrastra 545 235 300 540" ":pausa 3" ":clicd 726 585" ":pausa 1" ":captura re5" ":tecla down" ":tecla ret" ":pausa 2" > $Y/eq.sal 2>&1
 tr -d '\r' < $Y/eq.sal > $Y/eq.txt
 S=$Y/eq.txt
 mira "Mi equipo: dos clics en ESCALA.OGG la abren con el Reproductor (y suena)" "^reproductor: ventana 760x[0-9]*; 1 canciones; la tarjeta a 48000 Hz$"
