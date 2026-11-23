@@ -1767,7 +1767,16 @@ módulo Usuario
                 devolver r
             caso 209:
                 ; ARGON2.BIN: el pedido (a = 0) y la respuesta (a = 1); solo el
-                ; que ha puesto en marcha el núcleo para eso
+                ; que ha puesto en marcha el núcleo para eso. (0.8.9) Si el
+                ; reloj le da la vez antes de que «argon2» apunte su número
+                ; (cargar_servicio ya lo ha dejado listo), espera a que lo
+                ; apunte: con el equipo cargado el pedido salía en 1 tic sin
+                ; respuesta y la contraseña buena «no valía»
+                r := 0
+                mientras tarea_argon = 0 y pedido_argon.magia = MAGIA_ARGON y actual.sello = SELLO_ARGON2 y r < 100 hacer
+                    dormir(1)
+                    r := r + 1
+                fin
                 si tarea_argon = 0 o actual.id <> tarea_argon o actual.sello <> SELLO_ARGON2 entonces devolver NO_VALE fin
                 si a = 0 entonces
                     si c < tamaño(Pedido_argon) o no puede(b, tamaño(Pedido_argon), cierto) entonces devolver NO_VALE fin
