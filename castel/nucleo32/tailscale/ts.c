@@ -300,17 +300,49 @@ static int registra(void)
 	}
 }
 
-static int pide_mapa(void)
+/* El MapRequest. Con «Stream» (y Version >= 68) el servidor lo toma como de
+ * solo leer: no guarda ni el DiscoKey, ni el Hostinfo (NetInfo.PreferredDERP,
+ * de donde sale el HomeDERP que ven los demás), ni los Endpoints (tailcfg.go,
+ * MapRequest.Stream). Eso se guarda con la «actualización ligera»: Stream
+ * false y OmitPeers true (lo que hace el cliente oficial en SendUpdate); la
+ * respuesta solo dice el código. Así que primero esa y luego el flujo. */
+static int peticion_mapa(char *j, int cabe, int flujo)
 {
-	static char j[2048];
 	char nk[80], dk[80], hi[600];
-	int n, cod;
 
 	hex32("nodekey:", ts_nodo_pub, nk);
 	hex32("discokey:", ts_disco_pub, dk);
 	hostinfo(hi, sizeof hi);
-	n = formatear(j, sizeof j, "{\"Version\":%u,\"NodeKey\":\"%s\",\"DiscoKey\":\"%s\",\"Stream\":true,\"KeepAlive\":true,\"Hostinfo\":%s}",
-		      TS_CAPVER, nk, dk, hi);
+	/* (sin Endpoints: de momento, solo por DERP; sin «Compress»: el mapa en claro) */
+	return formatear(j, cabe, "{\"Version\":%u,\"KeepAlive\":true,\"NodeKey\":\"%s\",\"DiscoKey\":\"%s\",%s\"Hostinfo\":%s}",
+			 TS_CAPVER, nk, dk, flujo ? "\"Stream\":true," : "\"OmitPeers\":true,", hi);
+}
+
+static int actualiza_nodo(void)
+{
+	static char j[2048], r[2048];
+	int n, cod;
+
+	n = peticion_mapa(j, sizeof j, 0);
+	cod = ts_pide("/machine/map", j, n, 0);
+	if (cod < 0)
+		return -1;
+	ts_cuerpo_entero(r, sizeof r, 30 * h_hz);
+	if (cod != 200 && cod != 299) {
+		formatear(ts_error, sizeof ts_error, "el servidor de control no guarda los datos del equipo (%d): %s", cod, r);
+		return -1;
+	}
+	return 0;
+}
+
+static int pide_mapa(void)
+{
+	static char j[2048];
+	int n, cod;
+
+	if (actualiza_nodo() < 0)
+		return -1;
+	n = peticion_mapa(j, sizeof j, 1);
 	cod = ts_pide("/machine/map", j, n, 1);
 	if (cod != 200 && cod != 299) {	/* (299: «:status» en otra forma; el mapa dirá si vale) */
 		if (cod > 0) {

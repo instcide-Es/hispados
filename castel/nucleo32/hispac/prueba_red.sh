@@ -221,6 +221,17 @@ EOF
     ip netns exec $ESP timeout 60 ssh -o "ProxyCommand=$TSC nc %h %p" -o StrictHostKeyChecking=no -o UserKnownHostsFile=$D/../conocidos -o UpdateHostKeys=no \
       -o IdentitiesOnly=yes -o BatchMode=yes -i $D/../clave prueba@$HIP "echo hola por tailscale" < /dev/null
     echo "código $?"
+    # lo que el servidor ha guardado del equipo (la clave del disco y el relevo de casa: sin eso, los demás no lo encuentran)
+    echo "=== nodos"
+    ip netns exec $ESP $HS -c $D/hs.yaml nodes list -o json > $D/nodos.json 2>&1
+    python3 -I -c 'import json,sys
+for n in json.load(open(sys.argv[1])):
+  print("nodo", n.get("given_name") or n.get("name"), "disco", "sí" if (n.get("disco_key") or "").startswith("discokey:") and n.get("disco_key")[9:].strip("0") else "no")' $D/nodos.json 2>&1
+    # y cómo lo ve el otro equipo (como «tailscale debug netmap» en la red de verdad)
+    ip netns exec $ESP $TSC debug netmap > $D/netmap.json 2>&1
+    python3 -I -c 'import json,sys
+for p in json.load(open(sys.argv[1])).get("Peers") or []:
+  print("par", (p.get("Hostinfo") or {}).get("Hostname"), "disco", "sí" if p.get("DiscoKey") else "no", "derp", p.get("HomeDERP") or p.get("DERP"))' $D/netmap.json 2>&1
   ) > $D/fuera.txt 2>&1 &
   FUERA=$!
   CAPTURAS=$D TMPDIR=$D/tmp MEMORIA=64 ESCRIBE=1 DISCO=$DISCO ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" ip netns exec $ESP $N/probar.sh "" ":pausa 3" \

@@ -4071,7 +4071,15 @@ TAILSCALE /IP              la IP 100.x de este equipo
    `PeersRemoved`, `PeersChangedPatch`, `OnlineChange`) y las reglas
    (`PacketFilter`). Con eso se pone la interfaz del túnel (100.64.0.0/10 y las
    subredes que anuncien), los nombres (MagicDNS) y un par de WireGuard por
-   equipo.
+   equipo. **Antes**, el mismo `POST /machine/map` como «actualización
+   ligera» (`Stream: false`, `OmitPeers: true`; la respuesta solo trae el
+   código): con `Stream: true` (y la versión 68 o más) el servidor lo toma como
+   de solo leer y **no guarda** ni el `DiscoKey`, ni el Hostinfo (de su
+   `NetInfo.PreferredDERP` sale el `HomeDERP` que ven los demás), ni los
+   `Endpoints` (tailcfg, `MapRequest.Stream`). Sin eso los demás equipos ven
+   el nodo sin clave de disco ni relevo y no llegan a él («unknown peer»; así
+   pasaba el 23/11 con la red de Carlos). Cuando cambia el relevo de casa, otra
+   vez las dos cosas (el flujo de antes se cierra con RST_STREAM).
 5. **DERP** (`derp.c`): por HTTPS (TLS.BIN), `GET /derp` con `Upgrade: DERP`;
    el servidor se presenta (FrameServerKey: «DERP🔑» y su clave), uno dice quién
    es con una caja de NaCl (FrameClientInfo: X25519 + XSalsa20-Poly1305,

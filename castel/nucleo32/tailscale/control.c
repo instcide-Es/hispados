@@ -714,6 +714,11 @@ int ts_pide(const char *camino, const char *json, u32 n, int abierto)
 
 	if (!conectado)
 		return -1;
+	/* el flujo de antes, si aún está abierto (el mapa que se deja): que lo cierre el servidor */
+	if (flujo && estado_flujo && estado_flujo != 3) {
+		u8 e[4] = { 0, 0, 0, 8 };	/* CANCEL */
+		frame(H2_RST, 0, flujo, e, 4);
+	}
 	flujo = flujo_sig;
 	flujo_sig += 2;
 	estado_flujo = 1;
