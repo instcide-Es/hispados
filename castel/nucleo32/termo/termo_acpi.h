@@ -65,6 +65,9 @@ struct termo_acpi {
 	 * (DSDT.BIN, SSDT1.BIN...), y la lista PCI (PCI.TXT); equipo_hecho: 1 si
 	 * ya se ha intentado, 2 si no se ha podido escribir */
 	uint32_t equipo_tablas, equipo_pci, equipo_hecho;
+	/* (TERMO) el voltaje de ahora de la primera batería (mV, el 4.º valor
+	 * de _BST); 0 si no lo dice */
+	uint32_t bat_mv;
 };
 
 _Static_assert(sizeof(struct termo_acpi) <= TA_TAM, "termo_acpi: no cabe en lo que copia el núcleo");

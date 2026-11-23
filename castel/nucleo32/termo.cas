@@ -46,7 +46,8 @@
 ;        de cada tarea): en ECX, EDX octetos
 ;        En la 220, también (Intel de Nehalem en adelante) 3F8h, 3F9h, 3FAh,
 ;        3FCh, 3FDh y 3FEh: lo que lleva el paquete y el núcleo en C3, C6 y C7;
-;        34h (MSR_SMI_COUNT: los SMI del firmware que ha atendido);
+;        34h (MSR_SMI_COUNT: los SMI del firmware que ha atendido); 179h,
+;        17Ah y de 400h a 47Fh (Machine Check: los errores de hardware);
 ;        y 690h, 6B0h, 6B1h: por qué se frena (PROCHOT, térmico, la alarma
 ;        del regulador de tensión, los límites de potencia y de corriente)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -136,7 +137,12 @@ módulo Termo
             ; (TERMO) por qué se frena (Intel de Haswell en adelante): el
             ; núcleo, la gráfica integrada y el anillo (MSR_*_PERF_LIMIT_REASONS)
             caso 0x690, 0x6B0, 0x6B1: devolver cierto
+            ; (TERMO) Machine Check: MCG_CAP, MCG_STATUS y los bancos (CTL,
+            ; STATUS, ADDR, MISC de hasta 32): los errores de hardware que ha
+            ; anotado el procesador (caché, memoria, bus, PCIe), solo leer
+            caso 0x179, 0x17A: devolver cierto
         fin
+        si m >= 0x400 y m < 0x480 entonces devolver cierto fin
         devolver falso
     fin
 

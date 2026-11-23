@@ -752,6 +752,10 @@ static void ta_lee_bateria(void)
 	}
 	ta.bat_estado = est;
 	ta.bat_mw = hay && mw < 1000000 ? (int32_t)mw : TA_NO;
+	ta.bat_mv = 0;
+	for (i = 0; i < LL_NBAT && !ta.bat_mv; i++)
+		if (estado.bat[i].hay && estado.bat[i].valida && estado.bat[i].voltaje && estado.bat[i].voltaje < 100000)
+			ta.bat_mv = estado.bat[i].voltaje;
 }
 
 /* (TERMO) a \TERMO\EQUIPO: las tablas ACPI tal cual y la lista PCI. Solo

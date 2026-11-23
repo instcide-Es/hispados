@@ -981,6 +981,8 @@ static void log_datos(void)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | smi=%u", smi_dos);
 	if (parado_dos)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | parado=%d ms", parado_dos);
+	if (hay_zonas && za.t.bat_mv > 0 && za.t.bat_mv < 100000)
+		m += snprintf(b + m, sizeof b - (size_t)m, " | V=%u,%02u", za.t.bat_mv / 1000, za.t.bat_mv % 1000 / 10);
 	if (hay_bateria && en.pct <= 100)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | bateria=%u%% %s", en.pct, en.ca == 1 ? "enchufado" : en.ca == 0 ? "sin enchufar" : "");
 	if (hay_bateria && hay_zonas && za.t.bat_mw != NO && (za.t.bat_estado & 3)) {
@@ -2113,6 +2115,137 @@ static void mira_carga(void)
 			   h, seg, n_ap + 1, solo_aqui ? " (este, en la tarea del Termómetro)" : "");
 }
 
+/* ---------------------------------------------------------------- Machine Check
+ * (TERMO) El MSI GT80: «si es algo de la alimentación, interferiría en más
+ * cosas que el procesador» (Carlos). Los bancos de Machine Check (MCG_CAP
+ * 179h; MCi_STATUS, ADDR y MISC desde 400h, de cuatro en cuatro) guardan los
+ * errores de hardware que ha visto el procesador (caché, controlador de
+ * memoria, bus, PCIe), corregidos o no, y sobreviven a un reinicio en
+ * caliente: lo de Windows se ve aquí. Solo leer; al abrir y al acabar la
+ * prueba (los nuevos, aparte). */
+#define MCA_MAX 32
+static int mca_bancos = -1, mca_antes, mca_nuevos;
+static u32 mca_st0[MCA_MAX][2];
+static char mca_texto[900];	/* para el informe */
+
+static const char *mca_clase(u32 cod)
+{
+	if (cod == 0)
+		return "sin error";
+	if (cod == 1)
+		return "error sin clasificar";
+	if (cod == 2)
+		return "error de la ROM del microcódigo";
+	if (cod == 3)
+		return "error externo (otro procesador o la placa, por BINIT o MCERR)";
+	if (cod == 5)
+		return "error de paridad interno";
+	if (cod == 0x400)
+		return "vigilante interno del procesador (se ha quedado colgado un núcleo)";
+	if ((cod & 0xFC00) == 0x0400)
+		return "error interno del procesador sin clasificar";
+	if ((cod & 0xEFF0) == 0x0010)
+		return "error de la TLB (traducción de direcciones)";
+	if ((cod & 0xEF80) == 0x0080)
+		return "error del controlador de memoria (la RAM o su canal)";
+	if ((cod & 0xEF00) == 0x0100)
+		return "error de la caché";
+	if ((cod & 0xE800) == 0x0800)
+		return "error del bus o de la interconexión (PCIe, el anillo, la memoria por el bus)";
+	return "error de otra clase (del fabricante)";
+}
+
+static void mira_mca(int al_final)
+{
+	u32 r[4], lo, hi;
+	int i, n = 0;
+
+	if (mca_bancos == 0 || (!cpu.intel && !cpu.amd))
+		return;
+	if (mca_bancos < 0) {
+		cpuid(1, r);
+		if (!(r[3] & (1u << 14)) || !(r[3] & (1u << 7)) || !lee_msr(0x179, &lo, &hi)) {
+			mca_bancos = 0;
+			suceso_log("Machine Check: este procesador no deja leer sus errores de hardware");
+			return;
+		}
+		mca_bancos = (int)(lo & 0xFF) > MCA_MAX ? MCA_MAX : (int)(lo & 0xFF);
+	}
+	for (i = 0; i < mca_bancos; i++) {
+		u32 a = 0, ah = 0, mi = 0, mh = 0, cod;
+		char t[400];
+		int nuevo;
+
+		if (!lee_msr(0x401 + 4 * (u32)i, &lo, &hi) || !(hi & 0x80000000u))
+			continue;
+		nuevo = al_final && (lo != mca_st0[i][0] || hi != mca_st0[i][1]);
+		if (al_final && !nuevo)
+			continue;
+		if (!al_final)
+			mca_st0[i][0] = lo, mca_st0[i][1] = hi;
+		if (hi & (1u << 26))
+			lee_msr(0x402 + 4 * (u32)i, &a, &ah);
+		if (hi & (1u << 27))
+			lee_msr(0x403 + 4 * (u32)i, &mi, &mh);
+		cod = lo & 0xFFFF;
+		snprintf(t, sizeof t, "Machine Check, banco %d: %s, %s%s%s (código %04Xh, el del modelo %04Xh; estado %08X%08Xh%s", i, mca_clase(cod),
+			 hi & (1u << 29) ? "NO corregido" : "corregido", hi & (1u << 30) ? ", y hubo más que no caben (desbordado)" : "",
+			 hi & (1u << 25) ? ", el procesador quedó en mal estado" : "", cod, lo >> 16, hi, lo, (hi & (1u << 26)) ? "" : ")");
+		if (hi & (1u << 26)) {
+			size_t k = strlen(t);
+
+			snprintf(t + k, sizeof t - k, "; dirección %08X%08Xh)", ah, a);
+		}
+		suceso_log("%s%s", t, al_final ? " NUEVO: ha pasado durante el Termómetro" : " (anotado ANTES de abrir el Termómetro: desde Windows o el arranque; sobrevive al reinicio en caliente)");
+		if (strlen(mca_texto) + strlen(t) + 80 < sizeof mca_texto) {
+			size_t k = strlen(mca_texto);
+
+			snprintf(mca_texto + k, sizeof mca_texto - k, "  - %s%s\r\n", al_final ? "NUEVO: " : "De antes: ", t);
+		}
+		n++;
+		(void)mi, (void)mh;
+	}
+	if (al_final)
+		mca_nuevos += n;
+	else {
+		mca_antes = n;
+		suceso_log("Machine Check: %d bancos; %s", mca_bancos, n ? "con errores anotados (arriba)" : "ningún error de hardware anotado");
+	}
+}
+
+/* ---------------------------------------------------------------- la alimentación
+ * (TERMO) el voltaje de la batería (_BST) y el porcentaje con el cargador
+ * puesto: si baja enchufado, el cargador no da bastante; el voltaje, el de
+ * reposo frente al más bajo en la carga */
+static int bat_mv_reposo, bat_mv_min_carga, bat_pct_ca_ini = -1, bat_pct_ca_min = 101, bat_baja_dicho;
+
+static void mira_alimentacion(void)
+{
+	int mv = hay_zonas ? (int)za.t.bat_mv : 0;
+
+	if (mv > 0 && mv < 100000) {
+		if (fase == F_REPOSO)
+			bat_mv_reposo = mv;
+		else if (fase == F_CARGA && (!bat_mv_min_carga || mv < bat_mv_min_carga))
+			bat_mv_min_carga = mv;
+	}
+	if (hay_bateria && en.pct <= 100 && en.ca == 1) {
+		if (bat_pct_ca_ini < 0)
+			bat_pct_ca_ini = (int)en.pct;
+		if ((int)en.pct < bat_pct_ca_min)
+			bat_pct_ca_min = (int)en.pct;
+		if (bat_pct_ca_ini - bat_pct_ca_min >= 2 && !bat_baja_dicho) {
+			bat_baja_dicho = 1;
+			suceso_log("OJO: con el cargador puesto, la batería BAJA (del %d al %d %%): el cargador no da bastante para lo que gasta el equipo%s",
+				   bat_pct_ca_ini, bat_pct_ca_min, fase == F_CARGA ? " en la prueba de esfuerzo" : "");
+		}
+	}
+}
+
+static int frenos_placa_en_carga(void);	/* (abajo, con los frenos) */
+static int freno_frio_hay(void);
+static int frenos_690(void);
+
 /* (TERMO) INFORME.TXT: lo de la última prueba, para enseñárselo a un técnico
  * (el dueño del portátil se lo lleva): el equipo, la fecha, cada sensor en
  * reposo, en carga y al acabar, lo que no era de fiar, la parada si la hubo
@@ -2200,6 +2333,66 @@ static void escribe_informe(void)
 		else
 			IN("  Ninguno visto.\r\n");
 	}
+	/* (TERMO) los errores de hardware (Machine Check) */
+	if (mca_bancos > 0) {
+		IN("\r\nERRORES DE HARDWARE ANOTADOS POR EL PROCESADOR (MACHINE CHECK)\r\n");
+		if (mca_antes + mca_nuevos == 0)
+			IN("  Ninguno (%d bancos mirados al abrir y al acabar).\r\n", mca_bancos);
+		else
+			IN("%s  (Los de antes los anotó el procesador antes de abrir el Termómetro, con Windows o al arrancar: estos registros sobreviven al reinicio en caliente.)\r\n", mca_texto);
+	}
+	/* (TERMO) «qué apunta a la alimentación y qué no», sin sacar conclusiones */
+	{
+		int fav = 0, con = 0, placa_prueba;
+		char f[1400], c[1400];
+		int nf = 0, nc = 0;
+
+		f[0] = c[0] = 0;
+		placa_prueba = frenos_placa_en_carga();
+		if (placa_prueba) {
+			nf += snprintf(f + nf, sizeof f - (size_t)nf, "  + En la carga se ha frenado por una señal de la placa o del regulador (PROCHOT, alarma del regulador, corriente o EDP)%s.\r\n",
+				       freno_frio_hay() ? ", con el procesador lejos de su límite" : "");
+			fav++;
+		} else if (cpu.intel && cpu.dts) {
+			nc += snprintf(c + nc, sizeof c - (size_t)nc, "  - En la prueba no se ha visto ni PROCHOT ni la alarma del regulador de tensión ni el límite de corriente.\r\n");
+			con++;
+		}
+		if (bat_baja_dicho) {
+			nf += snprintf(f + nf, sizeof f - (size_t)nf, "  + Con el cargador puesto, la batería ha bajado (del %d al %d %%): el cargador no da bastante.\r\n", bat_pct_ca_ini, bat_pct_ca_min);
+			fav++;
+		} else if (bat_pct_ca_ini >= 0) {
+			nc += snprintf(c + nc, sizeof c - (size_t)nc, "  - Con el cargador puesto, la batería no ha bajado (del %d %%, como mucho al %d %%).\r\n", bat_pct_ca_ini, bat_pct_ca_min > 100 ? bat_pct_ca_ini : bat_pct_ca_min);
+			con++;
+		}
+		if (bat_mv_reposo && bat_mv_min_carga) {
+			int caida = (bat_mv_reposo - bat_mv_min_carga) * 1000 / bat_mv_reposo;
+
+			if (caida >= 50) {
+				nf += snprintf(f + nf, sizeof f - (size_t)nf, "  + El voltaje de la batería cae en la carga: de %d,%02d V en reposo a %d,%02d V (un %d,%d %% menos).\r\n", bat_mv_reposo / 1000,
+					       bat_mv_reposo % 1000 / 10, bat_mv_min_carga / 1000, bat_mv_min_carga % 1000 / 10, caida / 10, caida % 10);
+				fav++;
+			} else {
+				nc += snprintf(c + nc, sizeof c - (size_t)nc, "  - El voltaje de la batería aguanta en la carga (de %d,%02d V a %d,%02d V como mucho).\r\n", bat_mv_reposo / 1000,
+					       bat_mv_reposo % 1000 / 10, bat_mv_min_carga / 1000, bat_mv_min_carga % 1000 / 10);
+				con++;
+			}
+		}
+		if (mca_nuevos) {
+			nf += snprintf(f + nf, sizeof f - (size_t)nf, "  + Durante la prueba el procesador ha anotado %d errores de hardware (Machine Check): una alimentación floja puede darlos, pero también la RAM, la placa o el propio procesador.\r\n", mca_nuevos);
+			fav++;
+		} else if (mca_bancos > 0) {
+			nc += snprintf(c + nc, sizeof c - (size_t)nc, "  - Durante la prueba no ha habido errores de hardware (Machine Check)%s.\r\n", mca_antes ? "; los que hay son de antes" : "");
+			con++;
+		}
+		if (frenos_690())
+			nc += snprintf(c + nc, sizeof c - (size_t)nc, "  · Los límites de potencia PL1/PL2 son los vatios que deja la BIOS: frenarse por ellos es normal y no dice nada de la alimentación.\r\n");
+		if (bloqueos || parones)
+			nc += snprintf(c + nc, sizeof c - (size_t)nc, "  · Los parones (ver PARONES DEL EQUIPO) no son de la alimentación por sí mismos: apuntan al firmware o a la memoria USB; si fueran cortes de corriente, el equipo se reiniciaría.\r\n");
+		IN("\r\nQUÉ APUNTA A LA ALIMENTACIÓN Y QUÉ NO (sin sacar conclusiones antes de tiempo)\r\n");
+		IN("A favor de un problema de alimentación:\r\n%s", fav ? f : "  (nada visto)\r\n");
+		IN("En contra, o que no dice nada de ella:\r\n%s", c[0] ? c : "  (nada visto)\r\n");
+		IN("  Falta, para otra vez: una prueba de la memoria RAM y una lectura larga del disco (si fuera la alimentación, también fallarían).\r\n");
+	}
 	/* (TERMO) los parones (el MSI GT80): para el técnico */
 	if (parones || bloqueos || cmos_atras_dicho || smi_total || carga_vueltas) {
 		int pt = parado_total_ms > cmos_atras * 1000 ? parado_total_ms : cmos_atras * 1000;
@@ -2284,6 +2477,7 @@ static void escribe_resumen(void)
 	int k;
 
 	VP.frenado = frenado_en_carga();
+	mira_mca(1);
 	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
 	for (k = 0; k < ns && k < VE_MAXS; k++)
 		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
@@ -2567,6 +2761,28 @@ static void mira_frenos(void)
 	}
 }
 
+/* (TERMO) ¿se ha frenado en la carga por una señal de la placa o del
+ * regulador? ¿se lee el 690h (los límites de potencia)? */
+static int frenos_placa_en_carga(void)
+{
+	int i;
+
+	for (i = 0; i < NFRENOS; i++)
+		if (frenos[i].placa && frenos_cuenta[i][1])
+			return 1;
+	return 0;
+}
+
+static int freno_frio_hay(void)
+{
+	return freno_frio;
+}
+
+static int frenos_690(void)
+{
+	return frenos_hay[2] > 0;
+}
+
 /* ¿se ha frenado durante la carga (por lo que sea)? */
 static int frenado_en_carga(void)
 {
@@ -2712,6 +2928,7 @@ static void pulso(void)
 		t_zon = jg_tics() - tz;
 		mide_ocupacion();
 		mira_parones();
+		mira_alimentacion();
 		mira_frenos();
 		mira_envio();
 		mira_mide();
@@ -3747,6 +3964,7 @@ int principal(void)
 		   cpu.marca, ns, cpu.no_hay[0] ? " (no hay: se dice en pantalla)" : "", ruta_csv);
 	if (anterior[0])
 		serie("termo: aviso: %s\n", anterior);
+	mira_mca(0);
 	jg_correr(&J);
 	sc(SC_CARGA, 1, 0, 0);
 	return 0;

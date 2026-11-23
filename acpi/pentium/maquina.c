@@ -23,8 +23,8 @@ static u32 pci_dir;		/* lo último escrito en CF8h */
  * ACPI.BIN y no sin él. Con «registro», lo que el AML va a escribir en el
  * equipo (los puertos, la configuración PCI y la memoria física) se apunta
  * ANTES de escribirlo en \ACPIESC.TXT, abriendo, añadiendo y cerrando cada
- * vez: si el equipo se queda parado, la última línea es la culpable. Las 400
- * primeras (luego, una de cada 100) */
+ * vez: si el equipo se queda parado, la última línea es la culpable. Las 200
+ * primeras (luego, una de cada 1000) */
 int mq_traza;
 static u32 traza_n;
 
