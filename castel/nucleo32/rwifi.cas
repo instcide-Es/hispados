@@ -57,6 +57,7 @@ módulo Rwifi
     ; IPCONFIG /TODO (el ASUS por UEFI, sin teclado)
     público variable registro_archivo: bool
     variable registro_guardado: nat32
+    variable registro_fallo: bool
     variable lanzado: bool
     variable hay_tarjeta: bool                  ; una de las que lleva WIFI.BIN, en el PCI
     variable cola: arreglo [COLA] de arreglo [TRAMA] de byte
@@ -198,7 +199,11 @@ módulo Rwifi
         si n < 7 entonces devolver fin
         copiar(dirección(r[n - 3]), "LOG")
         m := crear(r)
-        si es_error(m) entonces devolver fin
+        si es_error(m) entonces
+            si no registro_fallo entonces apunta4("RED.LOG: no se puede escribir (%08X)", m, 0, 0, 0) fin
+            registro_fallo := cierto
+            devolver
+        fin
         escribir_archivo(m, dirección(registro[0]), registro_largo)
         cerrar(m)
     fin
