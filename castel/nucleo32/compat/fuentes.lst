@@ -1,0 +1,27 @@
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Los fuentes del Asistente de compatibilidad (los leen hacer.sh y
+# anfitrion.sh): «comun/x», de la biblioteca común de la oficina;
+# «compat/x», de aquí. Detrás, «-w» si lleva código de otros (sin avisos).
+comun/texto
+comun/ttf
+comun/letras -w
+comun/lienzo
+comun/ui
+comun/iconos
+comun/miniz_ofi -w
+compat/comun
+compat/sha256
+compat/lzx
+compat/cab
+compat/pe
+compat/informe
+compat/saber
+compat/historia
+compat/comprueba
+compat/http
+compat/enviar
+compat/revisa
+compat/redist
+compat/vista
+compat/ventana
+compat/principal

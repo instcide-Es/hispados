@@ -2592,6 +2592,9 @@ módulo UPaquetes
         fin
         di_avance(orden_n, orden_n, "Hecho", "")
         si núcleo_nuevo entonces prepara_arranque() fin
+        ; (COMPAT) si ha cambiado win32, el Asistente de compatibilidad vuelve a
+        ; comprobar lo de este usuario y avisa de lo que ya va (si no está, nada)
+        si no reparando y en_plan("win32") <> NINGUNO entonces lanzar_suelto("\\COMPAT.BIN", "/REVISA") fin
         escribir("Hecho.\n")
         devolver cierto
     fin

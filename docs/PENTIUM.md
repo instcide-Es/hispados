@@ -9624,7 +9624,7 @@ cerrar, `/lento/` va a unos 150 K/s):
 5. Si algo falla: `IPCONFIG /TODO > RED.TXT` y `X:\WIFI.LOG` (lo apuntan RED.BIN
    y WIFI.BIN: el enlace, DHCP, «tcp: ... cortada»).
 
-## 14 vicies. El Termómetro (TERMO.BIN, rama termometro)
+## 14 quatervicies. El Termómetro (TERMO.BIN, rama termometro)
 
 *22/11/2026. Una memoria USB que arranca sola y mide si un portátil ajeno se
 calienta (y, desde la 1.0, también un programa normal: el paquete «termo»,
@@ -9663,6 +9663,233 @@ la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
 | **ASUS ROG GL553V** (de Carlos, objetivo) | i7-7700HQ Kaby Lake (4/8); GTX 1050/1050 Ti (GP107, Optimus) | — | la GPU Pascal (20460h, solo leer) sin despertarla si duerme (Optimus: el enlace del puerto); ventiladores y temperatura por el WMI de ASUS (DSTS, nunca DEVS); en el LEEME, Esc/F2 y «Launch CSM» |
 
 Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
+
+## 14 quinvicies. El Asistente de compatibilidad (COMPAT.BIN, rama compat)
+
+*22/11/2026, la rama `compat`; aprobado por Carlos el 22/11. Todo lo cambiado
+fuera de `castel/nucleo32/compat/` lleva la marca «(COMPAT)».*
+
+| | |
+|---|---|
+| ![La ventana: el juego de mentira, agrupado por DLL](pentium/compat/ventana.png) | ![El consentimiento: exactamente lo que se manda](pentium/compat/consentimiento.png) |
+| ![Los componentes de Microsoft](pentium/compat/componentes.png) | ![El aviso de la bandeja tras poner un win32 nuevo](pentium/compat/aviso.png) |
+
+**Qué hace.** Dice qué le falta a un programa de Windows para correr con
+WIN32.BIN, sin ponerlo en marcha, y lo dice claro: por programa, «Está todo» o
+«Faltan N», agrupado por DLL y con para qué sirve cada una («WINMM.DLL: el
+sonido, la música MIDI, el CD de música y el reloj fino»), y aparte lo que no
+hace falta: el instalador y el desinstalador, el servidor dedicado, Glide de
+3dfx, los actualizadores, lo de Steam, las DLL opcionales (A3D, EAX, IMM32...).
+Se abre desde el menú Inicio (Herramientas), desde Mi equipo (botón derecho
+en un `.EXE` > «Comprobar compatibilidad»), con `COMPAT ruta`  y con el botón
+«Comprobar compatibilidad» del aviso de WIN32 cuando no puede seguir con un
+programa (`COMPAT /FALLO`). El paquete: **`compat` 1.0** (tipo `herramientas`; necesita
+`base >= 0.8.4, win32 >= 1.0`).
+
+### Cómo está hecho
+
+En **C portable con la biblioteca común de la oficina** (`oficina/comun`: la
+ventana, los cuadros, las letras DejaVu), como Pluma 2: lo de cada sistema en
+`compat/plat.h` (`plat_pentium.c`; `plat_anfitrion.c` en Linux, para las
+pruebas y para Hispa-64). Las piezas:
+
+| Archivo | Qué hace |
+|---|---|
+| `comprueba.c` | corre `WIN32 COMPRUEBA /MAQUINA "ruta"` con la salida a un archivo (la llamada 27, redirigir; 10 y 11, lanzar y esperar sin parar la ventana); un WIN32 de antes dice «/MAQUINA: no se encuentra» y sigue con lo de siempre, y se lee igual; mide cada archivo y saca su SHA-256 (a trozos: un `.EXE` de 100 MB no tiene que caber en la memoria) |
+| `informe.c` | lee las dos salidas de COMPRUEBA (la de las personas y la `/MAQUINA`, abajo) |
+| `saber.c` | las DLL de Windows (unas 100: tema, para qué sirve, si es opcional y lo que hay que saber) y los archivos que no hacen falta (por su nombre: `SETUP*.EXE`, `UNINS0*.EXE`, `HLDS.EXE`, `*DEDICATED*`, `GLIDE*.DLL`, `*UPDATE*.EXE`, `STEAM*`...) |
+| `vista.c` | el resultado en renglones (para la ventana y para la Consola) |
+| `historia.c` | lo comprobado de cada usuario, en su carpeta (`\USUARIOS\<USUARIO>\COMPAT`): `PROGRAMA.LST` (la ruta, el nombre, la versión de win32, cuántas faltan) y `P<número>.TXT` (lo que faltaba) |
+| `revisa.c` | «avisar cuando ya esté» (abajo) |
+| `enviar.c`, `http.c` | el informe y el envío por HTTPS (TLS.BIN) |
+| `redist.c`, `cab.c`, `lzx.c`, `pe.c`, `sha256.c` | los componentes de Microsoft: la lista, bajar, la suma, la licencia, el CAB (sin comprimir, MSZIP con miniz y **LZX escrito aquí**), las DLL por su nombre de exportación |
+| `ventana.c`, `principal.c` | la ventana y las órdenes |
+
+**En la Consola**, lo mismo: `COMPAT /ORDEN comprueba RUTA` (y `informe`,
+`envia RUTA /ACEPTO`, `lista`, `olvida`, `revisa [/FORZAR]`, `componentes`,
+`baja ID`, `licencia ID`, `pon ID /ACEPTO`, `saca ARCHIVO ID CARPETA`, `cab
+ARCHIVO [NOMBRE DESTINO]`).
+
+### El informe (con permiso, cada vez)
+
+«Enviar informe a Hispa-DOS...» vuelve a comprobar (con las sumas) y enseña
+**exactamente** lo que va, renglón a renglón, con una casilla «He leído lo que
+se manda y quiero mandarlo» (hasta marcarla, «Enviar» está apagado). Va esto y
+nada más:
+
+```
+HISPA-COMPAT 1
+hispa-pentium=0.8.7
+win32=1.2
+asistente=1.0
+archivos=4
+archivo=JUEGO.EXE<TAB>1536<TAB><sha256><TAB>ventanas<TAB>6<TAB>si
+archivo=SETUP.EXE<TAB>1536<TAB><sha256><TAB>ventanas<TAB>2<TAB>instalador
+falta=JUEGO.EXE<TAB>WINMM.DLL<TAB>mixerOpen
+faltadll=JUEGO.EXE<TAB>PRUEBAC.DLL<TAB>5
+fin
+```
+
+El nombre de cada archivo **sin su carpeta** (nunca una ruta: ahí podría ir el
+nombre de quien lo usa) y solo con letras, cifras y `. _ -`; ni el nombre de
+la carpeta del programa, ni nada de lo de dentro de los archivos. Por HTTPS
+al receptor (`\HISPA\COMPAT\COMPAT.INI`: `https://actualiza.hispados.es/compat/informe.php`
+y, si no, `https://hispados.es/compat/informe.php`), con el **testigo** del
+equipo: 32 octetos al azar del núcleo (la llamada 210) hechos la primera vez,
+en `COMPAT\TESTIGO.TXT` de la carpeta del usuario; el servidor solo guarda su
+SHA-256.
+
+**El receptor** (`tools/compat-subida/`, sin desplegar; las órdenes, en su
+`INSTALAR.txt`): el mismo diseño que el de «Enviar a Carlos» del Termómetro
+(un POST multipart, «OK ...» o «ERROR motivo», un pool de PHP-FPM con usuario
+propio, los datos fuera de la web con 0600 y un cron de root que los pasa al
+FTP). Lo distinto: el Asistente es para cualquiera, así que el testigo se
+aprende la primera vez que llega, con topes (5 equipos nuevos al día por IP y
+300 en total; 20 informes y 2 MB al día por equipo; 3000 y 100 MB entre
+todos; 240 KB por informe); se mira la forma del informe renglón a renglón (lo
+que no casa, fuera: una ruta, PHP disfrazado...); de la IP no se guarda nada
+(nginx con `access_log off`; para el tope, un resumen con sal del día). El
+cron (`compat-mover.sh`) lo pasa a `/root/FTP/HispaDOS/Compatibilidad/<AAAAMMDD>/`
+y rehace el **resumen acumulado** (`compat-resumen.py`: `resumen.csv` y
+`resumen.json`): por cada función (o DLL entera) que falta, en cuántos
+programas distintos (cada programa una vez, con su último informe: lo que ya
+se ha hecho deja de contar cuando llegan informes con el win32 nuevo), cuántos
+de partes que no hacen falta, en cuántos informes y unos ejemplos. Así se sabe
+qué hacer antes en WIN32.
+
+### Avisar cuando ya esté
+
+`COMPAT /REVISA`: si la versión de win32 (`\HISPA\PAQUETES\WIN32.PQI`) no es
+la de cuando se comprobó cada programa de la lista del usuario, se vuelve a
+comprobar solo y, si algo ha cambiado, una **ventanita abajo a la derecha**
+(como la de las actualizaciones; se va sola a los 45 s): «Half-Life: ya no
+falta nada; pruébelo de nuevo.» o «Half-Life: ahora faltan 12 (antes 142).»,
+con «Verlo» (abre el Asistente con las novedades arriba) y «Ahora no»; sin
+escritorio, en la Consola. Queda también en `COMPAT\AVISOS.TXT`. Lo lanzan:
+
+- **PAQUETES**, al acabar de instalar si en lo instalado iba win32
+  (`upaquete.cas`, una línea «(COMPAT)»: `lanzar_suelto("\\COMPAT.BIN", "/REVISA")`);
+- **ACTUALIZ /BANDEJA**, al arrancar el escritorio (`uactual.cas`, otra
+  línea): así cada usuario se entera en su sesión. Si no ha cambiado nada, no
+  dice nada; si COMPAT.BIN no está, la llamada da error y ya.
+
+### Los componentes de Microsoft (al estilo de winetricks)
+
+«Componentes de Microsoft...»: los que muchos programas de antes instalan y
+que Microsoft deja redistribuir. **No van en el paquete ni en el repositorio**:
+`\HISPA\COMPAT\REDIST.LST` dice solo dónde están (`download.microsoft.com`),
+lo que miden y su SHA-256; los baja quien los usa, se comprueba la suma, se
+enseña **la licencia que traen dentro** (la de Visual C++ 2008 y 2010, en
+español: `eula.3082.txt`, `3082\eula.rtf`; la de 2005, en inglés, el recurso
+`LICENSE` de su ejecutable) y, si se acepta, se sacan **solo sus DLL** a
+`\WIN32` (en el **modo administrador**, que pregunta el núcleo: `\WIN32` es de
+la zona protegida). Nunca se pisa una DLL que ya está (las de win32, como
+MSVCRT.DLL, son nuestras).
+
+Por dentro son ejecutables que se extraen solos con un **CAB en LZX:21**
+dentro y, en ese, otro CAB (`vc_red.cab`) o un `.MSI` con varios CAB (2005),
+donde las DLL llevan nombres de Windows Installer (`F_CENTRAL_msvcr100_x86`):
+se reconocen por el nombre de su directorio de exportaciones. El LZX
+(`compat/lzx.c`) está escrito aquí, de la descripción pública del formato;
+con los tres paquetes de verdad (bajados una vez, fuera del repositorio) da
+las DLL con su suma PE (`CheckSum`) buena, todas.
+
+**Cuáles valen** (investigado el 22/11/2026; las URL, vivas con `curl -I`; las
+sumas, medidas: Microsoft no publica el SHA-256 y su ETag no lo es):
+
+| Componente | Lo que se pone | Con WIN32 |
+|---|---|---|
+| **Visual C++ 2010 SP1** (8.993.744 octetos) | MSVCR100, MSVCP100, MFC100, MFC100U, ATL100, VCOMP100 | no tira de nada de dentro de NT; a MSVCR100 le faltan con win32 1.3 20 funciones de KERNEL32 (`EncodePointer` y `DecodePointer`, que llama al arrancar; las listas S de Interlocked; las colas de temporizadores...): se piden a win32-hl |
+| **Visual C++ 2008 SP1** (4.483.040) | MSVCR90, MSVCP90, MFC90, MFC90U, ATL90, VCOMP90 | a MSVCR90 le faltan 7, ninguna de las que llama al arrancar; MSVCP90, nada. Comprueba si la cargan con un manifiesto (`FindActCtxSectionStringW`, por GetProcAddress: el R6034), pero solo si esa función existe: como en Windows 2000, sin ella no mira |
+| **Visual C++ 2005 SP1** (2.710.520) | MSVCR80, MSVCP80, MFC80, MFC80U, ATL80, VCOMP | igual que la 2008 (le faltan 6) |
+
+Y por qué los demás no: **MSVCM80/90 y MFCM80/90/100** piden .NET
+(MSCOREE.DLL); **Visual C++ 6** (MFC42, MSVCP60) ya no está en
+`download.microsoft.com` (404); **Visual Basic 6** (`vbrun60.exe`, que sí
+está) necesita OLE de verdad (MSVBVM60 pide 73 funciones de OLE32 y su
+OLEAUT32, el registro de clases): cuando WIN32 lo tenga; **DirectX de junio de
+2010** (100 MB): D3DX9 sirve con Direct3D 9, que aún no hay; XAudio2 y XACT
+son COM; XInput pide SETUPAPI y lo de los aparatos; X3DAudio sola no sirve
+sin XAudio2; **MSXML 4 y 6**, ya no están en esas URL.
+
+### Con WIN32 (win32 1.3, de la rama win32-hl)
+
+1. **`WIN32 COMPRUEBA "ruta" /MAQUINA`** (docs/pentium/WIN32.md): una línea
+   por hecho, con tabuladores: `PROGRAMA`, `ARCHIVO` (ruta, tipo, tamaño,
+   SHA-256), `NOHAY`, `USA`, `FALTA`, `FALTADLL`, `RESUMEN` y, al final,
+   `TOTAL`. El Asistente la pide siempre y la lee (`informe.c`): las rutas
+   enteras, y el tamaño y la suma de cada archivo, que ya no tiene que medir
+   él. Un WIN32 de antes dice «/MAQUINA: no se encuentra» y escribe lo de las
+   personas: también se lee (la reserva).
+2. **El botón «Comprobar compatibilidad»** del aviso de WIN32 cuando un
+   programa no puede seguir (una función que llama y no hay, una DLL que no
+   está) lanza `COMPAT.BIN /FALLO <ruta del .EXE>`, sin decir qué: el
+   Asistente lo saca de lo último que WIN32 apuntó de ese programa en
+   `WIN32.LOG` («LLAMA A UNA QUE FALTA: DLL!función» o «no se encuentra
+   NOHAY.DLL»), lo pone arriba y comprueba la carpeta del programa. El cuadro
+   es el de WIN32 (el Asistente no saca otro).
+
+Para la próxima versión de win32 (apuntado):
+
+1. **No exportar `FindActCtxSectionStringW`** (ni las de los contextos de
+   activación) hasta que de verdad los haya: MSVCR80 y MSVCR90 la buscan por
+   GetProcAddress y, si está y dice que no, acaban con el R6034.
+2. Lo que les falta a las bibliotecas de Visual C++ (por si se quieren
+   poner): a **MSVCR100**, `EncodePointer`, `DecodePointer` (las dos al
+   arrancar), `FindFirstFileExW`, `CreateProcessW`,
+   `InterlockedPushEntrySList`, `InterlockedPopEntrySList`,
+   `InterlockedFlushSList`, `QueryDepthSList`, `CreateTimerQueue`,
+   `CreateTimerQueueTimer`, `DeleteTimerQueueTimer`, `OutputDebugStringW`,
+   `FreeLibraryAndExitThread`, `GetThreadTimes`, `GetTimeFormatW`,
+   `GetDateFormatW`, `HeapQueryInformation`, `HeapWalk`, `PeekNamedPipe`,
+   `CreatePipe`; a **MSVCP100**, `EncodePointer` y
+   `DecodePointer`; a **MSVCR90**, `GetSystemWindowsDirectoryW`,
+   `GetSystemDirectoryW`, `GetLongPathNameW`, `CreateProcessW`, `HeapWalk`,
+   `PeekNamedPipe`, `CreatePipe` (a MSVCR80, las mismas menos la primera).
+
+### Las pruebas (la parte 49, `SOLO=compat`, `castel/pruebas_compat.sh`)
+
+Sin nada de Microsoft ni de ningún juego: un **juego de mentira**
+(`compat/pruebas/haz_juego.py`: PE de 386 que no hacen nada, con las
+importaciones justas: su programa, su DLL, una DLL que no hay —la trae un
+win32 «nuevo» de prueba—, Glide, A3D, un `SETUP.EXE` y un `HLDS.EXE`), un
+**WIN32 COMPRUEBA de mentira** para Linux (`falso_win32.py`, con lo que tiene
+WIN32 sacado de sus fuentes, y sus dos salidas), un **redistribuible de
+mentira** (un ejecutable con un CAB MSZIP que lleva la licencia y otro CAB
+con las DLL con nombres de Windows Installer) servido por `php -S` como si
+fuera `download.microsoft.com`, un **LZX hecho aquí** (`haz_lzx.py`: bloques
+literales, alineados y sin comprimir —uno de largo impar—, uno que pasa de un
+trozo de 32 K al siguiente, las tres repetidas, los códigos 17, 18 y 19 del
+pre-árbol y la traducción E8) y el receptor con `php -S` detrás de un HTTPS de
+prueba (`tls_delante.py`, el del Termómetro; su raíz en `\RAICES`):
+
+1. En Linux (ASan y UBSan): lo agrupado, el informe (sin rutas, con las sumas
+   de verdad), mandarlo, lo que el receptor no deja, el cron y el resumen, el
+   aviso al cambiar win32, el redistribuible (la suma, la licencia, sin
+   `/ACEPTO` nada, sin administrador nada, con él las DLL octeto a octeto) y
+   el LZX octeto a octeto.
+2. En QEMU, la Consola, con el WIN32.BIN de verdad: comprobar, el informe, el
+   envío por HTTPS (TLS 1.2) al receptor de prueba, los componentes (con «S» al
+   modo administrador: la DLL en `\WIN32`, octeto a octeto) y **PAQUETES
+   ACTUALIZA** con un catálogo de prueba firmado con una clave de prueba que
+   trae el win32 «nuevo»: el gancho lanza `COMPAT /REVISA` y avisa.
+3. En QEMU, el escritorio (1024 x 600): la ventana, el consentimiento y el
+   envío, los componentes y la licencia, el aviso de la bandeja tras PAQUETES
+   ACTUALIZA y la ventana de `/FALLO`. Las capturas, en
+   [pentium/compat](pentium/compat/) (`COMPAT_CAPTURAS=docs/pentium/compat`).
+
+**28 bien, 0 mal** (22/11, con win32 1.3 y su `/MAQUINA`).
+
+### Lo que falta
+
+Poner las
+versiones nuevas de los paquetes `equipo` (Mi equipo, el menú del `.EXE`) y
+`paquetes` (los ganchos de PAQUETES y de ACTUALIZ /BANDEJA) para que lleguen;
+el testigo es de cada usuario de cada equipo (no hay sitio del equipo en la
+zona protegida para el Asistente sin tocar `permisos.cas`); nombres largos en
+la lista (el núcleo crea 8+3); el nombre «bonito» del programa (hoy, el de su
+carpeta); el resto de componentes cuando WIN32 tenga OLE de verdad y
+Direct3D 9.
 
 ## 15. Las pruebas
 
