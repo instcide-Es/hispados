@@ -328,6 +328,67 @@ static int manda_claro(const u8 *d, u32 n)
 #define H2_DATA 0
 #define H2_HEADERS 1
 #define H2_RST 3
+
+/* el «:status» escrito como literal (con el nombre de la tabla, 8 a 14) y el
+   valor en claro o en Huffman (RFC 7541: solo hacen falta las cifras) */
+static int status_literal(const u8 *p, u32 l)
+{
+	u32 i = 0, n, b, bits = 0, cuenta = 0, k;
+	int idx, huff, cod = 0;
+	u32 acu = 0;
+
+	if (!l)
+		return 0;
+	if ((p[0] & 0xC0) == 0x40)
+		idx = p[0] & 0x3F;		/* con indexación */
+	else if ((p[0] & 0xF0) == 0x00 || (p[0] & 0xF0) == 0x10)
+		idx = p[0] & 0x0F;		/* sin indexación o «nunca» */
+	else
+		return 0;
+	if (idx < 8 || idx > 14)
+		return 0;
+	i = 1;
+	if (i >= l)
+		return 0;
+	huff = p[i] & 0x80;
+	n = p[i] & 0x7F;
+	i++;
+	if (n == 0 || i + n > l)
+		return 0;
+	if (!huff) {
+		for (k = 0; k < n; k++) {
+			if (p[i + k] < '0' || p[i + k] > '9')
+				return 0;
+			cod = cod * 10 + (p[i + k] - '0');
+		}
+		return (cod >= 100 && cod <= 599) ? cod : 0;
+	}
+	/* Huffman: 0,1,2 = 00000,00001,00010 (5 bits); 3..9 = 011001..011111 (6 bits) */
+	for (k = 0; k < n; k++) {
+		acu = (acu << 8) | p[i + k];
+		bits += 8;
+		while (bits >= 5 && cuenta < 3) {
+			b = (acu >> (bits - 5)) & 0x1F;
+			if (b <= 2) {
+				cod = cod * 10 + (int)b;
+				bits -= 5;
+				cuenta++;
+			} else if (b >= 0x0C && b <= 0x0F) {	/* 01100..01111: hace falta el 6.º bit */
+				if (bits < 6)
+					break;
+				b = (acu >> (bits - 6)) & 0x3F;
+				if (b < 0x19)
+					return 0;
+				cod = cod * 10 + (int)(b - 0x19 + 3);
+				bits -= 6;
+				cuenta++;
+			} else
+				return 0;
+		}
+	}
+	return (cuenta == 3 && cod >= 100 && cod <= 599) ? cod : 0;
+}
+
 #define H2_SETTINGS 4
 #define H2_PING 6
 #define H2_GOAWAY 7
@@ -424,8 +485,26 @@ static int frames(void)
 				if (band & 0x20)
 					i += 5;		/* (prioridad) */
 				/* «:status» es casi siempre lo primero: 0x88 es el 200 de la tabla */
-				if (!codigo_flujo)
-					codigo_flujo = (i < l && p[i] == 0x88) ? 200 : 400;
+				if (!codigo_flujo) {
+					/* (antes del «:status» puede venir un cambio de tamaño de la tabla: 001xxxxx) */
+					while (i < l && (p[i] & 0xE0) == 0x20) {
+						if ((p[i++] & 0x1F) == 0x1F)
+							while (i < l && (p[i++] & 0x80))
+								;
+					}
+					if (i < l && p[i] >= 0x88 && p[i] <= 0x8E) {
+						static const int tabla[7] = { 200, 204, 206, 304, 400, 404, 500 };
+						codigo_flujo = tabla[p[i] - 0x88];
+					} else if ((codigo_flujo = status_literal(p + i, l - i)) > 0) {
+						;
+					} else {
+						/* otra forma (literal o con Huffman): no se descifra; lo dice el registro,
+						   y quien pide mira el cuerpo (el JSON del control trae lo que importa) */
+						codigo_flujo = 299;
+						h_apunta("control: «:status» en otra forma (%02x %02x %02x %02x)",
+							 i < l ? p[i] : 0, i + 1 < l ? p[i + 1] : 0, i + 2 < l ? p[i + 2] : 0, i + 3 < l ? p[i + 3] : 0);
+					}
+				}
 				if (band & 4)
 					estado_flujo = 2;
 				if (band & 1)

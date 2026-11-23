@@ -261,12 +261,13 @@ static int registra(void)
 		if (cod < 0)
 			return -1;
 		ts_cuerpo_entero(r, sizeof r, 600 * h_hz);
-		if (cod != 200) {
-			formatear(ts_error, sizeof ts_error, "el registro no va: %s", r);
-			return -1;
-		}
-		if (!j_valor(r, strlen(r), &o)) {
-			formatear(ts_error, sizeof ts_error, "el registro: respuesta que no se entiende");
+		/* el código puede no entenderse (299: «:status» en otra forma): si el cuerpo es la
+		   respuesta del alta (con «MachineAuthorized» o «AuthURL»), vale igual */
+		if (!j_valor(r, strlen(r), &o) || (cod != 200 && !j_campo(o, "MachineAuthorized", &v) && !j_campo(o, "AuthURL", &v))) {
+			if (cod != 200)
+				formatear(ts_error, sizeof ts_error, "el registro no va (%d): %s", cod, r);
+			else
+				formatear(ts_error, sizeof ts_error, "el registro: respuesta que no se entiende: %s", r);
 			return -1;
 		}
 		if (j_campo(o, "Error", &v) && v.n > 2) {
@@ -311,7 +312,7 @@ static int pide_mapa(void)
 	n = formatear(j, sizeof j, "{\"Version\":%u,\"NodeKey\":\"%s\",\"DiscoKey\":\"%s\",\"Stream\":true,\"KeepAlive\":true,\"Hostinfo\":%s}",
 		      TS_CAPVER, nk, dk, hi);
 	cod = ts_pide("/machine/map", j, n, 1);
-	if (cod != 200) {
+	if (cod != 200 && cod != 299) {	/* (299: «:status» en otra forma; el mapa dirá si vale) */
 		if (cod > 0) {
 			static char r[2048];
 			ts_cuerpo_entero(r, sizeof r, 10 * h_hz);
