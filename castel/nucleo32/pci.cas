@@ -173,12 +173,24 @@ módulo Pci
     ; -------------------------------------------------------------------------
     constante MAX_OCUPADAS = 96
     constante TECHO = 0xFC000000
-    variable ocu_base, ocu_fin: arreglo [MAX_OCUPADAS] de nat32
-    variable n_ocu: nat32
+    público variable ocu_base, ocu_fin: arreglo [MAX_OCUPADAS] de nat32   ; (lo ocupado, visto al mover la última: para el registro)
+    público variable n_ocu: nat32
+    variable zonas_desde, zonas_hasta: nat32    ; lo que abarcan las zonas de 32 bits de los aparatos (lo que ha repartido el firmware)
     público variable movidas: nat32             ; las zonas movidas debajo de los 4 GB
     público variable movida_aparato, movida_alta, movida_baja, movida_a, movida_tam: nat32   ; la última
     público variable sin_mover: nat32           ; las que estaban arriba y no se han podido mover
     público variable sin_mover_aparato, sin_mover_alta, sin_mover_por: nat32   ; la última (por: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja)
+
+    ; lo de un aparato (no del mapa): también cuenta para lo que abarcan
+    función ocupa_aparato(b: nat32, f: nat32)
+        si f <= b o b < 0x10000000 o f > TECHO entonces
+            ocupa(b, f)
+            devolver
+        fin
+        si zonas_desde = 0 o b < zonas_desde entonces zonas_desde := b fin
+        si f > zonas_hasta entonces zonas_hasta := f fin
+        ocupa(b, f)
+    fin
 
     función ocupa(b: nat32, f: nat32)
         si f <= b o n_ocu >= MAX_OCUPADAS entonces devolver fin
@@ -226,6 +238,8 @@ módulo Pci
         variable i, n, a, cab, k, v, hi, b, l, f: nat32
         variable r: puntero a Región
         n_ocu := 0
+        zonas_desde := 0
+        zonas_hasta := 0
         n := regiones()
         para i desde 0 hasta n hacer
             si i < n entonces
@@ -247,12 +261,12 @@ módulo Pci
                 v := pci_leer(a, 0x20)
                 b := (v yb 0xFFF0) << 16
                 l := (v yb 0xFFF00000) ob 0xFFFFF
-                si l > b entonces ocupa(b, l + 1) fin
+                si l > b entonces ocupa_aparato(b, l + 1) fin
                 v := pci_leer(a, 0x24)
                 si pci_leer(a, 0x2C) = 0 entonces
                     b := (v yb 0xFFF0) << 16
                     l := (v yb 0xFFF00000) ob 0xFFFFF
-                    si l > b entonces ocupa(b, l + 1) fin
+                    si l > b entonces ocupa_aparato(b, l + 1) fin
                 fin
             sino si cab <> 0 entonces
                 n := 0
@@ -263,7 +277,7 @@ módulo Pci
                 hi := 0
                 si v yb 1 = 0 y (v yb 6) = 4 y k + 1 < n entonces hi := pci_leer(a, PCI_BAR0 + k * 4 + 4) fin
                 si v yb 1 = 0 y hi = 0 y (v yb 0xFFFFFFF0) <> 0 y no (a = propio y PCI_BAR0 + k * 4 = reg) entonces
-                    ocupa(v yb 0xFFFFFFF0, fin_de_zona(v yb 0xFFFFFFF0, mide_zona(a, PCI_BAR0 + k * 4, (v yb 6) = 4)))
+                    ocupa_aparato(v yb 0xFFFFFFF0, fin_de_zona(v yb 0xFFFFFFF0, mide_zona(a, PCI_BAR0 + k * 4, (v yb 6) = 4)))
                 fin
                 si v yb 1 = 0 y (v yb 6) = 4 entonces k := k + 1 fin
                 k := k + 1
@@ -318,21 +332,25 @@ módulo Pci
             fin
         fin
         c := 0
-        ; justo encima de las zonas de 32 bits de los aparatos (de las de
-        ; encima de la memoria)
-        f := 0
-        i := 0
-        mientras i < n_ocu hacer
-            si ocu_base[i] >= techo_ram y ocu_fin[i] <= TECHO y ocu_fin[i] > f y ocu_base[i] < 0xF0000000 entonces f := ocu_fin[i] fin
-            i := i + 1
-        fin
-        si f <> 0 entonces
-            f := (f + t - 1) yb (0 - t)
+        ; 1. en un hueco entre las zonas que ha repartido el firmware: ahí
+        ; seguro que llega (está dentro de la ventana del puente raíz)
+        si zonas_hasta > zonas_desde entonces
+            f := (zonas_desde + t - 1) yb (0 - t)
+            mientras c = 0 y f <> 0 y f + t <= zonas_hasta hacer
+                si libre(f, t) entonces c := f sino f := f + t fin
+            fin
+            ; 2. justo encima de ellas
+            f := (zonas_hasta + t - 1) yb (0 - t)
             mientras c = 0 y f <> 0 y f + t <= TECHO hacer
                 si libre(f, t) entonces c := f sino f := f + t fin
             fin
+            ; 3. justo debajo
+            si zonas_desde >= t entonces f := (zonas_desde - t) yb (0 - t) sino f := 0 fin
+            mientras c = 0 y f > techo_ram y f >= 0x10000000 hacer
+                si libre(f, t) entonces c := f sino f := f - t fin
+            fin
         fin
-        ; si no, de arriba abajo
+        ; 4. si no hay ninguna (raro), de arriba abajo
         si c = 0 entonces
             f := (TECHO - t) yb (0 - t)
             mientras c = 0 y f > techo_ram y f >= 0x10000000 hacer

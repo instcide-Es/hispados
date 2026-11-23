@@ -876,6 +876,21 @@ módulo Usb
             d[2] := movida_tam >> 10
             d[3] := movidas
             apunta("%08Xh): movida a %08Xh (%u K); movidas, %u\n", d)
+            ; (lo ocupado por encima de la RAM, para ver en un equipo de
+            ; verdad por qué ha ido ahí)
+            apunta0("pci: ocupado:")
+            i := 0
+            k := 0
+            mientras i < n_ocu y k < 24 hacer
+                si ocu_fin[i] > 0x10000000 entonces
+                    d[0] := ocu_base[i]
+                    d[1] := ocu_fin[i] - 1
+                    apunta(" %08X-%08X", d)
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            apunta0("\n")
         fin
         si sin_mover <> 0 entonces
             d[0] := (sin_mover_aparato >> 16) yb 0xFF
