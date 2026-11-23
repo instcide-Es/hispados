@@ -386,6 +386,10 @@ módulo Excep64
     ; las excepciones; detrás de detén_ini, quien la llama escribe el porqué
     ; (lo que haga falta) y acaba con detén_fin
     público función detén_ini(qué: puntero a byte)
+        ; (sin interrupciones: que el hilo no cambie de procesador mientras se para)
+        ensamblador
+            cli
+        fin
         si no toma_la_parada() entonces devolver fin
         escribir("\n*** Hispa-64 se ha parado: ", qué, " ***\n")
         dónde()

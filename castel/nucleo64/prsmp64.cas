@@ -292,6 +292,22 @@ módulo PrSmp64
     ; ---- las prioridades ----
     variable para_ya: nat64
     variable hecho_p: arreglo [4] de nat64
+    variable pasado: nat64              ; lo que se pasa el interactivo, en total
+
+    ; uno interactivo que duerme 10 ms, 10 veces, donde corren los de abajo
+    función interactivo(arg: nat64)
+        variable r: nat32
+        variable t0, d: nat64
+        pasado := 0
+        r := 0
+        mientras r < 10 hacer
+            t0 := ahora_ns()
+            duerme_ms(10)
+            d := ahora_ns() - t0
+            si d > 10000000 entonces pasado := pasado + (d - 10000000) fin
+            r := r + 1
+        fin
+    fin
 
     función ocupado(arg: nat64)
         mientras para_ya = 0 hacer
@@ -301,7 +317,8 @@ módulo PrSmp64
 
     función prueba_prioridades()
         variable i, k: nat32
-        variable total: nat64
+        variable total, e0: nat64
+        variable it: puntero a Hilo
         k := último()
         para_ya := 0
         i := 0
@@ -309,13 +326,17 @@ módulo PrSmp64
             hecho_p[i] := 0
             i := i + 1
         fin
+        e0 := expropiaciones
         hilos[0] := nat64(crea(nat64(dirección(ocupado)), 0, "normal", NORMAL, k))
         i := 1
         mientras i < 4 hacer
             hilos[i] := nat64(crea(nat64(dirección(ocupado)), nat64(i), "de fondo", FONDO, k))
             i := i + 1
         fin
-        duerme_ms(300)
+        duerme_ms(50)
+        it := crea(nat64(dirección(interactivo)), 0, "interactivo", INTERACTIVO, k)
+        duerme_ms(250)
+        une(it)
         para_ya := 1
         i := 0
         mientras i < 4 hacer
@@ -325,6 +346,8 @@ módulo PrSmp64
         total := hecho_p[0] + hecho_p[1] + hecho_p[2] + hecho_p[3]
         escribir("Prioridades: en el procesador ", k, ", uno normal y tres de fondo, sin parar, 300 ms: el normal hace el ", tanto_por_ciento(hecho_p[0], total), " % del trabajo\n")
         si tanto_por_ciento(hecho_p[0], total) < 90 entonces mal("el hilo normal no pasa por delante de los de fondo") fin
+        escribir("  y uno interactivo que duerme 10 ms, 10 veces, en ese mismo procesador: se pasa de media ", pasado div 10000000, ",", (pasado div 1000000) mod 10, " ms (pasa por delante: ", expropiaciones - e0, " expropiaciones)\n")
+        si expropiaciones = e0 entonces mal("el interactivo no pasa por delante del normal (ninguna expropiación)") fin
     fin
 
     ; ---- la TLB de los demás ----

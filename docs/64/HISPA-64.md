@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0, 1 y 2 están hechas** (secciones 6, 7 y 8).
+**etapas 0, 1, 2 y 3 están hechas** (secciones 6, 7, 8 y 9).
 
 ---
 
@@ -260,7 +260,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 0 | Arranque UEFI, modo largo, consola, mapa de memoria, excepciones | **hecha (23/11)** | — |
 | 1 | Núcleo en la mitad alta, memoria física y virtual, montón | **hecha (23/11)** | — |
 | 2 | ACPI (tablas propias), APIC, HPET, tiempo, PCIe, apagar | **hecha (23/11)** | — |
-| 3 | SMP, planificador, hilos del núcleo | 4–6 sem. | 4 meses |
+| 3 | SMP, planificador, hilos del núcleo | **hecha (23/11)** | — |
 | 4 | Anillo 3, syscall/sysret, ELF64, procesos | 4–5 sem. | 5 meses |
 | 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | 5–7 sem. | 6,5 meses |
 | 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento | 5–7 sem. | 8 meses |
@@ -304,7 +304,15 @@ función»: los nombres van en un módulo del cargador (`HISPA64.SIM`).
   ACPI), `-smp 8`. **Taller**: los tres de antes y los MacBook Air (2012 y 2017:
   el firmware de Apple tiene sus cosas con ACPI).
 
-### Etapa 3 — varios procesadores y el planificador
+### Etapa 3 — varios procesadores y el planificador (hecha: sección 9)
+
+Lo que cambió del plan al hacerla: las pruebas de QEMU, con `-smp 1, 2, 4 y 8`
+(no 16: el servidor tiene 4 núcleos y con el TCG de varios hilos 16 procesadores
+serían 4 veces más lentos sin probar nada nuevo); «`hlt` sin tic» queda para la
+etapa 11 (el tic sigue a 100 por segundo también en reposo: es el que despierta a
+los dormidos y deja robar trabajo a los ociosos); y se ha añadido lo que pedía el
+encargo: sucesos, semáforos y mutex, `mwait` en la tarea ociosa donde es seguro, y
+que un pánico en cualquier procesador pare a todos y lo explique uno.
 
 - Arrancar los demás procesadores; datos por procesador; cerrojos; IPI (vaciar el
   TLB de los demás).
@@ -423,7 +431,7 @@ con la imagen y un LEEME.TXT.
   órdenes). La pantalla se comprueba con un pantallazo (`screendump` por el monitor
   de QEMU). Ojo con lo que QEMU no tiene igual que el hardware: no hay GOP por
   encima de 4 GB, sí hay 8254 y COM1. Por eso cada etapa va también al taller.
-- `castel/nucleo64/pruebas.sh` (solo, unos 3 minutos desde la etapa 2) y `SOLO=castel64 ./pruebas.sh`
+- `castel/nucleo64/pruebas.sh` (solo, unos 4 minutos desde la etapa 3) y `SOLO=castel64 ./pruebas.sh`
   (CASTEL64 entero, que lo llama). **Los martes y jueves de 16:30 a 21:00, nada
   pesado en el servidor** (el bingo).
 
@@ -756,3 +764,213 @@ procesadores híbridos.
   PCI, con ACPICA (etapa 11); las BAR de más de 4 GB, mapeadas al usarlas.
 - ACPICA (el puente con C): la batería, la tapa, dormir, el botón por el AML.
 - Leer los bancos del fallo de máquina (MCi_STATUS).
+
+---
+
+## 9. La etapa 3, hecha (23/11/2026): varios procesadores y el planificador
+
+### Las decisiones
+
+- **El trampolín, en una página por debajo de 1 MB, y todo relativo a ella.**
+  `trampolin.asm` (231 octetos; los ensambladores de la casa no saben de 16 bits,
+  así que van como `db` en `smp64.cas` y `pruebas.sh` comprueba que son los que
+  saca NASM) entra en modo real, pasa a 32 bits y a 64 con `retf` (sin saltos
+  lejanos que haya que cambiar: EBX lleva su dirección), con su propia GDT, su
+  pila en lo alto de la página y unas **tablas de páginas del trampolín** (en el
+  núcleo, por debajo de 4 GB: la identidad de los 2 primeros MB, para el momento
+  de encender la paginación, y la mitad alta copiada de las de verdad). EFER.NXE
+  se pone **antes** de la paginación (las tablas del núcleo llevan NX: sin él,
+  serían bits reservados). La página la da `Fisica64.pide_bajo` (disponible y sin
+  pisar lo del cargador; el primer MB nunca se da a nadie).
+- **De uno en uno**, INIT, 10 ms, SIPI, 200 µs, SIPI (si no ha llegado) y hasta 3
+  s de espera; si no llega, otro INIT (que no se quede a medias con la página) y
+  se cuenta como «no contesta». Cada uno, antes de salir del trampolín, tiene ya
+  su bloque de PorCpu64, su pila (la que será la de su tarea ociosa) y las tres
+  pilas IST, en la **zona de las pilas** (`0xFFFFE00000000000`: sitios de 32 KB,
+  la pila arriba y 16 KB sin poner debajo: quien se desborde, falla, y Excep64 lo
+  dice), y su GDT y su TSS en el montón. Como mucho 64 (MAX_CPUS); los de más se
+  cuentan.
+- **Una cola por procesador, con robo de trabajo** (no una sola con cerrojo). Con
+  una sola cola, todos los procesadores tomarían el mismo cerrojo en cada tic y en
+  cada cambio de hilo: con 8 o 16, lo que más se esperaría. Con una por
+  procesador, cada uno toma de la suya, y solo el que se queda sin nada roba de la
+  más larga de otro, **con `intenta()`** (sin esperar: dos que roben el uno del
+  otro no se cruzan). Al despertar o crear un hilo se pone en uno en reposo (en
+  los híbridos, los interactivos prefieren los P y los de fondo los E) o en el de
+  menos trabajo, y se le avisa con un IPI.
+- **Lo delicado, como en Linux**: el cerrojo de la cola se tiene durante el
+  cambio de hilo y lo suelta el que entra (`tras_cambio`); así un hilo que está en
+  una cola ya ha dejado del todo su procesador. Quien despierta a otro (con `lock
+  cmpxchg` de DURMIENDO a LISTO) espera a que haya dejado su procesador (`en_cpu =
+  0`) antes de ponerlo en una cola; entre ponerse a dormir y cambiar, las
+  interrupciones están quitadas. A los que esperan a que acabe un hilo (`une`) los
+  despierta el que entra tras él: así nadie suelta su pila mientras aún corre en
+  ella (y uno normal que espera a uno de fondo no se queda dando vueltas delante).
+- **Leer «lo de este procesador» desde un hilo, sin interrupciones**: entre leer
+  el bloque (`yo()`) y leer de él, el tic puede quitarle el procesador al hilo y
+  seguir en otro; `actual()` (el hilo que corre) lo hace con ellas quitadas. Lo
+  enseñó la prueba de los 100 hilos con 8 procesadores por UEFI: un mutex creía
+  que lo abría otro hilo.
+- **Prioridades estrictas** (tiempo real, interactivo, normal, de fondo), turnos de
+  20 ms dentro de cada una, expropiación con el tic de cada procesador o con el
+  aviso de otro (V_PLAN, 0xF2) cuando despierta uno de más prioridad.
+- **Vaciar la TLB de los demás**: `desmapea` quita la página de las tablas y de la
+  TLB propia, suelta el cerrojo y llama a `Smp64.derriba`: un IPI al vector V_TLB
+  (0xF1) y espera a que **cada** procesador en marcha diga que lo ha hecho (su
+  `tlb_visto`, por número de aviso); solo después se da el marco a otro. Quien
+  espera el cerrojo de los avisos atiende mientras los de los demás (no se cruzan
+  dos que avisan). Regla: **no se llama a `desmapea` con un cerrojo tomado** (el
+  montón ya suelta el suyo antes de quitar las páginas de un bloque grande;
+  `desmapea_aquí` no avisa, para lo que nadie más ha visto).
+- **Los pánicos**: el primero que se para (una excepción o una parada del núcleo)
+  se queda con la parada (`lock cmpxchg`), manda un **NMI** a los demás (llega
+  aunque tengan las interrupciones quitadas, dando vueltas en un cerrojo), espera
+  hasta 100 ms (con el TSC) a que digan que se han parado y lo explica él solo,
+  diciendo en qué procesador ha pasado. Los demás, al entrar en su NMI y ver que
+  ya hay uno parándose, se quedan quietos sin escribir nada.
+- **La tarea ociosa**: `hlt`, o `mwait` con la pista más honda de cpuid 5 donde es
+  seguro, con la misma regla que la 0.8.9 de Hispa-Pentium «(MWAIT)»: solo Intel,
+  no Atom, con MONITOR/MWAIT y sus pistas, ARAT, TSC invariante y no en una
+  máquina virtual; `ocioso=hlt` lo quita y `ocioso=mwait` lo fuerza (así se prueba
+  en QEMU). La despierta una interrupción (su tic o el IPI de otro): entre `sti` y
+  `hlt`/`mwait` no se pierde ninguna.
+- **El reloj de ACPI, con cerrojo**: se va sumando en 64 bits (`pm_suma`), así que
+  dos procesadores no pueden leerlo a la vez; el HPET no lo necesita.
+
+### Qué hace
+
+Hispa-64 0.3.0. Los módulos nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `smp64.cas` y `trampolin.asm` | encender los de la MADT (INIT-SIPI-SIPI y el trampolín de 16 → 32 → 64 bits); en cada uno, `ap_entra`: las tablas de verdad, la PAT y las páginas globales (NX y WP, ya del trampolín), GS a su bloque, su GDT, su TSS y sus IST, la IDT, su APIC local y su tic, el tipo de núcleo (CPUID 1Ah: 0x40 de rendimiento, 0x20 eficiente) y a su tarea ociosa; `derriba` (vaciar la TLB de los demás); `para_los_demás` (el NMI de los pánicos); `lee_con_red` (leer sin pararse si la página no está: las pruebas de la TLB) |
+| `hilos64.cas` | los hilos del núcleo (pila de 16 KB con guarda), el planificador (colas por procesador, robo, 4 prioridades, turnos, expropiación), `crea`, `termina`, `une`, `suéltalo` y `recoge`, `cede`, `duerme_ns`/`duerme_ms` (la lista de los dormidos, por orden), las colas de espera (`duerme_en`, `despierta_uno`, `despierta_todos`), la tarea ociosa (`hlt` o `mwait`) y lo que se cuenta (cambios, robos, el tiempo en reposo de cada uno) |
+| `sinc64.cas` | sucesos (`espera`, `señala`, `rearma`), semáforos (`baja`, `sube`) y mutex (`cierra_mutex`, `abre_mutex`; abrir uno que no es suyo, o cerrar dos veces, para el núcleo y lo dice) |
+| `prsmp64.cas` | las pruebas de cada arranque (abajo) y las de a mano: `prueba=panicoap`, `paradaap`, `pilahilo` |
+| `cerrojo.cas` | además: `intenta`, `toma_sin`/`suelta_sin`, `suma_atómica` (`lock xadd`), `cambia_si` (`lock cmpxchg`), `pon_atómico`, `sin_ints`/`restaura` |
+| `porcpu64.cas` | el bloque de cada procesador, con lo del planificador y los avisos; `cpu(n)`, `da_de_alta`; ya no importa el montón (lo usan las excepciones) |
+| `gdt64.cas` | `monta(gdt, tss, ist1, ist2, ist3)`: la GDT y la TSS en cualquier sitio (las de cada procesador) |
+| `pagina64.cas` | `desmapea` avisa a los demás (`desmapea_aquí`, no); la zona de las pilas (`pila_nueva`, `pila_suelta`); `prepara_este` (la PAT, CR3 y las páginas globales en otro procesador) |
+| `excep64.cas` | el pánico de uno para a todos; «En el procesador N (APIC a); los otros N se han parado.»; las IST de cada procesador; los fallos de página «con red»; el desbordamiento de la pila de un hilo; quién ha llamado, también en las pilas de los hilos; `carga_idt` |
+| `apic64.cas` | los IPI (`ipi`, `ipi_a_los_demás`; por el ICR del xAPIC o el MSR 830h del x2APIC) y `al_tic` (el planificador) |
+| `fisica64.cas`, `reloj64.cas`, `monton64.cas` | `pide_bajo` (la página del trampolín); el cerrojo del reloj de ACPI; el montón quita las páginas de un bloque grande sin su cerrojo tomado |
+
+Desde la etapa 3, lo que sigue en `hispa64.cas` (las pruebas a mano, el reloj y las
+teclas del equipo de verdad) corre en el hilo «principal», que puede ir en
+cualquier procesador; la línea del reloj dice además lo ocupado que está cada uno.
+Las entradas nuevas del menú: «con un solo procesador» (`sinsmp`), «la tarea ociosa
+con hlt» (`ocioso=hlt`) y «prueba de un fallo en otro procesador»
+(`prueba=panicoap`).
+
+Lo que dice (QEMU, q35, multiboot, 4 procesadores; abreviado):
+
+```
+Procesadores: 4 en marcha (APIC 0, 1, 2, 3)
+  con INIT-SIPI-SIPI y el trampolín en 0x9E000 (16, 32 y 64 bits); cada uno con su GDT, su TSS y sus pilas IST, la PAT, NX y WP, su APIC local y su tic
+Planificador: una cola por procesador, con robo de trabajo; 4 prioridades; turnos de 20 ms; la tarea ociosa, con hlt (sin MONITOR/MWAIT)
+Hilos: 100 hilos que suman 1, 10000 veces cada uno, a la vez: con un cerrojo, 1000000 (exacto); con «lock xadd», 1000000; con un mutex (500 cada uno), 50000 (exacto); en 657 ms
+  sin cerrojo (a propósito): 992798: se pierden sumas, porque corren a la vez de verdad
+  al acabar, sus pilas y sus bloques, devueltos (pilas en uso: 13, las de antes)
+Reparto: el trabajo de los sumadores, por procesador: 0: 26 % 1: 25 % 2: 25 % 3: 24 % (todos han trabajado)
+  robos de trabajo: 55; expropiaciones: 0
+Dormir: 8 hilos, de 20 a 160 ms, dos veces: ninguno antes de tiempo (0); el que más se pasa, 7,8 ms (el tic es de 10 ms); el principal, 100 ms: 106,4 ms
+Suceso: 20 hilos lo esperan; antes de señalarlo, despiertos 0; después, 20
+Semáforos: 4 productores y 4 consumidores, 10000 cosas por un búfer de 16: la suma, 50005000 (exacta)
+Prioridades: en el procesador 3, uno normal y tres de fondo, sin parar, 300 ms: el normal hace el 100 % del trabajo
+  y uno interactivo que duerme 10 ms, 10 veces, en ese mismo procesador: se pasa de media 1,7 ms (pasa por delante: 11 expropiaciones)
+TLB de los demás: una página puesta en el procesador 0 y leída en el 3: lee 0x1111
+  quitada sin avisar y puesta en otro marco (con 0x2222): el 3 aún lee 0x1111 (el de antes: su TLB no se ha vaciado)
+  y, ya con el marco nuevo en su TLB (lee 0x2222), quitada con aviso (desmapea: 1 aviso por IPI): al 3 le falla la lectura (fallo de página en 0xFFFFD00100000000, con red), como debe
+Carga (ocupado): 0: 90 % 1: 89 % 2: 89 % 3: 94 %
+...
+Hispa-64 etapa 3: todo en orden.
+```
+
+En un híbrido sale además una línea «híbrido: N de rendimiento (P: APIC ...) y M
+eficientes (E: APIC ...)» (cada hilo de un núcleo P cuenta como uno). Con `prueba=panicoap` (un fallo de página en un hilo
+fijo en el último procesador):
+
+```
+*** Hispa-64 se ha parado: excepción 14 ***
+Fallo de página (#PF): una dirección que no está en las tablas de páginas, o sin permiso
+En el procesador 3 (APIC 3); los otros 3 se han parado.
+Al leer de 0x0000500000000000: la página no está (desde el núcleo).
+En la función PrSmp64.pánico+0x20
+...
+Llamada desde: Hilos64.llama1+0xC <- Hilos64.arranque_hilo+0x31
+```
+
+El núcleo ocupa 88 KB.
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: 44 pruebas (45 con CASTEL64 y ENSAMB64), unos 4
+minutos (dentro de `SOLO=castel64 ./pruebas.sh`, unos 7). Las de la etapa 3:
+
+- los 231 octetos del trampolín de `smp64.cas` son los que saca NASM de
+  `trampolin.asm`;
+- las de cada arranque (`prsmp64.cas`, comprobadas línea a línea por `e3_bien`)
+  con **1, 2, 4 y 8 procesadores**: por multiboot con 1 (`pc`), 2 (`-machine pc
+  -smp 2`), 4 (q35; y sin HPET, con `pc` y con q35: el reloj de ACPI, con su
+  cerrojo, en los cuatro) y 8 (`-cpu max`); por UEFI (OVMF + GRUB) con 1, 2
+  (`pc`), 4 (`-cpu max`, 3 GB; y q35 sin HPET) y 8 (`-cpu max`, 8 GB). En todas:
+  - **cien hilos que suman** 10.000 veces cada uno: con un cerrojo, **1.000.000
+    exacto**; con `lock xadd`, 1.000.000; con un mutex (500 cada uno), **50.000
+    exacto**; de 260 ms (1 procesador) a 1,1-1,6 s (8, con el TCG en los 4 núcleos
+    del servidor); sin cerrojo, a propósito, se pierden entre 1.000 y 8.000 sumas
+    con 2 o más (corren a la vez de verdad); al acabar, las pilas y los bloques de
+    los hilos, devueltos;
+  - **el reparto**: todos los procesadores trabajan (con 4, del 23 al 28 % cada
+    uno; con 8, del 10 al 16 %), con entre 23 y 490 robos de trabajo;
+  - **dormir**: 8 hilos de 20 a 160 ms, dos veces: ninguno antes de tiempo; el que
+    más se pasa, de 1,6 a 12 ms (el tic es de 10 ms; la prueba admite 50);
+  - el **suceso** (20 esperan; ninguno antes, los 20 después) y los **semáforos**
+    (4 productores y 4 consumidores, 10.000 cosas por un búfer de 16: la suma,
+    50.005.000, exacta);
+  - **las prioridades**: en un procesador, uno normal y tres de fondo sin parar:
+    el normal hace el 100 % (la prueba pide 90); uno interactivo que duerme 10
+    ms, 10 veces, ahí mismo, les pasa por delante (11 expropiaciones; se pasa de
+    media de 1,7 a 7 ms; la prueba admite 25);
+  - **la TLB de los demás** (con 2 o más): la página puesta en el 0 se lee en el
+    último; quitada **sin avisar** y puesta en otro marco, el último **aún lee el
+    valor de antes** (su TLB: el TCG de QEMU la tiene como el hardware); con el
+    marco nuevo en su TLB, quitada **con aviso** (`desmapea`: 1 IPI), **le falla
+    la lectura** (fallo de página, con red);
+- `ocioso=mwait` con `-cpu max` y 4 procesadores (la tarea ociosa con
+  `monitor`/`mwait`: todo igual); `sinsmp` con 4 en la MADT (solo el que arranca);
+- **los pánicos en otro procesador**, que se explican una sola vez: `panicoap` con
+  4 («En el procesador 3 (APIC 3); los otros 3 se han parado.», el fallo de página
+  y quién ha llamado: el hilo), `paradaap` con 2 (abrir un mutex ajeno: «el otro
+  se ha parado»), `pilahilo` con 2 (el doble fallo en la IST 1 del procesador 1:
+  «La pila de un hilo ... se ha desbordado»), y el **NMI del monitor de QEMU con 4
+  procesadores** (llega a todos: uno lo explica, los otros 3 se paran);
+- lo de las etapas 0, 1 y 2, igual (las pruebas de las excepciones, con
+  `sinpruebas`).
+
+Lo que QEMU no prueba: **x2APIC** (los IPI por el MSR 830h) y los **híbridos**
+(CPUID 1Ah): en el taller (el ThinkPad). Y `mwait` de verdad (en QEMU es como
+`hlt`). Los tics de la etapa 2 con el servidor cargado: con 4 procesadores y sin
+HPET han salido 64 en 1 s (otra sesión con QEMU en marcha); se admite de 50 a 110,
+como ya se hacía por UEFI con 4.
+
+`SOLO=castel64` (CASTEL64 y ENSAMB64 sacan lo mismo que ccastel.py y NASM con los
+módulos nuevos; CASTEL32 con corre32, también), `SOLO=castel32` y `SOLO=16`: 80 bien y 0 mal (7 min y medio), 73 y 0, y 145 y 0.
+
+### Lo que queda para la etapa 4 (y más adelante)
+
+- **Sin tic en reposo** (temporizador de una vez, o TSC-deadline, hasta el siguiente
+  dormido): etapa 11 (la energía). Hoy dormir va de 10 en 10 ms (el tic).
+- Esperas **con plazo** (un suceso o un semáforo con tiempo máximo) y despertar por
+  señal: con los procesos (etapa 4).
+- **Procesos**: un espacio de direcciones por proceso; el planificador ya cambia de
+  pila, le faltará cambiar CR3 (y con PCID, sin vaciar la TLB) y que el aviso de
+  vaciar la TLB vaya solo a los que tienen ese espacio en uso.
+- La mitad alta de la PML4, compartida entre procesos (sus 256 PDPT hechas de
+  antemano): hoy el trampolín copia las entradas que haya al encender.
+- **x2APIC** y los **híbridos**, solo probados en el taller (el TCG de QEMU no los
+  tiene); los MTRR de los demás procesadores se fían de lo que deja el firmware.
+- El montón, con un solo cerrojo (cachés por procesador si hace falta); las
+  prioridades son estrictas (sin «envejecer» a los de fondo); como mucho 64
+  procesadores y 64 hilos esperando a que acabe uno.
+- Las estadísticas (`robados`, `expropiaciones`) se suman sin `lock`: son para
+  contar, no para decidir.

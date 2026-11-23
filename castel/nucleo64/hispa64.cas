@@ -507,10 +507,17 @@ módulo Hispa64
         si trampolín <> 0 entonces
             escribir("  con INIT-SIPI-SIPI y el trampolín en ")
             hex(trampolín)
-            escribir(" (16, 32 y 64 bits); cada uno con su GDT, su TSS y sus pilas IST, la PAT, NX y WP, su APIC local y su tic\n")
+            escribir(" (16, 32 y 64 bits); cada uno con su GDT, su TSS y sus pilas IST, la PAT, NX y WP, su APIC local")
+            si tic_va entonces escribir(" y su tic\n") sino escribir(" (sin tic: prueba=sintic)\n") fin
         fin
         escribir("Planificador: una cola por procesador, con robo de trabajo; 4 prioridades; turnos de ", CUANTO * 10, " ms; la tarea ociosa, con ", reposo, "\n")
-        si no tiene("sinpruebas") entonces pruebas_smp() fin
+        si tiene("sinpruebas") entonces
+            escribir("(sinpruebas: sin las pruebas de los hilos)\n")
+        sino si no tic_va entonces
+            escribir("(Sin el tic no hay turnos ni se despierta a los dormidos: sin las pruebas de los hilos.)\n")
+        sino
+            pruebas_smp()
+        fin
         carga()
     fin
 

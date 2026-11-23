@@ -161,11 +161,17 @@ módulo Hilos64
         fin
     fin
 
-    ; el hilo que corre en este procesador
+    ; el hilo que corre (sin interrupciones entre leer el bloque del procesador
+    ; y su hilo: si no, se le podría quitar el procesador a medias, seguir en
+    ; otro y leer el hilo del de antes, que ya es otro)
     público función actual(): puntero a Hilo
         variable c: puntero a Cpu
+        variable b, h: nat64
+        b := sin_ints()
         c := yo()
-        devolver puntero(c.hilo)
+        h := c.hilo
+        restaura(b)
+        devolver puntero(h)
     fin
 
     función hilo(d: nat64): puntero a Hilo
@@ -684,6 +690,11 @@ módulo Hilos64
         variable h: puntero a Hilo
         h := actual()
         fin_ := ahora_ns() + ns
+        si no tic_va entonces
+            ; (sin tic nadie despertaría a los dormidos: se cede el procesador hasta que toque)
+            mientras ahora_ns() < fin_ hacer cede() fin
+            devolver
+        fin
         mientras ahora_ns() < fin_ hacer
             b := sin_ints()
             h.estado := DURMIENDO
@@ -752,7 +763,10 @@ módulo Hilos64
         variable c: puntero a Cpu
         eoi()
         c := yo()
-        si c.hilo <> c.ociosa entonces planifica() fin
+        si c.hilo <> c.ociosa entonces
+            si c.expropiar <> 0 entonces expropiaciones := expropiaciones + 1 fin
+            planifica()
+        fin
     fin
 
     ; ---- la tarea ociosa ----

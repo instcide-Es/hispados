@@ -39,7 +39,8 @@
 #     trabajan), dormir (ninguno antes de tiempo; el que más se pasa, como
 #     mucho 50 ms), un suceso, semáforos (productores y consumidores: la suma
 #     exacta), las prioridades (uno normal con tres de fondo: el 90 % o más
-#     del trabajo es suyo), vaciar la TLB de los demás (una página quitada con
+#     del trabajo es suyo; uno interactivo que duerme 10 ms les pasa por
+#     delante, expropiando, y se pasa de media 25 ms como mucho), vaciar la TLB de los demás (una página quitada con
 #     aviso le falla al otro; sin aviso, el otro aún la lee); la tarea ociosa
 #     con mwait (ocioso=mwait, -cpu max); «sinsmp»; y los pánicos en otro
 #     procesador (un fallo de página, una parada del núcleo, el desbordamiento
@@ -128,6 +129,8 @@ e3_bien() {   # SALIDA N
     && grep -q "^Suceso: 20 hilos lo esperan; antes de señalarlo, despiertos 0; después, 20$" <<< "$v" \
     && grep -q "^Semáforos: 4 productores y 4 consumidores, 10000 cosas por un búfer de 16: la suma, 50005000 (exacta)$" <<< "$v" \
     && entre "$s" "^Prioridades: en el procesador [0-9]*, uno normal y tres de fondo, sin parar, 300 ms: el normal hace el " 90 100 \
+    && grep -q "^  y uno interactivo que duerme 10 ms, 10 veces, en ese mismo procesador: se pasa de media [0-9,]* ms (pasa por delante: [1-9][0-9]* expropiaciones)$" <<< "$v" \
+    && entre "$s" "se pasa de media " 0 25 \
     && { [ "$n" = 1 ] || grep -q "^  y, ya con el marco nuevo en su TLB (lee 0x2222), quitada con aviso (desmapea: 1 aviso por IPI): al [0-9]* le falla la lectura (fallo de página en 0xFFFFD00100000000, con red), como debe$" <<< "$v"; } \
     && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 3: todo en orden.$" <<< "$v"
 }
