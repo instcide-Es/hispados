@@ -1,0 +1,254 @@
+; =============================================================================
+;  uhidprue.cas - HIDPRUEB.BIN, (I2CHID) la prueba del analizador de los
+;  descriptores HID (hiddesc.cas) y de lo de HID sobre I2C, sin el equipo:
+;  en Linux con corre32 (la parte 52 de castel/pruebas.sh) o en Hispa-Pentium.
+;
+;      HIDPRUEB archivo
+;
+;  El archivo, línea a línea (en hexadecimal; «#», un comentario):
+;    d HH HH ...        más octetos del descriptor de informe
+;    ?                  analizarlo: dice el ratón, el modo de entrada y el digitalizador
+;    i HH HH ...        un informe de entrada (con su identificador): lo que da como ratón
+;    h HH HH ...        un descriptor HID de HID sobre I2C (30 octetos): si vale
+;    m                  la escritura que pone el modo de entrada a 0 (ratón)
+;    o REG OP TIPO ID   (decimal) la orden que se manda
+;    -                  se empieza otro descriptor
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UHidprue
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32, Hiddesc
+
+    variable args: arreglo [160] de byte
+    variable archivo: arreglo [100] de byte
+    variable línea: arreglo [1200] de byte
+    variable trozo: arreglo [4096] de byte
+    variable en_trozo, leído_trozo, manejador: nat32
+    variable desc: arreglo [2048] de byte
+    variable n_desc: nat32
+    variable oct: arreglo [512] de byte
+    variable n_oct: nat32
+    variable dis: Diseño
+    variable hd: Desc_i2c
+    variable analizado: bool
+
+    función lee_línea(): bool
+        variable n, c: nat32
+        n := 0
+        mientras cierto hacer
+            si en_trozo >= leído_trozo entonces
+                leído_trozo := leer(manejador, trozo, 4096)
+                en_trozo := 0
+                si es_error(leído_trozo) o leído_trozo = 0 entonces
+                    leído_trozo := 0
+                    línea[n] := 0
+                    devolver n > 0
+                fin
+            fin
+            c := trozo[en_trozo]
+            en_trozo := en_trozo + 1
+            si c = '\n' entonces
+                línea[n] := 0
+                devolver cierto
+            fin
+            si c <> '\r' y n < 1199 entonces
+                línea[n] := byte(c)
+                n := n + 1
+            fin
+        fin
+        devolver falso
+    fin
+
+    función cifra(c: nat32): nat32
+        si c >= '0' y c <= '9' entonces devolver c - '0' fin
+        si c >= 'a' y c <= 'f' entonces devolver c - 'a' + 10 fin
+        si c >= 'A' y c <= 'F' entonces devolver c - 'A' + 10 fin
+        devolver 0xFF
+    fin
+
+    ; los octetos en hexadecimal desde «desde» a «oct»
+    función octetos(inicio: nat32)
+        variable i, a, b: nat32
+        n_oct := 0
+        i := inicio
+        mientras línea[i] <> 0 hacer
+            a := cifra(línea[i])
+            si a <> 0xFF entonces
+                b := cifra(línea[i + 1])
+                si b <> 0xFF entonces
+                    si n_oct < 512 entonces
+                        oct[n_oct] := byte((a << 4) ob b)
+                        n_oct := n_oct + 1
+                    fin
+                    i := i + 1
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función número(q: puntero a byte): nat32
+        variable n: nat32
+        n := 0
+        mientras valor(q) >= '0' y valor(q) <= '9' hacer
+            n := n * 10 + (valor(q) - '0')
+            q := q + 1
+        fin
+        devolver n
+    fin
+
+    función enseña()
+        variable d: arreglo [10] de nat32
+        analiza(desc, n_desc, dis)
+        analizado := cierto
+        d[0] := n_desc
+        d[1] := dis.informes
+        imprimir("descriptor: %u octetos, %u informes", d)
+        si dis.malo entonces escribir(", mal hecho") fin
+        escribir("\n")
+        si dis.ratón entonces
+            d[0] := dis.id
+            d[1] := dis.n_botones
+            d[2] := dis.botones_bit
+            d[3] := dis.x_bit
+            d[4] := dis.y_bit
+            d[5] := dis.eje_bits
+            d[6] := dis.rueda_bit
+            d[7] := dis.rueda_bits
+            d[8] := dis.largo
+            imprimir("ratón: informe %u, %u botones en el bit %u, X en el %u, Y en el %u, de %u bits; rueda en el %u, de %u bits; %u octetos\n", d)
+        sino
+            escribir("ratón: no\n")
+        fin
+        si dis.modo entonces
+            d[0] := dis.modo_id
+            d[1] := dis.modo_bit
+            d[2] := dis.modo_bits
+            d[3] := dis.modo_largo
+            imprimir("modo: informe %u, en el bit %u, de %u bits; el informe, %u octetos\n", d)
+        sino
+            escribir("modo: no\n")
+        fin
+        imprimir1("digitalizador: %u\n", dis.digitalizador)
+    fin
+
+    función enseña_oct(q: puntero a byte, n: nat32)
+        variable i: nat32
+        para i desde 1 hasta n hacer
+            imprimir1(" %02X", q[i - 1])
+        fin
+        escribir("\n")
+    fin
+
+    función informe()
+        variable dx, dy, r: ent32
+        variable b: nat32
+        variable d: arreglo [4] de nat32
+        si no analizado entonces enseña() fin
+        si lee_ratón(dis, oct, n_oct, dx, dy, b, r) entonces
+            d[0] := nat32(dx)
+            d[1] := nat32(dy)
+            d[2] := b
+            d[3] := nat32(r)
+            imprimir("informe: dx=%d dy=%d botones=%u rueda=%d\n", d)
+        sino
+            escribir("informe: no es del ratón\n")
+        fin
+    fin
+
+    función hid()
+        variable r: nat32
+        variable d: arreglo [8] de nat32
+        r := lee_desc_i2c(oct, n_oct, hd)
+        escribir("hid: ", qué_desc(r))
+        si r = DI_BIEN entonces
+            d[0] := hd.fabricante
+            d[1] := hd.producto
+            d[2] := hd.informe_largo
+            d[3] := hd.informe_reg
+            d[4] := hd.entrada_reg
+            d[5] := hd.entrada_máx
+            d[6] := hd.orden_reg
+            d[7] := hd.datos_reg
+            imprimir(": %04X:%04X, informe de %u octetos en %04Xh, entrada en %04Xh (%u), órdenes en %04Xh, datos en %04Xh", d)
+        fin
+        escribir("\n")
+    fin
+
+    función modo()
+        variable q: arreglo [64] de byte
+        variable z: arreglo [16] de byte
+        variable n: nat32
+        si no analizado entonces enseña() fin
+        si no dis.modo o dis.modo_largo > 16 entonces
+            escribir("modo: no se puede\n")
+            devolver
+        fin
+        llenar(z, 16, 0)
+        n := pon_característica(q, hd, dis.modo_id, z, dis.modo_largo)
+        escribir("modo 0:")
+        enseña_oct(q, n)
+    fin
+
+    función orden()
+        variable q: arreglo [8] de byte
+        variable w: arreglo [16] de byte
+        variable v: arreglo [4] de nat32
+        variable k, n: nat32
+        para k desde 0 hasta 3 hacer
+            v[k] := 0
+            si palabra(línea, k + 1, w, 16) entonces v[k] := número(w) fin
+        fin
+        n := pon_orden(q, v[0], v[1], v[2], v[3])
+        escribir("orden:")
+        enseña_oct(q, n)
+    fin
+
+    función principal(): byte
+        variable c: nat32
+        argumentos(args, 160)
+        si no palabra(args, 0, archivo, 100) entonces
+            escribir("uso: HIDPRUEB archivo\n")
+            devolver 2
+        fin
+        manejador := abrir(archivo)
+        si es_error(manejador) entonces
+            escribir("hidprueb: no puedo abrir ", archivo, "\n")
+            devolver 2
+        fin
+        mientras lee_línea() hacer
+            c := línea[0]
+            si c = 'd' entonces
+                octetos(1)
+                para c desde 1 hasta n_oct hacer
+                    si n_desc < 2048 entonces
+                        desc[n_desc] := oct[c - 1]
+                        n_desc := n_desc + 1
+                    fin
+                fin
+                analizado := falso
+            sino si c = '?' entonces
+                enseña()
+            sino si c = 'i' entonces
+                octetos(1)
+                informe()
+            sino si c = 'h' entonces
+                octetos(1)
+                hid()
+            sino si c = 'm' entonces
+                modo()
+            sino si c = 'o' entonces
+                orden()
+            sino si c = '-' entonces
+                n_desc := 0
+                analizado := falso
+                escribir("--\n")
+            fin
+        fin
+        cerrar(manejador)
+        devolver 0
+    fin
+
+fin UHidprue.

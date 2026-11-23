@@ -1,0 +1,435 @@
+; =============================================================================
+;  hiddesc.cas - (I2CHID) los descriptores de informe HID, sin tocar el
+;  equipo: lo que usan los ratones USB (usbhid.cas) y los touchpads HID sobre
+;  I2C (i2chid.cas), y que se prueba igual en Linux con corre32 (HIDPRUEB.BIN,
+;  la parte 52 de castel/pruebas.sh) con los descriptores de touchpads de
+;  verdad.
+;
+;  Un descriptor de informe (la norma «Device Class Definition for HID 1.11»,
+;  §6.2.2) es una lista de «elementos»: cada uno, un octeto de cabeza (la
+;  etiqueta, la clase —principal, global o local— y cuántos octetos de dato
+;  lleva: 0, 1, 2 o 4) y su dato. Los globales (la página de usos, el tamaño
+;  de cada campo, cuántos campos, el identificador del informe) valen hasta
+;  que se cambian; los locales (los usos, o su mínimo y su máximo) valen para
+;  el elemento principal que viene (una entrada, una salida, una
+;  característica o una colección) y luego se olvidan. Cada entrada ocupa
+;  «cuenta x tamaño» bits en el informe de su identificador, por orden.
+;
+;  analiza() lo recorre entero y dice:
+;   - el ratón: el informe con los ejes X (01:30) e Y (01:31) relativos, dónde
+;     van en él los botones (la página 9), los ejes y la rueda (01:38), y su
+;     identificador. Un touchpad de precisión (los de Windows 8 en adelante)
+;     tiene siempre esta colección «de ratón», que es la que manda recién
+;     encendido;
+;   - el «modo de entrada» (Input Mode, 0D:52, una característica): dónde va
+;     y en qué informe; poniéndolo a 0 el touchpad se queda como ratón (a 3,
+;     manda los dedos: lo que piden Windows y Linux);
+;   - si es un digitalizador (0D:05 touchpad, 0D:04 pantalla táctil...).
+;
+;  Y lo de la norma de HID sobre I2C de Microsoft (1.0): el descriptor HID de
+;  30 octetos (lee_desc_i2c) y las órdenes (pon_orden, pon_característica).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Hiddesc
+
+    importar Mem32
+
+    público tipo Diseño = estructura
+        ; el ratón
+        ratón: bool
+        con_id: bool                    ; los informes empiezan por su identificador
+        id: nat32                       ; el del ratón
+        botones_bit, n_botones: nat32   ; dónde van los botones (sin el identificador) y cuántos
+        x_bit, y_bit, eje_bits: nat32
+        rueda_bit, rueda_bits: nat32    ; 0 bits: sin rueda
+        largo: nat32                    ; los octetos del informe del ratón (sin el identificador)
+        ; el modo de entrada (una característica)
+        modo: bool
+        modo_id, modo_bit, modo_bits: nat32
+        modo_largo: nat32               ; los octetos de ese informe de características (sin el identificador)
+        ; el digitalizador: 0 no; si no, su uso (5 touchpad, 4 pantalla táctil, 2 lápiz...)
+        digitalizador: nat32
+        informes: nat32                 ; cuántos identificadores distintos
+        malo: bool                      ; el descriptor se acaba a medias o lleva algo que no se entiende
+    fin
+
+    ; el descriptor HID de HID sobre I2C (30 octetos, todo en «little endian»)
+    público tipo Desc_i2c = estructura
+        largo, versión: nat32           ; 30 y 0100h
+        informe_largo, informe_reg: nat32       ; el descriptor de informe: cuánto y dónde
+        entrada_reg, entrada_máx: nat32 ; los informes de entrada (máx: con los 2 del largo)
+        salida_reg, salida_máx: nat32
+        orden_reg, datos_reg: nat32     ; las órdenes y sus datos
+        fabricante, producto, revisión: nat32
+    fin
+
+    ; lo que se puede decir de un descriptor HID que no vale
+    público constante DI_BIEN = 0
+    público constante DI_CORTO = 1             ; no han llegado los 30 octetos
+    público constante DI_LARGO = 2             ; su primer campo no dice 30
+    público constante DI_VERSIÓN = 3           ; no es la 1.00
+    público constante DI_REGISTROS = 4         ; el descriptor de informe, vacío o enorme; o sin registro de órdenes
+    público constante DI_VACÍO = 5             ; todo FFh o todo 0 (nadie contesta de verdad)
+
+    ; las órdenes de HID sobre I2C (§7.2)
+    público constante OP_RESET = 1
+    público constante OP_GET_REPORT = 2
+    público constante OP_SET_REPORT = 3
+    público constante OP_SET_POWER = 8
+    público constante TIPO_ENTRADA = 1
+    público constante TIPO_CARACTERÍSTICA = 3
+
+    constante MAX_ID = 24
+    constante MAX_USOS = 16
+
+    ; ---- por dentro: cuántos bits lleva ya cada informe ----
+    variable ids: arreglo [MAX_ID] de nat32
+    variable bits_ent: arreglo [MAX_ID] de nat32
+    variable bits_car: arreglo [MAX_ID] de nat32
+    variable botón_bit: arreglo [MAX_ID] de nat32      ; el primer campo de botones de cada informe (FFFFh: ninguno)
+    variable botón_n: arreglo [MAX_ID] de nat32
+    variable eje_x: arreglo [MAX_ID] de nat32          ; X e Y relativos de cada informe (FFFFh: no)
+    variable eje_y: arreglo [MAX_ID] de nat32
+    variable eje_xb: arreglo [MAX_ID] de nat32
+    variable eje_yb: arreglo [MAX_ID] de nat32
+    variable rueda_b: arreglo [MAX_ID] de nat32
+    variable rueda_n: arreglo [MAX_ID] de nat32
+    variable n_ids: nat32
+
+    ; el sitio del informe «id» en las tablas (lo hace si no está)
+    función sitio(id: nat32): nat32
+        variable i: nat32
+        para i desde 0 hasta n_ids hacer
+            si i < n_ids y ids[i] = id entonces devolver i fin
+        fin
+        si n_ids >= MAX_ID entonces devolver MAX_ID - 1 fin
+        i := n_ids
+        ids[i] := id
+        bits_ent[i] := 0
+        bits_car[i] := 0
+        botón_bit[i] := 0xFFFF
+        botón_n[i] := 0
+        eje_x[i] := 0xFFFF
+        eje_y[i] := 0xFFFF
+        eje_xb[i] := 0
+        eje_yb[i] := 0
+        rueda_b[i] := 0
+        rueda_n[i] := 0
+        n_ids := n_ids + 1
+        devolver i
+    fin
+
+    ; recorre el descriptor de informe (p, n octetos) y llena «d». Da si hay
+    ; un ratón.
+    público función analiza(p: puntero a byte, n: nat32, ref d: Diseño): bool
+        variable i, cabeza, largo, clase, etiqueta_, dato, k, s, u, bit: nat32
+        variable página, tamaño_, cuenta, id, n_usos, uso_mín, uso_máx, hondo: nat32
+        variable usos: arreglo [MAX_USOS] de nat32
+        variable pila_pág, pila_tam, pila_cuenta: arreglo [4] de nat32
+        variable hay_mín, hay_máx: bool
+        llenar(puntero(nat32(dirección(d))), tamaño(Diseño), 0)
+        n_ids := 0
+        página := 0
+        tamaño_ := 0
+        cuenta := 0
+        id := 0
+        n_usos := 0
+        uso_mín := 0
+        uso_máx := 0
+        hay_mín := falso
+        hay_máx := falso
+        hondo := 0
+        s := sitio(0)
+        i := 0
+        mientras i < n hacer
+            cabeza := p[i]
+            si cabeza = 0xFE entonces
+                ; un elemento largo (no los usa nadie): se salta
+                si i + 2 >= n entonces
+                    d.malo := cierto
+                    romper
+                fin
+                i := i + 3 + p[i + 1]
+                seguir
+            fin
+            largo := cabeza yb 3
+            si largo = 3 entonces largo := 4 fin
+            clase := (cabeza >> 2) yb 3
+            etiqueta_ := cabeza >> 4
+            si i + 1 + largo > n entonces
+                d.malo := cierto
+                romper
+            fin
+            dato := 0
+            para k desde 1 hasta largo hacer
+                dato := dato ob (nat32(p[i + k]) << ((k - 1) * 8))
+            fin
+            si clase = 1 entonces
+                ; los globales
+                según etiqueta_
+                    caso 0: página := dato
+                    caso 7: tamaño_ := dato
+                    caso 9: cuenta := dato
+                    caso 8:
+                        id := dato
+                        d.con_id := cierto
+                        s := sitio(id)
+                    caso 10:
+                        ; Push
+                        si hondo < 4 entonces
+                            pila_pág[hondo] := página
+                            pila_tam[hondo] := tamaño_
+                            pila_cuenta[hondo] := cuenta
+                            hondo := hondo + 1
+                        fin
+                    caso 11:
+                        ; Pop
+                        si hondo > 0 entonces
+                            hondo := hondo - 1
+                            página := pila_pág[hondo]
+                            tamaño_ := pila_tam[hondo]
+                            cuenta := pila_cuenta[hondo]
+                        fin
+                fin
+            sino si clase = 2 entonces
+                ; los locales: el uso lleva su página (la de ahora, si no la dice él)
+                si largo = 4 entonces u := dato sino u := (página << 16) ob dato fin
+                si etiqueta_ = 0 y n_usos < MAX_USOS entonces
+                    usos[n_usos] := u
+                    n_usos := n_usos + 1
+                sino si etiqueta_ = 1 entonces
+                    uso_mín := u
+                    hay_mín := cierto
+                sino si etiqueta_ = 2 entonces
+                    uso_máx := u
+                    hay_máx := cierto
+                fin
+            sino si clase = 0 entonces
+                si tamaño_ > 32 o cuenta > 4096 entonces
+                    d.malo := cierto
+                    romper
+                fin
+                si etiqueta_ = 8 entonces
+                    ; una entrada
+                    bit := bits_ent[s]
+                    si dato yb 1 = 0 entonces
+                        para k desde 0 hasta cuenta hacer
+                            si k < cuenta entonces
+                                u := 0
+                                si k < n_usos entonces
+                                    u := usos[k]
+                                sino si n_usos > 0 entonces
+                                    u := usos[n_usos - 1]
+                                sino si hay_mín entonces
+                                    u := uso_mín + k
+                                    si hay_máx y u > uso_máx entonces u := uso_máx fin
+                                fin
+                                si u >> 16 = 9 y botón_bit[s] = 0xFFFF entonces
+                                    botón_bit[s] := bit + k * tamaño_
+                                    botón_n[s] := cuenta - k
+                                fin
+                                si dato yb 4 <> 0 y tamaño_ >= 2 y tamaño_ <= 16 entonces
+                                    si u = 0x10030 y eje_x[s] = 0xFFFF entonces
+                                        eje_x[s] := bit + k * tamaño_
+                                        eje_xb[s] := tamaño_
+                                    fin
+                                    si u = 0x10031 y eje_y[s] = 0xFFFF entonces
+                                        eje_y[s] := bit + k * tamaño_
+                                        eje_yb[s] := tamaño_
+                                    fin
+                                    si u = 0x10038 y rueda_n[s] = 0 entonces
+                                        rueda_b[s] := bit + k * tamaño_
+                                        rueda_n[s] := tamaño_
+                                    fin
+                                fin
+                            fin
+                        fin
+                    fin
+                    bits_ent[s] := bits_ent[s] + cuenta * tamaño_
+                sino si etiqueta_ = 11 entonces
+                    ; una característica
+                    bit := bits_car[s]
+                    si dato yb 1 = 0 entonces
+                        para k desde 0 hasta cuenta hacer
+                            si k < cuenta y no d.modo entonces
+                                u := 0
+                                si k < n_usos entonces u := usos[k] sino si hay_mín entonces u := uso_mín + k fin
+                                si u = 0xD0052 entonces
+                                    d.modo := cierto
+                                    d.modo_id := id
+                                    d.modo_bit := bit + k * tamaño_
+                                    d.modo_bits := tamaño_
+                                fin
+                            fin
+                        fin
+                    fin
+                    bits_car[s] := bits_car[s] + cuenta * tamaño_
+                sino si etiqueta_ = 10 entonces
+                    ; una colección: la de «aplicación» (1) dice qué es el aparato
+                    si dato = 1 y n_usos > 0 y usos[0] >> 16 = 0x0D y d.digitalizador = 0 entonces
+                        d.digitalizador := usos[0] yb 0xFFFF
+                    fin
+                fin
+                ; (después de un elemento principal, los locales se olvidan)
+                n_usos := 0
+                hay_mín := falso
+                hay_máx := falso
+            fin
+            i := i + 1 + largo
+        fin
+        ; el ratón: el primer informe con X e Y relativos del mismo tamaño
+        d.informes := n_ids
+        si d.con_id y n_ids > 1 y bits_ent[0] = 0 y bits_car[0] = 0 entonces d.informes := n_ids - 1 fin
+        para k desde 0 hasta n_ids hacer
+            si k < n_ids y no d.ratón y eje_x[k] <> 0xFFFF y eje_y[k] <> 0xFFFF y eje_xb[k] = eje_yb[k] entonces
+                d.ratón := cierto
+                d.id := ids[k]
+                d.x_bit := eje_x[k]
+                d.y_bit := eje_y[k]
+                d.eje_bits := eje_xb[k]
+                d.rueda_bit := rueda_b[k]
+                d.rueda_bits := rueda_n[k]
+                d.botones_bit := 0
+                d.n_botones := 0
+                si botón_bit[k] <> 0xFFFF entonces
+                    d.botones_bit := botón_bit[k]
+                    d.n_botones := botón_n[k]
+                fin
+                d.largo := (bits_ent[k] + 7) >> 3
+            fin
+            si k < n_ids y d.modo y ids[k] = d.modo_id entonces d.modo_largo := (bits_car[k] + 7) >> 3 fin
+        fin
+        devolver d.ratón
+    fin
+
+    ; n bits del informe, desde el bit «desde_bit», como un número con signo
+    público función campo(p: puntero a byte, desde_bit: nat32, n: nat32): ent32
+        variable v, i: nat32
+        si n = 0 entonces devolver 0 fin
+        v := 0
+        para i desde 0 hasta n - 1 hacer
+            si p[(desde_bit + i) >> 3] yb (nat32(1) << ((desde_bit + i) yb 7)) <> 0 entonces v := v ob (nat32(1) << i) fin
+        fin
+        si n < 32 y v yb (nat32(1) << (n - 1)) <> 0 entonces v := v ob (0xFFFFFFFF << n) fin
+        devolver ent32(v)
+    fin
+
+    ; un informe del ratón (p, n octetos, con su identificador si lo lleva):
+    ; lo movido, los botones (bit 0 el izquierdo, 1 el derecho, 2 el del
+    ; medio...) y la rueda. Falso si no es el del ratón o viene corto.
+    público función lee_ratón(ref d: Diseño, p: puntero a byte, n: nat32, ref dx: ent32, ref dy: ent32, ref botones: nat32, ref rueda: ent32): bool
+        variable nb: nat32
+        si no d.ratón entonces devolver falso fin
+        si d.con_id entonces
+            si n = 0 o p[0] <> d.id entonces devolver falso fin
+            p := p + 1
+            n := n - 1
+        fin
+        si (d.y_bit + d.eje_bits + 7) >> 3 > n o (d.x_bit + d.eje_bits + 7) >> 3 > n entonces devolver falso fin
+        nb := d.n_botones
+        si nb > 5 entonces nb := 5 fin
+        botones := 0
+        si nb > 0 y (d.botones_bit + nb + 7) >> 3 <= n entonces
+            botones := nat32(campo(p, d.botones_bit, nb + 1)) yb ((nat32(1) << nb) - 1)
+        fin
+        dx := campo(p, d.x_bit, d.eje_bits)
+        dy := campo(p, d.y_bit, d.eje_bits)
+        rueda := 0
+        si d.rueda_bits <> 0 y (d.rueda_bit + d.rueda_bits + 7) >> 3 <= n entonces
+            rueda := campo(p, d.rueda_bit, d.rueda_bits)
+        fin
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  HID sobre I2C
+    ; -------------------------------------------------------------------------
+    función le16(p: puntero a byte, i: nat32): nat32
+        devolver nat32(p[i]) ob (nat32(p[i + 1]) << 8)
+    fin
+
+    ; los 30 octetos del descriptor HID: DI_BIEN o lo que no vale
+    público función lee_desc_i2c(p: puntero a byte, n: nat32, ref h: Desc_i2c): nat32
+        variable i, unos, ceros: nat32
+        llenar(puntero(nat32(dirección(h))), tamaño(Desc_i2c), 0)
+        si n < 30 entonces devolver DI_CORTO fin
+        unos := 0
+        ceros := 0
+        para i desde 0 hasta 29 hacer
+            si p[i] = 0xFF entonces unos := unos + 1 fin
+            si p[i] = 0 entonces ceros := ceros + 1 fin
+        fin
+        si unos = 30 o ceros = 30 entonces devolver DI_VACÍO fin
+        h.largo := le16(p, 0)
+        h.versión := le16(p, 2)
+        h.informe_largo := le16(p, 4)
+        h.informe_reg := le16(p, 6)
+        h.entrada_reg := le16(p, 8)
+        h.entrada_máx := le16(p, 10)
+        h.salida_reg := le16(p, 12)
+        h.salida_máx := le16(p, 14)
+        h.orden_reg := le16(p, 16)
+        h.datos_reg := le16(p, 18)
+        h.fabricante := le16(p, 20)
+        h.producto := le16(p, 22)
+        h.revisión := le16(p, 24)
+        si h.largo <> 30 entonces devolver DI_LARGO fin
+        si h.versión <> 0x0100 entonces devolver DI_VERSIÓN fin
+        si h.informe_largo = 0 o h.informe_largo > 4096 o h.orden_reg = 0 o h.entrada_máx < 2 entonces devolver DI_REGISTROS fin
+        devolver DI_BIEN
+    fin
+
+    ; lo que se dice de cada DI_
+    público función qué_desc(r: nat32): puntero a byte
+        según r
+            caso DI_BIEN: devolver "bien"
+            caso DI_CORTO: devolver "mal: no llegan los 30 octetos"
+            caso DI_LARGO: devolver "mal: no dice que mide 30 octetos"
+            caso DI_VERSIÓN: devolver "mal: no es la versión 1.00"
+            caso DI_REGISTROS: devolver "mal: sus registros no tienen sentido"
+            caso DI_VACÍO: devolver "mal: todo FFh o todo 0 (no contesta un HID)"
+        fin
+        devolver "mal"
+    fin
+
+    ; una orden (§7.2): al registro de órdenes, [el registro][tipo e
+    ; identificador][la orden] (con el identificador de 15 o más, un octeto
+    ; más: el nibble bajo va a 0Fh). Para SET_POWER, «tipo» es el estado (0
+    ; encendido, 1 dormido) e «id», 0. Da los octetos puestos en «q».
+    público función pon_orden(q: puntero a byte, reg: nat32, op: nat32, cuál: nat32, id: nat32): nat32
+        q[0] := byte(reg yb 0xFF)
+        q[1] := byte(reg >> 8)
+        q[3] := byte(op)
+        si id >= 15 entonces
+            q[2] := byte((cuál << 4) ob 0x0F)
+            q[4] := byte(id)
+            devolver 5
+        fin
+        q[2] := byte((cuál << 4) ob id)
+        devolver 4
+    fin
+
+    ; SET_REPORT de una característica: la orden y, detrás (en la misma
+    ; escritura, como hace Linux), el registro de datos, el largo (2 + el
+    ; identificador + los datos) y los datos. Da los octetos puestos en «q».
+    público función pon_característica(q: puntero a byte, ref h: Desc_i2c, id: nat32, datos: puntero a byte, n: nat32): nat32
+        variable k, i, largo: nat32
+        k := pon_orden(q, h.orden_reg, OP_SET_REPORT, TIPO_CARACTERÍSTICA, id)
+        q[k] := byte(h.datos_reg yb 0xFF)
+        q[k + 1] := byte(h.datos_reg >> 8)
+        largo := 2 + n
+        si id <> 0 entonces largo := largo + 1 fin
+        q[k + 2] := byte(largo yb 0xFF)
+        q[k + 3] := byte(largo >> 8)
+        k := k + 4
+        si id <> 0 entonces
+            q[k] := byte(id)
+            k := k + 1
+        fin
+        para i desde 0 hasta n hacer
+            si i < n entonces q[k + i] := datos[i] fin
+        fin
+        devolver k + n
+    fin
+
+fin Hiddesc.
