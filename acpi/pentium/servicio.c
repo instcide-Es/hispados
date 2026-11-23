@@ -783,6 +783,12 @@ static void ta_equipo(void)
 			break;
 		if (!h || h->Length < sizeof *h || h->Length > 0x200000)
 			continue;
+		/* MSDM y SLIC llevan la licencia de Windows del equipo (la clave del
+		   producto): no se copian nunca (el equipo puede ser de otro) */
+		if (!memcmp(h->Signature, "MSDM", 4) || !memcmp(h->Signature, "SLIC", 4)) {
+			reg("ACPI: (TERMO) la tabla %.4s no se guarda: lleva la licencia de Windows\n", h->Signature);
+			continue;
+		}
 		if (!memcmp(h->Signature, "SSDT", 4))
 			snprintf(nombre, sizeof nombre, "SSDT%u.BIN", ++nssdt);
 		else {
