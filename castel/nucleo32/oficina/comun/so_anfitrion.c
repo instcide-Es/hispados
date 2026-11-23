@@ -687,6 +687,24 @@ void so_menu(int v, int x, int y, const char *opciones, u32 grises, u32 etiqueta
 	hay_menu = 1;
 }
 
+/* (PUNTEROS) en Linux no hay puntero: se dice (lo miran las pruebas) */
+void so_puntero(int v, int forma)
+{
+	static int ult = -1;
+
+	(void)v;
+	if (forma == ult)
+		return;
+	ult = forma;
+	fprintf(stderr, "puntero: forma %d\n", forma);
+}
+
+void so_puntero_zona(int v, int x, int y, int an, int al, int forma)
+{
+	(void)v;
+	fprintf(stderr, "puntero: zona %d,%d %dx%d, forma %d\n", x, y, an, al, forma);
+}
+
 int so_control(void)
 {
 	return (mods_ahora & SO_CON_CONTROL) != 0;

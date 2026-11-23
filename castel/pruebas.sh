@@ -261,6 +261,10 @@
 #      GRUB): el escritorio a la medida del GOP, ACPI.BIN con la RSDP de GRUB y la
 #      batería de prueba, los discos SATA y USB, la consola de texto pintada en la
 #      pantalla del firmware; la misma memoria por la BIOS; y el CD por UEFI.
+#  51. (PUNTEROS, SOLO=punteros) Los punteros del ratón (pruebas_punteros.sh): la flecha de
+#      siempre, la «I» del Bloc, los bordes; las 13 formas en 6 juegos, 4 tamaños y 11
+#      colores sobre claro y oscuro (mira_punteros.py), para zurdos, los anillos, el
+#      rastro, sin restos; el Panel > Ratón > Puntero y PUNTERO.INI.
 #  47. (ICONOS, SOLO=iconos) Los iconos del tapiz (pruebas_iconos.sh): 30 a 1024 x 600 y
 #      a 800 x 600, ninguno en la barra ni en el dock (mira_iconos.py); organizar por
 #      nombre, tipo, tamaño y fecha; arrastrar; la cuadrícula, la automática, el teclado,
@@ -415,6 +419,7 @@
 #   SOLO=iconos ./pruebas.sh      la primera y la 47 (ICONOS: los iconos del tapiz; pruebas_iconos.sh)
 #   SOLO=compat ./pruebas.sh      la primera y la 49 ((COMPAT) el Asistente de compatibilidad; pruebas_compat.sh)
 #   SOLO=touchpad ./pruebas.sh    la primera y la 50 (TOUCHPAD: el touchpad; pruebas_touchpad.sh)
+#   SOLO=punteros ./pruebas.sh    la primera y la 51 (PUNTEROS: los punteros del ratón; pruebas_punteros.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -481,6 +486,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_iconos.sh          # (ICONOS) la parte 47, como parte_iconos
 . $AQUI/pruebas_compat.sh          # (COMPAT) la parte 49, como parte_compat
 . $AQUI/pruebas_touchpad.sh        # (TOUCHPAD) la parte 50, como parte_touchpad
+. $AQUI/pruebas_punteros.sh        # (PUNTEROS) la parte 51, como parte_punteros
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -5943,6 +5949,8 @@ if parte08 iconos; then parte_iconos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin l
 if parte08 compat; then parte_compat; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Asistente de compatibilidad)"; fi   # (COMPAT) la 49
 # ------------------------- 50. (TOUCHPAD) el touchpad (pruebas_touchpad.sh)
 if parte08 touchpad; then parte_touchpad; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el touchpad)"; fi
+# ------------------------- 51. (PUNTEROS) los punteros del ratón (pruebas_punteros.sh)
+if parte08 punteros; then parte_punteros; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los punteros del ratón)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0
@@ -5984,7 +5992,7 @@ sys.stdout.buffer.write(''.join('linea %06d con algo de texto para llenar\r\n' %
     ":tecla ctrl-f" ":escribe fin" ":tecla ret" ":pausa 1" ":captura bl2" ":tecla esc" ":tecla ctrl-h" ":pausa 1" ":captura bl3" ":tecla esc" \
     ":raton 400 300" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 1" ":pausa 2" ":captura bl4" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 -1" ":pausa 2" \
     ":clic 157 199" ":pausa 1" ":captura bl5" ":clic 157 199" ":pausa 1" \
-    ":tecla ctrl-o" ":pausa 2" ":captura bl6" ":escribe A1.TXT" ":tecla ret" ":pausa 2" ":escribe zz" ":pausa 1" ":captura bl7" \
+    ":tecla ctrl-o" ":pausa 2" ":captura bl6" ":escribe A1.TXT" ":tecla ret" ":pausa 2" ":escribe zz" ":raton 400 300" ":pausa 1" ":captura bl7" \
     ":tecla ctrl-o" ":pausa 1" ":escribe A2.TXT" ":tecla ret" ":pausa 2" ":clic 340 126" ":pausa 1" ":clic 400 395" ":pausa 2" ":captura bl8" ":tecla esc" ":pausa 1" \
     ":tecla ctrl-shift-f" ":pausa 1" ":escribe carta" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla end" ":escribe DOCS" ":tecla ret" ":pausa 3" ":captura bl9" \
     ":doble 200 254" ":pausa 2" ":captura bl10" ":tecla f1" ":pausa 2" ":captura bl11" \
@@ -6003,6 +6011,7 @@ sys.stdout.buffer.write(''.join('linea %06d con algo de texto para llenar\r\n' %
   miracap "un clic en el [-] del margen pliega el módulo entero: se ve «...» y el número de la línea de después es el 20" bl5 negrita 166 186 178 198 "módulo" \
     texto 124 202 136 214 "20" notexto 160 200 400 300 "función"
   miracap "Ctrl+O: Abrir, con la carpeta (las carpetas primero) y la ruta abajo" bl6 negrita 122 170 134 182 'C:\' negrita 200 186 400 200 "DOCS" texto 122 426 134 438 "Abrir:"
+  # (PUNTEROS) para bl7 el ratón, abajo en el texto: la «I» en (157, 199) tapaba el pie de las pestañas
   miracap "las pestañas: MUESTRA.CAS y A1.TXT (con cambios: « *», no solo un color)" bl7 texto 126 171 138 183 "MUESTRA.CAS" negrita 266 171 278 183 "A1.TXT *"
   miracap "Ver > Comparar con la de al lado: A1 y A2 lado a lado, con «*» (cambiado), «-» (quitado) y «+» (añadido) en el margen, el hueco rayado y el resumen" bl8 \
     negrita 128 194 140 206 "*" negrita 128 242 140 254 "-" negrita 380 274 392 286 "+" texto 120 454 132 466 "3 trozos distintos" rgb 200 248 FDE2E2 rgb 450 280 DCFCE7

@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada, Preferencias, Iconpanel, Organiza
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada, Preferencias, Iconpanel, Organiza, Apuntero, Cursores
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -2545,6 +2545,7 @@ módulo Escritorio
         ; nadie la va a esperar: al acabar, la recoge el núcleo
         t.padre := 0
         lanzados := lanzados + 1
+        pon_ocupado(3 * HZ)                     ; (PUNTEROS) la flecha con la espera, hasta que haga su ventana
         tomar_consola()
         imprimir2("escritorio: lanzo %s (la tarea %u)\n", nat32(ruta), t.id)
         soltar_consola()
@@ -3207,6 +3208,7 @@ módulo Escritorio
         lee_iconos()
         lee_accesos()
         lee_archivos()
+        lee_puntero()                           ; (PUNTEROS) el puntero del ratón, el suyo (PUNTERO.INI)
         rehace_iconos("usuario")
         pinta_barra()
         repintar_todo()
@@ -4220,11 +4222,36 @@ módulo Escritorio
         si lee_archivos() entonces rehace_iconos("escritor") fin
     fin
 
+    ; (PUNTEROS) por el puerto serie: la forma del puntero cuando cambia, y
+    ; cuando se localiza con Control (lo miran las pruebas)
+    variable formas_dichas, localizados_dichos, rastros_dichos: nat32
+    función mira_puntero()
+        si formas_vistas <> formas_dichas entonces
+            formas_dichas := formas_vistas
+            tomar_consola()
+            imprimir2("puntero: forma %u (%s)\n", forma_vista, nat32(nombre_forma(forma_vista)))
+            soltar_consola()
+        fin
+        si rastros_vistos <> rastros_dichos entonces
+            rastros_dichos := rastros_vistos
+            tomar_consola()
+            imprimir1("puntero: rastro, con %u copias\n", copias_rastro)
+            soltar_consola()
+        fin
+        si localizados <> localizados_dichos entonces
+            localizados_dichos := localizados
+            tomar_consola()
+            escribir("puntero: localizado (Control)\n")
+            soltar_consola()
+        fin
+    fin
+
     ; la tarea del escritorio: el pulso del gestor y lo suyo, cien veces por segundo
     función tarea_escritorio(n: nat32)
         variable f, h: nat32
         mientras cierto hacer
             pulso()
+            mira_puntero()                      ; (PUNTEROS)
             atiende_emergente()
             si hay_resultado entonces
                 hay_resultado := falso
@@ -4419,6 +4446,7 @@ módulo Escritorio
             pinta_tapiz()
         fin
         anota_tapiz(falso)
+        lee_puntero()                           ; (PUNTEROS) el puntero del ratón (PUNTERO.INI; con usuarios, al entrar cada uno)
         prefs_vistas := Preferencias.cambios
         repinta_activa()
         pinta_barra()

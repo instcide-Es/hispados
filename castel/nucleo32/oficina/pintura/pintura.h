@@ -13,7 +13,7 @@
 #include "dibujo.h"
 #include "colores.h"
 
-#define PINTURA_VERSION "2.0"
+#define PINTURA_VERSION "2.0.1"
 
 /* las herramientas (en este orden, en la caja: de dos en dos) */
 enum {

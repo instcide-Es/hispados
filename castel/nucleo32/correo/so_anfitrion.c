@@ -538,6 +538,7 @@ int so_argumentos(char *d, int cabe)
 	return k;
 }
 int so_al_portapapeles(const char *t, u32 n) { (void)t; (void)n; return 0; }
+void so_puntero_zona(int x, int y, int an, int al, int forma) { (void)x; (void)y; (void)an; (void)al; (void)forma; }     /* (PUNTEROS) */
 char *so_del_portapapeles(u32 *n) { *n = 0; return NULL; }
 
 /* ---- la ventana: nada ---- */

@@ -1,0 +1,104 @@
+; =============================================================================
+;  ppuntero.cas - (PUNTEROS) el puntero del ratón para los programas
+;  («modelo usuario»): la llamada 177 del núcleo (apuntero.cas). Aparte de
+;  llamadas.cas para que los programas que no lo usan no cambien.
+;
+;    puntero_de_ventana(v, P_TEXTO)          la forma sobre lo de dentro de v
+;    zona_de_puntero(v, x, y, an, al, P_...)  la de una zona (la última manda;
+;                                            hasta 16; con an = 0, se quitan)
+;    ajustes_puntero(a) / poner_ajustes_puntero(a)
+;                                            los del Panel (cambiarlos, solo
+;                                            el Panel o el modo administrador)
+;    pinta_puntero(p)                        uno en un mapa de puntos (la
+;                                            vista previa del Panel)
+;
+;  Cómo se usa (docs/PENTIUM.md, «Los punteros»): sobre lo que se escribe,
+;  P_TEXTO (una zona: el núcleo la pone sin esperar al programa); sobre un
+;  enlace, P_MANO (al moverse, con EV_RATÓN_MUEVE); para dibujar con
+;  precisión, P_CRUZ; mientras el programa trabaja y no atiende, P_ESPERA
+;  (y luego otra vez P_FLECHA). Los bordes que cambian el tamaño de la
+;  ventana ya los pone el núcleo.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ppuntero
+
+    ; las formas (las de cursores.cas)
+    público constante P_FLECHA = 0
+    público constante P_TAMAÑO_H = 1
+    público constante P_TAMAÑO_V = 2
+    público constante P_TAMAÑO_D1 = 3
+    público constante P_TAMAÑO_D2 = 4
+    público constante P_ESPERA = 5
+    público constante P_FLECHA_ESPERA = 6
+    público constante P_TEXTO = 7
+    público constante P_MANO = 8
+    público constante P_MOVER = 9
+    público constante P_CRUZ = 10
+    público constante P_PROHIBIDO = 11
+    público constante P_AYUDA = 12
+    público constante N_FORMAS = 13
+    ; los juegos, los tamaños y los colores (los del Panel)
+    público constante N_JUEGOS = 6
+    público constante N_TAMAÑOS = 4
+    público constante N_COLORES = 11
+    público constante C_INVERTIDO = 2
+
+    público tipo Zona_puntero = estructura
+        x, ye, ancho, alto: ent32
+        forma: nat32
+    fin
+
+    público tipo Ajustes_puntero = estructura
+        juego, tamaño, color, rastro, localizar, espejo: nat32
+    fin
+
+    público tipo Pinta_puntero = estructura
+        forma, juego, tamaño, color, espejo, cuadro: nat32
+        puntos: puntero a nat32
+        salto: nat32
+        ancho, alto: ent32
+        x, ye: ent32
+    fin
+
+    función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+
+    público función puntero_de_ventana(v: nat32, forma: nat32): nat32
+        devolver llamada(177, 0, v, forma)
+    fin
+
+    público función zona_de_puntero(v: nat32, x: ent32, yy: ent32, an: ent32, al: ent32, forma: nat32): nat32
+        variable z: Zona_puntero
+        z.x := x
+        z.ye := yy
+        z.ancho := an
+        z.alto := al
+        z.forma := forma
+        devolver llamada(177, 1, v, nat32(dirección(z)))
+    fin
+
+    público función ajustes_puntero(ref a: Ajustes_puntero): nat32
+        devolver llamada(177, 2, nat32(dirección(a)), 0)
+    fin
+
+    público función poner_ajustes_puntero(ref a: Ajustes_puntero): nat32
+        devolver llamada(177, 3, nat32(dirección(a)), 0)
+    fin
+
+    ; da el ancho (abajo) y el alto (en los 16 bits de arriba) de lo pintado
+    público función pinta_puntero(ref p: Pinta_puntero): nat32
+        devolver llamada(177, 4, 0, nat32(dirección(p)))
+    fin
+
+    público función forma_del_puntero(): nat32
+        devolver llamada(177, 5, 0, 0)
+    fin
+
+fin Ppuntero.

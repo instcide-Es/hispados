@@ -214,44 +214,6 @@ static void asa(lienzo *L, int x, int y, int encima)
 		lz_marco(L, x - 1, y - 1, 9, 9, 0xFFFFFF);
 }
 
-/* (PINTURA32) la flecha de cambiar el tamaño, junto a la del ratón (abajo a
- * la derecha de la punta): doble, en diagonal para la esquina, en
- * horizontal para el asa de la derecha y en vertical para la de abajo; negra
- * con borde blanco (se ve sobre cualquier color) */
-static void flecha_tamano(lienzo *L, int modo, int x, int y)
-{
-	int i, k, dx = modo == 2 ? 0 : 1, dy = modo == 1 ? 0 : 1;
-
-	x += 14;
-	y += 14;
-	for (k = 0; k < 2; k++) {
-		u32 c = k ? 0x000000 : 0xFFFFFF;
-		int g = k ? 1 : 3, o = k ? 0 : -1;
-
-		for (i = -6; i <= 6; i++)
-			lz_rect(L, x + i * dx + o, y + i * dy + o, g, g, c);
-		/* las dos puntas */
-		for (i = 0; i <= 4; i++) {
-			int s;
-
-			for (s = -1; s <= 1; s += 2) {
-				int px = x + s * 6 * dx, py = y + s * 6 * dy;
-
-				if (modo == 3) {
-					lz_rect(L, px - s * i + o, py + o, g, g, c);
-					lz_rect(L, px + o, py - s * i + o, g, g, c);
-				} else if (modo == 1) {
-					lz_rect(L, px - s * i + o, py - i + o, g, g, c);
-					lz_rect(L, px - s * i + o, py + i + o, g, g, c);
-				} else {
-					lz_rect(L, px - i + o, py - s * i + o, g, g, c);
-					lz_rect(L, px + i + o, py - s * i + o, g, g, c);
-				}
-			}
-		}
-	}
-}
-
 int vista_asa_en(int sx, int sy)
 {
 	int ax = VI.ox + VI.san + 1, ay = VI.oy + VI.sal + 1;
@@ -370,8 +332,8 @@ void vista_pinta(lienzo *L, int x0, int y0, int x1, int y1)
 
 		caja_hormigas(L, VI.ox - 1, VI.oy - 1, ex, ey);
 	}
-	if (asa_encima)
-		flecha_tamano(L, asa_encima, asa_mx, asa_my);	/* (PINTURA32) */
+	/* (PUNTEROS) la flecha de cambiar el tamaño ya es el puntero del
+	 * sistema (ventana.c, puntero_de_pintura): no se dibuja aquí */
 	/* lo elegido */
 	if (s->activa) {
 		if (s->libre && !s->flota && s->n_libre > 1) {

@@ -158,7 +158,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, Termo
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, Termo, Apuntero
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -708,6 +708,36 @@ módulo Usuario
         devolver NO_VALE
     fin
 
+    ; (PUNTEROS) la llamada 177: se mira la memoria del programa y lo que
+    ; lleva punteros se copia antes (que no lo cambie otro hilo a medias)
+    función atender_177(a: nat32, b: nat32, c: nat32): nat32
+        variable pp: Pinta_puntero
+        variable z: Zona
+        variable aj: Ajustes_puntero
+        si a = 1 entonces
+            si no puede(c, tamaño(Zona), falso) entonces devolver NO_VALE fin
+            copiar_memoria(puntero(dirección(z)), puntero(c), tamaño(Zona))
+            devolver atender_puntero(1, b, nat32(dirección(z)))
+        fin
+        si a = 2 entonces
+            si no puede(b, tamaño(Ajustes_puntero), cierto) entonces devolver NO_VALE fin
+            devolver atender_puntero(2, b, 0)
+        fin
+        si a = 3 entonces
+            si no puede(b, tamaño(Ajustes_puntero), falso) entonces devolver NO_VALE fin
+            copiar_memoria(puntero(dirección(aj)), puntero(b), tamaño(Ajustes_puntero))
+            devolver atender_puntero(3, nat32(dirección(aj)), 0)
+        fin
+        si a = 4 entonces
+            si no puede(c, tamaño(Pinta_puntero), falso) entonces devolver NO_VALE fin
+            copiar_memoria(puntero(dirección(pp)), puntero(c), tamaño(Pinta_puntero))
+            si pp.ancho < 1 o pp.alto < 1 o pp.ancho > 4096 o pp.alto > 4096 o pp.salto > 4096 o nat32(pp.ancho) > pp.salto entonces devolver NO_VALE fin
+            si no puede(nat32(pp.puntos), pp.salto * nat32(pp.alto) * 4, cierto) entonces devolver NO_VALE fin
+            devolver atender_puntero(4, 0, nat32(dirección(pp)))
+        fin
+        devolver atender_puntero(a, b, c)
+    fin
+
     función atender(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable t: puntero a Tarea
         variable ruta, ruta2: arreglo [MAX_RUTA] de byte
@@ -836,6 +866,8 @@ módulo Usuario
                 devolver atender_ajuste(a, b)           ; (PANEL) los ajustes del Panel de control (preferencias.cas)
             caso 175:
                 devolver atender_hora(a, b)             ; (PANEL, NTP) la hora exacta del reloj del PC
+            caso 177:
+                devolver atender_177(a, b, c)           ; (PUNTEROS) el puntero del ratón (apuntero.cas)
             caso 173:
                 devolver lo_soltado(a, b)       ; (BLOC)
             caso 25:
