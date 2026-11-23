@@ -903,6 +903,130 @@ módulo Semilla
         fin
     fin
 
+    ; (PSTATE, 0.8.9) el estado P del procesador: Hispa-Pentium no lo ponía
+    ; nunca, y se quedaba el que dejara el firmware; en la Medion S2217 (Atom
+    ; Z3735F, Bay Trail, por UEFI de 32 bits) eran 499 MHz todo el rato, en
+    ; reposo y con carga (la nominal es 1,33 GHz). Al arrancar se pide la
+    ; nominal máxima (sin turbo: con la nominal pedida el turbo lo da el
+    ; procesador solo si puede), como Linux (intel_pstate), solo donde se sabe
+    ; hacer bien:
+    ;  - Intel con SpeedStep (cpuid 1, ECX 7) encendido por el firmware
+    ;    (IA32_MISC_ENABLE, 1A0h, bit 16) y sin HWP puesto (IA32_PM_ENABLE,
+    ;    770h, bit 0: entonces manda el procesador y PERF_CTL no vale);
+    ;  - Core de Nehalem en adelante (modelo 1Ah o más, no Atom): la nominal
+    ;    de MSR_PLATFORM_INFO (CEh, bits 15:8), a IA32_PERF_CTL (199h) bits
+    ;    15:8 (core_get_val de intel_pstate);
+    ;  - Silvermont (Bay Trail, 37h) y Airmont (Cherry Trail/Braswell, 4Ch):
+    ;    la máxima de 66Ah (bits 22:16) con su voltaje, el más alto de 66Bh
+    ;    (bits 22:16), en PERF_CTL bits 15:8 y 6:0 (atom_get_val de
+    ;    intel_pstate con la máxima: el voltaje es justo el «máximo»);
+    ;  - los demás (Atom viejos como el N455, AMD, máquinas virtuales sin
+    ;    SpeedStep), nada: lo dice y se queda la del firmware.
+    ; Cada lectura y escritura, con wrmsr_seguro/rdmsr_seguro (termo.cas): un
+    ; #GP no para el núcleo. Con valores raros (ratio < 4 o > 60, voltaje 0 o
+    ; al revés), nada. «sinpstate» en la línea del cargador lo quita. Solo el
+    ; procesador del sistema (el BSP): en estos Intel los núcleos van a la
+    ; misma frecuencia y manda la petición más alta; los AP que despierta el
+    ; Termómetro no piden nada (pendiente: que pidan lo mismo).
+    ; El registro dice «procesador: frecuencia puesta a X MHz (de Y)».
+    función bus_silvermont(): nat32             ; MHz x 10 (MSR_FSB_FREQ, CDh)
+        si no Termo.rdmsr_seguro(0xCD) entonces devolver 833 fin
+        según Termo.msr_lo yb 7
+            caso 0: devolver 833
+            caso 1: devolver 1000
+            caso 2: devolver 1333
+            caso 3: devolver 1167
+            caso 4: devolver 800
+        fin
+        devolver 833
+    fin
+
+    función mira_pstate()
+        variable fam, modelo, ecx1, antes, nueva, vid, bus, lo, hi: nat32
+        variable silver: bool
+        si buscar(línea_del_cargador(), "sinpstate") <> nulo entonces
+            apunta0("procesador: el estado P, el del firmware (lo dice la línea del cargador: sinpstate)\n")
+            devolver
+        fin
+        cpuid_s(0, 0)
+        si no (rc[1] = 0x756E6547 y rc[3] = 0x49656E69 y rc[2] = 0x6C65746E) y buscar(línea_del_cargador(), "pstate=prueba") = nulo entonces
+            apunta0("procesador: no es Intel; la frecuencia, la del firmware\n")
+            devolver
+        fin
+        cpuid_s(1, 0)
+        ecx1 := rc[2]
+        fam := (rc[0] >> 8) yb 0xF
+        modelo := ((rc[0] >> 4) yb 0xF) + (((rc[0] >> 16) yb 0xF) << 4)
+        ; «pstate=prueba» (solo QEMU, las pruebas): como si fuera un Core con
+        ; SpeedStep, para pasar por las lecturas y escrituras (y sus #GP)
+        si buscar(línea_del_cargador(), "pstate=prueba") <> nulo entonces
+            fam := 6
+            modelo := 0x3A
+            ecx1 := ecx1 ob 0x80
+        fin
+        si fam <> 6 o (ecx1 yb 0x80) = 0 entonces
+            apunta2("procesador: sin SpeedStep (familia %u, modelo %02Xh); la frecuencia, la del firmware\n", fam, modelo)
+            devolver
+        fin
+        silver := modelo = 0x37 o modelo = 0x4C
+        si no silver y (modelo < 0x1A o es_atom(modelo)) entonces
+            apunta1("procesador: modelo %02Xh: no sé ponerle el estado P; la frecuencia, la del firmware\n", modelo)
+            devolver
+        fin
+        si (no Termo.rdmsr_seguro(0x1A0) o (Termo.msr_lo yb 0x10000) = 0) y buscar(línea_del_cargador(), "pstate=prueba") = nulo entonces
+            apunta0("procesador: el firmware tiene apagado SpeedStep (1A0h, bit 16); la frecuencia, la suya\n")
+            devolver
+        fin
+        si Termo.rdmsr_seguro(0x770) y (Termo.msr_lo yb 1) <> 0 entonces
+            apunta0("procesador: con HWP encendido (770h): la frecuencia la lleva el procesador\n")
+            devolver
+        fin
+        si silver entonces bus := bus_silvermont() sino bus := 1000 fin
+        si modelo = 0x1A o modelo = 0x1E o modelo = 0x1F o modelo = 0x25 o modelo = 0x2C o modelo = 0x2E o modelo = 0x2F entonces bus := 1333 fin
+        antes := 0
+        si Termo.rdmsr_seguro(0x198) entonces antes := (Termo.msr_lo >> 8) yb 0xFF fin
+        vid := 0
+        si silver entonces
+            si no Termo.rdmsr_seguro(0x66A) entonces
+                apunta0("procesador: no se deja leer 66Ah; la frecuencia, la del firmware\n")
+                devolver
+            fin
+            nueva := (Termo.msr_lo >> 16) yb 0x7F
+            si no Termo.rdmsr_seguro(0x66B) entonces
+                apunta0("procesador: no se deja leer 66Bh; la frecuencia, la del firmware\n")
+                devolver
+            fin
+            vid := (Termo.msr_lo >> 16) yb 0x7F
+            si vid = 0 o vid < ((Termo.msr_lo >> 8) yb 0x7F) entonces
+                apunta1("procesador: el voltaje de 66Bh no es creíble (%08Xh); la frecuencia, la del firmware\n", Termo.msr_lo)
+                devolver
+            fin
+        sino
+            si no Termo.rdmsr_seguro(0xCE) entonces
+                apunta0("procesador: no se deja leer CEh; la frecuencia, la del firmware\n")
+                devolver
+            fin
+            nueva := (Termo.msr_lo >> 8) yb 0xFF
+        fin
+        si nueva = 0 y buscar(línea_del_cargador(), "pstate=prueba") <> nulo entonces nueva := 16 fin   ; (QEMU da 0)
+        si nueva < 4 o nueva > 60 entonces
+            apunta1("procesador: la nominal leída no es creíble (%u); la frecuencia, la del firmware\n", nueva)
+            devolver
+        fin
+        si no Termo.rdmsr_seguro(0x199) entonces
+            apunta0("procesador: no se deja leer 199h; la frecuencia, la del firmware\n")
+            devolver
+        fin
+        lo := (Termo.msr_lo yb 0xFFFF0000) ob (nueva << 8)
+        si silver entonces lo := (lo yb 0xFFFFFF80) ob vid fin
+        hi := Termo.msr_hi yb 0xFFFFFFFE           ; el bit 32 (sin turbo), apagado: el turbo, si puede
+        si no Termo.wrmsr_seguro(0x199, lo, hi) entonces
+            apunta0("procesador: no se deja escribir 199h; la frecuencia, la del firmware\n")
+            devolver
+        fin
+        apunta3("procesador: frecuencia puesta a %u MHz (de %u; ratio %u)\n", (nueva * bus + 5) div 10, (antes * bus + 5) div 10, nueva)
+    fin
+
     ; (UEFI) el SMBIOS (lo que dice el equipo de sí mismo: el fabricante, el
     ; modelo, la placa, la BIOS) no está en F0000h-FFFFFh sin BIOS: está en la
     ; tabla de configuración de la tabla del sistema de EFI, con su GUID (el
@@ -999,6 +1123,7 @@ módulo Semilla
         pinta_ahora()                           ; (UEFI) lo dicho hasta aquí, ya en la pantalla
         mira_reloj()                            ; (UEFI) ¿cuenta el 8254? Si no, el HPET (relojhpet.cas)
         mira_reposo()                           ; (MWAIT) «hlt» o «mwait» en la tarea ociosa
+        mira_pstate()                           ; (PSTATE) la frecuencia nominal del procesador
         pinta_ahora()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())

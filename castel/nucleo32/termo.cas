@@ -59,7 +59,8 @@ módulo Termo
     variable r_cpu: arreglo [4] de nat32        ; lo que da cpuid
     ; el rdmsr que puede fallar: dónde está y dónde se sigue (semilla.cas,
     ; la excepción 13, mira «recupera»)
-    variable msr_ins, msr_sigue, msr_lo, msr_hi: nat32
+    variable msr_ins, msr_sigue: nat32
+    público variable msr_lo, msr_hi: nat32      ; (PSTATE) lo leído, también para semilla.cas
     variable en_msr, msr_falló: bool
 
     función cpuid(hoja: nat32)
@@ -94,7 +95,7 @@ módulo Termo
         devolver 0
     fin
 
-    función rdmsr_seguro(m: nat32): bool
+    público función rdmsr_seguro(m: nat32): bool     ; (PSTATE) público: el estado P de semilla.cas
         variable b: nat32
         b := sin_interrupciones()
         msr_falló := falso
@@ -111,6 +112,31 @@ módulo Termo
             db 0x0F, 0x32               ; rdmsr
             mov {msr_lo}, eax
             mov {msr_hi}, edx
+        .sigue:
+        fin
+        en_msr := falso
+        reponer(b)
+        devolver no msr_falló
+    fin
+
+    ; (PSTATE) escribir un MSR sin que un #GP pare el núcleo (lo mismo que
+    ; rdmsr_seguro: la excepción 13 de semilla.cas mira «recupera»). Solo
+    ; desde el núcleo (semilla.cas: IA32_PERF_CTL); los programas no llegan
+    público función wrmsr_seguro(m: nat32, lo: nat32, hi: nat32): bool
+        variable b: nat32
+        b := sin_interrupciones()
+        msr_falló := falso
+        en_msr := cierto
+        ensamblador
+            lea eax, [.ins]
+            mov {msr_ins}, eax
+            lea eax, [.sigue]
+            mov {msr_sigue}, eax
+            mov ecx, {m}
+            mov eax, {lo}
+            mov edx, {hi}
+        .ins:
+            db 0x0F, 0x30               ; wrmsr
         .sigue:
         fin
         en_msr := falso
