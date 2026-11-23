@@ -9698,6 +9698,43 @@ C6 y C7) debe pasar de 0 % a casi todo el tiempo en reposo en el MacBook Air
 2017 (Broadwell), el MacBook 2012 (Ivy Bridge), el ASUS (Kaby Lake) y el GT80
 (Haswell); en los Atom y en AMD, igual que antes.
 
+**El estado P (0.8.9, marcado «(PSTATE)»).** La tableta **Medion S2217**
+(Atom Z3735F, Bay Trail, por UEFI de 32 bits) iba **a 499 MHz todo el rato**,
+en reposo y con los 4 procesadores al 100 % (la nominal es 1,33 GHz y la
+ráfaga 1,83): Hispa-Pentium no ponía nunca el estado P y se quedaba el que
+dejara el firmware (en los demás equipos salía la nominal porque su firmware
+la deja, pero no es de fiar). Desde la 0.8.9, `mira_pstate` (`semilla.cas`,
+tras `mira_reposo`) pide al arrancar la **nominal máxima** en
+`IA32_PERF_CTL` (199h), como `intel_pstate` de Linux:
+
+- **Core de Nehalem en adelante** (modelo 1Ah o más, no Atom): el ratio de
+  `MSR_PLATFORM_INFO` (CEh, bits 15:8) en los bits 15:8 (bus de 100 MHz;
+  133 en Nehalem/Westmere);
+- **Silvermont y Airmont** (Bay Trail 37h; Cherry Trail/Braswell 4Ch): el
+  ratio máximo de 66Ah (bits 22:16) con **su voltaje**, el más alto de 66Bh
+  (bits 22:16), en los bits 15:8 y 6:0 (`atom_get_val` con la máxima); el bus,
+  de `MSR_FSB_FREQ` (CDh: 83,3, 100, 133,3, 116,7 u 80 MHz);
+- solo si es **Intel con SpeedStep** (`cpuid 1`, ECX bit 7), el firmware lo
+  tiene **encendido** (`IA32_MISC_ENABLE`, 1A0h, bit 16) y **sin HWP** puesto
+  (770h, bit 0: con HWP manda el procesador); con valores raros (ratio menor
+  de 4 o mayor de 60, voltaje 0 o al revés) no se toca nada;
+- los Atom de antes (el N455 del HP Mini y el Toshiba: solo por ACPI `_PSS`,
+  pendiente), AMD y las máquinas virtuales: nada, y se dice.
+
+Cada `rdmsr`/`wrmsr` va con `rdmsr_seguro`/`wrmsr_seguro` (`termo.cas`): un
+#GP no para el núcleo (la excepción 13 de `semilla.cas` mira `recupera`). El
+bit 32 de PERF_CTL (sin turbo) queda apagado: el turbo lo da el procesador si
+puede. Solo el procesador del sistema (el BSP): en estos Intel los núcleos van
+a la misma frecuencia y manda la petición más alta (pendiente: que los AP que
+despierta el Termómetro pidan lo mismo). ARRANQUE.TXT lo dice en la línea
+**«procesador: frecuencia puesta a X MHz (de Y; ratio N)»**, o por qué no.
+**`sinpstate`** en la línea del cargador lo quita; `pstate=prueba` (solo para
+QEMU) hace como si fuera un Core para pasar por las lecturas y la escritura.
+En QEMU no hay estados P: sin SpeedStep dice «sin SpeedStep... la del
+firmware», y con `pstate=prueba` llega a escribir 199h y sigue contando el
+tiempo. **La medida de verdad, en la Medion S2217 y el Acer One 10** (la
+columna MHz del Termómetro: de 499 a 1333 en reposo y hasta 1833 con carga).
+
 **Equipos probados (de verdad).**
 
 | Equipo | Procesador | Lo que salió | Lo arreglado |

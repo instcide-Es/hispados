@@ -234,16 +234,14 @@ módulo Termo
             mov {c}, eax
             jmp termo_ap_sigue
         termo_ap_inicio:
-            bits 16
-            cli
-            mov ax, cs
-            mov ds, ax
-            o32 lgdt [0x420]
-            mov eax, cr0
-            or al, 1
-            mov cr0, eax
-            jmp dword 0x08:(termo_ap_32 - termo_ap_inicio)
-            bits 32
+            ; (en 16 bits; a mano, como lo da NASM: los ensambladores propios
+            ; —ensambla.py, ENSAMB32, ENSAMB64— no tienen «bits 16» ni el salto
+            ; lejano de 32 bits) cli; mov ax, cs; mov ds, ax; o32 lgdt [0x420];
+            ; mov eax, cr0; or al, 1; mov cr0, eax; jmp dword 0x08:1Bh (el de
+            ; termo_ap_32: 27 octetos más allá de termo_ap_inicio)
+            db 0xFA, 0x8C, 0xC8, 0x8E, 0xD8, 0x66, 0x0F, 0x01, 0x16, 0x20, 0x04
+            db 0x0F, 0x20, 0xC0, 0x0C, 0x01, 0x0F, 0x22, 0xC0
+            db 0x66, 0xEA, 0x1B, 0x00, 0x00, 0x00, 0x08, 0x00
         termo_ap_32:
             mov ax, 0x10
             mov ds, ax
@@ -251,7 +249,7 @@ módulo Termo
             mov ss, ax
             mov fs, ax
             mov gs, ax
-            lidt [0x430]
+            db 0x0F, 0x01, 0x1D, 0x30, 0x04, 0x00, 0x00     ; lidt [0x430]
             mov eax, 1
             db 0xF0, 0x0F, 0xC1, 0x05, 0x44, 0x04, 0x00, 0x00   ; lock xadd [0x444], eax (486: a mano, el núcleo es «cpu 386»)
             cmp eax, 16
@@ -277,7 +275,7 @@ módulo Termo
             mov ebp, eax                ; 1: tiene sensor (Intel: 19Ch)
         termo_ap_sin_dts:
             mov dword [edi+4], 1
-            fninit
+            db 0xDB, 0xE3               ; fninit (a mano: ensambla.py no sabe el x87)
             mov eax, [0x448]
             mov [edi+20], eax
             db 0x0F, 0x31               ; rdtsc
@@ -286,14 +284,14 @@ módulo Termo
             cmp dword [0x440], 1
             jne termo_ap_para
             mov ecx, 100000
-            fld1
+            db 0xD9, 0xE8               ; fld1
         termo_ap_carga:
-            fsqrt
-            fadd st0, st0
-            fsqrt
+            db 0xD9, 0xFA               ; fsqrt
+            db 0xD8, 0xC0               ; fadd st0, st0
+            db 0xD9, 0xFA               ; fsqrt
             dec ecx
             jnz termo_ap_carga
-            fstp st0
+            db 0xDD, 0xD8               ; fstp st0
             inc dword [edi+8]
             mov eax, [0x448]
             cmp eax, [edi+20]
