@@ -130,6 +130,9 @@
 ;  209  (solo ARGON2.BIN, el que pone el núcleo) EBX = 0: el pedido, a ECX
 ;       (caben EDX); 1: el resumen (32 octetos de ECX)
 ;  210  ECX octetos de azar (hasta 256) del pozo del núcleo, a EBX -> ECX
+;  (TERMO) 220 a 225: las temperaturas del procesador y de las zonas
+;       térmicas de ACPI, para el Termómetro (TERMO.BIN): solo leer, de una
+;       lista cerrada de registros (termo.cas)
 ;  (SONIDO) 190 a 199: el sonido, con el servicio de sonido (SONIDO.BIN):
 ;       los canales de los programas, el volumen, los sonidos del sistema y
 ;       tocar un .WAV (la 194); los cuenta sonido.cas
@@ -155,7 +158,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, Termo, Apuntero
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -164,7 +167,8 @@ módulo Usuario
     ; que dicen el menú Inicio, Configuración y «Acerca de» (la primera parte
     ; de las pruebas mira que sea la misma que la de hpq.py)
     ; (PANEL) la 0.8.7: el Panel de control y la hora por Internet
-    público constante VERSIÓN_TEXTO = "0.8.8"
+    ; (TOUCHPAD) la 0.8.9 (antes, 0.8.8)
+    público constante VERSIÓN_TEXTO = "0.8.9"
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -704,6 +708,36 @@ módulo Usuario
         devolver NO_VALE
     fin
 
+    ; (PUNTEROS) la llamada 177: se mira la memoria del programa y lo que
+    ; lleva punteros se copia antes (que no lo cambie otro hilo a medias)
+    función atender_177(a: nat32, b: nat32, c: nat32): nat32
+        variable pp: Pinta_puntero
+        variable z: Zona
+        variable aj: Ajustes_puntero
+        si a = 1 entonces
+            si no puede(c, tamaño(Zona), falso) entonces devolver NO_VALE fin
+            copiar_memoria(puntero(dirección(z)), puntero(c), tamaño(Zona))
+            devolver atender_puntero(1, b, nat32(dirección(z)))
+        fin
+        si a = 2 entonces
+            si no puede(b, tamaño(Ajustes_puntero), cierto) entonces devolver NO_VALE fin
+            devolver atender_puntero(2, b, 0)
+        fin
+        si a = 3 entonces
+            si no puede(b, tamaño(Ajustes_puntero), falso) entonces devolver NO_VALE fin
+            copiar_memoria(puntero(dirección(aj)), puntero(b), tamaño(Ajustes_puntero))
+            devolver atender_puntero(3, nat32(dirección(aj)), 0)
+        fin
+        si a = 4 entonces
+            si no puede(c, tamaño(Pinta_puntero), falso) entonces devolver NO_VALE fin
+            copiar_memoria(puntero(dirección(pp)), puntero(c), tamaño(Pinta_puntero))
+            si pp.ancho < 1 o pp.alto < 1 o pp.ancho > 4096 o pp.alto > 4096 o pp.salto > 4096 o nat32(pp.ancho) > pp.salto entonces devolver NO_VALE fin
+            si no puede(nat32(pp.puntos), pp.salto * nat32(pp.alto) * 4, cierto) entonces devolver NO_VALE fin
+            devolver atender_puntero(4, 0, nat32(dirección(pp)))
+        fin
+        devolver atender_puntero(a, b, c)
+    fin
+
     función atender(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable t: puntero a Tarea
         variable ruta, ruta2: arreglo [MAX_RUTA] de byte
@@ -832,6 +866,8 @@ módulo Usuario
                 devolver atender_ajuste(a, b)           ; (PANEL) los ajustes del Panel de control (preferencias.cas)
             caso 175:
                 devolver atender_hora(a, b)             ; (PANEL, NTP) la hora exacta del reloj del PC
+            caso 177:
+                devolver atender_177(a, b, c)           ; (PUNTEROS) el puntero del ratón (apuntero.cas)
             caso 173:
                 devolver lo_soltado(a, b)       ; (BLOC)
             caso 25:
@@ -940,6 +976,8 @@ módulo Usuario
                 si t = nulo o no t.usuario entonces devolver NO_VALE fin
                 si t.servicio entonces devolver t.sello ob 0x80000000 fin
                 devolver t.sello
+            caso 220..225:
+                devolver atender_termo(n, a, b, c)     ; (TERMO) las temperaturas, solo leer (termo.cas)
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
             caso 190..199:
@@ -1729,7 +1767,16 @@ módulo Usuario
                 devolver r
             caso 209:
                 ; ARGON2.BIN: el pedido (a = 0) y la respuesta (a = 1); solo el
-                ; que ha puesto en marcha el núcleo para eso
+                ; que ha puesto en marcha el núcleo para eso. (0.8.9) Si el
+                ; reloj le da la vez antes de que «argon2» apunte su número
+                ; (cargar_servicio ya lo ha dejado listo), espera a que lo
+                ; apunte: con el equipo cargado el pedido salía en 1 tic sin
+                ; respuesta y la contraseña buena «no valía»
+                r := 0
+                mientras tarea_argon = 0 y pedido_argon.magia = MAGIA_ARGON y actual.sello = SELLO_ARGON2 y r < 100 hacer
+                    dormir(1)
+                    r := r + 1
+                fin
                 si tarea_argon = 0 o actual.id <> tarea_argon o actual.sello <> SELLO_ARGON2 entonces devolver NO_VALE fin
                 si a = 0 entonces
                     si c < tamaño(Pedido_argon) o no puede(b, tamaño(Pedido_argon), cierto) entonces devolver NO_VALE fin
@@ -2596,7 +2643,7 @@ módulo Usuario
     ; y esos argumentos (o nulo). Da la tarea; o nulo, y en «error» por qué.
     ; (PROTEGE) «sello» y «servicio»: lo que es (Permisos.sello_de_carga):
     ; se pone en su ficha antes de que pueda correr
-    función cargar_imagen(nombre: puntero a byte, ini: nat32, largo: nat32, args: puntero a byte, ref error: nat32, sello: nat32, servicio: bool): puntero a Tarea
+    función cargar_imagen(nombre: puntero a byte, ini: nat32, largo: nat32, args: puntero a byte, ref error: nat32, sello: nat32, servicio: bool, teb: nat32): puntero a Tarea
         variable c: puntero a Cabecera
         variable d, v, m, origen, cuánto, n, b: nat32
         variable t: puntero a Tarea
@@ -2649,6 +2696,11 @@ módulo Usuario
         t := crear_tarea_usuario(nombre, d, c.entrada, PILA_FINAL - 16, v)
         si t <> nulo entonces
             t.args := copia
+            ; (JUEGOS, 0.8.9) la TEB de su hilo principal, si es WIN32.BIN: aquí
+            ; y no al volver, porque lo primero que hace es la 183, 9 (quitar
+            ; las primeras 64 K), que sin TEB no vale; si el reloj le daba la
+            ; vez antes, el puntero nulo no fallaba (SEH, a veces)
+            t.teb := teb
             ; (PROTEGE) su sello, y el modo administrador de quien la lanza
             ; (si es un programa que lo tiene; el núcleo no lo da)
             t.sello := sello
@@ -2682,7 +2734,7 @@ módulo Usuario
     público función cargar(i: nat32): puntero a Tarea
         variable t: puntero a Tarea
         variable e: nat32
-        t := cargar_imagen(módulo_nombre(i), módulo_inicio(i), módulo_final(i) - módulo_inicio(i), nulo, e, 0, falso)
+        t := cargar_imagen(módulo_nombre(i), módulo_inicio(i), módulo_final(i) - módulo_inicio(i), nulo, e, 0, falso, 0)
         si t = nulo entonces imprimir1("%s\n", nat32(texto_error(e))) fin
         devolver t
     fin
@@ -2704,6 +2756,12 @@ módulo Usuario
     ; y, de ahí, a su espacio de direcciones. Da la tarea; o nulo, y en
     ; «error» por qué.
     función carga_de(u: nat32, ruta: puntero a byte, args: puntero a byte, ref error: nat32): puntero a Tarea
+        devolver carga_de_con(u, ruta, args, error, 0)
+    fin
+
+    ; lo mismo, con la TEB del hilo principal (teb <> 0: WIN32.BIN, que la
+    ; tiene desde que empieza)
+    función carga_de_con(u: nat32, ruta: puntero a byte, args: puntero a byte, ref error: nat32, teb: nat32): puntero a Tarea
         variable m, largo, leídos: nat32
         variable imagen, nombre, p: puntero a byte
         variable t: puntero a Tarea
@@ -2723,7 +2781,7 @@ módulo Usuario
                 devolver nulo
             fin
             sello := sello_de_carga(u, ruta, servicio)      ; (PROTEGE)
-            devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error, sello, servicio)
+            devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error, sello, servicio, teb)
         fin
         m := abrir_archivo(u, ruta, PARA_LEER)
         de_dónde := ruta                        ; (PROTEGE) de dónde se carga de verdad
@@ -2784,7 +2842,7 @@ módulo Usuario
             si valor(p) = '\\' o valor(p) = '/' o valor(p) = ':' entonces nombre := p + 1 fin
             p := p + 1
         fin
-        t := cargar_imagen(nombre, nat32(imagen), largo, args, error, sello, servicio)
+        t := cargar_imagen(nombre, nat32(imagen), largo, args, error, sello, servicio, teb)
         liberar(imagen)
         devolver t
     fin
@@ -2814,7 +2872,7 @@ módulo Usuario
         todo[n + 2] := ' '
         si k > 0 entonces copiar_memoria(todo + n + 3, args, k) fin
         todo[n + 3 + k] := 0
-        t := carga_de(del_sistema, "\\WIN32.BIN", todo, error)
+        t := carga_de_con(del_sistema, "\\WIN32.BIN", todo, error, TEB_PRINCIPAL)
         liberar(todo)
         si t <> nulo entonces
             ; su nombre: el del .EXE
@@ -2826,7 +2884,6 @@ módulo Usuario
             fin
             copiar_hasta(dirección(t.nombre_propio[0]), nombre, 16)
             t.nombre := dirección(t.nombre_propio[0])
-            t.teb := TEB_PRINCIPAL               ; (JUEGOS) la TEB de su hilo principal (FS, tareas.cas)
         fin
         devolver t
     fin

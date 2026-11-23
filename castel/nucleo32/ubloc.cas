@@ -35,7 +35,7 @@ módulo UBloc
 
     modelo usuario
 
-    importar Llamadas, Barramenu, Textos32, Formato, Grafico, BlocMem, BlocPag, BlocTxt, BlocVis, BlocArc, BlocLen, BlocExp, BlocBus, BlocDef
+    importar Llamadas, Barramenu, Textos32, Formato, Grafico, BlocMem, BlocPag, BlocTxt, BlocVis, BlocArc, BlocLen, BlocExp, BlocBus, BlocDef, Ppuntero
 
     constante BARRA = 34                        ; lo que mide la franja de los botones
     constante ALTO_PESTAÑAS = 24
@@ -2686,6 +2686,12 @@ módulo UBloc
         abajo_texto := alto - PIE - alto_panel()
         si abajo_texto < arriba_texto + 20 entonces abajo_texto := arriba_texto + 20 fin
         colócate(arriba_texto, abajo_texto)
+        ; (PUNTEROS) sobre el texto, el puntero de escribir (la «I»): lo pone
+        ; el núcleo, sin esperar al Bloc
+        si BlocVis.v <> 0 entonces
+            zona_de_puntero(BlocVis.v, 0, 0, 0, 0, P_FLECHA)
+            zona_de_puntero(BlocVis.v, gw, arriba_texto, ancho - gw, abajo_texto - arriba_texto, P_TEXTO)
+        fin
     fin
 
     ; los botones de arriba: «Nuevo» y «Guardar» (como siempre) y los de más, si caben
@@ -3302,7 +3308,7 @@ módulo UBloc
     fin
 
     función acerca()
-        avisa_bien("Bloc de notas 1.0 de Hispa-Pentium, escrito en Castel. GPL-2.0 o posterior.")
+        avisa_bien("Bloc de notas 1.0.1 de Hispa-Pentium, escrito en Castel. GPL-2.0 o posterior.")
     fin
 
     función letra_más(paso_: ent32)

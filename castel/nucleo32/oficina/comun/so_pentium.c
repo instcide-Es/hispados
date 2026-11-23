@@ -810,6 +810,25 @@ void so_menu(int v, int x, int y, const char *opciones, u32 grises, u32 etiqueta
 	llamada(39, (u32)v, (u32)&p, 0);
 }
 
+/* (PUNTEROS) la llamada 177: 0, la forma de la ventana; 1, la de una zona */
+void so_puntero(int v, int forma)
+{
+	static int ult_v = -1, ult_f = -1;
+
+	if (v == ult_v && forma == ult_f)
+		return;
+	ult_v = v;
+	ult_f = forma;
+	llamada(177, 0, (u32)v, (u32)forma);
+}
+
+void so_puntero_zona(int v, int x, int y, int an, int al, int forma)
+{
+	struct { i32 x, y, an, al; u32 forma; } z = { x, y, an, al, (u32)forma };
+
+	llamada(177, 1, (u32)v, (u32)&z);
+}
+
 int so_control(void)
 {
 	u32 mapa[16];	/* (la 181 da dos mapas: las pulsadas ahora y desde la última vez) */

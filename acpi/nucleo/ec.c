@@ -27,6 +27,14 @@ static u32 detalle_quedan = 600;	/* accesos que se apuntan uno a uno */
 
 void *ec_disp(void) { return ec; }
 
+/* (TERMO) mientras el Termómetro lee las zonas térmicas (ACPI.BIN de
+ * Hispa-Pentium, servicio.c), el EC es de solo lectura: lo que el AML quiera
+ * escribir en la región no se escribe (se cuenta y se apunta) y se le dice
+ * que ha ido bien, para que el método siga y lea */
+int ec_solo_lectura;
+unsigned int ec_espera_activa_us = 2000;
+unsigned int ec_ignoradas;
+
 /* Lo normal es que conteste en microsegundos. Si tarda más de 2 ms, se
  * suelta el procesador entre miradas (el equipo sigue) hasta el plazo. */
 static int espera(u32 mascara, u32 valor)
@@ -41,8 +49,10 @@ static int espera(u32 mascara, u32 valor)
 		va = mq_ahora_us() - ini;
 		if (va > EC_ESPERA_US)
 			return -1;
-		if (va > 2000)
-			tarea_duerme(10);
+		/* (TERMO) la espera activa: 2 ms (Hispa-486); ACPI.BIN de Hispa-Pentium la
+		 * baja a 50 us (ec_espera_activa_us) y luego duerme entre miradas */
+		if (va > ec_espera_activa_us)
+			tarea_duerme(ec_espera_activa_us >= 2000 ? 10 : 1);	/* (Hispa-486: como antes) */
 		else
 			mq_espera_us(10);
 	}
@@ -110,6 +120,10 @@ static ACPI_STATUS ec_manejador(UINT32 funcion, ACPI_PHYSICAL_ADDRESS dir, UINT3
 				detalle_quedan--;
 				reg("  EC[%02Xh] -> %02Xh\n", (u32)dir + i, r);
 			}
+		} else if (ec_solo_lectura) {
+			/* (TERMO) no se escribe */
+			if (ec_ignoradas++ < 40)
+				reg("EC: (TERMO) el AML quiere escribir %02Xh en EC[%02Xh]: no se escribe (solo lectura)\n", v[i], (u32)dir + i);
 		} else {
 			r = orden_insiste(EC_ESCRIBE, dir + i, v[i]);
 			if (r < 0)

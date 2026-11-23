@@ -1,0 +1,32 @@
+EL ASISTENTE DE COMPATIBILIDAD DE HISPA-PENTIUM (COMPAT.BIN)
+
+Dice qué le falta a un programa de Windows para correr en Hispa-Pentium,
+sin ponerlo en marcha: elija el programa (.EXE) o la carpeta donde está y
+pulse «Comprobar». Lo que falta sale agrupado por DLL, con para qué sirve
+cada una (el sonido, la red, la impresora...) y, aparte, lo que no hace
+falta (el instalador, el servidor dedicado, lo de las tarjetas 3dfx...).
+
+Se abre desde el menú Inicio (Herramientas), desde Mi equipo (botón derecho
+en un .EXE > «Comprobar compatibilidad») y solo cuando WIN32 no puede
+seguir con un programa porque le falta algo.
+
+Lo comprobado se guarda en su carpeta (\USUARIOS\<USUARIO>\COMPAT). Cuando
+se pone al día el paquete win32, se vuelve a comprobar solo y se avisa
+abajo a la derecha: «ya no falta nada; pruébelo de nuevo» o «ahora faltan
+12 (antes 142)».
+
+«Enviar informe a Hispa-DOS...»: con su permiso, cada vez, y enseñando
+antes exactamente lo que va: el nombre de cada .EXE y .DLL (sin carpetas),
+lo que mide, su suma SHA-256, lo que le falta y las versiones. Nunca su
+nombre, sus carpetas ni lo que hay dentro de los archivos. Va por HTTPS.
+
+«Componentes de Microsoft...»: las bibliotecas de Visual C++ 2005, 2008 y
+2010, que piden muchos programas. Se bajan de Microsoft
+(download.microsoft.com), se comprueba su suma, se enseña su licencia y,
+si la acepta, se ponen solo sus DLL en \WIN32 (con el modo administrador).
+Hispa-DOS no las reparte: las baja usted de Microsoft.
+
+En la Consola: COMPAT /ORDEN comprueba C:\JUEGOS\X (y informe, envia,
+lista, olvida, revisa, componentes, licencia, pon).
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

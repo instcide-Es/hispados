@@ -750,6 +750,16 @@ char *so_del_portapapeles(u32 *n)
  *  La ventana (ui.h): las llamadas 32 a 39 y 80
  * ============================================================================= */
 static u32 vent;
+
+/* (PUNTEROS) una zona de la ventana con su forma del puntero (la llamada 177) */
+void so_puntero_zona(int x, int y, int an, int al, int forma)
+{
+	struct { int32_t x, y, an, al; uint32_t forma; } z = { x, y, an, al, (uint32_t)forma };
+
+	if (vent)
+		sc(177, 1, vent, (u32)&z);
+}
+
 static struct orden ord;
 /* (PARPADEO) el lienzo propio: todo se pinta aquí y se vuelca de una vez */
 static Lienzo lz;

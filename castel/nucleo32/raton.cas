@@ -10,11 +10,25 @@
 ;  casi todos los de rueda, y los paneles táctiles que la imitan), cada
 ;  movimiento trae un cuarto octeto con lo que ha girado; se va sumando
 ;  (hacia arriba, positivo) y el escritorio lo reparte (saca_rueda()).
+;  (TOUCHPAD, 22/11) Los paneles táctiles: al encenderlo se pregunta si es un
+;  Synaptics (la «llamada especial»: E6, cuatro E8 con el argumento de dos
+;  en dos bits y E9; el segundo octeto, 47h), y lo que lleva (el modelo, el
+;  firmware, varios dedos, la palma, clickpad, las medidas) va al registro
+;  del arranque. Un Synaptics de firmware 4 o más se pone en modo absoluto
+;  (con W y a 80 paquetes por segundo: seis octetos cada uno) y touchpad.cas
+;  hace de ellos el ratón: mover, tocar para hacer clic, el borde derecho
+;  (la rueda), el de abajo y dos dedos. Si se descoloca y no vuelve, otra vez
+;  el modo relativo de siempre. Si no es Synaptics, se mira si es un ALPS o
+;  un Elantech (solo para decirlo: van como un ratón de los de siempre) y se
+;  pone el IntelliMouse. Con «tp_simulado» en la línea del cargador hay un
+;  Synaptics de mentira, al que llegan los octetos de RATON /INYECTA (las
+;  pruebas, en QEMU, que no tiene touchpad). Y lo que llega por la IRQ 12
+;  se puede grabar unos segundos (RATON /TOUCHPAD: TOUCHPAD.TXT).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Raton
 
-    importar Cpu, Pozo
+    importar Cpu, Pozo, Tareas, Consola, Registro, Formato, Textos32, Multiboot, Touchpad     ; (PS2) Registro: la línea del 8042; (TOUCHPAD) Tareas, Consola, Formato, Textos32, Multiboot, Touchpad
 
     constante DATOS = 0x60
     constante ESTADO = 0x64
@@ -46,9 +60,34 @@ módulo Raton
     variable resto_x, resto_y: ent32            ; (PANEL) lo que queda de los octavos de punto
     variable por_octavos: arreglo [11] de ent32 ; (PANEL) lo que vale cada punto, en octavos, por la velocidad
     variable rueda: ent32                       ; (NAVEGADOR) lo que ha girado y aún no se ha repartido (arriba, positivo)
+    variable rueda_h: ent32                     ; (TOUCHPAD) lo mismo, a los lados (a la derecha, positivo)
     constante COLA = 32
     variable cola: arreglo [COLA] de Clic
     variable cola_ent, cola_sal: nat32
+
+    ; ---- (TOUCHPAD) el panel táctil ----
+    público constante TP_NO = 0                 ; ninguno (o un ratón)
+    público constante TP_SYNAPTICS = 1          ; Synaptics, en modo absoluto (touchpad.cas)
+    público constante TP_SYNAPTICS_REL = 2      ; Synaptics, como ratón (no ha querido el modo absoluto, o se descolocó)
+    público constante TP_ALPS = 3               ; ALPS (como ratón)
+    público constante TP_ELANTECH = 4           ; Elantech (como ratón)
+    público variable tp_tipo: nat32
+    público variable tp_simulado: bool          ; (las pruebas) «tp_simulado» en la línea del cargador
+    público variable tp_nombre: arreglo [48] de byte     ; «Touchpad Synaptics 7.2», para el Administrador de dispositivos
+    público variable tp_detalle: arreglo [200] de byte   ; lo que lleva (lo mismo que va al registro)
+    público variable tp_corto: arreglo [80] de byte      ; lo mismo, en corto (el Administrador de dispositivos)
+    variable modo_tp: bool                      ; el IRQ 12 trae paquetes de touchpad.cas
+    variable tp_modo_byte: nat32                ; el modo puesto (Synaptics)
+    variable teclas_vistas: nat32               ; Consola.teclas, la última vez (para «al escribir»)
+    variable tp_ident, tp_modelo, tp_cap, tp_ext, tp_0c: nat32
+    ; lo grabado (RATON /TOUCHPAD): los octetos que llegan y su tic
+    público constante CABE_CAPTURA = 12288
+    variable cap_oct: arreglo [CABE_CAPTURA] de byte
+    variable cap_tic: arreglo [CABE_CAPTURA] de nat16
+    público variable cap_n: nat32
+    variable cap_desde: nat32
+    variable cap_hasta: nat32                   ; hasta qué tic se graba (0: no se graba)
+    público variable cap_hecha: bool            ; acabada, sin guardar
 
     ; espera a que el 8042 admita una orden (falso si no llega a admitirla)
     función espera_escribir(): bool
@@ -68,6 +107,27 @@ módulo Raton
         devolver 0xFFFFFFFF
     fin
 
+    ; (PS2) tira lo que haya esperando en el 8042 (un octeto del teclado, o lo
+    ; que dejó el firmware: si no, se toma por la respuesta del ratón)
+    función vacía_8042()
+        variable i, tirado: nat32
+        i := 0
+        mientras i < 32 y meter_puerto(ESTADO) yb 1 <> 0 hacer
+            tirado := meter_puerto(DATOS)
+            i := i + 1
+        fin
+    fin
+
+    ; (PS2) espera más (un reinicio del ratón tarda hasta 500 ms o más en los touchpad)
+    función espera_leer_largo(): nat32
+        variable i, v: nat32
+        para i desde 1 hasta 8 hacer
+            v := espera_leer()
+            si v <> 0xFFFFFFFF entonces devolver v fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
     ; una orden al ratón (por el 8042): da su respuesta (0xFA, «entendido»)
     función al_ratón(orden: byte): nat32
         si no espera_escribir() entonces devolver 0xFFFFFFFF fin
@@ -81,6 +141,360 @@ módulo Raton
     función frecuencia(n: byte): bool
         si al_ratón(0xF3) <> 0xFA entonces devolver falso fin
         devolver al_ratón(n) = 0xFA
+    fin
+
+    ; (TOUCHPAD) una orden al ratón con el ratón quizá mandando paquetes: lo
+    ; que llega antes de su «entendido» se tira (hasta 40 octetos)
+    función al_ratón_tirando(orden: byte): nat32
+        variable r, i: nat32
+        r := al_ratón(orden)
+        i := 0
+        mientras r <> 0xFA y r <> 0xFE y r <> 0xFC y r <> 0xFFFFFFFF y i < 40 hacer
+            r := espera_leer()
+            i := i + 1
+        fin
+        devolver r
+    fin
+
+    ; (TOUCHPAD) la «llamada especial» de Synaptics (y de Elantech): E6 y
+    ; cuatro E8, cada uno con dos bits del argumento (los altos primero)
+    función especial(arg: nat32): bool
+        variable i: nat32
+        si al_ratón(0xE6) <> 0xFA entonces devolver falso fin
+        para i desde 0 hasta 3 hacer
+            si al_ratón(0xE8) <> 0xFA entonces devolver falso fin
+            si al_ratón(byte((arg >> (6 - 2 * i)) yb 3)) <> 0xFA entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; (TOUCHPAD) los tres octetos que da E9 (el estado), juntos
+    función tres_de_e9(ref r: nat32): bool
+        variable a, b, c: nat32
+        si al_ratón(0xE9) <> 0xFA entonces devolver falso fin
+        a := espera_leer()
+        b := espera_leer()
+        c := espera_leer()
+        si a = 0xFFFFFFFF o b = 0xFFFFFFFF o c = 0xFFFFFFFF entonces devolver falso fin
+        r := (a << 16) ob (b << 8) ob c
+        devolver cierto
+    fin
+
+    ; (TOUCHPAD) una pregunta a un Synaptics (la llamada especial y E9)
+    función pregunta(arg: nat32, ref r: nat32): bool
+        r := 0
+        si no especial(arg) entonces devolver falso fin
+        devolver tres_de_e9(r)
+    fin
+
+    ; (TOUCHPAD) tres veces la misma orden y E9 (el «informe E6» y el «E7» de
+    ; ALPS y Elantech); ALPS, con E8 00 delante (como Linux)
+    función informe(orden: byte, con_e8: bool, ref r: nat32): bool
+        r := 0
+        si con_e8 y (al_ratón(0xE8) <> 0xFA o al_ratón(0) <> 0xFA) entonces devolver falso fin
+        si al_ratón(orden) <> 0xFA o al_ratón(orden) <> 0xFA o al_ratón(orden) <> 0xFA entonces devolver falso fin
+        devolver tres_de_e9(r)
+    fin
+
+    función uno(b: bool): nat32
+        si b entonces devolver 1 fin
+        devolver 0
+    fin
+
+    función sí_no(b: bool): puntero a byte
+        si b entonces devolver "sí" fin
+        devolver "no"
+    fin
+
+    ; (TOUCHPAD) ¿es un Synaptics? Si lo es, lo apunta y, si puede, lo pone
+    ; en modo absoluto (cierto)
+    función mira_synaptics(): bool
+        variable r, mayor, menor, pedidas: nat32
+        variable d: arreglo [8] de nat32
+        variable t: arreglo [120] de byte
+        variable extendida: bool
+        si no pregunta(0x00, tp_ident) entonces devolver falso fin
+        si (tp_ident >> 8) yb 0xFF <> 0x47 entonces devolver falso fin
+        tp_tipo := TP_SYNAPTICS_REL
+        mayor := tp_ident yb 0x0F
+        menor := (tp_ident >> 16) yb 0xFF
+        pregunta(0x03, tp_modelo)
+        si no pregunta(0x02, tp_cap) entonces tp_cap := 0 fin
+        extendida := tp_cap yb 0x800000 <> 0
+        pedidas := 0
+        si extendida entonces pedidas := (tp_cap >> 20) yb 7 fin
+        tp_ext := 0
+        tp_0c := 0
+        si pedidas >= 1 entonces pregunta(0x09, tp_ext) fin
+        si pedidas >= 4 entonces pregunta(0x0C, tp_0c) fin
+        tp_varios_dedos := extendida y (tp_cap yb 2 <> 0 o tp_0c yb 0x080000 <> 0)
+        tp_clickpad := tp_0c yb 0x100000 <> 0
+        tp_medio := extendida y tp_cap yb 0x040000 <> 0
+        tp_cuatro := extendida y tp_cap yb 0x08 <> 0
+        ; las medidas (si las dice; si no, las de casi todos)
+        si pedidas >= 5 y tp_0c yb 0x020000 <> 0 y pregunta(0x0D, r) entonces
+            d[0] := (((r >> 16) yb 0xFF) << 5) ob (((r >> 8) yb 0x0F) << 1)
+            d[1] := ((r yb 0xFF) << 5) ob (((r >> 8) yb 0xF0) >> 3)
+            si d[0] > 3000 y d[0] < 8000 entonces tp_x_máx := ent32(d[0]) fin
+            si d[1] > 2500 y d[1] < 8000 entonces tp_y_máx := ent32(d[1]) fin
+        fin
+        si pedidas >= 7 y tp_0c yb 0x002000 <> 0 y pregunta(0x0F, r) entonces
+            d[0] := (((r >> 16) yb 0xFF) << 5) ob (((r >> 8) yb 0x0F) << 1)
+            d[1] := ((r yb 0xFF) << 5) ob (((r >> 8) yb 0xF0) >> 3)
+            si d[0] > 300 y d[0] < 3000 entonces tp_x_mín := ent32(d[0]) fin
+            si d[1] > 300 y d[1] < 2500 entonces tp_y_mín := ent32(d[1]) fin
+        fin
+        d[0] := mayor
+        d[1] := menor
+        formatear(tp_nombre, 48, "Touchpad Synaptics %u.%u", d)
+        d[0] := tp_modelo
+        d[1] := tp_cap
+        d[2] := tp_ext
+        d[3] := tp_0c
+        d[4] := nat32(sí_no(tp_varios_dedos))
+        d[5] := nat32(sí_no(tp_cap yb 1 <> 0))
+        d[6] := nat32(sí_no(tp_clickpad))
+        d[7] := nat32(sí_no(tp_medio))
+        formatear(tp_detalle, 200, "modelo %06X, capacidades %06X, extendidas %06X, 0C %06X; varios dedos: %s; palma: %s; clickpad: %s; botón del medio: %s", d)
+        d[0] := nat32(sí_no(tp_varios_dedos))
+        d[1] := nat32(sí_no(tp_clickpad))
+        formatear(tp_corto, 80, "varios dedos: %s; clickpad: %s; va como un ratón", d)
+        d[0] := nat32(dirección(tp_nombre[0]))
+        d[1] := nat32(dirección(tp_detalle[0]))
+        apunta("ratón: %s (PS/2): %s\n", d)
+        d[0] := nat32(tp_x_mín)
+        d[1] := nat32(tp_x_máx)
+        d[2] := nat32(tp_y_mín)
+        d[3] := nat32(tp_y_máx)
+        apunta("ratón: el touchpad mide de %u a %u de ancho y de %u a %u de alto\n", d)
+        si mayor < 4 o no extendida entonces
+            apunta0("ratón: firmware de antes del 4 o sin capacidades extendidas (sin W): va como un ratón\n")
+            devolver falso
+        fin
+        ; el modo: absoluto, 80 paquetes por segundo, sin los gestos del
+        ; touchpad (los toques los cuenta touchpad.cas) y, si se puede, con W
+        tp_modo_byte := 0x80 ob 0x40 ob 0x04 ob 0x01
+        si no especial(tp_modo_byte) o al_ratón(0xF3) <> 0xFA o al_ratón(0x14) <> 0xFA entonces
+            apunta0("ratón: el touchpad no ha querido el modo absoluto: va como un ratón\n")
+            devolver falso
+        fin
+        ; (no se comprueba con la pregunta 01h: desde el firmware 7.5 da otra
+        ; cosa. Si no se ha puesto, sus paquetes no tienen la forma de los del
+        ; modo absoluto y touchpad.cas lo da por perdido: otra vez relativo)
+        tp_tipo := TP_SYNAPTICS
+        modo_tp := cierto
+        tp_empieza()
+        d[0] := nat32(sí_no(tp_varios_dedos))
+        d[1] := nat32(sí_no(tp_clickpad))
+        formatear(tp_corto, 80, "varios dedos: %s; clickpad: %s; modo absoluto (rueda por el borde)", d)
+        apunta1("ratón: el touchpad, en modo absoluto (modo %02X): borde derecho para desplazar, tocar para hacer clic\n", tp_modo_byte)
+        devolver cierto
+    fin
+
+    ; (TOUCHPAD) si no es Synaptics: ¿ALPS o Elantech? Solo se dice (y van
+    ; como un ratón): lo que contestan a E6 y E7 tres veces y E9 no lo puede
+    ; decir un ratón de los de siempre
+    función mira_otros()
+        variable e6, e7: nat32
+        variable d: arreglo [3] de nat32
+        si no informe(0xE6, falso, e6) entonces devolver fin
+        si e6 >> 8 = 0x3C03 y (e6 yb 0xFF = 0xC8 o e6 yb 0xFF = 0) entonces
+            tp_tipo := TP_ELANTECH
+            copiar(tp_nombre, "Touchpad Elantech")
+            d[0] := e6
+            formatear(tp_detalle, 200, "informe E6 %06X (va como un ratón)", d)
+            copiar(tp_corto, tp_detalle)
+            apunta1("ratón: touchpad Elantech (PS/2; E6: %06X): va como un ratón\n", e6)
+            devolver
+        fin
+        si no informe(0xE6, cierto, e6) entonces devolver fin
+        si (e6 >> 16) yb 0xF8 <> 0 o (e6 >> 8) yb 0xFF <> 0 o (e6 yb 0xFF <> 10 y e6 yb 0xFF <> 100) entonces devolver fin
+        si no informe(0xE7, cierto, e7) entonces devolver fin
+        según nat16(e7 >> 16)
+            caso 0x33, 0x53, 0x60, 0x63, 0x73:
+                si (e7 >> 8) yb 0xFF <= 3 entonces
+                    tp_tipo := TP_ALPS
+                    copiar(tp_nombre, "Touchpad ALPS")
+                    d[0] := e6
+                    d[1] := e7
+                    formatear(tp_detalle, 200, "informe E6 %06X, E7 %06X (va como un ratón)", d)
+                    copiar(tp_corto, tp_detalle)
+                    apunta("ratón: touchpad ALPS (PS/2; E6: %06X, E7: %06X): va como un ratón\n", d)
+                fin
+        fin
+    fin
+
+    ; (TOUCHPAD) del modo absoluto al relativo (se ha descolocado y no
+    ; vuelve): el modo a 0 y lo de siempre. Con las interrupciones tapadas.
+    función a_relativo()
+        variable r: nat32
+        modo_tp := falso
+        tp_tipo := TP_SYNAPTICS_REL
+        cuántos := 0
+        largo_paquete := 3
+        hay_rueda := falso
+        al_ratón_tirando(0xF5)
+        especial(0)
+        al_ratón(0xF3)
+        al_ratón(0x14)
+        al_ratón(0xF6)
+        r := al_ratón(0xF4)
+        apunta3("ratón: el touchpad se ha descolocado (%u octetos malos, %u veces): vuelve a ir como un ratón (%02X)\n", tp_malos, tp_resincros, r)
+        tp_empieza()
+        copiar(tp_corto, "se descolocó: va como un ratón")
+        si ratón_botones <> 0 entonces movido(0, 0, 0) fin    ; (nada se queda pulsado)
+    fin
+
+    ; (TOUCHPAD) lo que ha salido de touchpad.cas, al ratón (con las
+    ; interrupciones tapadas)
+    función aplica_tp()
+        variable i: nat32
+        si tp_dx <> 0 o tp_dy <> 0 entonces movido(escala(tp_dx, resto_x), escala(tp_dy, resto_y), ratón_botones) fin
+        si tp_n_cambios > 0 entonces
+            para i desde 0 hasta tp_n_cambios - 1 hacer movido(0, 0, botones_de(tp_cambios[i])) fin
+        fin
+        rueda := rueda + tp_rueda
+        rueda_h := rueda_h + tp_rueda_h
+        tp_recogido()
+    fin
+
+    ; (TOUCHPAD) ¿se ha pulsado una tecla? (para «no hacer caso al escribir»)
+    función mira_teclas()
+        si Consola.teclas <> teclas_vistas entonces
+            teclas_vistas := Consola.teclas
+            tp_tecla(tics)
+        fin
+    fin
+
+    ; (TOUCHPAD) se está escribiendo (un touchpad que va como ratón: no se mueve)
+    función escribiendo(): bool
+        mira_teclas()
+        si tp_tipo < TP_SYNAPTICS_REL o tp_pausa = 0 entonces devolver falso fin
+        devolver tp_desde_tecla(tics) < tp_pausa
+    fin
+
+    ; (TOUCHPAD) cien veces por segundo (lo llama el pulso del escritorio): el
+    ; botón del toque, volver al modo relativo y acabar de grabar
+    público función tp_pulso()
+        variable b: nat32
+        b := sin_interrupciones()
+        si modo_tp o tp_simulado entonces
+            mira_teclas()
+            tp_reloj(tics)
+            aplica_tp()
+            si tp_perdido y modo_tp entonces a_relativo() fin
+        fin
+        si cap_hasta <> 0 y tics - cap_hasta < 0x80000000 entonces
+            cap_hasta := 0
+            cap_hecha := cierto
+        fin
+        reponer(b)
+    fin
+
+    ; (TOUCHPAD) un octeto de RATON /INYECTA, como si llegara del touchpad (solo con «tp_simulado»)
+    público función tp_inyecta(d: nat32): bool
+        variable b: nat32
+        si no tp_simulado entonces devolver falso fin
+        b := sin_interrupciones()
+        mira_teclas()
+        tp_octeto(d, tics)
+        aplica_tp()
+        reponer(b)
+        devolver cierto
+    fin
+
+    ; (TOUCHPAD) grabar lo que llega por la IRQ 12 durante s segundos
+    público función graba_touchpad(s: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        cap_n := 0
+        cap_desde := tics
+        cap_hasta := tics + s * HZ
+        si cap_hasta = 0 entonces cap_hasta := 1 fin
+        cap_hecha := falso
+        reponer(b)
+    fin
+
+    ; (TOUCHPAD) los segundos que quedan de grabar (0: acabado o nada)
+    público función quedan_grabando(): nat32
+        si cap_hasta = 0 entonces devolver 0 fin
+        si tics - cap_hasta < 0x80000000 entonces
+            cap_hasta := 0
+            cap_hecha := cierto
+            devolver 0
+        fin
+        devolver (cap_hasta - tics) div HZ + 1
+    fin
+
+    ; (TOUCHPAD) la cabecera de TOUCHPAD.TXT (lo que se sabe del touchpad,
+    ; como líneas que RATON /ANALIZA sabe leer)
+    público función cabecera_captura(t: puntero a byte, cabe: nat32)
+        variable d: arreglo [8] de nat32
+        variable l: arreglo [240] de byte
+        copiar(t, "# lo que ha dicho el touchpad (RATON /TOUCHPAD de Hispa-Pentium)\r\n")
+        d[0] := nat32(dirección(tp_nombre[0]))
+        d[1] := tp_tipo
+        d[2] := nat32(dirección(tp_detalle[0]))
+        formatear(l, 240, "# %s (tipo %u): %s\r\n", d)
+        concatenar(t, l)
+        d[0] := tp_ident
+        d[1] := tp_modo_byte
+        d[2] := tp_paquetes
+        d[3] := tp_malos
+        d[4] := tp_resincros
+        d[5] := tp_toques
+        d[6] := tp_palmas
+        formatear(l, 240, "# identidad %06X, modo %02X; paquetes buenos %u, octetos malos %u, resincronizado %u veces, toques %u, palmas %u\r\n", d)
+        concatenar(t, l)
+        d[0] := nat32(tp_x_mín)
+        d[1] := nat32(tp_x_máx)
+        d[2] := nat32(tp_y_mín)
+        d[3] := nat32(tp_y_máx)
+        formatear(l, 240, "aj xmin %u\r\naj xmax %u\r\naj ymin %u\r\naj ymax %u\r\n", d)
+        concatenar(t, l)
+        d[0] := uno(tp_varios_dedos)
+        d[1] := uno(tp_clickpad)
+        d[2] := uno(tp_medio)
+        d[3] := uno(tp_cuatro)
+        formatear(l, 240, "aj dedos %u\r\naj clickpad %u\r\naj medio %u\r\naj cuatro %u\r\n", d)
+        concatenar(t, l)
+        d[0] := uno(tp_toque)
+        d[1] := uno(tp_borde_v)
+        d[2] := uno(tp_borde_h)
+        d[3] := uno(tp_dos_dedos)
+        d[4] := tp_velocidad
+        d[5] := tp_pausa
+        d[6] := tp_zona
+        formatear(l, 240, "aj toque %u\r\naj borde_v %u\r\naj borde_h %u\r\naj dos %u\r\naj vel %u\r\naj pausa %u\r\naj zona %u\r\n", d)
+        concatenar(t, l)
+        d[0] := cap_n
+        formatear(l, 240, "# %u octetos; cada línea, «@tic o» y los octetos (en hexadecimal)\r\n", d)
+        concatenar(t, l)
+    fin
+
+    ; (TOUCHPAD) una línea de lo grabado, desde el octeto i (que avanza):
+    ; «@tic o HH HH ...», con los de un paquete (6 en modo absoluto; si no,
+    ; 3 o 4). 0 si no hay más.
+    público función línea_captura(ref i: nat32, t: puntero a byte, cabe: nat32): nat32
+        variable n, k, largo: nat32
+        variable d: arreglo [2] de nat32
+        variable h: arreglo [8] de byte
+        si i >= cap_n entonces devolver 0 fin
+        largo := largo_paquete
+        si modo_tp entonces largo := 6 fin
+        d[0] := cap_tic[i]
+        formatear(t, cabe, "@%u o", d)
+        n := 0
+        mientras n < largo y i < cap_n y (n = 0 o cap_tic[i] = cap_tic[i - n]) hacer
+            d[0] := cap_oct[i]
+            formatear(h, 8, " %02X", d)
+            concatenar(t, h)
+            i := i + 1
+            n := n + 1
+        fin
+        concatenar(t, "\r\n")
+        k := longitud(t)
+        devolver k
     fin
 
     ; (PANEL) lo movido, por la velocidad del Panel (en octavos de punto: lo
@@ -144,6 +558,18 @@ módulo Raton
         devolver n
     fin
 
+    ; (TOUCHPAD) lo que se ha desplazado a los lados (el borde de abajo del
+    ; touchpad, dos dedos) desde la última vez (y se pone a cero)
+    público función saca_rueda_h(): ent32
+        variable b: nat32
+        variable n: ent32
+        b := sin_interrupciones()
+        n := rueda_h
+        rueda_h := 0
+        reponer(b)
+        devolver n
+    fin
+
     ; lo mismo, desde un ratón USB (usbhid.cas)
     público función ratón_de_fuera(dx: ent32, dy: ent32, botones: nat32)
         variable b: nat32
@@ -160,8 +586,19 @@ módulo Raton
         si e yb 0x21 = 0x21 entonces
             d := meter_puerto(DATOS)
             ruido(R_RATÓN, d)                   ; (USUARIOS) el pozo del azar
+            ; (TOUCHPAD) grabando (RATON /TOUCHPAD)
+            si cap_hasta <> 0 y cap_n < CABE_CAPTURA entonces
+                cap_oct[cap_n] := byte(d)
+                cap_tic[cap_n] := nat16(tics - cap_desde)
+                cap_n := cap_n + 1
+            fin
+            si modo_tp entonces
+                ; (TOUCHPAD) un Synaptics en modo absoluto: lo hace touchpad.cas
+                mira_teclas()
+                tp_octeto(d, tics)
+                aplica_tp()
             ; el primero de los tres lleva siempre el bit 3: así no se pierde el paso
-            si cuántos <> 0 o d yb 8 <> 0 entonces
+            sino si cuántos <> 0 o d yb 8 <> 0 entonces
                 trozo[cuántos] := d
                 cuántos := cuántos + 1
             fin
@@ -173,7 +610,13 @@ módulo Raton
                     si b yb 0x10 <> 0 entonces dx := dx - 256 fin
                     dy := ent32(trozo[2])
                     si b yb 0x20 <> 0 entonces dy := dy - 256 fin
-                    movido(escala(dx, resto_x), escala(0 - dy, resto_y), botones_de(b yb 7))     ; (PANEL)
+                    si escribiendo() entonces
+                        ; (TOUCHPAD) un touchpad que va como ratón, mientras se escribe: ni se mueve ni pulsa
+                        b := botones_de(b yb 7) yb ratón_botones
+                        si b <> ratón_botones entonces movido(0, 0, b) fin
+                    sino
+                        movido(escala(dx, resto_x), escala(0 - dy, resto_y), botones_de(b yb 7))     ; (PANEL)
+                    fin
                     ; (NAVEGADOR) el cuarto: la rueda (hacia el que la usa, positivo)
                     si largo_paquete = 4 y trozo[3] <> 0 entonces
                         dx := ent32(trozo[3] yb 0x0F)
@@ -234,7 +677,8 @@ módulo Raton
     ; enciende el ratón, con la flecha en el centro de una pantalla de ese
     ; ancho y ese alto. Falso si no contesta (no hay ratón PS/2).
     público función prepara_ratón(an: ent32, al: ent32): bool
-        variable b, c, r: nat32
+        variable b, c, r, prueba1, prueba2, id, aa: nat32
+        variable d: arreglo [6] de nat32
         ancho := an
         alto := al
         ; (PANEL) cada punto, en octavos, por la velocidad (de 1 a 10; el 5, uno a uno)
@@ -250,13 +694,34 @@ módulo Raton
         por_octavos[10] := 22
         ratón_x := an div 2
         ratón_y := al div 2
+        ; (TOUCHPAD) las pruebas: un Synaptics de mentira (RATON /INYECTA)
+        si buscar(línea_del_cargador(), "tp_simulado") <> nulo entonces
+            tp_simulado := cierto
+            tp_tipo := TP_SYNAPTICS
+            tp_varios_dedos := cierto
+            copiar(tp_nombre, "Touchpad Synaptics (simulado)")
+            copiar(tp_detalle, "de mentira, para las pruebas: le llega lo de RATON /INYECTA")
+            tp_empieza()
+            apunta0("ratón: touchpad simulado (tp_simulado): le llega lo de RATON /INYECTA\n")
+        fin
         ; sin controlador de teclado y ratón PS/2 (un Mac, un PC «sin
         ; legado»: su puerto lee 0xFF): solo puede haber ratón USB
         si meter_puerto(ESTADO) = 0xFF entonces
+            apunta0("ps2: no hay controlador 8042 (el puerto 64h lee FFh): ni teclado ni ratón PS/2\n")    ; (PS2)
             hay_ratón := hay_ratón_usb
             devolver hay_ratón
         fin
         b := sin_interrupciones()
+        vacía_8042()                            ; (PS2)
+        ; (PS2) las pruebas de las dos bocas (AB: la del teclado; A9: la del
+        ; ratón; 00 es que está bien), para el registro
+        espera_escribir()
+        sacar_puerto(ESTADO, 0xAB)
+        prueba1 := espera_leer()
+        espera_escribir()
+        sacar_puerto(ESTADO, 0xA9)
+        prueba2 := espera_leer()
+        vacía_8042()
         ; la segunda boca del 8042, encendida, y con su interrupción
         espera_escribir()
         sacar_puerto(ESTADO, 0xA8)
@@ -270,18 +735,44 @@ módulo Raton
             espera_escribir()
             sacar_puerto(DATOS, c)
         fin
+        vacía_8042()                            ; (PS2)
         r := al_ratón(0xF6)                     ; como de fábrica
+        aa := 0
+        si r <> 0xFA entonces
+            ; (PS2) no contesta: reiniciarlo (FF: dice FA, luego AA y su id);
+            ; hay touchpad (los de los ThinkPad) que el firmware deja a medias
+            vacía_8042()
+            si al_ratón(0xFF) = 0xFA entonces
+                aa := espera_leer_largo()
+                espera_leer()
+                vacía_8042()
+                r := al_ratón(0xF6)
+            fin
+        fin
+        ; (TOUCHPAD) ¿un touchpad? Synaptics (en modo absoluto, si puede);
+        ; si no, ALPS o Elantech (solo para decirlo). Lo que no se queda en
+        ; modo absoluto vuelve a estar como de fábrica (las preguntas cambian
+        ; la resolución)
+        si r = 0xFA y no mira_synaptics() entonces
+            al_ratón(0xF6)
+            si tp_tipo = TP_NO entonces mira_otros() fin
+            r := al_ratón(0xF6)
+        fin
+        id := 0xFFFFFFFF
         ; (NAVEGADOR) ¿tiene rueda? La llamada del IntelliMouse: la frecuencia
         ; a 200, a 100 y a 80; si luego dice que es el 3, manda cuatro octetos
-        si r = 0xFA entonces
+        si r = 0xFA y no modo_tp entonces       ; (TOUCHPAD: no en modo absoluto, que lo descolocaría)
             si frecuencia(200) y frecuencia(100) y frecuencia(80) entonces
-                si al_ratón(0xF2) = 0xFA y espera_leer() = 3 entonces
-                    hay_rueda := cierto
-                    largo_paquete := 4
+                si al_ratón(0xF2) = 0xFA entonces
+                    id := espera_leer()         ; (PS2) 00 normal, 03 con rueda, 04 con 5 botones
+                    si id = 3 entonces
+                        hay_rueda := cierto
+                        largo_paquete := 4
+                    fin
                 fin
             fin
-            r := al_ratón(0xF4)                 ; y que cuente lo que se mueve
         fin
+        si r = 0xFA entonces r := al_ratón(0xF4) fin     ; y que cuente lo que se mueve
         hay_ratón := r = 0xFA o hay_ratón_usb
         ratón_ps2 := r = 0xFA                   ; (dispositivos)
         si r = 0xFA entonces
@@ -292,6 +783,16 @@ módulo Raton
             sacar_puerto(PIC1 + 1, meter_puerto(PIC1 + 1) yb 0xFB)
         fin
         reponer(b)
+        ; (PS2) la línea del registro: el 8042, sus dos bocas y el ratón
+        d[0] := prueba1
+        d[1] := prueba2
+        d[2] := r
+        d[3] := aa
+        d[4] := id
+        apunta("ps2: controlador 8042 sí; prueba de la boca 1 (teclado) %02X, de la 2 (ratón) %02X (00: bien); el ratón contesta %02X", d)
+        si aa <> 0 entonces apunta1(" (después de reiniciarlo: %02X)", aa) fin
+        si r = 0xFA entonces apunta1(", id %02X (00 normal, 03 con rueda, 04 cinco botones)", id) sino apunta0(": no hay ratón PS/2 (o no contesta)") fin
+        apunta0("\n")
         devolver hay_ratón
     fin
 

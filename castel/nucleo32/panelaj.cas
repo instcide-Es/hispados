@@ -36,6 +36,16 @@ módulo Panelaj
     público constante AJ_HORA_ÚLTIMA = 20       ; la última puesta en hora por Internet (segundos desde el 1/1/2000)
     público constante AJ_HORA_ESTADO = 21       ; cómo fue (HORA_... de zonas.cas)
     público constante AJ_HORA_DESFASE = 22      ; lo que iba mal el reloj, en segundos (con signo)
+    ; (TOUCHPAD) el touchpad (preferencias.cas)
+    público constante AJ_TP_TOQUE = 23          ; 1: tocar para hacer clic
+    público constante AJ_TP_BORDE_V = 24        ; 1: el borde derecho, para desplazar
+    público constante AJ_TP_BORDE_H = 25        ; 1: el borde de abajo, a los lados
+    público constante AJ_TP_DOS_DEDOS = 26      ; 1: dos dedos, para desplazar
+    público constante AJ_TP_VELOCIDAD = 27      ; 1 a 10 (5)
+    público constante AJ_TP_ESCRIBIR = 28       ; no hacerle caso tras una tecla, en centésimas (0: siempre)
+    público constante AJ_TP_ZONA = 29           ; el ancho del borde, en % (4 a 20)
+    público constante AJ_TP_HAY = 30            ; (solo leer) 0 ninguno, 1 Synaptics, 2 Synaptics como ratón, 3 ALPS, 4 Elantech
+    público constante AJ_TP_GRABA = 31          ; grabar N segundos (1 a 60); 0, guardar TOUCHPAD.TXT; al leer, los que quedan; 1000 + octeto, inyectar (tp_simulado)
     público constante MAX_TEMAS = 6
     público constante SOLO_LEER = 0xFFFFFFFF
 

@@ -1658,6 +1658,18 @@ static void raton_regla(const so_suceso *s)
 	}
 }
 
+/* (PUNTEROS) la forma del puntero (la llamada 177): sobre la página, la
+ * «I» de escribir; en lo demás (los menús, las barras, la regla, un
+ * cuadro), la flecha */
+static void puntero_de_pluma(const so_suceso *s)
+{
+	int f = SO_P_FLECHA;
+
+	if (!P.cuadro && !arrastra_desp && !arrastra_regla && s->y >= y_doc && s->y < y_doc + al_doc && s->x < an_doc && !P.vi.previa)
+		f = SO_P_TEXTO;
+	so_puntero(P.v, f);
+}
+
 static void raton(const so_suceso *s)
 {
 	int flecha;
@@ -1951,7 +1963,7 @@ int pluma_ventana(const char *archivo)
 		case SO_TECLA: tecla(&s); break;
 		case SO_BAJA:
 		case SO_SUBE:
-		case SO_MUEVE: raton(&s); break;
+		case SO_MUEVE: raton(&s); puntero_de_pluma(&s); break;	/* (PUNTEROS) */
 		case SO_RUEDA: rueda(&s); break;
 		case SO_MENU: menu_elegido(&s); break;
 		case SO_TAMANO: cambia_tamano(s.x, s.y); break;

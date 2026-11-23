@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -134,6 +134,15 @@ módulo Semilla
             mov eax, [ebp+40]
             mov {cs_}, eax
             mov {m}, ebp
+        fin
+        ; (TERMO) el rdmsr «seguro» de termo.cas: el registro no está; se sigue detrás
+        si cs_ yb 3 = 0 y recupera(eip) <> 0 entonces
+            eip := recupera(eip)
+            ensamblador
+                mov eax, {eip}
+                mov [ebp+36], eax
+            fin
+            devolver
         fin
         si a_su_despachador(m, 13, código, 0, cierto) entonces devolver fin   ; (JUEGOS, SEH)
         imprimir1("\n*** excepción 13: protección general (código %u)", código)
@@ -731,10 +740,356 @@ módulo Semilla
     ; batería. Si no está en la unidad del sistema, no pasa nada: se apaga
     ; como antes. Se le da la línea del cargador: con «registro», el suyo va
     ; a \ACPI.TXT; «acpicada=N», una lectura cada N segundos (10 si no).
+    ; (UEFI) la primera línea del registro del arranque: por dónde ha
+    ; arrancado (UEFI de 64 o 32 bits, o la BIOS/CSM), con qué pantalla, y la
+    ; línea del cargador (que dice qué entrada del menú de GRUB se eligió)
+    función apunta_arranque()
+        variable base, fila, an, al, bits: nat32
+        variable de64, hay: bool
+        variable d: arreglo [4] de nat32
+        hay := pantalla_del_cargador(base, fila, an, al, bits)
+        d[1] := an
+        d[2] := al
+        si arrancado_por_uefi() entonces
+            tabla_efi(de64)
+            d[0] := 32
+            si de64 entonces d[0] := 64 fin
+            si hay entonces formatear(modo_arranque, 64, "por UEFI (%u bits, GOP %u x %u)", d) sino formatear(modo_arranque, 64, "por UEFI (%u bits, sin pantalla)", d) fin
+        sino si mb2() entonces
+            Textos32.copiar(modo_arranque, "por multiboot2 (sin UEFI)")
+        sino si hay entonces
+            d[0] := an
+            d[1] := al
+            formatear(modo_arranque, 64, "por la BIOS/CSM (VBE %u x %u)", d)
+        sino
+            Textos32.copiar(modo_arranque, "por la BIOS/CSM (modo texto)")
+        fin
+        d[0] := nat32(dirección(modo_arranque[0]))
+        d[1] := nat32(línea_del_cargador())
+        apunta("arranque: %s; la línea del cargador: %s\n", d)
+    fin
+
+    ; (MWAIT, 0.8.9) ¿«mwait» en el reposo, con la pista más honda? Solo si
+    ; no hay nada que lo haga peligroso:
+    ;  - Intel (en AMD, «mwait» es C1, lo mismo que «hlt»);
+    ;  - no un Atom (Bay Trail se cuelga con C6: el Acer One 10, el Medion;
+    ;    los N455 del HP Mini y el Toshiba, por si acaso tampoco);
+    ;  - MONITOR/MWAIT (cpuid 1, ECX 3) y sus pistas (cpuid 5, ECX 0);
+    ;  - ARAT (cpuid 6, EAX 2: el temporizador del APIC local no se para en
+    ;    C3 y más hondo; el tic puede ser suyo, relojhpet.cas) y el TSC
+    ;    invariante (80000007h, EDX 8: lo usan el Termómetro y los tiempos);
+    ;  - no en una máquina virtual (el bit 31 de cpuid 1, ECX: VirtualBox
+    ;    puede tratar «mwait» como «nop» y gastar el procesador de verdad).
+    ; La pista: el C más hondo con subestados en cpuid 5, EDX (de 4 en 4
+    ; bits: C0, C1, C2...): ((C - 1) << 4) + (subestados - 1). Si el
+    ; firmware no deja tanto, el procesador lo rebaja solo.
+    ; «ocioso=hlt» en la línea del cargador: siempre «hlt»; «ocioso=mwait»
+    ; (las pruebas, en QEMU): «mwait» aunque no se cumpla lo de arriba
+    ; (con la pista de cpuid 5 si la hay; si no, 0, C1).
+    variable rc: arreglo [4] de nat32
+    función cpuid_s(hoja: nat32, sub: nat32)
+        ensamblador
+            push ebx
+            mov eax, {hoja}
+            mov ecx, {sub}
+            db 0x0F, 0xA2               ; cpuid
+            mov {rc}, eax
+            mov {rc+4}, ebx
+            mov {rc+8}, ecx
+            mov {rc+12}, edx
+            pop ebx
+        fin
+    fin
+
+    ; los Atom (Bonnell, Saltwell, Silvermont, Airmont, Goldmont, Tremont...)
+    función es_atom(m: nat32): bool
+        variable lista: arreglo [20] de nat32
+        variable i: nat32
+        lista[0] := 0x1C
+        lista[1] := 0x26
+        lista[2] := 0x27
+        lista[3] := 0x35
+        lista[4] := 0x36
+        lista[5] := 0x37
+        lista[6] := 0x4A
+        lista[7] := 0x4C
+        lista[8] := 0x4D
+        lista[9] := 0x5A
+        lista[10] := 0x5D
+        lista[11] := 0x5C
+        lista[12] := 0x5F
+        lista[13] := 0x7A
+        lista[14] := 0x86
+        lista[15] := 0x96
+        lista[16] := 0x9C
+        lista[17] := 0xBE
+        lista[18] := 0xAF
+        lista[19] := 0xB6
+        para i desde 0 hasta 19 hacer
+            si lista[i] = m entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función mira_reposo()
+        variable máx, fam, modelo, ecx1, edx5, ecx5, c, n, sub, pista: nat32
+        variable intel, atom, arat, tsc_inv, virtual, forzado: bool
+        variable por: puntero a byte
+        si buscar(línea_del_cargador(), "ocioso=hlt") <> nulo entonces
+            apunta0("reposo: hlt (lo dice la línea del cargador: ocioso=hlt)\n")
+            devolver
+        fin
+        forzado := buscar(línea_del_cargador(), "ocioso=mwait") <> nulo
+        cpuid_s(0, 0)
+        máx := rc[0]
+        intel := rc[1] = 0x756E6547 y rc[3] = 0x49656E69 y rc[2] = 0x6C65746E
+        cpuid_s(1, 0)
+        ecx1 := rc[2]
+        fam := (rc[0] >> 8) yb 0xF
+        modelo := (rc[0] >> 4) yb 0xF
+        si fam = 6 o fam = 15 entonces modelo := modelo + (((rc[0] >> 16) yb 0xF) << 4) fin
+        atom := fam = 6 y es_atom(modelo)
+        virtual := (ecx1 >> 31) = 1
+        arat := falso
+        si máx >= 6 entonces
+            cpuid_s(6, 0)
+            arat := (rc[0] yb 4) <> 0
+        fin
+        cpuid_s(0x80000000, 0)
+        tsc_inv := falso
+        si rc[0] >= 0x80000007 entonces
+            cpuid_s(0x80000007, 0)
+            tsc_inv := (rc[3] yb 0x100) <> 0
+        fin
+        pista := 0
+        edx5 := 0
+        ecx5 := 0
+        si máx >= 5 y (ecx1 yb 8) <> 0 entonces
+            cpuid_s(5, 0)
+            ecx5 := rc[2]
+            edx5 := rc[3]
+            si (ecx5 yb 1) <> 0 entonces
+                c := 7
+                mientras c >= 1 hacer
+                    sub := (edx5 >> (c * 4)) yb 0xF
+                    si sub <> 0 entonces
+                        pista := ((c - 1) << 4) + (sub - 1)
+                        c := 0
+                    sino
+                        c := c - 1
+                    fin
+                fin
+            fin
+        fin
+        por := nulo
+        si (ecx1 yb 8) = 0 entonces por := "sin MONITOR/MWAIT"
+        sino si no intel entonces por := "no es Intel"
+        sino si atom entonces por := "un Atom"
+        sino si virtual entonces por := "una máquina virtual"
+        sino si máx < 5 o (ecx5 yb 1) = 0 entonces por := "sin las pistas de cpuid 5"
+        sino si no arat entonces por := "sin ARAT (el APIC local se pararía)"
+        sino si no tsc_inv entonces por := "sin TSC invariante"
+        sino si pista < 0x10 entonces por := "solo C1 (lo mismo que hlt)"
+        fin
+        si por <> nulo y no (forzado y (ecx1 yb 8) <> 0) entonces
+            apunta3("reposo: hlt (%s; familia %u, modelo %02Xh)\n", nat32(por), fam, modelo)
+            devolver
+        fin
+        pon_mwait(pista)
+        si por <> nulo entonces
+            apunta2("reposo: mwait con la pista %02Xh (C%u), FORZADO (ocioso=mwait)\n", pista, (pista >> 4) + 1)
+        sino
+            apunta3("reposo: mwait con la pista %02Xh (C%u; cpuid 5, EDX = %08Xh)\n", pista, (pista >> 4) + 1, edx5)
+        fin
+    fin
+
+    ; (PSTATE, 0.8.9) el estado P del procesador: Hispa-Pentium no lo ponía
+    ; nunca, y se quedaba el que dejara el firmware; en la Medion S2217 (Atom
+    ; Z3735F, Bay Trail, por UEFI de 32 bits) eran 499 MHz todo el rato, en
+    ; reposo y con carga (la nominal es 1,33 GHz). Al arrancar se pide la
+    ; nominal máxima (sin turbo: con la nominal pedida el turbo lo da el
+    ; procesador solo si puede), como Linux (intel_pstate), solo donde se sabe
+    ; hacer bien:
+    ;  - Intel con SpeedStep (cpuid 1, ECX 7) encendido por el firmware
+    ;    (IA32_MISC_ENABLE, 1A0h, bit 16) y sin HWP puesto (IA32_PM_ENABLE,
+    ;    770h, bit 0: entonces manda el procesador y PERF_CTL no vale);
+    ;  - Core de Nehalem en adelante (modelo 1Ah o más, no Atom): la nominal
+    ;    de MSR_PLATFORM_INFO (CEh, bits 15:8), a IA32_PERF_CTL (199h) bits
+    ;    15:8 (core_get_val de intel_pstate);
+    ;  - Silvermont (Bay Trail, 37h) y Airmont (Cherry Trail/Braswell, 4Ch):
+    ;    la máxima de 66Ah (bits 22:16) con su voltaje, el más alto de 66Bh
+    ;    (bits 22:16), en PERF_CTL bits 15:8 y 6:0 (atom_get_val de
+    ;    intel_pstate con la máxima: el voltaje es justo el «máximo»);
+    ;  - los demás (Atom viejos como el N455, AMD, máquinas virtuales sin
+    ;    SpeedStep), nada: lo dice y se queda la del firmware.
+    ; Cada lectura y escritura, con wrmsr_seguro/rdmsr_seguro (termo.cas): un
+    ; #GP no para el núcleo. Con valores raros (ratio < 4 o > 60, voltaje 0 o
+    ; al revés), nada. «sinpstate» en la línea del cargador lo quita. Solo el
+    ; procesador del sistema (el BSP): en estos Intel los núcleos van a la
+    ; misma frecuencia y manda la petición más alta; los AP que despierta el
+    ; Termómetro no piden nada (pendiente: que pidan lo mismo).
+    ; El registro dice «procesador: frecuencia puesta a X MHz (de Y)».
+    función bus_silvermont(): nat32             ; MHz x 10 (MSR_FSB_FREQ, CDh)
+        si no Termo.rdmsr_seguro(0xCD) entonces devolver 833 fin
+        según Termo.msr_lo yb 7
+            caso 0: devolver 833
+            caso 1: devolver 1000
+            caso 2: devolver 1333
+            caso 3: devolver 1167
+            caso 4: devolver 800
+        fin
+        devolver 833
+    fin
+
+    función mira_pstate()
+        variable fam, modelo, ecx1, antes, nueva, vid, bus, lo, hi: nat32
+        variable silver: bool
+        si buscar(línea_del_cargador(), "sinpstate") <> nulo entonces
+            apunta0("procesador: el estado P, el del firmware (lo dice la línea del cargador: sinpstate)\n")
+            devolver
+        fin
+        cpuid_s(0, 0)
+        si no (rc[1] = 0x756E6547 y rc[3] = 0x49656E69 y rc[2] = 0x6C65746E) y buscar(línea_del_cargador(), "pstate=prueba") = nulo entonces
+            apunta0("procesador: no es Intel; la frecuencia, la del firmware\n")
+            devolver
+        fin
+        cpuid_s(1, 0)
+        ecx1 := rc[2]
+        fam := (rc[0] >> 8) yb 0xF
+        modelo := ((rc[0] >> 4) yb 0xF) + (((rc[0] >> 16) yb 0xF) << 4)
+        ; «pstate=prueba» (solo QEMU, las pruebas): como si fuera un Core con
+        ; SpeedStep, para pasar por las lecturas y escrituras (y sus #GP)
+        si buscar(línea_del_cargador(), "pstate=prueba") <> nulo entonces
+            fam := 6
+            modelo := 0x3A
+            ecx1 := ecx1 ob 0x80
+        fin
+        si fam <> 6 o (ecx1 yb 0x80) = 0 entonces
+            apunta2("procesador: sin SpeedStep (familia %u, modelo %02Xh); la frecuencia, la del firmware\n", fam, modelo)
+            devolver
+        fin
+        silver := modelo = 0x37 o modelo = 0x4C
+        si no silver y (modelo < 0x1A o es_atom(modelo)) entonces
+            apunta1("procesador: modelo %02Xh: no sé ponerle el estado P; la frecuencia, la del firmware\n", modelo)
+            devolver
+        fin
+        si (no Termo.rdmsr_seguro(0x1A0) o (Termo.msr_lo yb 0x10000) = 0) y buscar(línea_del_cargador(), "pstate=prueba") = nulo entonces
+            apunta0("procesador: el firmware tiene apagado SpeedStep (1A0h, bit 16); la frecuencia, la suya\n")
+            devolver
+        fin
+        si Termo.rdmsr_seguro(0x770) y (Termo.msr_lo yb 1) <> 0 entonces
+            apunta0("procesador: con HWP encendido (770h): la frecuencia la lleva el procesador\n")
+            devolver
+        fin
+        si silver entonces bus := bus_silvermont() sino bus := 1000 fin
+        si modelo = 0x1A o modelo = 0x1E o modelo = 0x1F o modelo = 0x25 o modelo = 0x2C o modelo = 0x2E o modelo = 0x2F entonces bus := 1333 fin
+        antes := 0
+        si Termo.rdmsr_seguro(0x198) entonces antes := (Termo.msr_lo >> 8) yb 0xFF fin
+        vid := 0
+        si silver entonces
+            si no Termo.rdmsr_seguro(0x66A) entonces
+                apunta0("procesador: no se deja leer 66Ah; la frecuencia, la del firmware\n")
+                devolver
+            fin
+            nueva := (Termo.msr_lo >> 16) yb 0x7F
+            si no Termo.rdmsr_seguro(0x66B) entonces
+                apunta0("procesador: no se deja leer 66Bh; la frecuencia, la del firmware\n")
+                devolver
+            fin
+            vid := (Termo.msr_lo >> 16) yb 0x7F
+            si vid = 0 o vid < ((Termo.msr_lo >> 8) yb 0x7F) entonces
+                apunta1("procesador: el voltaje de 66Bh no es creíble (%08Xh); la frecuencia, la del firmware\n", Termo.msr_lo)
+                devolver
+            fin
+        sino
+            si no Termo.rdmsr_seguro(0xCE) entonces
+                apunta0("procesador: no se deja leer CEh; la frecuencia, la del firmware\n")
+                devolver
+            fin
+            nueva := (Termo.msr_lo >> 8) yb 0xFF
+        fin
+        si nueva = 0 y buscar(línea_del_cargador(), "pstate=prueba") <> nulo entonces nueva := 16 fin   ; (QEMU da 0)
+        si nueva < 4 o nueva > 60 entonces
+            apunta1("procesador: la nominal leída no es creíble (%u); la frecuencia, la del firmware\n", nueva)
+            devolver
+        fin
+        si no Termo.rdmsr_seguro(0x199) entonces
+            apunta0("procesador: no se deja leer 199h; la frecuencia, la del firmware\n")
+            devolver
+        fin
+        lo := (Termo.msr_lo yb 0xFFFF0000) ob (nueva << 8)
+        si silver entonces lo := (lo yb 0xFFFFFF80) ob vid fin
+        hi := Termo.msr_hi yb 0xFFFFFFFE           ; el bit 32 (sin turbo), apagado: el turbo, si puede
+        si no Termo.wrmsr_seguro(0x199, lo, hi) entonces
+            apunta0("procesador: no se deja escribir 199h; la frecuencia, la del firmware\n")
+            devolver
+        fin
+        apunta3("procesador: frecuencia puesta a %u MHz (de %u; ratio %u)\n", (nueva * bus + 5) div 10, (antes * bus + 5) div 10, nueva)
+    fin
+
+    ; (UEFI) el SMBIOS (lo que dice el equipo de sí mismo: el fabricante, el
+    ; modelo, la placa, la BIOS) no está en F0000h-FFFFFh sin BIOS: está en la
+    ; tabla de configuración de la tabla del sistema de EFI, con su GUID (el
+    ; de SMBIOS 3, F2FD1544-..., o el de SMBIOS 2, EB9D2D31-...). Da la
+    ; dirección física de su punto de entrada («_SM3_» o «_SM_»), o 0.
+    función smbios_uefi(): nat32
+        variable st, n, ct, salto, i, d3, d2: nat32
+        variable de64: bool
+        variable v, g: puntero a nat32
+        st := tabla_efi(de64)
+        si st = 0 entonces devolver 0 fin
+        v := puntero(mapear_aparato(st, 128))
+        si v = nulo entonces devolver 0 fin
+        si de64 entonces
+            n := v[26]
+            si v[27] <> 0 o v[29] <> 0 entonces devolver 0 fin
+            ct := v[28]
+            salto := 24
+        sino
+            n := v[16]
+            ct := v[17]
+            salto := 20
+        fin
+        si n = 0 o n > 64 o ct = 0 entonces devolver 0 fin
+        g := puntero(mapear_aparato(ct, n * salto))
+        si g = nulo entonces devolver 0 fin
+        d3 := 0
+        d2 := 0
+        para i desde 0 hasta n - 1 hacer
+            v := puntero(nat32(g) + i * salto)
+            si no de64 o v[5] = 0 entonces              ; (no por encima de 4 GB)
+                si v[0] = 0xF2FD1544 y v[1] = 0x4A2C9794 y v[2] = 0xBBE52E99 y v[3] = 0x94E320CF entonces d3 := v[4] fin
+                si v[0] = 0xEB9D2D31 y v[1] = 0x11D32D88 y v[2] = 0x9000169A y v[3] = 0x4DC13F27 entonces d2 := v[4] fin
+            fin
+        fin
+        si d3 <> 0 entonces devolver d3 fin
+        devolver d2
+    fin
+
     función arranca_acpi()
         variable t: puntero a Tarea
-        variable e: nat32
-        t := cargar_servicio("ACPI.BIN", línea_del_cargador(), e)      ; (PROTEGE) de la carpeta del sistema
+        variable e, sm: nat32
+        variable línea: arreglo [600] de byte
+        variable d: arreglo [3] de nat32
+        ; (UEFI) sin BIOS, la RSDP no está en su zona: la que ha copiado GRUB
+        ; (su dirección física), detrás de lo que dice el cargador; y el
+        ; SMBIOS, el de la tabla del sistema de EFI
+        si rsdp() <> 0 entonces
+            sm := smbios_uefi()
+            d[0] := nat32(línea_del_cargador())
+            d[1] := rsdp()
+            d[2] := sm
+            si sm <> 0 entonces
+                formatear(línea, 600, "%s rsdp=%08X smbios=%08X", d)
+                imprimir1("uefi: el SMBIOS, en 0x%08X (de la tabla del sistema de EFI)\n", sm)
+            sino
+                formatear(línea, 600, "%s rsdp=%08X", d)
+                escribir("uefi: la tabla del sistema de EFI no dice dónde está el SMBIOS\n")
+            fin
+            t := cargar_servicio("ACPI.BIN", línea, e)
+        sino
+            t := cargar_servicio("ACPI.BIN", línea_del_cargador(), e)      ; (PROTEGE) de la carpeta del sistema
+        fin
         si t = nulo entonces devolver fin
         pon_servicio_acpi(t)
         imprimir1("acpi: el servicio de ACPI (ACPI.BIN) en marcha, la tarea %u\n", t.id)
@@ -742,12 +1097,14 @@ módulo Semilla
 
     función principal(): byte
         variable malo: puntero a nat32
+        variable pse: puntero a nat32           ; (UEFI) pruebapse36
         prepara_gdt()
         prepara_excepciones()
         prepara_pic()
         prepara_reloj()
         carga_idt()
         escribir("Hispa-Pentium (semilla), un núcleo de 32 bits escrito en Castel\n")
+        apunta_arranque()                       ; (UEFI) la primera línea del registro: por dónde ha arrancado
         prepara_marcos(nat32(fin_programa()))
         si límite = 0 entonces
             escribir("*** el cargador no dice cuánta memoria hay. El núcleo se para.\n")
@@ -758,13 +1115,29 @@ módulo Semilla
             devolver 12
         fin
         prepara_tareas()
+        prepara_texto_uefi()                    ; (UEFI) sin modo de texto: la consola, en la pantalla del firmware
         prepara_consola()
         prepara_usuario()
         prepara_escritorio()
         permitir_interrupciones()
+        pinta_ahora()                           ; (UEFI) lo dicho hasta aquí, ya en la pantalla
+        mira_reloj()                            ; (UEFI) ¿cuenta el 8254? Si no, el HPET (relojhpet.cas)
+        mira_reposo()                           ; (MWAIT) «hlt» o «mwait» en la tarea ociosa
+        mira_pstate()                           ; (PSTATE) la frecuencia nominal del procesador
+        pinta_ahora()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())
         busca_discos()
+        pinta_ahora()                           ; (UEFI)
+        ; (UEFI, para las pruebas) «pruebapse36»: lo de poner a la vista la
+        ; pantalla de por encima de 4 GB, con la RAM de 4 GB (QEMU -m 5G):
+        ; se escribe CAFEBABE en 0x100001234 y la prueba lo mira desde fuera
+        si buscar(línea_del_cargador(), "pruebapse36") <> nulo y no arrancado_por_uefi() entonces
+            mapea_alta(1, 0)
+            pse := puntero(GRÁFICOS_INICIO + 0x1234)
+            valor(pse) := 0xCAFEBABE
+            imprimir1("pse36: escrito 0x%08X en 0x100001234 (por una página de 4 MB)\n", valor(pse))
+        fin
         ; si el cargador lo pide («ordenes» en su línea), el intérprete de
         ; órdenes del anillo 3, ya
         ; un sistema instalado en el disco: sus ajustes (\\HISPA\\HISPA.INI: el

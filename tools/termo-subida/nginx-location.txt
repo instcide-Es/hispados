@@ -1,0 +1,34 @@
+# (TERMO) «Enviar a Carlos»: el receptor del Termómetro. Va DENTRO del
+# server { listen 443 ssl; server_name actualiza.hispados.es ...; } (ese
+# bloque HTTPS hay que crearlo: hoy actualiza.hispados.es solo tiene el de
+# HTTP del puerto 80, y su certificado no cubre ese nombre) o, si se prefiere
+# no tocar actualiza, dentro del server de 443 de hispados.es (que ya tiene
+# certificado bueno): la memoria prueba los dos, por este orden:
+#   https://actualiza.hispados.es/termo/subir.php
+#   https://hispados.es/termo/subir.php
+# Solo esa URL, solo POST, como mucho 6 MB, con su propio pool de PHP; el
+# guion está fuera de la carpeta de la web (no se puede descargar su fuente).
+location = /termo/subir.php {
+    limit_except POST { deny all; }
+    client_max_body_size 6m;
+    client_body_timeout 60s;
+    fastcgi_pass unix:/tmp/php-cgi-83-hispados-termo.sock;
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME /www/hispados-termo/subir.php;
+    fastcgi_param SCRIPT_NAME /termo/subir.php;
+    access_log /www/wwwlogs/hispados-termo.log;
+}
+location ^~ /termo/ { return 404; }
+
+# Para el bloque HTTPS nuevo de actualiza.hispados.es (si se quiere ese nombre):
+# server {
+#     listen 443 ssl;
+#     http2 on;
+#     server_name actualiza.hispados.es;
+#     ssl_certificate     /www/hispados-ssl/actualiza.crt;   # (Let's Encrypt, para actualiza.hispados.es)
+#     ssl_certificate_key /www/hispados-ssl/actualiza.key;
+#     ssl_protocols TLSv1.2 TLSv1.3;     # (TLS.BIN de Hispa-Pentium habla TLS 1.2)
+#     root /www/hispados;
+#     ... los dos location de arriba ...
+#     location / { default_type application/octet-stream; try_files $uri =404; }
+# }

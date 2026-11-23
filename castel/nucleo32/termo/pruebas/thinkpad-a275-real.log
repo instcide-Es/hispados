@@ -1,0 +1,47 @@
+Registro del Termometro de Hispa-Pentium, 22/11/2026
+(RECONSTRUIDO del extracto del Lenovo ThinkPad A275 real (AMD PRO A12-8830B, familia 15h modelo 60h+, 0 zonas ACPI) que pego Carlos: el registro decia «114,3 C fijo en todas las lineas hasta el cierre»; las lineas DATOS que faltaban en el extracto se han rellenado con ese valor)
+19:53:16 SUCESO Termometro abierto: procesador AMD PRO A12-8830B R7, 10 COMPUTE CORES 4C+6G, 1 sensores del procesador
+19:53:18 SUCESO ACPI (ACPI.BIN): 0 zonas termicas, 0 ventiladores, equipo LENOVO 20KCS0FT02, BIOS R0NET46W (1.24 ) (04/13/2021)
+19:53:18 SUCESO sensor Procesador (Tctl): 114,3 C (limite 90,0 C)
+19:53:18 SUCESO bateria: SIN enchufar, 97 %
+19:53:18 DATOS fase=reposo max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:20 DATOS fase=reposo max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:22 DATOS fase=reposo max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:24 DATOS fase=reposo max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:26 DATOS fase=reposo max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:28 SUCESO EMPIEZA la prueba de esfuerzo: 300 s, carga de coma flotante (x87) en 1 nucleo, a 114,3 C
+19:53:28 DATOS fase=carga max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:29 SUCESO ACABA la carga a los 1 s: PARADA DE SEGURIDAD: Procesador (Tctl) llego a 114,3 C (su limite: 90,0 C); llego a 114,3 C, al empezar 114,3 C. Empieza el enfriamiento
+19:53:30 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:32 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:34 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:36 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:38 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:40 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:42 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:44 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:46 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:48 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:50 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:52 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:54 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:56 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:53:58 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:00 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:02 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:04 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:06 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:08 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:10 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:12 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:14 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:16 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:18 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:20 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:22 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:24 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:26 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:28 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:30 DATOS fase=enfriando max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:32 DATOS fase=reposo max=114,3 C | Procesador=114,3 C | MHz=3549 | bateria=97% sin enchufar
+19:54:40 CIERRE el Termometro se ha cerrado bien

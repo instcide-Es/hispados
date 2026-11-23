@@ -151,6 +151,18 @@ int so_fondo_escritorio(const u32 *px, int an, int al);
  * la barra de tareas: para las ventanas) */
 void so_pantalla_entera(int *an, int *al);
 
+/* (PUNTEROS) la forma del puntero del ratón sobre la ventana v (la llamada
+ * 177 de Hispa-Pentium: docs/PENTIUM.md, «Los punteros»): sobre lo que se
+ * escribe, SO_P_TEXTO; sobre un enlace, SO_P_MANO; para dibujar, SO_P_CRUZ;
+ * mientras se trabaja sin atender, SO_P_ESPERA. Vale hasta que se pida otra
+ * (no se repite la llamada si es la misma). so_puntero_zona: la de una zona
+ * de la ventana (la última manda; hasta 16; con an = 0, se quitan todas): el
+ * núcleo la pone sin esperar al programa. En Linux, solo lo dice (stderr). */
+enum { SO_P_FLECHA, SO_P_TAMANO_H, SO_P_TAMANO_V, SO_P_TAMANO_D1, SO_P_TAMANO_D2, SO_P_ESPERA, SO_P_FLECHA_ESPERA,
+       SO_P_TEXTO, SO_P_MANO, SO_P_MOVER, SO_P_CRUZ, SO_P_PROHIBIDO, SO_P_AYUDA };
+void so_puntero(int v, int forma);
+void so_puntero_zona(int v, int x, int y, int an, int al, int forma);
+
 /* lanzar otro programa sin esperarlo (una ventana nueva de Pluma, Hispa-PDF...) */
 int so_lanza(const char *programa, const char *args);
 /* la ruta del programa que corre (para lanzarse otra vez): en Hispa-Pentium,

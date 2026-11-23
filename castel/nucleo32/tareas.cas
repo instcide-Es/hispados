@@ -116,6 +116,10 @@ módulo Tareas
     variable dormidas: Cola
     variable siguiente_id: nat32
     público variable tics: nat32
+    ; (UEFI) si el tic lo da el temporizador del APIC local (relojhpet.cas: sin
+    ; 8254 ni HPET), también a él hay que decirle «fin de interrupción»: 1, por
+    ; su registro MSR (x2APIC); si no es 0, la dirección de su registro EOI
+    público variable eoi_apic: nat32
     público variable cambios: nat32             ; las veces que ha cambiado de tarea
     ; (NAVEGADOR, 21/11) la coma flotante (el x87): la de quién está ahora en
     ; el procesador. Al cambiar de tarea no se guarda: se enciende CR0.TS y,
@@ -296,6 +300,7 @@ módulo Tareas
     interrupción función reloj()
         variable marco, s, i: nat32
         variable t, sig: puntero a Tarea
+        variable ep: puntero a nat32            ; (UEFI)
         tics := tics + 1
         ruido(R_RELOJ, tics)                    ; (USUARIOS) el pozo del azar: el momento exacto
         si tics mod HZ = 0 y no sin_segundos entonces
@@ -306,6 +311,17 @@ módulo Tareas
             fin
         fin
         sacar_puerto(PIC1, FIN_INT)
+        si eoi_apic = 1 entonces                ; (UEFI)
+            ensamblador
+                mov ecx, 0x80B
+                xor eax, eax
+                xor edx, edx
+                db 0x0F, 0x30                   ; wrmsr
+            fin
+        sino si eoi_apic <> 0 entonces
+            ep := puntero(eoi_apic)
+            valor(ep) := 0
+        fin
         si actual = nulo entonces devolver fin
         actual.tics_usados := actual.tics_usados + 1
         ; una tarea cortada con Ctrl+C a la que el reloj pilla en el anillo 3
@@ -453,7 +469,7 @@ módulo Tareas
 
     función bucle_ocioso(n: nat32)
         mientras cierto hacer
-            esperar_interrupción()
+            reposar()                           ; (MWAIT) «hlt», o «mwait» si se puede (cpu.cas)
         fin
     fin
 
@@ -872,6 +888,13 @@ módulo Tareas
             caso EN_CERROJO: devolver "en cerrojo"
         fin
         devolver "libre"
+    fin
+
+    ; (TERMO) los tics que ha corrido la ociosa (el Termómetro: lo ocupado
+    ; que está el procesador)
+    público función tics_de_la_ociosa(): nat32
+        si ociosa = nulo entonces devolver 0 fin
+        devolver ociosa.tics_usados
     fin
 
     público función enseña_tareas()

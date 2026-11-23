@@ -231,6 +231,7 @@ cuarta parte, los discos y el USB).
 | `edid.cas` (Edid) | Lo que dice la **pantalla** de sí misma (su EDID): en QEMU, de su tarjeta; en las Intel, por el DDC con el GMBUS; la nativa, lo más grande y su nombre (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
 | `raton.cas` (Raton) | El **ratón** (el PS/2, por la IRQ 12, o uno USB): dónde está la flecha y la cola de clics. |
+| `touchpad.cas` (Touchpad) | (TOUCHPAD) **El touchpad Synaptics en modo absoluto**: de sus paquetes, el ratón (mover, tocar para hacer clic, el borde derecho como rueda, dos dedos, la palma); sin tocar el equipo (sección 14 sexvicies). |
 | `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha (y sus formas), mover y **cambiar de tamaño**, y repartir el ratón y las teclas. |
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
@@ -242,6 +243,8 @@ cuarta parte, los discos y el USB).
 | `dispositivos.cas` (Dispositivos) | **Lo que hay en el equipo y qué lo lleva** (desde la 0.8.3): las llamadas 155 (la lista, de solo lectura) y 156 (lo que apuntan los servicios del anillo 3), para el Administrador de dispositivos (sección 10). |
 | `sonido.cas` (Sonido) | (SONIDO) **El sonido**, lo que pone el núcleo (sección 14 decies): los canales de los programas (sus colas), el volumen general, el silencio, los sonidos del sistema y las órdenes para el servicio de sonido (`SONIDO.BIN`); las llamadas 190 a 199. |
 | `preferencias.cas` (Preferencias) | (PANEL) **Los ajustes del Panel de control** (sección 14 quattuordecies): la llamada 174, aplicarlos (el ratón, el teclado, el tema, el tapiz...) y `PANEL.INI`, que escribe solo el núcleo. |
+| `cursores.cas` (Cursores) | (PUNTEROS) **Las formas del puntero** (sección 14 septemvicies): 13 formas vectoriales en seis juegos, cuatro tamaños, once colores y en espejo; la caché de lo medido. |
+| `apuntero.cas` (Apuntero) | (PUNTEROS) La llamada 177 y `PUNTERO.INI` (por usuario). |
 | `iconpanel.cas` (Iconpanel) | (PANEL) **Los iconos del Panel de control** (Configuración y PANEL.BIN), dibujados, cada uno con su forma. |
 | `win32.cas` (Win32) | [WIN32] **Lo de los programas de Windows** (sección 14 quater): las llamadas 180 a 182 (páginas en cualquier sitio de la zona del programa, el mapa de las teclas, las ventanas sin marco o a pantalla completa). |
 | `semilla.cas` (Semilla) | El programa: arranca todo lo anterior; las **excepciones** (con el fallo de página, que se atiende) y la **consola del núcleo** con sus órdenes (sección 9). |
@@ -274,6 +277,9 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
 | `upanel.cas` | `PANEL.BIN` | (PANEL) **El Panel de control**: Fecha y hora, Ratón, Teclado, Red y Wi-Fi, Energía y Personalización (sección 14 quattuordecies). |
+| `uraton.cas` | `RATON.BIN` | (TOUCHPAD) **El touchpad**: qué hay, `RATON /TOUCHPAD` (graba lo que manda en TOUCHPAD.TXT), `/ANALIZA` y `/INYECTA` (las pruebas) (sección 14 sexvicies). |
+| `panelpun.cas` | (en `PANEL.BIN`) | (PUNTEROS) **Panel de control › Ratón › Puntero**: la forma, el tamaño, el color, el rastro, localizar y para zurdos, con la vista previa. |
+| `upuntest.cas` | `PUNTEST.BIN` | (PUNTEROS) La prueba de los punteros (la parte 51; no va en el sistema). |
 | `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 quattuordecies). |
 | `panelaj.cas` (Panelaj) | — | (PANEL) Las llamadas 174 (los ajustes) y 175 (la hora exacta) para los programas. |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
@@ -484,6 +490,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 173 | (BLOC, REPRODUCTOR; la 0.8.7) **lo soltado desde Mi equipo** en una ventana suya (tras `EV_SOLTADO` = 14, que lleva el punto, visto desde dentro): la ruta, a EBX (caben ECX, con su 0). Una sola para todos: el Bloc de notas la abre en una pestaña, el Reproductor la pone en la lista. Se da una vez | `lo_soltado` | su largo; `NO_HAY` (nada para ella) o `NO_VALE` |
 | 174 | (PANEL) **un ajuste del Panel de control**: EBX la clave, ECX el valor nuevo (0xFFFFFFFF: leerlo). Cambiarlo, el Panel de control o el modo administrador (sección 14 quattuordecies) | `ajuste`, `poner_ajuste` (`panelaj.cas`) | el que queda, o `DENEGADO` |
 | 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000; EBX = 1, ponerlo a ECX (como la 67, y HORARED.BIN sin atrasarlo más de 2 horas) | `hora_exacta`, `poner_hora_exacta` | el reloj, o 0 / `DENEGADO` |
+| 177 | (PUNTEROS) **el puntero del ratón**: EBX = 0, la forma sobre la ventana ECX (EDX); 1, la de una zona (EDX, una `Zona`); 2, leer los ajustes (a ECX); 3, cambiarlos (el Panel o el modo administrador); 4, pintar uno en un mapa del programa; 5, la forma de ahora (sección 14 septemvicies) | `puntero_de_ventana`, `zona_de_puntero`... (`ppuntero.cas`) | 0, `NO_VALE` o `DENEGADO` |
 | 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
 | 100 | (WIFI) **pedir al servicio Wi-Fi** (`WIFI.BIN`), como la 90 (sección 14 octies) | — | la primera palabra de la respuesta (`SIN_WIFI` si no hay servicio) |
 
@@ -2733,6 +2740,197 @@ de sus métodos y que la BIOS de cada uno apague con `SLP_EN`. Las pruebas
 con PIIX4 (`pc`) y con ICH9 (`q35`). Para el equipo: la imagen
 `hispa-pentium-usb-0.8-hp-mini.zip` (o `-toshiba`, la misma), con todo lo de la 0.8 y su LEEME.
 
+### Arrancar por UEFI (22/11, rama pentium-uefi; marcado «(UEFI)»)
+
+Hasta aquí la memoria USB, el CD e INSTALAR arrancaban **solo por la BIOS**
+(o el «Legacy»/«CSM» de un equipo UEFI), con GRUB y multiboot. Ahora la
+memoria USB y el CD arrancan **también por UEFI**: de 64 bits (`BOOTX64.EFI`) y,
+si en el equipo que hace la imagen está su GRUB, de 32 bits (`BOOTIA32.EFI`: los
+Atom Bay Trail como el **Acer One 10** o el Medion, que tienen UEFI de 32 bits
+con un procesador de 64). Lo elige el equipo; la memoria es la misma.
+
+**La imagen** (`nucleo32/usb.sh`, `nucleo32/cd.sh` y lo común en
+`nucleo32/uefi.sh`):
+
+- **La memoria USB**: la tabla sigue siendo la del **MBR**, con una sola
+  partición FAT16 (la de siempre, con el GRUB de la BIOS en el MBR y su hueco).
+  En ella van **`\EFI\BOOT\BOOTX64.EFI`** (y `BOOTIA32.EFI`): un GRUB EFI hecho
+  con `grub-mkimage`, con todo lo que usa el menú dentro (no hace falta la
+  carpeta de módulos de EFI) y `-p /boot/grub` sin disco: busca su `grub.cfg` en
+  la misma partición de la que lo cargó el firmware. Es lo de Rufus «MBR para
+  BIOS o UEFI»: los firmwares buscan `\EFI\BOOT\` en cualquier partición FAT de
+  una memoria USB (no hace falta que sea de clase `EFh`), y así el núcleo sigue
+  viendo una sola unidad X: y la BIOS de los equipos viejos no ve nada nuevo.
+  No hay ESP aparte ni GPT.
+- **El CD**: `grub-mkrescue` sin `-d` hace las dos: el El Torito de la BIOS y
+  otro de **UEFI** (`/efi.img`, una FAT con el GRUB EFI), y la tabla para
+  grabarlo en una memoria con `dd`. La parte 16 sigue viendo su El Torito 1 de
+  la BIOS igual.
+- **El menú** es el mismo `grub.cfg` para las dos: con `$grub_platform` = `efi`
+  salen las entradas de UEFI (`multiboot2` y `module2`; los mismos módulos,
+  `a_module2`), y si no, las de siempre (`multiboot`), sin tocar. Por UEFI se
+  cargan solo `efi_gop` y `efi_uga` (con `all_video`, en QEMU, GRUB usaría la
+  VBE de Bochs por su cuenta). Hay además «Volver a la configuración del
+  firmware» (`fwsetup`).
+- **Sin GRUB EFI** en el equipo que hace la imagen (los paquetes
+  `grub-efi-amd64-bin` y `grub-efi-ia32-bin`), o con `SIN_UEFI=1`, la imagen sale
+  **como antes**, solo BIOS: el PC de Albinyana no los tiene, y sus pruebas siguen
+  igual.
+- **`LEEME-UEFI.TXT`** en la raíz (`nucleo32/uefi/LEEME-UEFI.TXT`): que hay que
+  **apagar el Secure Boot** (no está firmado: sin shim), cómo se suele hacer (la
+  tecla de la configuración, la pestaña Security/Boot, la contraseña de
+  supervisor que piden los Acer para dejarlo cambiar, «Other OS»), que se puede
+  **volver a encender** después, las teclas del menú de arranque y lo que cambia.
+
+**El núcleo, por multiboot2.** Castel pone ahora en el núcleo **dos cabeceras**
+(`ccastel.py` y `compilador/apoyo.cas`, `ARRANQUE_NUCLEO`, iguales): la de
+multiboot de siempre (con el sitio del modo gráfico de `modo_grafico.py`, que
+sigue en el mismo sitio) y detrás, alineada a 8, la de **multiboot2** (88
+octetos, la suma ya hecha): las mismas direcciones (etiqueta 2), la misma
+entrada (3) y la pantalla (5, optativa, sin medida: la que diga `gfxpayload`).
+La entrada guarda la magia y la información igual; `multiboot.cas` da lo mismo
+con una que con otra (`mb2()`):
+
+| Lo que da | multiboot | multiboot2 (UEFI) |
+|---|---|---|
+| la línea | campo 4 | etiqueta 1 |
+| los módulos | la lista del campo 3 | las etiquetas 3 (apuntadas la primera vez, hasta 2048) |
+| el mapa de memoria | campo 6 | etiqueta 6 (cada entrada se ve como una `Región` contada 4 octetos antes: base, largo y clase caen igual) |
+| la pantalla | campos 88-110 (la VBE) | etiqueta 8 (la del **GOP**) |
+| la RSDP de ACPI | (no la da: ACPI.BIN la busca en la EBDA y en E0000h-FFFFFh) | etiqueta 15 (ACPI 2) o 14: `rsdp()` |
+| ¿UEFI? | no | etiquetas 11/12 (la tabla del sistema de EFI): `arrancado_por_uefi()` |
+
+`marcos.cas` no da como libre **toda** la información de multiboot2
+(`largo_info()`: ahí van los nombres de los módulos, la línea y la copia de la
+RSDP). GRUB sale de los servicios de arranque del firmware antes de entrar.
+
+**Lo que usaba la BIOS, sin ella:**
+
+- **La pantalla**: la deja el firmware (GOP) o GRUB se la pide antes de arrancar
+  (`gfxpayload=auto`: la que dice la pantalla por su EDID o, si no, la que había;
+  las entradas de 1024 x 600, 1366 x 768 y 1024 x 768, `ANCHOxALTOx32,…,auto`; la
+  medida guardada en `PANTALLA.ENV`, igual que por la BIOS). No `keep`: con la
+  consola de texto de EFI, GRUB no tiene modo que guardar y no da pantalla. **El
+  cambio en marcha no se hace** (`se_cambia_en_marcha()` y `cambia_modo()` dicen
+  que no con UEFI, aunque en QEMU esté la VBE de Bochs: así QEMU se porta como un
+  PC de verdad); Configuración › Pantalla lo dice («Arrancado por UEFI: no se
+  cambia en marcha, la pone el firmware al arrancar. Se guarda para el próximo
+  arranque.») y va por «Guardar y reiniciar...». Si el GOP es **RGB** (el rojo
+  abajo; casi todos son BGR), se dibuja en un lienzo aparte y `volcar()` le da la
+  vuelta a cada punto (`pantalla_al_revés()`, `fila_al_revés`). El EDID por el
+  GMBUS de Intel sigue valiendo.
+- **El modo texto** no existe: **`textouefi.cas`** pasa la página de `0xB8000` a
+  un marco de RAM (todo lo de texto —la consola del núcleo, el intérprete del
+  arranque, INSTALAR, la llamada 60— sigue escribiendo ahí, como siempre) y una
+  tarea del núcleo, `texto-uefi`, la **pinta en la pantalla del firmware** cada 4
+  tics: 80 x 25 letras de 8 x 16 de la página 437 entera (`letra437.cas`, la de la
+  HispaBIOS: `hazletra437.py`), los 16 colores de la VGA y el cursor, al doble o
+  al triple si la pantalla da para ello, en el centro. Solo lo que cambia. Con el
+  escritorio en marcha se calla. Lo que el núcleo dice antes de la paginación
+  solo sale por el puerto serie.
+- **ACPI**: el núcleo le pasa a `ACPI.BIN` la RSDP de GRUB detrás de la línea
+  (`rsdp=XXXXXXXX`, la dirección física de la copia, dentro de la información
+  de multiboot2); `maquina.c` la usa en vez de buscarla (`mq_pon_rsdp`).
+- **Los puertos serie** del Administrador de dispositivos: sin la zona de datos
+  de la BIOS (400h es memoria cualquiera), se miran por su registro de prueba.
+- **int 13h, A20, la VBE**: el núcleo no los usa (GRUB hace lo suyo).
+- **El 8259, el 8254 y la CMOS** siguen en casi todos los equipos UEFI aunque el
+  CSM esté apagado (el bloque «legacy» del PCH). **Ojo**: en los Intel de 2015 en
+  adelante (Skylake, el Monovate de Tiger Lake) el firmware puede **parar el
+  reloj del 8254** para ahorrar (`8254CGE` del ITSS: lo que la HispaBIOS ya
+  trata, `pit_avanza`); el núcleo, sin su tic, se quedaría parado. Haría falta
+  el HPET o el reloj del APIC. Los Bay Trail lo tienen andando.
+- **El teclado**: en muchos portátiles y 2 en 1 modernos el de dentro no es
+  PS/2: por USB va (el teclado del Acer One 10 se engancha por USB); por
+  **I2C-HID** (algunas tabletas), no. El LEEME dice que se enchufe uno USB.
+- **Las zonas PCI por encima de 4 GB**: OVMF (y los PC con «Above 4G
+  decoding») ponen las zonas de memoria de 64 bits de algunos aparatos (el xHCI
+  de QEMU) por encima de los 4 GB, y el núcleo, de 32 bits, no las usa
+  (`pci_memoria` da 0): sin USB. En las pruebas, OVMF va sin su ventana de 64
+  bits (`-fw_cfg name=opt/ovmf/X-PciMmio64Mb,string=0`), como casi todos los
+  portátiles; moverlas debajo (con la ventana del puente que dice ACPI) queda
+  para más adelante.
+
+**Lo de los primeros equipos de verdad (22/11 por la noche).**
+
+- **ASUS ROG GL553V** (Kaby Lake, xHCI 8086:A12F): por UEFI al escritorio a
+  1920 x 1080, pero el teclado de dentro (USB, de velocidad plena) y un ratón USB
+  de velocidad plena no se dejaban enumerar (pasos 2 y 5). La causa encontrada
+  en `xhci.cas`: tras un error que no fuera STALL (error de la transacción,
+  «babble») el xHCI deja el extremo **parado** («Halted») y el núcleo mandaba
+  «Stop Endpoint», que en un extremo parado no vale: los tres reintentos fallaban
+  todos. Ahora se repone siempre (Reset Endpoint y el anillo, adelante). Y
+  además, como Linux y Windows: 10 ms tras la dirección (con el EHCI ya se
+  esperaban), los de velocidad plena empiezan con un paquete de 64 en el
+  extremo 0 (luego, Evaluate Context con el suyo), y si un aparato no se deja,
+  otro reinicio del puerto y otra vez. El registro dice ahora, en cada fallo,
+  el **código del xHCI** (4: error de la transacción, 6: STALL, 3: babble,
+  «se pasó el tiempo»...), lo que dio la petición y los 8 primeros octetos
+  leídos, y si al reintentarlo fue bien.
+- **El SMBIOS por UEFI** no está en F0000h: el núcleo lo busca en la tabla de
+  configuración de la tabla del sistema de EFI (etiquetas 11/12 de multiboot2;
+  los GUID de SMBIOS 3 y 2; GRUB 2.12 no da la etiqueta 13) y se lo pasa a
+  `ACPI.BIN` (`smbios=`); `mq_smbios()` da su punto de entrada (el dado, o el de
+  F0000h-FFFFFh con la BIOS). El registro de ACPI.BIN: «ACPI: SMBIOS en ...h».
+- **ThinkPad A275** (el touchpad/TrackPoint PS/2 dejó de ir): el arranque del
+  ratón PS/2 (`raton.cas`) tira antes lo que haya en el 8042 (un octeto que
+  quedara se tomaba por la respuesta), y si el ratón no contesta a F6 se
+  reinicia (FF, espera su AA) y se prueba otra vez. Y el registro lleva la línea
+  **«ps2: controlador 8042 sí/no; prueba de la boca 1 (teclado) .., de la 2
+  (ratón) ..; el ratón contesta .., id ..»**, por la BIOS y por UEFI.
+- **La primera línea del registro** (ARRANQUE.TXT): «arranque: por UEFI (64
+  bits, GOP 1366 x 768)» o «por la BIOS/CSM (VBE 800 x 600)» (o «modo texto»), y
+  la línea del cargador (que dice la entrada del menú elegida). También en
+  Acerca de («Arrancado por UEFI...»).
+
+- **La pantalla negra de los PC de ahora** (ThinkPad E14 con i7-1355U,
+  Raptor Lake; otro con i3-1115G4, Tiger Lake): GRUB sí, el núcleo nada. Las
+  dos causas que se han arreglado (en QEMU no se pueden dar las dos de verdad):
+  1. **El GOP por encima de los 4 GB** (0x4000000000...): `pantalla_del_cargador`
+     la rechazaba, y sin pantalla ni la consola de texto se pintaba. Ahora
+     (`Video.prepara_pantalla_alta`, desde `textouefi.cas`) las cuatro entradas
+     del directorio de la zona de los gráficos pasan a ser **páginas de 4 MB con
+     PSE-36** (los bits 32-39 de la dirección en los 13-20 de la entrada; CR4.PSE),
+     sin PAE; `Video.vista()` da el desplazamiento dentro de la página de 4 MB.
+     Probado con la RAM de por encima de 4 GB (`pruebapse36` en la línea, QEMU
+     `-m 5G`: lo escrito llega a 0x100001234).
+  2. **Sin 8254** (el firmware lo para con el CSM apagado): al encender las
+     interrupciones, `relojhpet.cas` mira si llegan los tics; si no, el **HPET**
+     (tabla «HPET» de ACPI) en modo de sustitución (su temporizador 0 por la
+     IRQ 0, 100 por segundo); y si no hay HPET, el **temporizador del APIC
+     local** (xAPIC o x2APIC), medido contra el reloj de ACPI (PM timer de la
+     FADT), con el vector de la IRQ 0 y su «fin de interrupción» en el reloj
+     de `tareas.cas` (`eoi_apic`). Probado en QEMU con `pit=off` y con
+     `pit=off,hpet=off`.
+  Y para saber dónde se queda: la consola de texto se pinta ya en cada paso
+  del arranque (`pinta_ahora()`, también sin tic), y el menú de UEFI tiene
+  **«Diagnóstico (UEFI)»**: `videoinfo`, `cpuid -l`, `lsacpi` (¿hay HPET?),
+  `lsefisystab`, `lspci` y `lsmmap`, con paginador, para hacer fotos.
+- **ia32**: con `grub-efi-ia32-bin` ya en el VPS, `usb.sh` y `cd.sh` ponen
+  `BOOTIA32.EFI` solos y la parte 48 arranca la memoria con el OVMF de 32 bits.
+
+**Lo que no se ha hecho:**
+
+- **El disco instalado arranca solo por la BIOS.** INSTALAR se puede lanzar
+  arrancado por UEFI (su pantalla azul se pinta en la del firmware), pero lo
+  que pone en el disco es el GRUB de la BIOS (MBR + hueco); la entrada del menú
+  lo avisa antes. Para UEFI haría falta una partición EFI (o `\EFI\BOOT` en la
+  FAT32), el GRUB EFI que busque `\HISPA\GRUB.CFG` y un `GRUB.CFG` con las dos
+  maneras, y tocar lo que lo cambia (el asistente, PAQUETES, ACTUALIZ).
+- No firmado (sin shim): hay que apagar el Secure Boot.
+
+**Probado** (parte 48, `SOLO=uefi`, `pruebas_uefi.sh`, 77 bien): con OVMF de 64 bits
+(q35): la memoria con `BOOTX64.EFI` y su menú, el escritorio a la medida del GOP
+(1280 x 800, la del EDID de QEMU), ACPI.BIN con la RSDP de GRUB y la batería de
+la SSDT de prueba, el disco SATA (AHCI) y la memoria por el xHCI como X:, la
+consola del núcleo pintada en la pantalla del firmware (con las letras al
+doble) y su texto en el marco que dice; `PANTALLA.ENV` a 800 x 600 pedida al GOP
+y Configuración › Pantalla diciendo que no se cambia en marcha; la misma memoria por SeaBIOS (multiboot
+de siempre, 800 x 600, nada de UEFI); y el CD por UEFI al escritorio. El de 32
+bits, si están OVMF32 y GRUB ia32. Y siguen pasando, con las imágenes híbridas
+(VPS), las partes cd, pantalla, 06 y 07; y en el PC de Albinyana (sin GRUB EFI:
+imágenes solo BIOS) castel32, 06, 07, cd, caliente, paquetes, acpi y pantalla.
+
 ## 12. Instalarlo en el disco duro
 
 Desde la **0.7**, Hispa-Pentium se instala en el disco duro del PC y arranca de
@@ -2960,10 +3158,10 @@ El menú de GRUB del CD (10 s):
 En el CD van también, en `\PAQUETES`, los paquetes del sistema con su catálogo
 (con `CLAVE_PRIVADA`, firmado).
 
-**Sin UEFI**: el núcleo usa la pantalla de texto (INSTALAR) y el modo que pone
-GRUB por la VBE, que con UEFI no están, y el disco instalado arranca por la
-BIOS. En VirtualBox, «Habilitar EFI» tiene que estar quitado (lo está, para
-«Other»).
+**(UEFI)** Desde la rama pentium-uefi el CD arranca también por UEFI (sección
+11, «Arrancar por UEFI»); el disco instalado, de momento, solo por la BIOS. En
+VirtualBox, con «Habilitar EFI» quitado (lo está, para «Other») va por la BIOS,
+como siempre.
 
 **VirtualBox**, lo que trae de serie y cómo va:
 
@@ -4351,6 +4549,93 @@ de otros no los lee), el Navegador con Google, ClicGest, Naves (suena),
 alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
+
+**La 0.8.9** (23/11, rama `pentium-089`: las ramas `pentium-uefi` —dentro de
+`termometro`—, `termometro`, `compat`, `touchpad` y `punteros`, y luego en la
+misma rama el reposo con MWAIT y el estado P; la `termometro` de después —el
+USB de los Intel nuevos— queda para la 0.8.10). Lo que se tocó al juntar:
+
+- **Una sola versión**: `VERSION_089` en `hpq.py` (la base; `VERSION_TOUCHPAD`
+  y `VERSION_PUNTEROS` son la misma) y `Usuario.VERSIÓN_TEXTO` («0.8.9»).
+- **Arrancar por UEFI** («Arrancar por UEFI», en la sección del arranque): la
+  memoria USB y el CD, de 64 y de 32 bits (`BOOTIA32.EFI`), la pantalla del
+  GOP (también por encima de 4 GB, con PSE-36), el tic del HPET o del APIC
+  local sin 8254, el SMBIOS de la tabla de EFI y el USB de velocidad plena
+  detrás de concentradores; parte 48 (`uefi`).
+- **El Termómetro** (sección 14 quatervicies; `TERMO.BIN`, paquete nuevo
+  `termo` 1.0, tipo herramientas; las llamadas 220 a 225 en la base), con los
+  demás procesadores en la carga (INIT-SIPI): **el trampolín de los AP va en
+  octetos** (ni `ensambla.py` ni ENSAMB32 ni ENSAMB64 saben `bits 16`, el
+  salto lejano ni el x87; con él escrito en ensamblador, las partes 16,
+  castel32 y castel64 decían que la semilla no salía igual que con NASM);
+  parte 46 (`termo`).
+- **El reposo con MWAIT** y **el estado P al arrancar** (en la sección del
+  Termómetro, «(MWAIT)» y «(PSTATE)»): `ocioso=hlt`/`ocioso=mwait` y
+  `sinpstate` en la línea del núcleo; las líneas «reposo:» y «procesador:» en
+  el registro.
+- **El Asistente de compatibilidad** (sección 14 quinvicies; `COMPAT.BIN`,
+  paquete nuevo `compat` 1.0, tipo herramientas): «Comprobar compatibilidad» en
+  Mi equipo (equipo **0.9.5**) y los ganchos al instalar o actualizar win32
+  (paquetes **1.6**); parte 49 (`compat`).
+- **El touchpad** (sección 14 sexvicies; `touchpad.cas`, `RATON.BIN` en la
+  base) y **los punteros del ratón** (sección 14 septemvicies; la llamada 177,
+  `PUNTERO.INI`): Panel de control › Ratón con Puntero y Touchpad; partes 50
+  (`touchpad`) y 51 (`punteros`). Los programas que piden su puntero: bloc
+  1.0.1, correo 1.0.3, pluma 2.0.2, pintura 2.0.1 (pide esta base) y navega
+  0.2.3.
+- **SSH 0.8.9**: el terminal nuevo (`ssh/vt.c`, xterm-256color, el tamaño con
+  window-change) en su ventana, el mismo del Termómetro.
+- **El montador** (`montador.cas`): `PARRAFOS_SIM` de 0x2000 a 0x3000 (192 K
+  para las etiquetas con nombre): con la 0.8.9 la semilla pasaba de 128 K y
+  ENSAMB32 y ENSAMB64 decían «demasiadas etiquetas» (partes castel32 y
+  castel64).
+- **Dos carreras al cargar un programa**, que salían con el equipo cargado:
+  ARGON2.BIN espera (la llamada 209, hasta 100 tics) a que el núcleo apunte
+  su número, o la contraseña buena «no valía» (parte `usuarios`); y la TEB
+  del hilo principal de WIN32.BIN se pone al crear la tarea (dentro de
+  `cargar_imagen`, sin interrupciones) y no al volver de `carga_de`: si el
+  reloj le daba la vez antes, su primera llamada (la 183, 9, quitar las
+  primeras 64 K) no valía sin TEB y el puntero nulo de un programa de
+  Windows no fallaba (SEH, parte `win32juegos`, una vez sí y otra no).
+- **Las pruebas que cambian**: la parte 07 acepta win32 1.x en la lista de
+  PAQUETES (el sistema lleva la 1.3); la parte `acpi` acepta el indicador
+  «> » delante de «escritorio: reiniciar».
+
+Los paquetes: base y ssh **0.8.9**, paquetes 1.6, equipo 0.9.5, bloc 1.0.1,
+correo 1.0.3, pluma 2.0.2, pintura 2.0.1, navega 0.2.3; nuevos compat 1.0 y
+termo 1.0; lo demás, tal cual lo publicado (red, tls y wifi siguen en la
+0.8.8; comprim y mirador 1.0.1 y win32 1.3, como se publicaron aparte;
+tailscal 0.8.9 se publicó aparte, de `worktree-v0.1-nucleo`, que también
+está fusionada aquí).
+
+**Las pruebas de la 0.8.9** (23/11; en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh -j 5`, 39 partes, **3790 bien, 0 mal**): `16`
+139/0, `06` 168/0, `07` 102/0, `castel32` 67/0, `castel64` 72/0, `caliente`
+79/0, `paquetes` 108/0, `red` 72/0, `acpi` 78/0, `tls` 72/0, `cd` 77/0,
+`pantalla` 98/0, `dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `win32`
+90/0, `rueda` 71/0, `menu` 95/0, `programas` 92/0, `protege` 76/0, `wifi`
+96/0, `accesorios` 81/0, `sonido` 109/0, `zip` 118/0, `mirador` 75/0,
+`usuarios` 94/0, `panel` 108/0, `bloc` 119/0, `reproductor` 111/0,
+`win32juegos` 118/0 (y tres veces más sola, 118/0: antes del arreglo de la
+TEB salía mal una vez sí y otra no), `juegos` 98/0, `oficina` 101/0,
+`correo` 193/0, `agenda` 91/0, `cortes` 86/0, `iconos` 95/0, `compat` 58/0,
+`touchpad` 113/0, `punteros` 136/0. En el VPS, una a una: `uefi` 88/0,
+`pluma` 79/0, `cuentas` 85/0, `pintura` 74/0, `pdf` 80/0, `navegador` 98/0,
+`escudo` 103/0, `termo` 104/0, y `ssh` 72/0 ya con Tailscale 0.8.9. En una
+primera tanda del PC (que se cortó al reiniciarse WSL), `06` (la memoria
+UHCI) y `sonido` (un tono) dieron 1 mal cada una con el PC cargado; solas en
+el VPS, 168/0 y 109/0, y en la tanda buena, bien: es el tiempo, no el código.
+`SOLO=32` (la octava; sin pasar desde la 0.8.4) no acaba en las 2 h de
+`pruebas_castel_pc.sh`, ni con la 0.8.9 ni con la 0.8.8 (`pentium-088`, sola
+en el PC: 483 bien y 15 mal hasta la parte del TLS). Se han puesto al día
+cuatro cosas que habían cambiado: AZAR.SEM en la raíz (21 entradas, 18
+archivos), el reloj de la bandeja (cualquier minuto de la sesión: probar.sh
+compila antes la semilla), la selección del Bloc y LEEME.TXT abierto desde el
+menú (la flecha nueva, la «I» del Bloc, tapaba lo que se mira). Con eso la
+0.8.9 da en esa parte los mismos 12 mal que la 0.8.8 (el explorador: dos
+clics en la unidad, la vista de detalles, copiar y pegar, F2, el recuadro, el
+acceso en el tapiz, ATAJOS.INI y DOCK.INI) y la memoria USB con GRUB
+(`usb.sh`, «41 programas»): vienen de antes, quedan para la 0.8.10.
 
 **La 0.8.8** (22/11, rama `pentium-088`, corta: las ramas `agenda`, `cuentas32`,
 `pintura32` y, al final, `red-cortes` e `iconos-escritorio`; `termometro` va
@@ -9250,7 +9535,7 @@ necesite»): las tres asas del marco (derecha, abajo y la esquina) miden 7 x 7
 puntos de la pantalla con cualquier zoom y se cogen en 10 x 10. Con el ratón
 encima, el asa se pone azul con doble borde, junto a la flecha del ratón sale
 la de cambiar el tamaño (doble: en diagonal, en horizontal o en vertical;
-negra con borde blanco: el sistema no tiene punteros con otra forma) y la
+desde la rama punteros, el puntero del sistema: la llamada 177) y la
 barra de estado dice «Arrastre para cambiar el tamaño del lienzo (ahora, 320
 x 200 píxeles)». Mientras se arrastra, el contorno nuevo con hormigas y en la
 barra «Tamaño del lienzo: 424 x 254 píxeles (suelte para aplicarlo)»; al
@@ -9440,6 +9725,683 @@ cerrar, `/lento/` va a unos 150 K/s):
    reiniciado): `IPCONFIG` dice la nueva y el Navegador y `PING` van.
 5. Si algo falla: `IPCONFIG /TODO > RED.TXT` y `X:\WIFI.LOG` (lo apuntan RED.BIN
    y WIFI.BIN: el enlace, DHCP, «tcp: ... cortada»).
+
+## 14 quatervicies. El Termómetro (TERMO.BIN, rama termometro)
+
+*22/11/2026. Una memoria USB que arranca sola y mide si un portátil ajeno se
+calienta (y, desde la 1.0, también un programa normal: el paquete «termo»,
+Inicio › Herramientas). Lo cambiado fuera de `castel/nucleo32/termo/` lleva
+la marca «(TERMO)». Las llamadas 220 a 224 del núcleo (termo.cas: solo leer,
+de una lista cerrada) van en la base 0.8.9; con una base de antes, TERMO.BIN
+lo dice y no hace nada más. Las pruebas: la parte 46 (`SOLO=termo`).*
+
+**Lo que mide.** El procesador (Intel: 19Ch/1B1h con la TjMax del 1A2h o de
+la tabla de coretemp; AMD: como k10temp, con el registro de cada familia), las
+zonas de ACPI (ACPI.BIN; el controlador embebido, de solo lectura mientras
+tanto, y el porqué de cada zona sin dato en el .LOG), lo ocupado que está el
+procesador (la tarea ociosa del núcleo; MPERF/TSC y C6 si los hay). El
+veredicto (`veredicto.c`, el mismo en el anfitrión) se mide con el sensor del
+procesador que más sube; una zona que no se mueve sale «fija» y no cuenta; un
+sensor clavado o imposible es «sin lectura fiable» y no para la prueba ni
+juzga nada; si el procesador no queda en reposo, no se juzga el enfriamiento.
+
+**«Enviar a Carlos» y «Terminal».** La memoria lleva un testigo (32 octetos
+al azar; el servidor solo guarda su SHA-256, `tools/termo-subida/`) para
+subir por HTTPS la carpeta TERMO, y una llave Ed25519 propia para el botón
+«Terminal»: SSH.BIN con el terminal nuevo de la ventana (`ssh/vt.c`:
+xterm-256color, 24 bits, cajas, Braille, símbolos, 2026, 2004, el tamaño de
+la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
+
+**El reposo con MWAIT (0.8.9, marcado «(MWAIT)»).** En el MacBook Air 2017 y
+el ASUS GL553V el Termómetro daba **C6 = 0 %**: la tarea ociosa del núcleo
+solo hacía `hlt`, que deja el procesador en C1, y tardaba en enfriarse. Desde
+la 0.8.9 la tarea ociosa (`bucle_ocioso` de `tareas.cas`) llama a
+`Cpu.reposar()`: `monitor` sobre una línea de caché que nadie escribe y
+`mwait` con la pista más honda que da `cpuid 5` (EDX, de 4 en 4 bits: el C
+más hondo con subestados, `((C - 1) << 4) + (subestados - 1)`; si el firmware
+no deja tanto, el procesador lo rebaja solo). Solo despierta una interrupción,
+como `hlt`; entre `sti` y `mwait` no se pierde ninguna. Lo decide
+`mira_reposo` (`semilla.cas`) al arrancar, tras `mira_reloj`, y lo apunta en
+ARRANQUE.TXT con la línea **«reposo:»**. Se usa **solo** si:
+
+- es **Intel** (en AMD, `mwait` es C1: lo mismo que `hlt`);
+- **no es un Atom** (Bonnell, Saltwell, Silvermont, Airmont, Goldmont,
+  Tremont, Gracemont: los Bay Trail del Acer One 10 y el Medion se cuelgan en
+  C6 —en Linux, `intel_idle.max_cstate=1`—; los N455 del HP Mini y el
+  Toshiba, por si acaso tampoco);
+- tiene MONITOR/MWAIT (`cpuid 1`, ECX bit 3) y sus pistas (`cpuid 5`, ECX bit 0);
+- tiene **ARAT** (`cpuid 6`, EAX bit 2: el temporizador del APIC local no se
+  para en C3 y más hondo; el tic puede ser suyo, `relojhpet.cas`) y el **TSC
+  invariante** (`80000007h`, EDX bit 8: lo usan el Termómetro y los tiempos);
+- **no es una máquina virtual** (el bit 31 de `cpuid 1`, ECX: VirtualBox puede
+  tratar `mwait` como `nop` y gastar el procesador del anfitrión);
+- y la pista es más honda que C1 (si no, `hlt`, que es lo mismo).
+
+Si no, `hlt` como siempre, y «reposo:» dice por qué. **`ocioso=hlt`** en la
+línea del cargador (la `e` de GRUB) lo quita en un equipo que dé problemas;
+**`ocioso=mwait`** lo fuerza aunque no se cumpla lo de arriba (solo para
+probar en QEMU). Los demás procesadores que despierta el Termómetro (los AP, solo para
+la carga) siguen con su `hlt`.
+
+**Medirlo**: en QEMU no se ve (no emula los estados C; con TCG y `-cpu max`
+`mwait` es una espera como `hlt`): ahí solo se ha comprobado que con
+`ocioso=mwait` el núcleo sigue contando el tiempo y contesta (la semilla, con
+`hora` antes y después de esperar), y que sin el bit de MONITOR dice «reposo:
+hlt (sin MONITOR/MWAIT...)». **Se mide en el equipo de verdad con el propio
+Termómetro**: la columna C6 (los MSR 3FCh-3FEh, lo que lleva el núcleo en C3,
+C6 y C7) debe pasar de 0 % a casi todo el tiempo en reposo en el MacBook Air
+2017 (Broadwell), el MacBook 2012 (Ivy Bridge), el ASUS (Kaby Lake) y el GT80
+(Haswell); en los Atom y en AMD, igual que antes.
+
+**El estado P (0.8.9, marcado «(PSTATE)»).** La tableta **Medion S2217**
+(Atom Z3735F, Bay Trail, por UEFI de 32 bits) iba **a 499 MHz todo el rato**,
+en reposo y con los 4 procesadores al 100 % (la nominal es 1,33 GHz y la
+ráfaga 1,83): Hispa-Pentium no ponía nunca el estado P y se quedaba el que
+dejara el firmware (en los demás equipos salía la nominal porque su firmware
+la deja, pero no es de fiar). Desde la 0.8.9, `mira_pstate` (`semilla.cas`,
+tras `mira_reposo`) pide al arrancar la **nominal máxima** en
+`IA32_PERF_CTL` (199h), como `intel_pstate` de Linux:
+
+- **Core de Nehalem en adelante** (modelo 1Ah o más, no Atom): el ratio de
+  `MSR_PLATFORM_INFO` (CEh, bits 15:8) en los bits 15:8 (bus de 100 MHz;
+  133 en Nehalem/Westmere);
+- **Silvermont y Airmont** (Bay Trail 37h; Cherry Trail/Braswell 4Ch): el
+  ratio máximo de 66Ah (bits 22:16) con **su voltaje**, el más alto de 66Bh
+  (bits 22:16), en los bits 15:8 y 6:0 (`atom_get_val` con la máxima); el bus,
+  de `MSR_FSB_FREQ` (CDh: 83,3, 100, 133,3, 116,7 u 80 MHz);
+- solo si es **Intel con SpeedStep** (`cpuid 1`, ECX bit 7), el firmware lo
+  tiene **encendido** (`IA32_MISC_ENABLE`, 1A0h, bit 16) y **sin HWP** puesto
+  (770h, bit 0: con HWP manda el procesador); con valores raros (ratio menor
+  de 4 o mayor de 60, voltaje 0 o al revés) no se toca nada;
+- los Atom de antes (el N455 del HP Mini y el Toshiba: solo por ACPI `_PSS`,
+  pendiente), AMD y las máquinas virtuales: nada, y se dice.
+
+Cada `rdmsr`/`wrmsr` va con `rdmsr_seguro`/`wrmsr_seguro` (`termo.cas`): un
+#GP no para el núcleo (la excepción 13 de `semilla.cas` mira `recupera`). El
+bit 32 de PERF_CTL (sin turbo) queda apagado: el turbo lo da el procesador si
+puede. Solo el procesador del sistema (el BSP): en estos Intel los núcleos van
+a la misma frecuencia y manda la petición más alta (pendiente: que los AP que
+despierta el Termómetro pidan lo mismo). ARRANQUE.TXT lo dice en la línea
+**«procesador: frecuencia puesta a X MHz (de Y; ratio N)»**, o por qué no.
+**`sinpstate`** en la línea del cargador lo quita; `pstate=prueba` (solo para
+QEMU) hace como si fuera un Core para pasar por las lecturas y la escritura.
+En QEMU no hay estados P: sin SpeedStep dice «sin SpeedStep... la del
+firmware», y con `pstate=prueba` llega a escribir 199h y sigue contando el
+tiempo. **La medida de verdad, en la Medion S2217 y el Acer One 10** (la
+columna MHz del Termómetro: de 499 a 1333 en reposo y hasta 1833 con carga).
+
+**Equipos probados (de verdad).**
+
+| Equipo | Procesador | Lo que salió | Lo arreglado |
+|---|---|---|---|
+| HP Mini 5103 | Atom N455 (06_1C, paso A) | lee; zona FDTZ clavada en 50 °C; 6 zonas «--» y 4 ventiladores sin datos | TjMax 100 (no 90); veredicto con el procesador; zona fija; el porqué de cada zona (EC); cada 2 s por el reloj |
+| Toshiba NB250 | Atom N455 | el sensor clavado en 6 °C, también en carga; reloj en 2010 | «sin lectura fiable»; «no da la temperatura del procesador»; aviso de la fecha y hora por Internet |
+| MacBook Air 2012 («Mac Nº3») | i5-3427U (Ivy Bridge, TjMax 105 del MSR) | lee bien; no bajaba al parar; el puntero parpadeaba | lo ocupado en cada línea; no se juzga el enfriamiento sin reposo; volcar solo lo que cambia (pendiente: EDID por GMBUS, SMC de Apple) |
+| ThinkPad A275 | AMD PRO A12-8830B (15h, 60h+) | 114,3 °C fijos y PARADA DE SEGURIDAD falsa | el registro bueno (SMN D8200CA4h por B8h/BCh); nada de PELIGRO con lecturas no creíbles |
+| **MSI GT80 Titan 2QD/2QE** (el objetivo, sin probar aún) | i7 Haswell HQ, 4 núcleos / 8 hilos, TjMax del MSR; 2 × GTX 970M/980M (GM204) en SLI | — | la carga en todos los procesadores (los AP, despertados solo para la prueba); un sensor por núcleo; las GPU por el BAR0 (solo leer, receta de nouveau); los frenos (PROCHOT, VR Therm Alert, PL1/PL2, 690h); el informe para el técnico; en el LEEME, Supr/F11 y CSM |
+
+| **ASUS ROG GL553V** (de Carlos, objetivo) | i7-7700HQ Kaby Lake (4/8); GTX 1050/1050 Ti (GP107, Optimus) | — | la GPU Pascal (20460h, solo leer) sin despertarla si duerme (Optimus: el enlace del puerto); ventiladores y temperatura por el WMI de ASUS (DSTS, nunca DEVS); en el LEEME, Esc/F2 y «Launch CSM» |
+
+Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
+
+## 14 quinvicies. El Asistente de compatibilidad (COMPAT.BIN, rama compat)
+
+*22/11/2026, la rama `compat`; aprobado por Carlos el 22/11. Todo lo cambiado
+fuera de `castel/nucleo32/compat/` lleva la marca «(COMPAT)».*
+
+| | |
+|---|---|
+| ![La ventana: el juego de mentira, agrupado por DLL](pentium/compat/ventana.png) | ![El consentimiento: exactamente lo que se manda](pentium/compat/consentimiento.png) |
+| ![Los componentes de Microsoft](pentium/compat/componentes.png) | ![El aviso de la bandeja tras poner un win32 nuevo](pentium/compat/aviso.png) |
+
+**Qué hace.** Dice qué le falta a un programa de Windows para correr con
+WIN32.BIN, sin ponerlo en marcha, y lo dice claro: por programa, «Está todo» o
+«Faltan N», agrupado por DLL y con para qué sirve cada una («WINMM.DLL: el
+sonido, la música MIDI, el CD de música y el reloj fino»), y aparte lo que no
+hace falta: el instalador y el desinstalador, el servidor dedicado, Glide de
+3dfx, los actualizadores, lo de Steam, las DLL opcionales (A3D, EAX, IMM32...).
+Se abre desde el menú Inicio (Herramientas), desde Mi equipo (botón derecho
+en un `.EXE` > «Comprobar compatibilidad»), con `COMPAT ruta`  y con el botón
+«Comprobar compatibilidad» del aviso de WIN32 cuando no puede seguir con un
+programa (`COMPAT /FALLO`). El paquete: **`compat` 1.0** (tipo `herramientas`; necesita
+`base >= 0.8.4, win32 >= 1.0`).
+
+### Cómo está hecho
+
+En **C portable con la biblioteca común de la oficina** (`oficina/comun`: la
+ventana, los cuadros, las letras DejaVu), como Pluma 2: lo de cada sistema en
+`compat/plat.h` (`plat_pentium.c`; `plat_anfitrion.c` en Linux, para las
+pruebas y para Hispa-64). Las piezas:
+
+| Archivo | Qué hace |
+|---|---|
+| `comprueba.c` | corre `WIN32 COMPRUEBA /MAQUINA "ruta"` con la salida a un archivo (la llamada 27, redirigir; 10 y 11, lanzar y esperar sin parar la ventana); un WIN32 de antes dice «/MAQUINA: no se encuentra» y sigue con lo de siempre, y se lee igual; mide cada archivo y saca su SHA-256 (a trozos: un `.EXE` de 100 MB no tiene que caber en la memoria) |
+| `informe.c` | lee las dos salidas de COMPRUEBA (la de las personas y la `/MAQUINA`, abajo) |
+| `saber.c` | las DLL de Windows (unas 100: tema, para qué sirve, si es opcional y lo que hay que saber) y los archivos que no hacen falta (por su nombre: `SETUP*.EXE`, `UNINS0*.EXE`, `HLDS.EXE`, `*DEDICATED*`, `GLIDE*.DLL`, `*UPDATE*.EXE`, `STEAM*`...) |
+| `vista.c` | el resultado en renglones (para la ventana y para la Consola) |
+| `historia.c` | lo comprobado de cada usuario, en su carpeta (`\USUARIOS\<USUARIO>\COMPAT`): `PROGRAMA.LST` (la ruta, el nombre, la versión de win32, cuántas faltan) y `P<número>.TXT` (lo que faltaba) |
+| `revisa.c` | «avisar cuando ya esté» (abajo) |
+| `enviar.c`, `http.c` | el informe y el envío por HTTPS (TLS.BIN) |
+| `redist.c`, `cab.c`, `lzx.c`, `pe.c`, `sha256.c` | los componentes de Microsoft: la lista, bajar, la suma, la licencia, el CAB (sin comprimir, MSZIP con miniz y **LZX escrito aquí**), las DLL por su nombre de exportación |
+| `ventana.c`, `principal.c` | la ventana y las órdenes |
+
+**En la Consola**, lo mismo: `COMPAT /ORDEN comprueba RUTA` (y `informe`,
+`envia RUTA /ACEPTO`, `lista`, `olvida`, `revisa [/FORZAR]`, `componentes`,
+`baja ID`, `licencia ID`, `pon ID /ACEPTO`, `saca ARCHIVO ID CARPETA`, `cab
+ARCHIVO [NOMBRE DESTINO]`).
+
+### El informe (con permiso, cada vez)
+
+«Enviar informe a Hispa-DOS...» vuelve a comprobar (con las sumas) y enseña
+**exactamente** lo que va, renglón a renglón, con una casilla «He leído lo que
+se manda y quiero mandarlo» (hasta marcarla, «Enviar» está apagado). Va esto y
+nada más:
+
+```
+HISPA-COMPAT 1
+hispa-pentium=0.8.7
+win32=1.2
+asistente=1.0
+archivos=4
+archivo=JUEGO.EXE<TAB>1536<TAB><sha256><TAB>ventanas<TAB>6<TAB>si
+archivo=SETUP.EXE<TAB>1536<TAB><sha256><TAB>ventanas<TAB>2<TAB>instalador
+falta=JUEGO.EXE<TAB>WINMM.DLL<TAB>mixerOpen
+faltadll=JUEGO.EXE<TAB>PRUEBAC.DLL<TAB>5
+fin
+```
+
+El nombre de cada archivo **sin su carpeta** (nunca una ruta: ahí podría ir el
+nombre de quien lo usa) y solo con letras, cifras y `. _ -`; ni el nombre de
+la carpeta del programa, ni nada de lo de dentro de los archivos. Por HTTPS
+al receptor (`\HISPA\COMPAT\COMPAT.INI`: `https://actualiza.hispados.es/compat/informe.php`
+y, si no, `https://hispados.es/compat/informe.php`), con el **testigo** del
+equipo: 32 octetos al azar del núcleo (la llamada 210) hechos la primera vez,
+en `COMPAT\TESTIGO.TXT` de la carpeta del usuario; el servidor solo guarda su
+SHA-256.
+
+**El receptor** (`tools/compat-subida/`, sin desplegar; las órdenes, en su
+`INSTALAR.txt`): el mismo diseño que el de «Enviar a Carlos» del Termómetro
+(un POST multipart, «OK ...» o «ERROR motivo», un pool de PHP-FPM con usuario
+propio, los datos fuera de la web con 0600 y un cron de root que los pasa al
+FTP). Lo distinto: el Asistente es para cualquiera, así que el testigo se
+aprende la primera vez que llega, con topes (5 equipos nuevos al día por IP y
+300 en total; 20 informes y 2 MB al día por equipo; 3000 y 100 MB entre
+todos; 240 KB por informe); se mira la forma del informe renglón a renglón (lo
+que no casa, fuera: una ruta, PHP disfrazado...); de la IP no se guarda nada
+(nginx con `access_log off`; para el tope, un resumen con sal del día). El
+cron (`compat-mover.sh`) lo pasa a `/root/FTP/HispaDOS/Compatibilidad/<AAAAMMDD>/`
+y rehace el **resumen acumulado** (`compat-resumen.py`: `resumen.csv` y
+`resumen.json`): por cada función (o DLL entera) que falta, en cuántos
+programas distintos (cada programa una vez, con su último informe: lo que ya
+se ha hecho deja de contar cuando llegan informes con el win32 nuevo), cuántos
+de partes que no hacen falta, en cuántos informes y unos ejemplos. Así se sabe
+qué hacer antes en WIN32.
+
+### Avisar cuando ya esté
+
+`COMPAT /REVISA`: si la versión de win32 (`\HISPA\PAQUETES\WIN32.PQI`) no es
+la de cuando se comprobó cada programa de la lista del usuario, se vuelve a
+comprobar solo y, si algo ha cambiado, una **ventanita abajo a la derecha**
+(como la de las actualizaciones; se va sola a los 45 s): «Half-Life: ya no
+falta nada; pruébelo de nuevo.» o «Half-Life: ahora faltan 12 (antes 142).»,
+con «Verlo» (abre el Asistente con las novedades arriba) y «Ahora no»; sin
+escritorio, en la Consola. Queda también en `COMPAT\AVISOS.TXT`. Lo lanzan:
+
+- **PAQUETES**, al acabar de instalar si en lo instalado iba win32
+  (`upaquete.cas`, una línea «(COMPAT)»: `lanzar_suelto("\\COMPAT.BIN", "/REVISA")`);
+- **ACTUALIZ /BANDEJA**, al arrancar el escritorio (`uactual.cas`, otra
+  línea): así cada usuario se entera en su sesión. Si no ha cambiado nada, no
+  dice nada; si COMPAT.BIN no está, la llamada da error y ya.
+
+### Los componentes de Microsoft (al estilo de winetricks)
+
+«Componentes de Microsoft...»: los que muchos programas de antes instalan y
+que Microsoft deja redistribuir. **No van en el paquete ni en el repositorio**:
+`\HISPA\COMPAT\REDIST.LST` dice solo dónde están (`download.microsoft.com`),
+lo que miden y su SHA-256; los baja quien los usa, se comprueba la suma, se
+enseña **la licencia que traen dentro** (la de Visual C++ 2008 y 2010, en
+español: `eula.3082.txt`, `3082\eula.rtf`; la de 2005, en inglés, el recurso
+`LICENSE` de su ejecutable) y, si se acepta, se sacan **solo sus DLL** a
+`\WIN32` (en el **modo administrador**, que pregunta el núcleo: `\WIN32` es de
+la zona protegida). Nunca se pisa una DLL que ya está (las de win32, como
+MSVCRT.DLL, son nuestras).
+
+Por dentro son ejecutables que se extraen solos con un **CAB en LZX:21**
+dentro y, en ese, otro CAB (`vc_red.cab`) o un `.MSI` con varios CAB (2005),
+donde las DLL llevan nombres de Windows Installer (`F_CENTRAL_msvcr100_x86`):
+se reconocen por el nombre de su directorio de exportaciones. El LZX
+(`compat/lzx.c`) está escrito aquí, de la descripción pública del formato;
+con los tres paquetes de verdad (bajados una vez, fuera del repositorio) da
+las DLL con su suma PE (`CheckSum`) buena, todas.
+
+**Cuáles valen** (investigado el 22/11/2026; las URL, vivas con `curl -I`; las
+sumas, medidas: Microsoft no publica el SHA-256 y su ETag no lo es):
+
+| Componente | Lo que se pone | Con WIN32 |
+|---|---|---|
+| **Visual C++ 2010 SP1** (8.993.744 octetos) | MSVCR100, MSVCP100, MFC100, MFC100U, ATL100, VCOMP100 | no tira de nada de dentro de NT; a MSVCR100 le faltan con win32 1.3 20 funciones de KERNEL32 (`EncodePointer` y `DecodePointer`, que llama al arrancar; las listas S de Interlocked; las colas de temporizadores...): se piden a win32-hl |
+| **Visual C++ 2008 SP1** (4.483.040) | MSVCR90, MSVCP90, MFC90, MFC90U, ATL90, VCOMP90 | a MSVCR90 le faltan 7, ninguna de las que llama al arrancar; MSVCP90, nada. Comprueba si la cargan con un manifiesto (`FindActCtxSectionStringW`, por GetProcAddress: el R6034), pero solo si esa función existe: como en Windows 2000, sin ella no mira |
+| **Visual C++ 2005 SP1** (2.710.520) | MSVCR80, MSVCP80, MFC80, MFC80U, ATL80, VCOMP | igual que la 2008 (le faltan 6) |
+
+Y por qué los demás no: **MSVCM80/90 y MFCM80/90/100** piden .NET
+(MSCOREE.DLL); **Visual C++ 6** (MFC42, MSVCP60) ya no está en
+`download.microsoft.com` (404); **Visual Basic 6** (`vbrun60.exe`, que sí
+está) necesita OLE de verdad (MSVBVM60 pide 73 funciones de OLE32 y su
+OLEAUT32, el registro de clases): cuando WIN32 lo tenga; **DirectX de junio de
+2010** (100 MB): D3DX9 sirve con Direct3D 9, que aún no hay; XAudio2 y XACT
+son COM; XInput pide SETUPAPI y lo de los aparatos; X3DAudio sola no sirve
+sin XAudio2; **MSXML 4 y 6**, ya no están en esas URL.
+
+### Con WIN32 (win32 1.3, de la rama win32-hl)
+
+1. **`WIN32 COMPRUEBA "ruta" /MAQUINA`** (docs/pentium/WIN32.md): una línea
+   por hecho, con tabuladores: `PROGRAMA`, `ARCHIVO` (ruta, tipo, tamaño,
+   SHA-256), `NOHAY`, `USA`, `FALTA`, `FALTADLL`, `RESUMEN` y, al final,
+   `TOTAL`. El Asistente la pide siempre y la lee (`informe.c`): las rutas
+   enteras, y el tamaño y la suma de cada archivo, que ya no tiene que medir
+   él. Un WIN32 de antes dice «/MAQUINA: no se encuentra» y escribe lo de las
+   personas: también se lee (la reserva).
+2. **El botón «Comprobar compatibilidad»** del aviso de WIN32 cuando un
+   programa no puede seguir (una función que llama y no hay, una DLL que no
+   está) lanza `COMPAT.BIN /FALLO <ruta del .EXE>`, sin decir qué: el
+   Asistente lo saca de lo último que WIN32 apuntó de ese programa en
+   `WIN32.LOG` («LLAMA A UNA QUE FALTA: DLL!función» o «no se encuentra
+   NOHAY.DLL»), lo pone arriba y comprueba la carpeta del programa. El cuadro
+   es el de WIN32 (el Asistente no saca otro).
+
+Para la próxima versión de win32 (apuntado):
+
+1. **No exportar `FindActCtxSectionStringW`** (ni las de los contextos de
+   activación) hasta que de verdad los haya: MSVCR80 y MSVCR90 la buscan por
+   GetProcAddress y, si está y dice que no, acaban con el R6034.
+2. Lo que les falta a las bibliotecas de Visual C++ (por si se quieren
+   poner): a **MSVCR100**, `EncodePointer`, `DecodePointer` (las dos al
+   arrancar), `FindFirstFileExW`, `CreateProcessW`,
+   `InterlockedPushEntrySList`, `InterlockedPopEntrySList`,
+   `InterlockedFlushSList`, `QueryDepthSList`, `CreateTimerQueue`,
+   `CreateTimerQueueTimer`, `DeleteTimerQueueTimer`, `OutputDebugStringW`,
+   `FreeLibraryAndExitThread`, `GetThreadTimes`, `GetTimeFormatW`,
+   `GetDateFormatW`, `HeapQueryInformation`, `HeapWalk`, `PeekNamedPipe`,
+   `CreatePipe`; a **MSVCP100**, `EncodePointer` y
+   `DecodePointer`; a **MSVCR90**, `GetSystemWindowsDirectoryW`,
+   `GetSystemDirectoryW`, `GetLongPathNameW`, `CreateProcessW`, `HeapWalk`,
+   `PeekNamedPipe`, `CreatePipe` (a MSVCR80, las mismas menos la primera).
+
+### Las pruebas (la parte 49, `SOLO=compat`, `castel/pruebas_compat.sh`)
+
+Sin nada de Microsoft ni de ningún juego: un **juego de mentira**
+(`compat/pruebas/haz_juego.py`: PE de 386 que no hacen nada, con las
+importaciones justas: su programa, su DLL, una DLL que no hay —la trae un
+win32 «nuevo» de prueba—, Glide, A3D, un `SETUP.EXE` y un `HLDS.EXE`), un
+**WIN32 COMPRUEBA de mentira** para Linux (`falso_win32.py`, con lo que tiene
+WIN32 sacado de sus fuentes, y sus dos salidas), un **redistribuible de
+mentira** (un ejecutable con un CAB MSZIP que lleva la licencia y otro CAB
+con las DLL con nombres de Windows Installer) servido por `php -S` como si
+fuera `download.microsoft.com`, un **LZX hecho aquí** (`haz_lzx.py`: bloques
+literales, alineados y sin comprimir —uno de largo impar—, uno que pasa de un
+trozo de 32 K al siguiente, las tres repetidas, los códigos 17, 18 y 19 del
+pre-árbol y la traducción E8) y el receptor con `php -S` detrás de un HTTPS de
+prueba (`tls_delante.py`, el del Termómetro; su raíz en `\RAICES`):
+
+1. En Linux (ASan y UBSan): lo agrupado, el informe (sin rutas, con las sumas
+   de verdad), mandarlo, lo que el receptor no deja, el cron y el resumen, el
+   aviso al cambiar win32, el redistribuible (la suma, la licencia, sin
+   `/ACEPTO` nada, sin administrador nada, con él las DLL octeto a octeto) y
+   el LZX octeto a octeto.
+2. En QEMU, la Consola, con el WIN32.BIN de verdad: comprobar, el informe, el
+   envío por HTTPS (TLS 1.2) al receptor de prueba, los componentes (con «S» al
+   modo administrador: la DLL en `\WIN32`, octeto a octeto) y **PAQUETES
+   ACTUALIZA** con un catálogo de prueba firmado con una clave de prueba que
+   trae el win32 «nuevo»: el gancho lanza `COMPAT /REVISA` y avisa.
+3. En QEMU, el escritorio (1024 x 600): la ventana, el consentimiento y el
+   envío, los componentes y la licencia, el aviso de la bandeja tras PAQUETES
+   ACTUALIZA y la ventana de `/FALLO`. Las capturas, en
+   [pentium/compat](pentium/compat/) (`COMPAT_CAPTURAS=docs/pentium/compat`).
+
+**28 bien, 0 mal** (22/11, con win32 1.3 y su `/MAQUINA`).
+
+### Lo que falta
+
+Poner las
+versiones nuevas de los paquetes `equipo` (Mi equipo, el menú del `.EXE`) y
+`paquetes` (los ganchos de PAQUETES y de ACTUALIZ /BANDEJA) para que lleguen;
+el testigo es de cada usuario de cada equipo (no hay sitio del equipo en la
+zona protegida para el Asistente sin tocar `permisos.cas`); nombres largos en
+la lista (el núcleo crea 8+3); el nombre «bonito» del programa (hoy, el de su
+carpeta); el resto de componentes cuando WIN32 tenga OLE de verdad y
+Direct3D 9.
+
+## 14 sexvicies. El touchpad (rama touchpad, «(TOUCHPAD)»)
+
+*22/11/2026.* Pedido de Carlos: el touchpad del **HP Mini 5103** lleva dibujada
+a la derecha una línea para usarla como **rueda**, y Hispa-Pentium no la
+aprovechaba (el touchpad iba como un ratón PS/2, relativo y sin rueda). Ahora
+los **Synaptics** (los de casi todos los portátiles de 2005 a 2015: el HP Mini y
+el Toshiba NB250, firmware 7.2) van en **modo absoluto** y el núcleo hace de sus
+paquetes el ratón, con el borde derecho para desplazar.
+
+**Detectarlo** (`raton.cas`, al encender el ratón PS/2, antes del IntelliMouse):
+
+- **Synaptics**: la «llamada especial» (E6 y cuatro E8 con el argumento de dos
+  en dos bits, los altos primero) y E9; si el segundo octeto es **47h**, es un
+  Synaptics. Luego se pregunta el modelo (03h), las capacidades (02h), las
+  extendidas (09h y 0Ch, si las dice) y, si las tiene, las medidas máximas y
+  mínimas (0Dh y 0Fh), como Linux. Al **registro del arranque** (y, con
+  «registro», a `ARRANQUE.TXT`, que el escritorio guarda otra vez al poner el
+  ratón): `ratón: Touchpad Synaptics 7.2 (PS/2): modelo ..., capacidades ...,
+  extendidas ..., 0C ...; varios dedos: sí; palma: sí; clickpad: no; botón del
+  medio: no` y `ratón: el touchpad mide de 1472 a 5472 de ancho y de 1408 a
+  4448 de alto`. Así sabremos qué lleva cada portátil de Carlos.
+- Con firmware 4 o más y capacidades extendidas, el **modo**: absoluto, 80
+  paquetes por segundo, con W y sin los gestos del touchpad (el byte de modo
+  C5h: la llamada especial y F3 14h), y F4. No se comprueba con la pregunta 01h
+  (desde el firmware 7.5 da el número de placa); si no se ha puesto, sus
+  paquetes no tienen la forma del modo absoluto y vuelve solo al relativo.
+- Si no es Synaptics: **Elantech** (E6 tres veces y E9: 3C 03 C8) o **ALPS**
+  (E8 00, E6 tres veces y E9: 00 00 0A/64; y lo mismo con E7: 33, 53, 60, 63 o
+  73 en el primero). Solo se dice (`ratón: touchpad ALPS (PS/2; E6: ..., E7:
+  ...): va como un ratón`): su modo absoluto (hay ocho protocolos de ALPS)
+  queda para cuando haya uno en el taller. Un ratón de verdad no puede dar
+  esas respuestas (el bit 3 de su estado es siempre 0, y tras E7 lleva el
+  10h de la escala 2:1). Lo que no se queda en modo absoluto vuelve a estar
+  como de fábrica (F6: las preguntas cambian la resolución) y sigue como
+  antes: el **IntelliMouse** (200, 100 y 80) para la rueda de un ratón PS/2.
+- En el **Administrador de dispositivos**, «Touchpad Synaptics 7.2» (SYN0002,
+  `touchpad.cas`) en lugar de «Ratón PS/2», con lo que lleva.
+
+**El analizador** (`touchpad.cas`, puro: no toca el equipo, y así se prueba en
+Linux con corre32). `raton.cas` le da cada octeto de la IRQ 12 y, desde el
+pulso del escritorio (100 veces por segundo, `tp_pulso`), el reloj; recoge lo
+movido, los cambios de botones y la rueda:
+
+| | Cómo |
+|---|---|
+| Los octetos, en su sitio | el primero de cada paquete, `10xx0xxx`; el cuarto, `11xx0xxx`. Si no, se tira lo que había y ese puede ser otro principio; más de 50 ms a medias, se empieza de nuevo; con **60 octetos malos seguidos**, perdido: el núcleo pone el modo 0 (relativo), F6 y F4, lo apunta y sigue como ratón (nada se queda pulsado) |
+| El dedo | toca con Z ≥ 30, se suelta con Z < 25; sin paquetes 200 ms, se ha ido |
+| Mover | lo movido por el dedo, de unidades a puntos (el ancho entero, unos 600 despacio), con **aceleración suave** (de 1 a 3 veces según lo deprisa), por la velocidad del touchpad y luego la del ratón (Panel de control) |
+| Tocar para hacer clic | un toque de 180 ms como mucho y quieto: el botón se pulsa y, si no se vuelve a tocar en 180 ms, se suelta; tocar otra vez enseguida, el **doble clic**; tocar y, sin levantar, mover, **arrastrar**; con dos dedos, el **derecho**; con tres, el del medio |
+| **El borde derecho** | el dedo que empieza en el 8 % derecho del ancho (5, 8, 12 o 16 %: Panel) y sube o baja da **pasos de rueda**, tantos como recorre (un paso, 1/20 del alto: de arriba abajo, unos 20), con los renglones por paso del Panel; un toque ahí es un clic |
+| El borde de abajo | lo mismo, a los lados (quitado de salida: ver abajo) |
+| Dos dedos | si el touchpad lo dice (W = 0 con «varios dedos»): desplazar, arriba y abajo o a los lados (lo primero que sale manda hasta levantarlos); un dedo que mueve y luego otro pasa a desplazar sin salto de la flecha |
+| La palma | W ≥ 11 o Z ≥ 200: ese toque ni mueve ni hace clic |
+| Al escribir | un toque que empieza menos de 0,5 s después de una tecla no hace nada (en los que van como ratón, ni se mueve ni pulsa) |
+| Las medidas | lo que se ve más allá de lo que dijo el touchpad amplía el ancho y el alto (y el borde va con ellos) |
+| Botones | los de verdad; en un clickpad, el click de todo el touchpad (abajo a la derecha, el derecho); el del medio; los de arriba y abajo de los antiguos, un paso de rueda |
+
+**A los lados** no hay suceso propio: va como `EV_RUEDA` con **Mayús** (lo que
+el Navegador entiende como desplazar a los lados; hacia arriba, a la
+izquierda) y el bit nuevo `RUEDA_LADOS` (8000h en «c», `ventanas.cas`), para
+que un programa los distinga más adelante. Los que no miran Mayús (el Bloc)
+desplazarían arriba y abajo: por eso el borde de abajo sale quitado.
+
+**Panel de control › Ratón › Touchpad** (`upanel.cas`, solo si hay uno; las
+claves 23 a 31 de la llamada 174, `preferencias.cas` y `panelaj.cas`, en
+`PANEL.INI`):
+
+| Clave | | Valores (lo de siempre) | En PANEL.INI |
+|---|---|---|---|
+| 23 | tocar para hacer clic | 0 o 1 (1) | `touchpad_toque` |
+| 24 | el borde derecho | 0 o 1 (1) | `touchpad_borde` |
+| 25 | el borde de abajo | 0 o 1 (0) | `touchpad_borde_abajo` |
+| 26 | dos dedos | 0 o 1 (1) | `touchpad_dos_dedos` |
+| 27 | velocidad | 1 a 10 (5; el Panel da 2, 3, 5, 7 y 9) | `touchpad_velocidad` |
+| 28 | quieto tras una tecla | centésimas (50; 0: no) | `touchpad_escribir` |
+| 29 | el ancho del borde | 4 a 20 % (8) | `touchpad_zona` |
+| 30 | (solo leer) el touchpad | 0 ninguno, 1 Synaptics, 2 Synaptics como ratón, 3 ALPS, 4 Elantech | — |
+| 31 | (cualquiera) grabar | N segundos (1 a 60); 0, guardar `TOUCHPAD.TXT`; al leer, los que quedan; 1000 + octeto, inyectar (con `tp_simulado`) | — |
+
+| ![Panel de control › Ratón, con la sección Touchpad](pentium/panel/touchpad.png) |
+|---|
+
+Uno que va como ratón (ALPS, Elantech, o un Synaptics sin modo absoluto) solo
+tiene «Quieto mientras se escribe».
+
+**RATON.BIN** (`uraton.cas`, en la base, `\HISPA`): `RATON` dice qué touchpad
+hay y cómo está puesto; **`RATON /TOUCHPAD [s]`** graba lo que llega por la IRQ
+12 durante s segundos (10; hasta 60) y lo deja en **`TOUCHPAD.TXT`** en la raíz
+de la unidad del sistema (la memoria USB: `X:\TOUCHPAD.TXT`): lo que se sabe del
+touchpad y cada paquete con su tic (`@123 o 80 24 3C C0 5E 9A`), para que
+Carlos lo mande si algo no va. **`RATON /ANALIZA archivo`** pasa un archivo así
+(o uno hecho a mano) por `touchpad.cas` y dice lo que sale: sirve en Linux con
+corre32 y para mirar lo que mande. **`RATON /INYECTA archivo [/TRAS s]`** (con
+**`tp_simulado`** en la línea del cargador: un Synaptics de mentira, con
+varios dedos) le manda los octetos al núcleo como si llegaran: así se prueba en
+QEMU, que no tiene touchpad.
+
+**Probarlo**: `SOLO=touchpad castel/pruebas.sh` (la parte 50,
+`castel/pruebas_touchpad.sh`):
+
+1. Con corre32, 38 casos de `nucleo32/tpsintetico.py` (paquetes Synaptics
+   hechos a mano): mover, la aceleración, la velocidad, tocar (y quitado),
+   doble toque, arrastrar, uno largo, dos y tres dedos, el borde derecho
+   abajo y arriba, el límite de la zona y la zona al 15 %, quitado, un toque en
+   el borde, el borde de abajo, dos dedos (arriba y abajo, a los lados, de uno
+   a dos, sin «varios dedos», quitado), la palma por W y por Z, al escribir,
+   los botones, un botón con el dedo, el clickpad (y su esquina derecha),
+   octetos de más, un cuarto octeto malo, medio paquete, perdido, las medidas
+   que se aprenden y un dedo que se va sin su último paquete.
+2. En QEMU, el ratón PS/2 de siempre: sigue con su rueda (IntelliMouse) tras
+   las preguntas, no se toma por un touchpad, `RATON` lo dice, `RATON /TOUCHPAD
+   3` graba y guarda (y `/ANALIZA` lo lee) y la rueda sigue moviendo la Consola.
+3. En QEMU con `tp_simulado`: `RATON /INYECTA` con el borde derecho de arriba
+   abajo baja el Bloc de notas 16 pasos (la línea 049 arriba), dos dedos hacia
+   arriba lo suben 9 (la 022) y un toque encima de «Archivo» abre el menú; y el
+   Panel de control › Ratón con la sección, cambiada y guardada en PANEL.INI.
+
+En el PC de Albinyana (23/11): `touchpad` 113/0, `panel` 108/0, `rueda` 70/0,
+`menu` 94/0, `programas` 92/0, `pantalla` 98/0, `dispositivos` 85/0, `castel32`
+67/0 y `06` sin fallos (lo de la 9 cuenta ahora 44 módulos, con RATON.BIN). De
+camino se arregló una carrera del Panel: tras elegir el tapiz (o el dock) se
+repintaba antes de que el escritorio lo pusiera y enseñaba el de antes; ahora
+la 174 da lo pedido mientras tanto (`preferencias.cas`).
+
+**Lo que no se ha podido probar aquí**: un Synaptics de verdad (QEMU no lo
+tiene). Lo probará Carlos en el HP Mini 5103 (y el Toshiba NB250):
+`/root/FTP/HispaDOS/Pruebas/Pendientes/HP-Mini-5103/Touchpad/`. Si algo va
+mal, lo primero es `ARRANQUE.TXT` (lo que ha dicho el touchpad) y `RATON
+/TOUCHPAD` (lo que manda).
+## 14 septemvicies. Los punteros del ratón (rama punteros, «(PUNTEROS)»)
+
+*22/11/2026. Lo pidió Carlos («es más estética»): Configuración › Ratón,
+cambiar el color, la forma y el tamaño del puntero; y luego, una mano con el
+dedo índice como puntero normal (hacia arriba y en diagonal) y los punteros
+en espejo para los zurdos. Todo lo cambiado lleva la marca «(PUNTEROS)».*
+
+| | |
+|---|---|
+| ![Las 13 formas de la «Clásica» a 1x y a 3x, sobre claro y sobre oscuro](pentium/punteros/clasica.png) | ![Los seis juegos: Clásica, Moderna, Gruesa, Retro, Mano y Mano en diagonal](pentium/punteros/juegos.png) |
+| ![Los once colores, con su nombre](pentium/punteros/colores.png) | ![Para zurdos: la flecha y la mano en espejo; la «I» y la cruz, iguales](pentium/punteros/zurdos.png) |
+| ![Panel de control › Ratón › Puntero, con la vista previa](pentium/punteros/panel.png) | ![Localizar el puntero al pulsar Control: los anillos que se cierran](pentium/punteros/localizar.png) |
+
+### Las formas
+
+Hasta la 0.8.8 había una flecha (y las cuatro de cambiar el tamaño en los
+bordes, de 1x): Pintura 2 dibujaba una flecha doble junto a la del ratón
+porque el sistema no tenía otra. Ahora el núcleo tiene **13 formas**
+(`cursores.cas`):
+
+| | forma | quién la pone |
+|---|---|---|
+| 0 | la flecha | lo de siempre |
+| 1-4 | cambiar el tamaño: de lado a lado, de arriba abajo y las dos diagonales | el núcleo, solo, en los bordes y las esquinas de una ventana que se puede estirar |
+| 5 | la espera (el reloj de arena, o un círculo que da vueltas en «Moderna» y en las manos), **animada** | un programa que trabaja sin atender |
+| 6 | la flecha con la espera | el núcleo, al abrir un programa, hasta que hace su ventana (o 3 s) |
+| 7 | el texto (la «I») | el Bloc de notas sobre el texto; Pluma sobre la página; Correo sobre los campos y el texto; Pintura con la herramienta Texto; el Navegador en un campo |
+| 8 | la mano (un enlace) | el Navegador sobre un enlace |
+| 9 | mover (las cuatro flechas) | el núcleo, al mover una ventana desde su menú (Alt+Espacio › Mover) |
+| 10 | la cruz de precisión | Pintura sobre el lienzo |
+| 11 | prohibido | el Navegador (lo que no se puede soltar) |
+| 12 | la ayuda (la flecha con «?») | el Navegador (`cursor: help`) |
+
+Cada forma es un **dibujo vectorial propio** (polígonos, discos, anillos y
+trazos redondos, en décimas de punto, con el punto activo en (0, 0)): no se
+copia de Windows ni de macOS. Para pintarla se mide, en cada punto de la
+pantalla, la distancia con signo a la silueta (en 64 avos de punto): lo que
+queda a menos de medio punto de la orilla se suaviza, lo que está a más de
+un borde de ella es relleno, y la «tinta» de dentro (las rayas entre los
+dedos, la arena del reloj, los puntos que corren) va del color del borde.
+Así cada tamaño sale **nítido** (no es la de 1x ampliada a bloques), y las
+de siempre (la flecha y las cuatro dobles de la «Clásica» a 1x) siguen
+siendo **las de antes, punto a punto**. Lo medido se guarda en una caché de
+24 imágenes (forma, juego, tamaño, espejo y cuadro de la animación).
+
+**Los juegos** (Panel › Ratón › Puntero › Forma), todos propios:
+
+- **Clásica**: la flecha de siempre, con su cola.
+- **Moderna**: una punta sin cola, con la base hacia dentro; la espera, un
+  círculo.
+- **Gruesa**: la clásica un 25 % más grande y con el borde doble (2 puntos a
+  1x): para ver mal.
+- **Retro (1990)**: lados rectos y **sin suavizar** (los puntos enteros).
+- **Mano (el dedo hacia arriba)** y **Mano (el dedo en diagonal)**: el
+  puntero normal es una mano con el índice apuntando, **con el punto activo
+  en la punta del dedo**; en diagonal, arriba a la izquierda, como una
+  flecha. En estos dos juegos la mano del **enlace no es la misma**: es la
+  mano hacia arriba con un **destello** (tres rayitas junto a la punta), para
+  que se note al pasar por un enlace.
+
+**Los tamaños**: normal (1x), grande (1,5x), muy grande (2x) y enorme (3x).
+El borde crece con el tamaño (es la misma silueta).
+
+**Los colores**, cada uno con su nombre escrito en el Panel (no solo el
+color: el daltonismo): blanco con borde negro (el de siempre), negro con
+borde blanco, **invertido** (el contrario de lo de debajo; en un gris
+medio, donde el contrario se parecería mucho, blanco o negro; y el borde, el
+contrario del relleno), amarillo, verde lima, rojo, azul, naranja, rosa,
+morado y cian, cada uno con el borde (negro o blanco) que más se distingue
+de él: se ve sobre claro y sobre oscuro.
+
+**Para zurdos** (Panel › Ratón › Puntero, «Para zurdos: en espejo»; y al
+marcar «Para zurdos» de los botones en Ratón se marca también, y se puede
+quitar): la flecha, la mano, la ayuda y la flecha con la espera, **en
+espejo** (apuntan arriba a la derecha y el punto activo sigue en la punta;
+el «?» y la espera van al otro lado, sin espejo: se leen igual); la «I», la
+cruz, mover, las dobles y prohibido no cambian.
+
+**El rastro** (opcional): por donde ha pasado en la última décima de
+segundo, el mismo puntero cada vez más transparente. **Localizar al pulsar
+Control** (opcional): Control pulsado y suelto, solo (sin otra tecla, ni un
+clic, ni la rueda), dos anillos (blanco con borde oscuro) que se cierran
+sobre el puntero en 0,6 s.
+
+### Sin parpadeo y sin restos
+
+Antes, `ventanas.cas` borraba la flecha (copiaba lo de debajo desde el
+doble búfer) y la pintaba otra vez en la pantalla: entre una cosa y otra, un
+instante sin flecha. Ahora lo que va encima de la pantalla (el puntero, el
+rastro y los anillos) son **piezas**: cuando cambian (se mueve, cambia de
+forma, de tamaño o de color, un cuadro de la animación) o se recompone algo
+debajo, se pinta en una **baldosa** de 128 x 128 lo del doble búfer con las
+piezas encima, y de ahí a la pantalla: cada punto se escribe **una sola vez
+y ya con lo que tiene que tener**. Donde estaban y donde están, juntos si se
+tocan; lo recompuesto que no toca las piezas, tal cual. Así no parpadea al
+moverse ni al cambiar de forma, y un puntero grande que tapa más no deja
+restos (lo comprueba la parte 51: después de moverlo deprisa por encima de
+las zonas y los bordes, la pantalla, igual punto a punto). Vale para todas
+las medidas de la pantalla y para las de 24 y 16 bits (la baldosa va al
+lienzo de la pantalla y `volcar()` la pasa).
+
+**Los juegos y lo que va a pantalla completa** (OpenGL, DirectX): manda el
+juego. `ShowCursor` (WIN32, `flecha_escondida`) esconde todas las piezas
+(también el rastro y los anillos) mientras su ventana es la activa. **La
+consola de texto** (también la pintada en la pantalla del firmware por
+UEFI) no tiene puntero: no aplica.
+
+### Para los programas: la llamada 177
+
+| EBX | lo que hace |
+|---|---|
+| 0 | la forma sobre lo de dentro de la ventana ECX (suya): EDX, la forma. Vale hasta que se pida otra |
+| 1 | una **zona** de la ventana ECX con su forma: EDX apunta a una `Zona` (x, y, ancho, alto y forma; 20 octetos). La última que se pide es la que vale; la misma zona otra vez, cambia su forma; con ancho 0 se quitan todas. Hasta 16 por ventana. El núcleo la pone sin esperar al programa |
+| 2 | los ajustes, a la `Ajustes_puntero` de ECX (24 octetos: juego, tamaño, color, rastro, localizar, espejo) |
+| 3 | cambiarlos: solo el Panel de control (su sello) o el modo administrador; se ponen al momento y se guardan |
+| 4 | pintar un puntero en un mapa de puntos del programa (la vista previa del Panel): EDX, un `Pinta_puntero` |
+| 5 | la forma que se ve ahora |
+
+En Castel, `ppuntero.cas` («modelo usuario»: `puntero_de_ventana`,
+`zona_de_puntero`, `ajustes_puntero`, `poner_ajustes_puntero`,
+`pinta_puntero`); en C, la oficina (`so_puntero` y `so_puntero_zona` en
+`oficina/comun/so.h`: Pluma, Cuentas, Pintura...), Correo
+(`so_puntero_zona`) y el Navegador (`v_puntero`, la `set_pointer` de
+NetSurf). **Cómo usarla** en un programa nuevo:
+
+- Sobre lo que se escribe, `P_TEXTO` con una **zona** (el núcleo la pone
+  enseguida, aunque el programa esté ocupado): el Bloc la rehace cada vez
+  que mide la ventana (`medidas()`), Correo cada vez que pinta.
+- Lo que depende de dónde está el ratón dentro de algo dibujado por el
+  programa (un enlace, un asa), con la forma de la ventana al recibir
+  `EV_RATÓN_MUEVE` (y la flecha al salir): Pintura y Pluma, después de cada
+  suceso del ratón; el Navegador, cuando NetSurf la pide.
+- Mientras trabaja sin atender, `P_ESPERA` (y luego la de antes).
+- Los bordes que cambian el tamaño de la ventana ya los pone el núcleo; un
+  programa no los pide.
+
+**Lo que se dice por el puerto serie** (las pruebas): `puntero: forma 7 (el
+texto)` cada vez que cambia; `puntero: localizado (Control)`; `puntero:
+juego 0, tamaño 0, color 0, rastro 0, localizar 0, zurdo 0` al arrancar o al
+entrar un usuario, y con «(del Panel)» al cambiarlo.
+
+### Dónde se guarda
+
+En `PUNTERO.INI`, **por usuario**: en sus ajustes
+(`\USUARIOS\CARLOS\AJUSTES\PUNTERO.INI`) o, sin usuarios, en `\HISPA`
+(sin instalar, en la raíz de la memoria). Solo lo escribe el núcleo (la zona
+protegida). Se lee al arrancar y al entrar cada usuario:
+
+```
+juego=4
+tamano=1
+color=3
+rastro=0
+localizar=1
+zurdo=0
+```
+
+### El Panel de control › Ratón › Puntero
+
+En Ratón, abajo, «Puntero: forma, color y tamaño...» (o `PANEL /PUNTERO`)
+abre la página (`panelpun.cas`, aparte de `upanel.cas` para no cruzarse con
+la sección «Touchpad» de la otra rama): Forma, Tamaño y Color (listas con su
+nombre), las casillas del rastro, localizar con Control y para zurdos, y la
+**vista previa** en el propio cuadro: la flecha, la «I», la mano, la
+espera, la doble en diagonal y la ayuda, sobre claro y sobre oscuro (las
+pinta el núcleo, la llamada 177, con lo elegido). Todo se pone al momento.
+
+### Probarlo
+
+`SOLO=punteros castel/pruebas.sh` (la parte 51, `castel/pruebas_punteros.sh`
+y `nucleo32/mira_punteros.py`): el puntero de verdad, en QEMU, es lo que
+cambia entre dos capturas (con él y con él lejos). A 800 x 600, la flecha
+de siempre punto a punto, la «I» sobre el texto del Bloc, las cuatro dobles
+en los bordes de su ventana y la flecha con la espera al abrirlo. A 1280 x
+720, `PUNTEST.BIN` (`upuntest.cas`: 13 columnas, cada una con su forma, en
+claro y en oscuro) con nueve `PUNTERO.INI`: las 13, distintas, a 1x y a 3x
+(tres veces más altas, nítidas y no ampliadas a bloques); Moderna, Gruesa,
+Retro (sin medios tonos), invertido (el contrario del fondo), Mano (la del
+enlace, distinta), Mano en diagonal; los colores con su borde; para zurdos,
+en espejo (y la «I» y la cruz, iguales); los anillos de Control, el rastro;
+y **sin restos** tras moverlo deprisa, con el puntero normal y el enorme. Y
+el Panel con el teclado: los once colores uno a uno (el puntero de verdad,
+de ese color, en claro y en oscuro), el tamaño enorme, para zurdos;
+`PUNTERO.INI` y al arrancar otra vez. Pintura (`pintura/pruebas/ventana.sh`)
+comprueba que sobre el asa sale la doble en diagonal y sobre el lienzo la
+cruz (en Linux, `so_anfitrion.c` dice la forma).
+
+**Pasadas** (23/11/2026; PC de Albinyana, -j 2, y aquí): punteros 136/0,
+06 168/0, panel 108/0, iconos 95/0, menu 95/0, rueda 71/0, programas 92/0,
+pantalla 98/0, pintura 73/0, correo 189/0; bloc 119/0, pluma 79/0 y
+navegador 98/0 aquí (en el PC faltan qpdf, poppler e ImageMagick: dan
+fallos que no son de esto). En el Bloc, la captura de las pestañas (bl7)
+aparta antes el ratón: la «I» tapaba su pie.
+
+### Lo que falta
+
+- La forma que pide un programa de Windows (`SetCursor`, `LoadCursor` con
+  los IDC_ de siempre) y uno de Ventanas en HVPRUN: hoy, la flecha.
+- Que Cuentas pida la cruz gruesa sobre las celdas y la Agenda la mano en
+  sus enlaces (con la llamada 177 es una línea).
+- Punteros de colores hechos por el usuario (un .CUR o un .ANI): por ahora,
+  los seis juegos propios.
 
 ## 15. Las pruebas
 

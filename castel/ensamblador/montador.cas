@@ -30,7 +30,7 @@ módulo Montador
     constante MAX_L = 32768             ; etiquetas L_n con tabla propia
     constante MAX_T = 16384             ; y T_n
     constante CUBOS = 4096              ; de la tabla de dispersión
-    constante PARRAFOS_SIM = 0x2000     ; 128 K para las etiquetas con nombre
+    constante PARRAFOS_SIM = 0x3000     ; 192 K para las etiquetas con nombre (0.8.9: con 128 K, la semilla ya no cabía)
 
     ; las clases de operando
     constante K_R16 = 1

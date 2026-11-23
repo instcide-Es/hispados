@@ -22,10 +22,16 @@
  *     reinicio lo hace el núcleo (el registro de la FADT, 8042, CF9h).
  *  4. El registro (lo que en Hispa-DOS es BATERIA.LOG) sale por el puerto
  *     serie y, con «registro», también a \ACPI.TXT de la unidad del sistema.
+ *  5. (TERMO) Solo si el Termómetro (TERMO.BIN) lo está pidiendo (la llamada
+ *     223 lo dice), cada 2 s y con la tarea quieta: _TMP de las zonas
+ *     térmicas (y una vez sus _CRT, _PSV, _HOT y _AC0), los ventiladores
+ *     (PNP0C0B: _FST, _STA, _PSC) y, una vez, lo que dice el SMBIOS (el
+ *     fabricante y el modelo del equipo, la placa, la BIOS). Solo se leen.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "acpi.h"
 #include "accommon.h"
 #include "pentium.h"
+#include "../../castel/nucleo32/termo/termo_acpi.h"	/* (TERMO) */
 
 int tarea_quieta(void);
 u32 mq_mide_tsc(void);
@@ -430,6 +436,342 @@ falla:
 	vacia_registro(0);
 }
 
+/* ---- (TERMO) las zonas térmicas, los ventiladores y el SMBIOS, para el
+ * Termómetro (TERMO.BIN, castel/nucleo32/termo/): la llamada 223 ---- */
+#define SC_TERMO 223
+/* (el núcleo copia TA_TAM octetos: los de detrás, a cero) */
+static union { struct termo_acpi t; char b[TA_TAM]; } ta_u;
+#define ta ta_u.t
+static ACPI_HANDLE ta_zh[TA_ZONAS], ta_fh[TA_VENT];
+static int ta_buscado;
+
+/* (si «estado» no es 0: lo que dijo ACPICA y lo que devolvió, para saber
+ * por qué no hay dato) */
+static int32_t ta_kelvin_de(ACPI_HANDLE h, const char *m, uint32_t *estado, int32_t *crudo)
+{
+	ACPI_BUFFER b;
+	ACPI_OBJECT o;
+	ACPI_STATUS s;
+	UINT64 v;
+
+	b.Length = sizeof o;
+	b.Pointer = &o;
+	s = AcpiEvaluateObjectTyped(h, (char *)m, NULL, &b, ACPI_TYPE_INTEGER);
+	if (estado)
+		*estado = s;
+	if (crudo)
+		*crudo = -1;
+	if (ACPI_FAILURE(s))
+		return TA_NO;
+	v = o.Integer.Value;
+	if (crudo)
+		*crudo = v > 0x7FFFFFFF ? 0x7FFFFFFF : (int32_t)v;
+	/* en décimas de kelvin; lo que no puede ser (0, basura), fuera */
+	if (v < 2000 || v > 4732)
+		return TA_NO;
+	return (int32_t)v - 2732;
+}
+
+static int32_t ta_kelvin(ACPI_HANDLE h, const char *m)
+{
+	return ta_kelvin_de(h, m, 0, 0);
+}
+
+static ACPI_STATUS ta_una_zona(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	ACPI_BUFFER b;
+	struct ta_zona *z;
+
+	(void)nivel; (void)ctx; (void)ret;
+	if (ta.nzonas >= TA_ZONAS)
+		return AE_CTRL_TERMINATE;
+	z = &ta.zona[ta.nzonas];
+	ta_zh[ta.nzonas++] = h;
+	b.Length = sizeof z->nombre;
+	b.Pointer = z->nombre;
+	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
+		pon_texto(z->nombre, "?", sizeof z->nombre);
+	z->crt = ta_kelvin(h, "_CRT");
+	z->psv = ta_kelvin(h, "_PSV");
+	z->hot = ta_kelvin(h, "_HOT");
+	z->ac0 = ta_kelvin(h, "_AC0");
+	z->tmp = TA_NO;
+	reg("ACPI: (TERMO) zona térmica %s: _CRT %d, _PSV %d, _HOT %d, _AC0 %d (décimas de grado)\n",
+	    z->nombre, z->crt, z->psv, z->hot, z->ac0);
+	return AE_OK;
+}
+
+static ACPI_STATUS ta_un_ventilador(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	ACPI_PNP_DEVICE_ID *hid;
+	ACPI_BUFFER b;
+	int es_vent;
+
+	(void)nivel; (void)ctx; (void)ret;
+	if (ta.nvent >= TA_VENT)
+		return AE_CTRL_TERMINATE;
+	if (ACPI_FAILURE(AcpiUtExecute_HID((ACPI_NAMESPACE_NODE *)h, &hid)))
+		return AE_OK;
+	es_vent = !strcmp(hid->String, "PNP0C0B");
+	ACPI_FREE(hid);
+	if (!es_vent)
+		return AE_OK;
+	b.Length = sizeof ta.vent[0].nombre;
+	b.Pointer = ta.vent[ta.nvent].nombre;
+	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
+		pon_texto(ta.vent[ta.nvent].nombre, "?", sizeof ta.vent[0].nombre);
+	reg("ACPI: (TERMO) ventilador %s\n", ta.vent[ta.nvent].nombre);
+	ta_fh[ta.nvent++] = h;
+	return AE_OK;
+}
+
+static void ta_lee_vent(int i)
+{
+	ACPI_BUFFER b;
+	ACPI_OBJECT *o;
+	ACPI_BUFFER e;
+	ACPI_OBJECT x;
+	struct ta_vent *v = &ta.vent[i];
+
+	v->velocidad = v->control = TA_NO;
+	v->encendido = -1;
+	b.Length = ACPI_ALLOCATE_BUFFER;
+	b.Pointer = NULL;
+	v->estado_fst = (uint16_t)AcpiEvaluateObjectTyped(ta_fh[i], "_FST", NULL, &b, ACPI_TYPE_PACKAGE);
+	v->estado_psc = 0;
+	if (ACPI_SUCCESS(v->estado_fst)) {
+		o = b.Pointer;
+		if (o->Package.Count >= 3 && o->Package.Elements[1].Type == ACPI_TYPE_INTEGER &&
+		    o->Package.Elements[2].Type == ACPI_TYPE_INTEGER) {
+			UINT64 c = o->Package.Elements[1].Integer.Value, r = o->Package.Elements[2].Integer.Value;
+
+			if (c <= 100)
+				v->control = (int32_t)c;
+			if (r < 0xFFFFFFFFull && r < 100000)
+				v->velocidad = (int32_t)r;
+			if (v->velocidad != TA_NO)
+				v->encendido = v->velocidad > 0;
+		}
+		ACPI_FREE(b.Pointer);
+	}
+	if (v->encendido < 0) {
+		e.Length = sizeof x;
+		e.Pointer = &x;
+		v->estado_psc = (uint16_t)AcpiEvaluateObjectTyped(ta_fh[i], "_PSC", NULL, &e, ACPI_TYPE_INTEGER);
+		if (ACPI_SUCCESS(v->estado_psc))
+			v->encendido = x.Integer.Value == 0;
+	}
+}
+
+/* (TERMO) los ASUS: \_SB.ATKD.WMNB (0, DSTS, {id, 0}) -> lo que dice el EC de
+ * ese «dispositivo» (como asus-wmi de Linux). Solo DSTS (0x53545344), que es
+ * leer; nunca DEVS (0x53564544), que escribe. ~0: no existe; sin el bit
+ * 0x00010000: no está. -1 si no vale */
+static ACPI_HANDLE ta_atkd;
+
+static int64_t ta_asus(u32 id)
+{
+	ACPI_OBJECT a[3], r;
+	ACPI_OBJECT_LIST l = { 3, a };
+	ACPI_BUFFER b = { sizeof r, &r };
+	static u8 entrada[8];
+	u32 v;
+
+	entrada[0] = id, entrada[1] = id >> 8, entrada[2] = id >> 16, entrada[3] = id >> 24;
+	entrada[4] = entrada[5] = entrada[6] = entrada[7] = 0;
+	a[0].Type = ACPI_TYPE_INTEGER;
+	a[0].Integer.Value = 0;
+	a[1].Type = ACPI_TYPE_INTEGER;
+	a[1].Integer.Value = 0x53545344;	/* DSTS */
+	a[2].Type = ACPI_TYPE_BUFFER;
+	a[2].Buffer.Length = 8;
+	a[2].Buffer.Pointer = entrada;
+	if (ACPI_FAILURE(AcpiEvaluateObjectTyped(ta_atkd, "WMNB", &l, &b, ACPI_TYPE_INTEGER)))
+		return -1;
+	v = (u32)r.Integer.Value;
+	if (v == 0xFFFFFFFEu || v == 0xFFFFFFFFu || !(v & 0x00010000))
+		return -1;
+	return v;
+}
+
+static void ta_lee_asus(void)
+{
+	int64_t v;
+	u32 antes = ec_ignoradas;
+
+	ta.asus_vent_cpu = ta.asus_vent_gpu = ta.asus_temp = TA_NO;
+	if (!ta.asus_hay)
+		return;
+	v = ta_asus(0x00110013);
+	if (v >= 0 && (v & 0xFFFF) < 200)
+		ta.asus_vent_cpu = (int32_t)(v & 0xFFFF) * 100;
+	v = ta_asus(0x00110014);
+	if (v >= 0 && (v & 0xFFFF) < 200)
+		ta.asus_vent_gpu = (int32_t)(v & 0xFFFF) * 100;
+	v = ta_asus(0x00110011);
+	if (v >= 0 && (v & 0xFFFF) >= 2732 && (v & 0xFFFF) <= 4232)
+		ta.asus_temp = (int32_t)(v & 0xFFFF) - 2732;
+	if (ec_ignoradas != antes)
+		ta.asus_escribe = 1;
+}
+
+/* lo de un texto del SMBIOS (el número k de los de detrás de la ficha) */
+static void ta_texto_smbios(char *d, u32 cabe, const u8 *f, u32 k)
+{
+	const char *t = (const char *)f + f[1];
+	u32 i;
+
+	d[0] = 0;
+	if (k == 0)
+		return;
+	while (--k && *t)
+		t += strlen(t) + 1;
+	if (!*t)
+		return;
+	for (i = 0; i + 1 < cabe && t[i]; i++)
+		d[i] = (t[i] >= 32 && t[i] < 127) ? t[i] : '?';
+	d[i] = 0;
+	/* (sin los blancos del final) */
+	while (i > 0 && d[i - 1] == ' ')
+		d[--i] = 0;
+}
+
+static void ta_smbios(void)
+{
+	/* (UEFI) el punto de entrada: el que dice el núcleo («smbios=», por UEFI)
+	 * o el de F0000h-FFFFFh (mq_smbios, maquina.c) */
+	u32 pe = mq_smbios(), dir = 0, largo = 0;
+	const u8 *e = pe ? mq_mapa(pe, 32) : 0, *f, *fin;
+
+	ta.smbios = 2;		/* (mirado; 1 si se ha encontrado) */
+	if (!e)
+		return;
+	if (!memcmp((void *)e, "_SM3_", 5)) {
+		if (*(const u32 *)(e + 0x14) == 0) {
+			dir = *(const u32 *)(e + 0x10);
+			largo = *(const u32 *)(e + 0x0C);
+		}
+	} else if (!memcmp((void *)e, "_SM_", 4)) {
+		largo = *(const u16 *)(e + 0x16);
+		dir = *(const u32 *)(e + 0x18);
+	} else if (!memcmp((void *)e, "_DMI_", 5)) {
+		largo = *(const u16 *)(e + 6);
+		dir = *(const u32 *)(e + 8);
+	} else
+		e = 0;
+	if (!e || !dir || !largo || largo > 0x10000) {
+		reg("ACPI: (TERMO) no se encuentra el SMBIOS\n");
+		return;
+	}
+	f = mq_mapa(dir, largo);
+	if (!f)
+		return;
+	fin = f + largo;
+	while (f + 4 <= fin && f[0] != 127 && f[1] >= 4) {
+		const u8 *s = f + f[1];
+
+		if (f[0] == 0 && f[1] >= 9) {
+			ta_texto_smbios(ta.bios, sizeof ta.bios, f, f[5]);
+			{
+				char fe[16];
+				u32 n = strlen(ta.bios);
+
+				ta_texto_smbios(fe, sizeof fe, f, f[8]);
+				if (fe[0] && n + strlen(fe) + 4 < sizeof ta.bios)
+					snprintf(ta.bios + n, sizeof ta.bios - n, " (%s)", fe);
+			}
+		} else if (f[0] == 1 && f[1] >= 8) {
+			ta_texto_smbios(ta.fabricante, sizeof ta.fabricante, f, f[4]);
+			ta_texto_smbios(ta.producto, sizeof ta.producto, f, f[5]);
+			ta_texto_smbios(ta.version_eq, sizeof ta.version_eq, f, f[6]);
+		} else if (f[0] == 2 && f[1] >= 6) {
+			ta_texto_smbios(ta.placa_fab, sizeof ta.placa_fab, f, f[4]);
+			ta_texto_smbios(ta.placa, sizeof ta.placa, f, f[5]);
+		}
+		/* los textos de detrás acaban con dos ceros */
+		while (s + 1 < fin && (s[0] || s[1]))
+			s++;
+		f = s + 2;
+	}
+	ta.smbios = 1;
+	reg("ACPI: (TERMO) SMBIOS: «%s» «%s», placa «%s» «%s», BIOS «%s»\n", ta.fabricante, ta.producto,
+	    ta.placa_fab, ta.placa, ta.bios);
+}
+
+static void ta_lee(void)
+{
+	u32 i;
+
+	if (!ta_buscado) {
+		ta_buscado = 1;
+		ta.version = TA_VERSION;
+		ta_smbios();
+		if (apm.fase != FASE_ERROR || mq_rsdp()) {
+			AcpiWalkNamespace(ACPI_TYPE_THERMAL, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_una_zona, NULL, NULL, NULL);
+			AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_un_ventilador, NULL, NULL, NULL);
+		}
+		reg("ACPI: (TERMO) %u zonas térmicas y %u ventiladores\n", ta.nzonas, ta.nvent);
+		ta.asus_hay = ACPI_SUCCESS(AcpiGetHandle(ACPI_ROOT_OBJECT, "\\_SB.ATKD", &ta_atkd)) && ACPI_SUCCESS(AcpiGetHandle(ta_atkd, "WMNB", &(ACPI_HANDLE){ 0 }));
+		if (ta.asus_hay)
+			reg("ACPI: (TERMO) ASUS: \\_SB.ATKD.WMNB (se leen con DSTS los ventiladores y la temperatura)\n");
+	}
+	/* (TERMO) el EC, de solo lectura mientras tanto; y cuánto se tarda y por
+	 * qué falla cada zona, apuntado (la primera vez y cuando cambia) */
+	{
+		u64 t0 = mq_ahora_us();
+		u32 l0 = estado.ec_lecturas, f0 = estado.ec_fallos;
+		static uint32_t antes[TA_ZONAS];
+
+		ec_solo_lectura = 1;
+		for (i = 0; i < ta.nzonas; i++) {
+			struct ta_zona *z = &ta.zona[i];
+
+			/* (TERMO) la que falla, otra vez solo una vez por minuto: cada
+			 * intento cuesta interpretar el AML (en el HP Mini 5103, cinco
+			 * zonas con 3007h, AE_AML_UNINITIALIZED_ELEMENT, ocupaban el
+			 * procesador más de medio segundo cada vez) */
+			if (ta.lecturas > 0 && z->tmp == TA_NO && z->estado != 0 && ta.lecturas % 30 != 0)
+				continue;
+			z->tmp = ta_kelvin_de(ta_zh[i], "_TMP", &z->estado, &z->crudo);
+			if (z->tmp == TA_NO && (z->estado != antes[i] || ta.lecturas == 0))
+				reg("ACPI: (TERMO) %s._TMP sin dato: %s, devuelve %d\n", z->nombre, AcpiFormatException(z->estado), z->crudo);
+			antes[i] = z->tmp == TA_NO ? z->estado : 0xFFFFFFFFu;
+		}
+		for (i = 0; i < ta.nvent; i++)
+			if (ta.lecturas == 0 || ta.lecturas % 30 == 0 || (ta.vent[i].estado_fst == 0 || ta.vent[i].estado_psc == 0))
+				ta_lee_vent(i);		/* (los que no dan nada: una vez por minuto) */
+		ta_lee_asus();			/* (TERMO) los ASUS, por WMI (DSTS) */
+		ec_solo_lectura = 0;
+		ta.ec_hay = estado.ec_hay;
+		ta.ec_lecturas += estado.ec_lecturas - l0;
+		ta.ec_fallos += estado.ec_fallos - f0;
+		ta.ec_ignoradas = ec_ignoradas;
+		ta.ms_lectura = (uint32_t)((mq_ahora_us() - t0) / 1000);
+	}
+	ta.lecturas++;
+}
+
+/* en cada vuelta del bucle: se da lo último (y el núcleo dice si alguien
+ * lo quiere); si lo quieren, cada 2 s, se lee otra vez */
+static void ta_vuelta(void)
+{
+	static u64 ultima;
+	u64 ahora;
+
+	ta.version = TA_VERSION;
+	if (sc(SC_TERMO, (u32)&ta, 0, 1) != 1)
+		return;
+	ahora = mq_ahora_us();
+	/* cada 2 s; si leer cuesta mucho (más de 0,2 s), cada 10 s */
+	if (ultima && ahora - ultima < (ta.ms_lectura > 200 ? 9900000u : 1900000u))
+		return;
+	if (!tarea_quieta())
+		return;
+	ultima = ahora;
+	ta_lee();
+	sc(SC_TERMO, (u32)&ta, 0, 1);
+}
+
 /* ¿está «p» en lo que le dice el núcleo (la línea del cargador)? Da lo que
  * va detrás, o 0 */
 static const char *tiene(const char *t, const char *p)
@@ -451,6 +793,7 @@ int servicio_principal(void)
 	u32 vistas = 0xFFFFFFFFu, fase = 0xFFFFFFFFu;
 
 	sc(SC_CORTE, 1, 0, 0);		/* Ctrl+C no acaba con el servicio */
+	ec_espera_activa_us = 50;	/* (TERMO) esperar al EC durmiendo, no dando vueltas */
 	/* el núcleo apunta qué tarea es el servicio justo después de lanzarlo:
 	 * hasta entonces (y para cualquier otro que lo lance), la 153 no vale */
 	for (n = 0; n < 100 && ES_ERROR(sc(SC_SERVICIO, 0, 0, 0)); n++)
@@ -470,6 +813,22 @@ int servicio_principal(void)
 			cada = cada * 10 + *p - '0';
 	if (cada < 1 || cada > 600)
 		cada = 10;
+	/* (UEFI) la RSDP, si la dice el núcleo (en hexadecimal) */
+	if ((p = tiene(args, "rsdp=")) != 0) {
+		u32 d = 0;
+
+		for (; (*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'); p++)
+			d = d * 16 + (u32)(*p <= '9' ? *p - '0' : *p - 'A' + 10);
+		mq_pon_rsdp(d);
+	}
+	/* (UEFI) y el SMBIOS (mq_smbios) */
+	if ((p = tiene(args, "smbios=")) != 0) {
+		u32 d = 0;
+
+		for (; (*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'); p++)
+			d = d * 16 + (u32)(*p <= '9' ? *p - '0' : *p - 'A' + 10);
+		mq_pon_smbios(d);
+	}
 	fin = sc(SC_MAS_MEMORIA, MONTON, 0, 0);
 	if (ES_ERROR(fin)) {
 		static const char m[] = "ACPI: no hay memoria para el servicio\n";
@@ -502,6 +861,7 @@ int servicio_principal(void)
 			preparado = 1;
 			if (apm.fase != FASE_ERROR || mq_rsdp())
 				prepara_energia();
+			reg("ACPI: SMBIOS en %08Xh\n", mq_smbios());	/* (UEFI) */
 			reg("ACPI: el núcleo ha puesto a la vista %u KB de memoria física\n", mq_puestos >> 10);
 		}
 		/* (dispositivos) una vez, con la tarea quieta y ya leída la batería */
@@ -517,6 +877,7 @@ int servicio_principal(void)
 		}
 		if (preparado)
 			mira_boton();	/* (PANEL) */
+		ta_vuelta();			/* (TERMO) */
 		vacia_registro(1);
 		/* un tic de HSPACPI son 54,9 ms; uno de Hispa-Pentium, 10 */
 		n = n < 0 ? 100 : n * 11 / 2;

@@ -1,0 +1,20 @@
+# (COMPAT) «Enviar informe a Hispa-DOS»: el receptor del Asistente de
+# compatibilidad. Como el del Termómetro (tools/termo-subida): DENTRO del
+# server { listen 443 ssl; ... } de hispados.es (que ya tiene certificado) y,
+# si se le da HTTPS, del de actualiza.hispados.es. El Asistente prueba, por
+# este orden (\HISPA\COMPAT\COMPAT.INI):
+#   https://actualiza.hispados.es/compat/informe.php
+#   https://hispados.es/compat/informe.php
+# Solo esa URL, solo POST, como mucho 300 KB, con su propio pool de PHP; el
+# guion está fuera de la carpeta de la web (no se puede descargar su fuente).
+location = /compat/informe.php {
+    limit_except POST { deny all; }
+    client_max_body_size 300k;
+    client_body_timeout 30s;
+    fastcgi_pass unix:/tmp/php-cgi-83-hispados-compat.sock;
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME /www/hispados-compat/informe.php;
+    fastcgi_param SCRIPT_NAME /compat/informe.php;
+    access_log off;      # (sin las IP de quien manda: el receptor no las guarda)
+}
+location ^~ /compat/ { return 404; }

@@ -249,13 +249,31 @@
 #      órdenes en el intérprete; y la ventana desde el explorador (abrir,
 #      entrar, Extraer todo, Quitar, Añadir, Propiedades, arrastrar al tapiz,
 #      contraseña, «Comprimir en ZIP»), mirando el disco con mtools y unzip.
+#  49. (COMPAT, SOLO=compat) El Asistente de compatibilidad (COMPAT.BIN; pruebas_compat.sh): el
+#      juego de mentira agrupado por DLL, el informe (sin rutas) y su receptor (php -S, HTTPS de
+#      prueba), el aviso al cambiar win32 (PAQUETES ACTUALIZA con un catálogo de prueba), los
+#      componentes de Microsoft con un servidor de mentira (CAB y LZX propios) y la ventana.
 #  42. (CORREO, SOLO=correo) Correo, el cliente de correo (CORREO.BIN; pruebas_correo.sh): el
 #      núcleo MIME/HTML/vCard y el IMAP con ASan y fuzz, el servidor de pruebas propio
 #      (IMAP, SMTP, POP3 con TLS), las órdenes y la ventana en QEMU, y lo que tarda en un Atom.
+#  48. (UEFI, SOLO=uefi) Arrancar por UEFI (pruebas_uefi.sh): la memoria USB con
+#      BOOTX64.EFI (GRUB EFI, multiboot2) en OVMF de 64 bits (y de 32, si hay su
+#      GRUB): el escritorio a la medida del GOP, ACPI.BIN con la RSDP de GRUB y la
+#      batería de prueba, los discos SATA y USB, la consola de texto pintada en la
+#      pantalla del firmware; la misma memoria por la BIOS; y el CD por UEFI.
+#  51. (PUNTEROS, SOLO=punteros) Los punteros del ratón (pruebas_punteros.sh): la flecha de
+#      siempre, la «I» del Bloc, los bordes; las 13 formas en 6 juegos, 4 tamaños y 11
+#      colores sobre claro y oscuro (mira_punteros.py), para zurdos, los anillos, el
+#      rastro, sin restos; el Panel > Ratón > Puntero y PUNTERO.INI.
 #  47. (ICONOS, SOLO=iconos) Los iconos del tapiz (pruebas_iconos.sh): 30 a 1024 x 600 y
 #      a 800 x 600, ninguno en la barra ni en el dock (mira_iconos.py); organizar por
 #      nombre, tipo, tamaño y fecha; arrastrar; la cuadrícula, la automática, el teclado,
 #      ICONOS.INI; cambiar la medida en marcha; 47 a 640 x 480, en dos páginas; sin dock.
+#  50. (TOUCHPAD, SOLO=touchpad) El touchpad (pruebas_touchpad.sh): touchpad.cas con
+#      paquetes Synaptics hechos a mano (RATON /ANALIZA con corre32: mover, tocar, doble
+#      toque, arrastrar, el borde derecho, dos dedos, la palma, al escribir, descolocados);
+#      el ratón PS/2 de QEMU sigue igual (y RATON /TOUCHPAD lo graba); con «tp_simulado»,
+#      RATON /INYECTA baja y sube el Bloc y hace clic; Panel de control > Ratón > Touchpad.
 #  32. (MIRADOR, SOLO=mirador) El Mirador (MIRADOR.BIN): PNG, BMP, JPG, GIF
 #  41. (PLUMA32, SOLO=pluma) Pluma 2 (PLUMA.BIN, el procesador de textos de 32 bits en C
 #      portable: nucleo32/oficina; pruebas_pluma.sh): formatos, PDF, RTF, corrector, la
@@ -312,6 +330,14 @@
 #      ventana a pantalla completa con el ratón de los juegos y DirectInput,
 #      UDP de cliente y de servidor, y el sonido (la mezcla en su hilo,
 #      waveOut, el CD de sonido por MCI).
+#  46. (TERMO, SOLO=termo) El Termómetro (TERMO.BIN, nucleo32/termo/; pruebas_termo.sh): en el
+#      anfitrión, el veredicto con los registros de equipos de verdad (HP Mini, Toshiba, ThinkPad),
+#      la TjMax, el terminal de SSH.BIN (vt.c, con htop, vim y less de verdad) y el receptor de
+#      «Enviar a Carlos» (subir.php); en QEMU, la memoria USB que lo abre al arrancar, la zona
+#      térmica de mentira de ACPI, la parada de seguridad, el registro cada 2 s, lo ocupado, sin
+#      repintar por el ratón, el apagón a mitad de la carga (FAT sana, .LOG y .CSV al día), el aviso
+#      al volver, «Enviar a Carlos» por HTTPS y «Terminal» (SSH con la llave de la memoria contra un
+#      sshd propio: xterm-256color, htop, vim, less, las teclas y window-change).
 #  39. (JUEGOS, SOLO=juegos) Los juegos (el paquete «juegos», nucleo32/juegos/;
 #      pruebas_juegos.sh): la física del pinball en el anfitrión (no atraviesa,
 #      conserva, el flipper golpea), los niveles de Almacén, el paquete, el
@@ -386,10 +412,14 @@
 #   SOLO=pluma ./pruebas.sh       la primera y la 41 (PLUMA32: Pluma 2; pruebas_pluma.sh)
 #   SOLO=oficina ./pruebas.sh     la primera y la 40 (OFICINA2: la oficina 1.1 en HVPRUN; pruebas_oficina.sh)
 #   SOLO=correo ./pruebas.sh      la primera y la 42 (CORREO: el cliente de correo; pruebas_correo.sh)
+#   SOLO=termo ./pruebas.sh       la primera y la 46 (TERMO: el Termómetro y su memoria USB; pruebas_termo.sh)
 #   SOLO=agenda ./pruebas.sh      la primera y la 43 (AGENDA: la Agenda; pruebas_agenda.sh)
 #   SOLO=cuentas ./pruebas.sh     la primera y la 44 (CUENTAS32: Cuentas 2; pruebas_cuentas.sh)
 #   SOLO=pintura ./pruebas.sh     la primera y la 45 (PINTURA32: Pintura 2; pruebas_pintura.sh)
 #   SOLO=iconos ./pruebas.sh      la primera y la 47 (ICONOS: los iconos del tapiz; pruebas_iconos.sh)
+#   SOLO=compat ./pruebas.sh      la primera y la 49 ((COMPAT) el Asistente de compatibilidad; pruebas_compat.sh)
+#   SOLO=touchpad ./pruebas.sh    la primera y la 50 (TOUCHPAD: el touchpad; pruebas_touchpad.sh)
+#   SOLO=punteros ./pruebas.sh    la primera y la 51 (PUNTEROS: los punteros del ratón; pruebas_punteros.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
 #   SOLO=castel64 ./pruebas.sh    la primera y la 23 (CASTEL64: Castel para x86-64, en Linux, y Hispa-64; pruebas64.sh)
@@ -447,11 +477,16 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_pluma.sh           # (PLUMA32) la parte 41, como parte_pluma
 . $AQUI/pruebas_oficina.sh         # (OFICINA2) la parte 40, como parte_oficina
 . $AQUI/pruebas_correo.sh          # (CORREO) la parte 42, como parte_correo
+. $AQUI/pruebas_termo.sh           # (TERMO) la parte 46, como parte_termo
+. $AQUI/pruebas_uefi.sh            # (UEFI) la parte 48, como parte_uefi
 . $AQUI/pruebas_agenda.sh          # (AGENDA) la parte 43, como parte_agenda
 . $AQUI/pruebas_cuentas.sh         # (CUENTAS32) la parte 44, como parte_cuentas
 . $AQUI/pruebas_pintura.sh         # (PINTURA32) la parte 45, como parte_pintura
 . $AQUI/pruebas_cortes.sh          # (CORTES) la parte 37, como parte_cortes
 . $AQUI/pruebas_iconos.sh          # (ICONOS) la parte 47, como parte_iconos
+. $AQUI/pruebas_compat.sh          # (COMPAT) la parte 49, como parte_compat
+. $AQUI/pruebas_touchpad.sh        # (TOUCHPAD) la parte 50, como parte_touchpad
+. $AQUI/pruebas_punteros.sh        # (PUNTEROS) la parte 51, como parte_punteros
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -474,7 +509,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -1188,7 +1223,8 @@ done
 if [ $hechos = 1 ]; then
 # lo que tiene que sumar TEXTOS\LARGO.TXT (el mismo que escribe disco.sh)
 suma=$(python3 -c "print(sum(sum(('linea %03d de un archivo de varios clusters\r\n' % i).encode()) for i in range(1, 401)))")
-# 1. desde la consola del núcleo, con FAT16
+# 1. desde la consola del núcleo, con FAT16 (en la raíz, también AZAR.SEM: la
+# semilla del azar, que el núcleo escribe en el primer arranque desde la 0.8.7)
 DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" disco dir "dir textos" "dir nada" "lanzar hola.bin" "lanzar eco.bin uno dos tres" \
   "lanzar noprog.bin" "lanzar nada.bin" disco apagar > $P/disco.sal 2>&1
 S=$P/disco.sal
@@ -1196,7 +1232,7 @@ mira "el controlador ATA (PIO): IDENTIFY dice qué disco hay en el canal primari
   "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$"
 mira "la FAT16 se monta y se lee su raíz (los nombres largos se saltan; queda el corto)" \
   "^sistema de archivos: FAT16, desde el sector 0, [0-9]* clusters de 2048 octetos, [0-9]* libres" \
-  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^20 entradas"
+  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^AZAR.SEM  *32$" "^21 entradas"
 mira "una carpeta dentro de otra, y una que no está" "^LARGO.TXT  *17600$" "^PIRATA.TXT  *110$" "^5 entradas" "^no puedo abrir «nada»: no existe"
 m1=$(grep "^hola.bin ha acabado" $S | awk '{print $10, $13}')
 mira "un programa del anillo 3 cargado del disco (no de multiboot): corre y acaba con su código" \
@@ -1217,7 +1253,7 @@ mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, 
 mira "VER y MEM" "^Hispa-Pentium ${VERSION_BASE//./\\.}: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
-  "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
+  "^TEXTOS  *<DIR>  " "^ *18 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
   "^LARGO    TXT  *17600  " "^ *3 archivos  *18[0-9]* octetos$" "^No puedo abrir nada: no existe\.$"
 mira "TYPE: un archivo de la raíz y uno de una carpeta (abrir, leer y cerrar por la llamada al sistema)" \
   "^Este archivo está en un disco FAT y lo enseña la orden TYPE\.$" "^Con diez cañones por banda,$" "^un velero bergantín\.$" \
@@ -1477,7 +1513,7 @@ else ko "«sindisco» no deja los discos sin mirar:"; sed 's/^/        /' $S | h
 
 echo "== Hispa-Pentium: el escritorio (modo gráfico, ratón, ventanas, barra de tareas, menú Inicio, iconos, Bloc de notas, Consola y Mi equipo) =="
 cp $P/d16.img $G/e.img
-hora1=$(date +%H:%M); hora2=$(date -d "+1 minute" +%H:%M)
+hora1=$(date +%H:%M); antes=$(date +%s)
 CAPTURAS=$G ESCRIBE=1 DISCO=$G/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura e1" \
   ":clic 40 585" ":captura e2" ":clic 80 176" ":pausa 2" ":escribe Querida señora: ¿qué tal está?" ":tecla ret" ":escribe Adiós." ":captura e3" \
   ":tecla f2" ":pausa 1" ":captura e4" ":arrastra 300 75 400 175" ":raton 600 450" ":captura e5" ":doble 400 175" ":pausa 1" ":captura e6" \
@@ -1491,7 +1527,14 @@ mira "«escritorio» en la línea del cargador: el núcleo pone el modo gráfico
   "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha puesto el núcleo, por la VBE de Bochs/QEMU), tapiz 0"
 miracap "el escritorio: el tapiz con el disquete y su nombre, la barra de tareas con «Inicio» y el reloj en la bandeja" e1 tam 800 600 \
   negrita 30 570 46 580 Inicio negrita 630 505 645 520 Hispa-Pentium rgb 400 2 154C9C rgb 300 598 1D5DBA 10 rgb 795 597 3393E0 12
-if cap $G/e1.ppm negrita 740 570 752 580 $hora1 || cap $G/e1.ppm negrita 740 570 752 580 $hora2; then ok "el reloj de la bandeja da la hora del PC (la de la CMOS: $hora1)"
+# (0.8.9) la hora puede ser cualquiera de las de entre que se empieza y que se
+# acaba: probar.sh compila antes la semilla y sus programas (con el PC cargado,
+# más de un minuto, y la hora de antes ya no valía)
+reloj_bien=0
+for ((t = antes; t <= $(date +%s) + 60; t += 60)); do
+  cap $G/e1.ppm negrita 740 570 752 580 $(date -d @$t +%H:%M) && { reloj_bien=1; break; }
+done
+if [ $reloj_bien = 1 ]; then ok "el reloj de la bandeja da la hora del PC (la de la CMOS: $hora1)"
 else ko "el reloj de la bandeja no da la hora ($hora1)"; fi
 miracap "la flecha del ratón está pintada donde está el ratón (y solo ahí)" e2 rgb 40 585 10233F rgb 42 589 FFFFFF nrgb 400 300 10233F
 miracap "el menú Inicio (MENÚ): los fijados a la izquierda, «Todos los programas» abajo, Mis documentos y Configuración a la derecha, y Cerrar sesión, Reiniciar y Apagar equipo en el pie" e2 \
@@ -1563,7 +1606,7 @@ miracap "Ctrl+V lo pega donde está el cursor, y Mayús con la flecha selecciona
 miracap "Ctrl+C copia lo seleccionado y Ctrl+V lo pega; tres clics seleccionan la línea entera" a7 texto 94 146 102 154 "Hola  cruelmundondo" rgb 99 167 $RES rgb 200 180 $RES \
   nrgb 99 151 $RES
 miracap "lo que se teclea sustituye a lo seleccionado; y un clic y Mayús con otro clic seleccionan de uno a otro" a8 texto 94 162 102 170 X notexto 90 160 200 176 segunda \
-  rgb 99 151 $RES rgb 136 164 $RES nrgb 141 151 $RES
+  rgb 99 151 $RES rgb 120 164 $RES nrgb 141 151 $RES       # ((PUNTEROS) 136,164 queda debajo de la flecha nueva, en 138,158)
 miracap "la barra de menús del Bloc (Archivo, Edición, Ayuda): «Edición» abre Cortar, Copiar, Pegar y Seleccionar todo, con sus teclas" a9 \
   texto 178 116 186 124 "Cortar            Ctrl+X" texto 178 140 186 148 "Copiar            Ctrl+C" texto 178 197 186 205 "Seleccionar todo  Ctrl+A" rgb 99 151 $RES
 miracap "arrastrar la esquina de la ventana la cambia de tamaño, y el programa vuelve a pintar lo suyo (el pie, más abajo; el papel, más ancho)" a10 \
@@ -1702,9 +1745,10 @@ else ko "ATAJOS.INI o DOCK.INI no guardan lo que tocaba:"; cat $G/atajos.ini $G/
 if sano $G/ex.img; then ok "y el disco, sano (fsck.fat)"; else ko "el disco ha quedado mal:"; sed 's/^/        /' $P/fsck.txt | head -5; fi
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
-# la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
+# la orden ESCRITORIO del intérprete, y abrir un documento desde el menú ((PUNTEROS)
+# la flecha se aparta antes de la captura: en el Bloc es la «I», que tapaba el texto)
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 300 171" ":pausa 1" ":clic 500 171" ":pausa 2" \
-  ":captura o1" ":clic 40 585" ":clic 360 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
+  ":raton 700 530" ":captura o1" ":clic 40 585" ":clic 360 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
 S=$G/orden.sal
 mira "la orden ESCRITORIO del intérprete de órdenes (por la llamada al sistema) pone en marcha el escritorio, y ese intérprete acaba" \
   "^C:.>escritorio$" "^escritorio: en marcha, 800 x 600" "^El escritorio está en marcha\.$" "^ORDENES.BIN ha acabado con el código 0"
@@ -2053,8 +2097,8 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    # (0.8.7) 43: los de la 0.8.6 y USUARIOS, ARGON2, PANEL y HORARED
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 43 archivos que ha traído el cargador hacen de unidad M:" $S \
+    # (0.8.7) 43: los de la 0.8.6 y USUARIOS, ARGON2, PANEL y HORARED; (TOUCHPAD) 44, con RATON
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 44 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -2467,7 +2511,7 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium $VERSION_BASE: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1.2     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|17 paquetes\.$" $Z/b2$hc.txt \
+    if grep -q "^|  win32     1\.[0-9]     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|17 paquetes\.$" $Z/b2$hc.txt \
       && grep -q "^|Los archivos de los 17 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
       ok "PAQUETES en el sistema recién instalado: LISTA dice los 17 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 17, base ya no cabe en la pantalla; (OFICINA2) con pintura) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
@@ -3430,7 +3474,7 @@ MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar
   ":clic 340 327" ":pausa 3" > $Y/reiniciar.sal 2>&1
 S=$Y/reiniciar.sal
 mira "«Reiniciar»: el servicio avisa al controlador embebido (_REG 3, 0) y el núcleo reinicia (PIIX4: por el teclado)" \
-  "^escritorio: reiniciar" "^ACPI: el núcleo va a reiniciar el equipo" "^energía: reiniciar por el teclado (8042)" "^\[código 0\]"
+  "^\(> \)\?escritorio: reiniciar" "^ACPI: el núcleo va a reiniciar el equipo" "^energía: reiniciar por el teclado (8042)" "^\[código 0\]"
 # 3. con ICH9 (q35): apagar y reiniciar (aquí la FADT sí trae el registro de reinicio: CF9h)
 for q in 275:apagar 340:reiniciar; do
   MAQUINA=q35 MODULOS=$Y/ACPI.BIN ARRANQUE="escritorio" QEMU_MAS="$SSDT" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN ":pausa 4" ":clic 40 585" \
@@ -5904,12 +5948,19 @@ if parte08 pluma; then parte_pluma; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Plu
 # ---------------------------------------- 40. (OFICINA2) la oficina 1.1 en HVPRUN
 if parte08 oficina; then parte_oficina; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la oficina 1.1)"; fi
 if parte08 correo; then parte_correo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Correo)"; fi   # (CORREO)
+if parte08 termo; then parte_termo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Termómetro)"; fi   # (TERMO) la 46
+if parte08 uefi; then parte_uefi; else echo "  (SOLO=${SOLO08:-$SOLO}: sin UEFI)"; fi   # (UEFI) la 48
 if parte08 agenda; then parte_agenda; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la Agenda)"; fi   # (AGENDA) la parte 43
 if parte08 cuentas; then parte_cuentas; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Cuentas 2)"; fi   # (CUENTAS32) la 44
 if parte08 pintura; then parte_pintura; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Pintura 2)"; fi   # (PINTURA32) la 45
 if parte08 cortes; then parte_cortes; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los cortes de la red)"; fi   # (CORTES)
 # ------------------------- 47. (ICONOS) los iconos del tapiz (pruebas_iconos.sh)
 if parte08 iconos; then parte_iconos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los iconos del tapiz)"; fi
+if parte08 compat; then parte_compat; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Asistente de compatibilidad)"; fi   # (COMPAT) la 49
+# ------------------------- 50. (TOUCHPAD) el touchpad (pruebas_touchpad.sh)
+if parte08 touchpad; then parte_touchpad; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el touchpad)"; fi
+# ------------------------- 51. (PUNTEROS) los punteros del ratón (pruebas_punteros.sh)
+if parte08 punteros; then parte_punteros; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los punteros del ratón)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0
@@ -5951,7 +6002,7 @@ sys.stdout.buffer.write(''.join('linea %06d con algo de texto para llenar\r\n' %
     ":tecla ctrl-f" ":escribe fin" ":tecla ret" ":pausa 1" ":captura bl2" ":tecla esc" ":tecla ctrl-h" ":pausa 1" ":captura bl3" ":tecla esc" \
     ":raton 400 300" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 1" ":pausa 2" ":captura bl4" ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 -1" ":pausa 2" \
     ":clic 157 199" ":pausa 1" ":captura bl5" ":clic 157 199" ":pausa 1" \
-    ":tecla ctrl-o" ":pausa 2" ":captura bl6" ":escribe A1.TXT" ":tecla ret" ":pausa 2" ":escribe zz" ":pausa 1" ":captura bl7" \
+    ":tecla ctrl-o" ":pausa 2" ":captura bl6" ":escribe A1.TXT" ":tecla ret" ":pausa 2" ":escribe zz" ":raton 400 300" ":pausa 1" ":captura bl7" \
     ":tecla ctrl-o" ":pausa 1" ":escribe A2.TXT" ":tecla ret" ":pausa 2" ":clic 340 126" ":pausa 1" ":clic 400 395" ":pausa 2" ":captura bl8" ":tecla esc" ":pausa 1" \
     ":tecla ctrl-shift-f" ":pausa 1" ":escribe carta" ":tecla tab" ":tecla tab" ":tecla tab" ":tecla end" ":escribe DOCS" ":tecla ret" ":pausa 3" ":captura bl9" \
     ":doble 200 254" ":pausa 2" ":captura bl10" ":tecla f1" ":pausa 2" ":captura bl11" \
@@ -5970,6 +6021,7 @@ sys.stdout.buffer.write(''.join('linea %06d con algo de texto para llenar\r\n' %
   miracap "un clic en el [-] del margen pliega el módulo entero: se ve «...» y el número de la línea de después es el 20" bl5 negrita 166 186 178 198 "módulo" \
     texto 124 202 136 214 "20" notexto 160 200 400 300 "función"
   miracap "Ctrl+O: Abrir, con la carpeta (las carpetas primero) y la ruta abajo" bl6 negrita 122 170 134 182 'C:\' negrita 200 186 400 200 "DOCS" texto 122 426 134 438 "Abrir:"
+  # (PUNTEROS) para bl7 el ratón, abajo en el texto: la «I» en (157, 199) tapaba el pie de las pestañas
   miracap "las pestañas: MUESTRA.CAS y A1.TXT (con cambios: « *», no solo un color)" bl7 texto 126 171 138 183 "MUESTRA.CAS" negrita 266 171 278 183 "A1.TXT *"
   miracap "Ver > Comparar con la de al lado: A1 y A2 lado a lado, con «*» (cambiado), «-» (quitado) y «+» (añadido) en el margen, el hueco rayado y el resumen" bl8 \
     negrita 128 194 140 206 "*" negrita 128 242 140 254 "-" negrita 380 274 392 286 "+" texto 120 454 132 466 "3 trozos distintos" rgb 200 248 FDE2E2 rgb 450 280 DCFCE7

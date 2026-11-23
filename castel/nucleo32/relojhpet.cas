@@ -1,0 +1,266 @@
+; =============================================================================
+;  relojhpet.cas - (UEFI) el tic del núcleo cuando el 8254 no cuenta.
+;  Los Intel de 2015 en adelante (Skylake y siguientes) pueden tener el reloj
+;  de siempre (el 8254) parado por el firmware para ahorrar, sobre todo con el
+;  CSM apagado (el 8254CGE del ITSS: la HispaBIOS lo cuenta). Sin su tic
+;  (la IRQ 0, cada 10 ms) el núcleo no reparte el procesador ni cuenta el
+;  tiempo: se queda colgado sin pintar nada. Al encender las interrupciones,
+;  semilla.cas mira si los tics avanzan; si no, aquí se busca el HPET (la
+;  tabla «HPET» de ACPI, desde la RSDP de GRUB) y se pone su temporizador 0 a
+;  dar un tic cada 10 ms en su modo «de sustitución» (LegacyReplacement): el
+;  tic llega por la misma IRQ 0 del 8259, y todo lo demás sigue igual.
+;  Si tampoco hay HPET (hay Intel de los últimos que lo esconden), el
+;  temporizador del APIC local, medido contra el reloj de ACPI (el «PM
+;  timer» de la FADT, 3,579545 MHz) y puesto a dar el mismo vector que la
+;  IRQ 0 (0x20); el reloj de tareas.cas le dice también su «fin de
+;  interrupción» (eoi_apic). En xAPIC por su memoria; en x2APIC por sus MSR.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Relojhpet
+
+    importar Cpu, Multiboot, Paginas, Tareas, Formato, Registro, Textouefi
+
+    ; la tabla de ACPI con esa firma (cuatro letras en un nat32): su dirección
+    ; física, o 0. Desde la RSDP de GRUB (la XSDT si la hay; si no, la RSDT)
+    función tabla_acpi(firma: nat32): nat32
+        variable r, t, e: puntero a nat32
+        variable rb: puntero a byte
+        variable dir, largo, n, i, salto, d: nat32
+        rb := puntero(rsdp())
+        si rb = nulo entonces devolver 0 fin
+        r := puntero(nat32(rb))
+        dir := r[4]                             ; la RSDT
+        salto := 4
+        si rb[15] >= 2 y r[7] = 0 y r[6] <> 0 entonces
+            dir := r[6]                         ; la XSDT
+            salto := 8
+        fin
+        si dir = 0 entonces devolver 0 fin
+        t := puntero(mapear_aparato(dir, 36))
+        si t = nulo entonces devolver 0 fin
+        largo := t[1]
+        si largo < 36 o largo > 4096 entonces devolver 0 fin
+        t := puntero(mapear_aparato(dir, largo))
+        si t = nulo entonces devolver 0 fin
+        n := (largo - 36) div salto
+        para i desde 0 hasta n - 1 hacer
+            e := puntero(nat32(t) + 36 + i * salto)
+            d := e[0]
+            si salto = 4 o e[1] = 0 entonces
+                si d <> 0 entonces
+                    r := puntero(mapear_aparato(d, 64))
+                    si r <> nulo y r[0] = firma entonces devolver d fin
+                fin
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; pone el HPET a dar el tic por la IRQ 0. Falso si no hay o no se puede.
+    función pon_hpet(): bool
+        variable h, t: puntero a nat32
+        variable tabla, base, periodo, cada, conf: nat32
+        tabla := tabla_acpi(0x54455048)         ; «HPET»
+        si tabla = 0 entonces
+            apunta0("reloj: no hay tabla HPET de ACPI\n")
+            devolver falso
+        fin
+        t := puntero(mapear_aparato(tabla, 56))
+        si t = nulo entonces devolver falso fin
+        ; su dirección: la estructura de 12 octetos desde el 40 (en memoria, 0)
+        h := puntero(nat32(t) + 40)
+        si (h[0] yb 0xFF) <> 0 o h[2] <> 0 entonces
+            apunta0("reloj: el HPET no está en la memoria de debajo de 4 GB\n")
+            devolver falso
+        fin
+        base := h[1]
+        h := puntero(mapear_aparato(base, 0x200))
+        si h = nulo entonces devolver falso fin
+        periodo := h[1]                         ; femtosegundos por cuenta
+        si periodo = 0 o periodo > 100000000 entonces
+            apunta1("reloj: el HPET de 0x%08X no vale (su período)\n", base)
+            devolver falso
+        fin
+        si h[0] yb 0x8000 = 0 entonces
+            apunta1("reloj: el HPET de 0x%08X no sabe sustituir al 8254 (LegacyReplacement)\n", base)
+            devolver falso
+        fin
+        conf := h[64]                           ; 0x100: la configuración del temporizador 0
+        si conf yb 0x10 = 0 entonces
+            apunta1("reloj: el temporizador 0 del HPET de 0x%08X no es periódico\n", base)
+            devolver falso
+        fin
+        ; las cuentas de 10 ms: 10^13 fs / período
+        cada := cuentas_10ms(periodo)
+        h[4] := 0                               ; parado
+        h[60] := 0                              ; 0xF0: la cuenta, a cero
+        h[61] := 0
+        h[64] := (conf yb 0xFFFFFE00) ob 0x4C   ; interrupción, periódico, se pone el valor
+        h[66] := cada                           ; 0x108: el comparador
+        h[67] := 0
+        h[66] := cada                           ; (y lo que suma en cada vuelta)
+        h[4] := 3                               ; en marcha, sustituyendo al 8254 (IRQ 0)
+        apunta3("reloj: el 8254 no da su tic: el tic, del HPET de 0x%08X (%u fs por cuenta, %u cuentas cada 10 ms)\n", base, periodo, cada)
+        devolver cierto
+    fin
+
+    función cuentas_10ms(periodo: nat32): nat32
+        variable q: nat32
+        ensamblador
+            mov edx, 0x918
+            mov eax, 0x4E72A000
+            mov ecx, {periodo}
+            div ecx
+            mov {q}, eax
+        fin
+        devolver q
+    fin
+
+    ; ---- el APIC local ----
+    variable apic_x2: bool
+    variable apic_reg: nat32                    ; dónde se ven sus registros (xAPIC)
+
+    función apic_lee(r: nat32): nat32
+        variable v, m: nat32
+        variable p: puntero a nat32
+        si apic_x2 entonces
+            m := 0x800 + (r >> 4)
+            ensamblador
+                mov ecx, {m}
+                db 0x0F, 0x32                   ; rdmsr
+                mov {v}, eax
+            fin
+            devolver v
+        fin
+        p := puntero(apic_reg + r)
+        devolver valor(p)
+    fin
+
+    función apic_pon(r: nat32, v: nat32)
+        variable m: nat32
+        variable p: puntero a nat32
+        si apic_x2 entonces
+            m := 0x800 + (r >> 4)
+            ensamblador
+                mov ecx, {m}
+                mov eax, {v}
+                xor edx, edx
+                db 0x0F, 0x30                   ; wrmsr
+            fin
+            devolver
+        fin
+        p := puntero(apic_reg + r)
+        valor(p) := v
+    fin
+
+    función lee_pm(puerto: nat32): nat32
+        variable v: nat32
+        ensamblador
+            mov edx, {puerto}
+            in eax, dx
+            mov {v}, eax
+        fin
+        devolver v yb 0xFFFFFF
+    fin
+
+    función pon_apic(): bool
+        variable f: puntero a nat32
+        variable fb: puntero a byte
+        variable fadt, pm, base_msr, t0, t1, andado, cuenta, vueltas: nat32
+        fadt := tabla_acpi(0x50434146)          ; «FACP»
+        si fadt = 0 entonces
+            apunta0("reloj: no hay FADT: sin reloj de ACPI para medir el del APIC\n")
+            devolver falso
+        fin
+        f := puntero(mapear_aparato(fadt, 244))
+        si f = nulo entonces devolver falso fin
+        fb := puntero(nat32(f))
+        pm := f[19]                             ; PM_TMR_BLK (76)
+        si pm = 0 y f[1] >= 220 y fb[208] = 1 entonces pm := f[53] fin      ; X_PM_TMR_BLK, en E/S
+        si pm = 0 o pm > 0xFFFF entonces
+            apunta0("reloj: la FADT no dice dónde está el reloj de ACPI (PM timer)\n")
+            devolver falso
+        fin
+        ensamblador
+            mov ecx, 0x1B
+            db 0x0F, 0x32                       ; rdmsr: IA32_APIC_BASE
+            mov {base_msr}, eax
+        fin
+        si base_msr yb 0x800 = 0 entonces
+            apunta0("reloj: el APIC local está apagado\n")
+            devolver falso
+        fin
+        apic_x2 := base_msr yb 0x400 <> 0
+        si no apic_x2 entonces
+            apic_reg := mapear_aparato(base_msr yb 0xFFFFF000, 0x400)
+            si apic_reg = 0 entonces devolver falso fin
+        fin
+        apic_pon(0xF0, apic_lee(0xF0) ob 0x100)           ; encendido (SVR)
+        apic_pon(0x3E0, 3)                                ; dividir entre 16
+        apic_pon(0x320, 0x10000 ob 0x20)                  ; tapado, de una vez
+        apic_pon(0x380, 0xFFFFFFFF)
+        ; 10 ms del reloj de ACPI: 35795 cuentas
+        t0 := lee_pm(pm)
+        vueltas := 0
+        andado := 0
+        mientras andado < 35795 y vueltas < 100000000 hacer
+            t1 := lee_pm(pm)
+            andado := (t1 - t0) yb 0xFFFFFF
+            vueltas := vueltas + 1
+        fin
+        cuenta := 0xFFFFFFFF - apic_lee(0x390)
+        si andado < 35795 o cuenta < 100 entonces
+            apunta0("reloj: el reloj de ACPI no anda: no se puede medir el del APIC\n")
+            devolver falso
+        fin
+        si apic_x2 entonces eoi_apic := 1 sino eoi_apic := apic_reg + 0xB0 fin
+        apic_pon(0x320, 0x20000 ob 0x20)                  ; periódico, el vector de la IRQ 0
+        apic_pon(0x380, cuenta)
+        si apic_x2 entonces
+            apunta2("reloj: el tic, del temporizador del APIC local (x2APIC), %u cuentas cada 10 ms (medido con el reloj de ACPI, puerto %Xh)\n", cuenta, pm)
+        sino
+            apunta2("reloj: el tic, del temporizador del APIC local, %u cuentas cada 10 ms (medido con el reloj de ACPI, puerto %Xh)\n", cuenta, pm)
+        fin
+        devolver cierto
+    fin
+
+    ; con las interrupciones ya encendidas: ¿llegan los tics del 8254? Si no
+    ; (y hay RSDP: arrancado por UEFI), el HPET. Con la BIOS no se mira.
+    público función mira_reloj()
+        variable t0, i: nat32
+        si rsdp() = 0 entonces devolver fin
+        t0 := tics
+        i := 0
+        mientras tics = t0 y i < 30000000 hacer
+            ensamblador
+                db 0xF3, 0x90                   ; pause (ENSAMB32 no la sabe)
+            fin
+            i := i + 1
+        fin
+        si tics <> t0 entonces
+            apunta0("reloj: el 8254 da su tic (la IRQ 0)\n")
+            devolver
+        fin
+        apunta0("reloj: el 8254 no da su tic (el firmware lo tiene parado): busco el HPET\n")
+        pinta_ahora()
+        si no pon_hpet() entonces
+            pinta_ahora()
+            si no pon_apic() entonces
+                apunta0("reloj: *** el 8254 no da su tic, y ni el HPET ni el APIC local lo sustituyen: el núcleo no puede contar el tiempo\n")
+                pinta_ahora()
+                devolver
+            fin
+        fin
+        t0 := tics
+        i := 0
+        mientras tics = t0 y i < 30000000 hacer
+            ensamblador
+                db 0xF3, 0x90                   ; pause (ENSAMB32 no la sabe)
+            fin
+            i := i + 1
+        fin
+        si tics = t0 entonces apunta0("reloj: *** tampoco llega el tic nuevo\n") sino apunta0("reloj: ya llega el tic\n") fin
+        pinta_ahora()
+    fin
+
+fin Relojhpet.

@@ -1,0 +1,64 @@
+(COMPAT) EL RECEPTOR DE «ENVIAR INFORME A HISPA-DOS» - CÓMO SE PONE EN EL SERVIDOR
+===================================================================================
+
+Lo que hay aquí (tools/compat-subida/; el mismo diseño que tools/termo-subida):
+  informe.php           el receptor (un POST multipart; contesta OK/ERROR)
+  hispados-compat.conf  su pool de PHP-FPM, con un usuario propio (hispacompat)
+  nginx-location.txt    el bloque «location» para nginx
+  compat-mover.sh       el cron de root que lo pasa al FTP y rehace el resumen
+  compat-resumen.py     el resumen acumulado (resumen.csv y resumen.json)
+
+Por qué así: PHP corre con un usuario propio sin permisos (hispacompat) y
+solo puede escribir en /www/hispados-compat-datos (fuera de cualquier web);
+no puede escribir en /root/FTP. Un cron de root, cada 5 min, mueve lo que
+lleva quieto más de 1 min a /root/FTP/HispaDOS/Compatibilidad/<AAAAMMDD>/
+(root, 0644) y rehace /root/FTP/HispaDOS/Compatibilidad/resumen.csv y
+resumen.json. Un fallo en informe.php no da acceso ni al FTP ni a ClicGest.
+
+Lo distinto del Termómetro: aquí no hay testigos dados de alta a mano (el
+Asistente es para cualquiera). Cada equipo hace el suyo (32 octetos al azar)
+y el receptor lo aprende la primera vez que llega, con topes: 5 equipos
+nuevos al día por IP y 300 en total; 20 informes y 2 MB al día por equipo;
+3000 informes y 100 MB al día entre todos; 240 KB por informe. De la IP no
+se guarda nada (solo un resumen con sal del día para el tope, que se borra
+a los dos días) y nginx no la apunta (access_log off). Si un equipo da la
+lata, se bloquea poniendo el SHA-256 de su testigo (el registro dice los
+8 primeros) en /etc/hispados-compat/bloqueados.txt.
+
+Las órdenes (como root):
+
+  useradd --system --no-create-home --shell /usr/sbin/nologin hispacompat
+  install -d -o root -g root -m 0755 /www/hispados-compat
+  install -o root -g root -m 0644 informe.php /www/hispados-compat/informe.php
+  install -d -o hispacompat -g hispacompat -m 0700 /www/hispados-compat-datos \
+      /www/hispados-compat-datos/entrantes /www/hispados-compat-datos/testigos \
+      /www/hispados-compat-datos/cuotas /www/hispados-compat-datos/registro
+  install -d -o root -g hispacompat -m 0750 /etc/hispados-compat
+  touch /etc/hispados-compat/bloqueados.txt
+  chown root:hispacompat /etc/hispados-compat/bloqueados.txt
+  chmod 0640 /etc/hispados-compat/bloqueados.txt
+  install -o root -g root -m 0644 hispados-compat.conf /www/server/php/83/etc/php-fpm.d/hispados-compat.conf
+  /etc/init.d/php-fpm-83 reload        (o desde aaPanel: PHP 8.3 > Recargar)
+  (nginx: añadir los dos «location» de nginx-location.txt al server de 443
+   de hispados.es (y al de actualiza.hispados.es si se le da HTTPS);
+   nginx -t && nginx -s reload)
+  install -d -o root -g root -m 0700 /root/hispados-tareas
+  install -o root -g root -m 0755 compat-mover.sh /root/hispados-tareas/compat-mover.sh
+  install -o root -g root -m 0755 compat-resumen.py /root/hispados-tareas/compat-resumen.py
+  install -d -o root -g root -m 0755 /root/FTP/HispaDOS/Compatibilidad
+  echo '*/5 * * * * root /root/hispados-tareas/compat-mover.sh >> /root/hispados-tareas/compat-mover.log 2>&1' > /etc/cron.d/compat-mover
+
+  (PHP 8.3 necesita mbstring para mb_check_encoding: en aaPanel suele estar;
+   php -m | grep mbstring)
+
+Probar desde fuera (cualquier testigo de 64 cifras hexadecimales vale: el
+primero lo aprende):
+  printf 'HISPA-COMPAT 1\nhispa-pentium=0.8.7\nwin32=1.2\nasistente=1.0\narchivos=1\narchivo=A.EXE\t10\t-\tventanas\t1\tsi\nfalta=A.EXE\tX.DLL\tF\nfin\n' > /tmp/I.TXT
+  curl -s --form-string testigo=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n') \
+       --form-string protocolo=1 -F informe=@/tmp/I.TXT https://hispados.es/compat/informe.php
+  -> «OK 20261122/123456-xxxxxxxx-xxxxxx.txt»; el registro:
+     /www/hispados-compat-datos/registro/informes.log
+  (y borrar luego ese informe de prueba del FTP, o dejarlo: el resumen lo
+   cuenta como un programa más)
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

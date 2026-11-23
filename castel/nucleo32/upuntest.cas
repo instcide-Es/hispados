@@ -1,0 +1,57 @@
+; =============================================================================
+;  upuntest.cas - (PUNTEROS) PUNTEST.BIN, la prueba de los punteros (la parte
+;  51 de castel/pruebas.sh; no va en el sistema): una ventana en (100, 10)
+;  con 13 columnas de 80 x 300, cada una con su forma del puntero (una zona:
+;  la llamada 177), arriba sobre claro y abajo sobre oscuro. Dice por el
+;  puerto serie dónde empieza lo de dentro.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo UPuntest
+
+    modelo usuario
+
+    importar Llamadas, Ppuntero
+
+    constante CELDA = 80
+    constante FILA = 150
+
+    función llamada(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        ensamblador
+            mov eax, {n}
+            mov ebx, {a}
+            mov ecx, {b}
+            mov edx, {c}
+            int 0x80
+        fin
+    fin
+
+    función principal(): byte
+        variable v, k, r: nat32
+        variable s: Suceso
+        v := ventana("Punteros", 13 * CELDA, 2 * FILA)
+        si v >= 0xFFFFFFF0 entonces
+            escribir("puntest: no hay escritorio\n")
+            devolver 1
+        fin
+        llamada(80, v, 100, 10)
+        rectángulo(v, 0, 0, 13 * CELDA, FILA, 0xF2F2F2)
+        rectángulo(v, 0, FILA, 13 * CELDA, FILA, 0x1F2933)
+        para k desde 0 hasta 12 hacer
+            r := zona_de_puntero(v, ent32(k) * CELDA, 0, CELDA, 2 * FILA, k)
+            si r <> 0 entonces escribir("puntest: la zona ", k, " no vale\n") fin
+        fin
+        ; lo que no vale: una forma que no hay, y una ventana que no es suya
+        si zona_de_puntero(v, 0, 0, 10, 10, 99) <> 0 y puntero_de_ventana(v + 1000, P_MANO) <> 0 entonces
+            escribir("puntest: una forma que no hay y una ventana que no es suya: no valen\n")
+        fin
+        escribir("puntest: lista, lo de dentro en (104, 38), celdas de 80 x 150\n")
+        mientras cierto hacer
+            si suceso(v, s, cierto) entonces
+                si s.clase = EV_CERRAR entonces devolver 0 fin
+                si s.clase = EV_TECLA y s.a = 27 entonces devolver 0 fin
+            fin
+        fin
+        devolver 0
+    fin
+
+fin UPuntest.

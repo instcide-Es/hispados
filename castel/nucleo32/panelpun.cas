@@ -1,0 +1,187 @@
+; =============================================================================
+;  panelpun.cas - (PUNTEROS) Panel de control > Ratón > «Puntero»: la forma
+;  (seis juegos propios), el tamaño (1x, 1,5x, 2x y 3x, dibujados en
+;  vectorial), el color (con su nombre escrito: no solo el color), el
+;  rastro, localizarlo al pulsar Control y el espejo para zurdos, con la
+;  vista previa en el propio cuadro (sobre claro y sobre oscuro, pintada por
+;  el núcleo: la llamada 177). Lo elegido se pone al momento y se guarda (el
+;  núcleo, en PUNTERO.INI del usuario).
+;
+;  Aparte de upanel.cas, que solo la llama (pinta_puntero_panel,
+;  hace_puntero, elige_puntero...): así la sección «Touchpad» de la otra
+;  rama no se cruza con esta.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Panelpun
+
+    importar Llamadas, Controles, Textos32, Formato, Ppuntero
+
+    público constante ID_P_JUEGO = 91
+    público constante ID_P_TAMAÑO = 92
+    público constante ID_P_COLOR = 93
+    público constante ID_P_RASTRO = 94
+    público constante ID_P_LOCALIZAR = 95
+    público constante ID_P_ZURDO = 96
+    público constante ID_P_VOLVER = 97
+
+    público constante JUEGOS = "Cl\xA0sica|Moderna|Gruesa|Retro (1990)|Mano (el dedo hacia arriba)|Mano (el dedo en diagonal)"
+    público constante TAMAÑOS = "Normal (1x)|Grande (1,5x)|Muy grande (2x)|Enorme (3x)"
+    público constante COLORES = "Blanco (borde negro)|Negro (borde blanco)|Invertido (contrario al fondo)|Amarillo (borde negro)|Verde lima (borde negro)|Rojo (borde blanco)|Azul (borde blanco)|Naranja (borde negro)|Rosa (borde negro)|Morado (borde blanco)|Cian (borde negro)"
+
+    variable aj: Ajustes_puntero
+    variable leídos: bool
+
+    función lee()
+        si no leídos entonces
+            ajustes_puntero(aj)
+            leídos := cierto
+        fin
+    fin
+
+    ; ¿es uno de los controles de aquí?
+    público función es_de_puntero(id: nat32): bool
+        devolver id >= ID_P_JUEGO y id <= ID_P_VOLVER
+    fin
+
+    público función opciones_puntero(id: nat32): puntero a byte
+        si id = ID_P_JUEGO entonces devolver JUEGOS fin
+        si id = ID_P_TAMAÑO entonces devolver TAMAÑOS fin
+        si id = ID_P_COLOR entonces devolver COLORES fin
+        devolver ""
+    fin
+
+    público función elegida_puntero(id: nat32): nat32
+        lee()
+        si id = ID_P_JUEGO entonces devolver aj.juego fin
+        si id = ID_P_TAMAÑO entonces devolver aj.tamaño fin
+        si id = ID_P_COLOR entonces devolver aj.color fin
+        devolver 0
+    fin
+
+    ; al núcleo, que lo pone y lo guarda; en «aviso», cómo ha ido
+    función manda(aviso: puntero a byte)
+        variable r: nat32
+        r := poner_ajustes_puntero(aj)
+        si r >= 0xFFFFFFF0 entonces
+            copiar(aviso, "No se ha podido cambiar el puntero (acceso denegado)")
+            leídos := falso
+            lee()
+        sino
+            copiar(aviso, "Hecho: el puntero ya est\xA0 as\xA1 (y se guarda para el arranque)")
+        fin
+        imprimir("panel: el puntero: juego %u, tama\xA4o %u, color %u, rastro %u, localizar %u, zurdo %u\n", dirección(aj.juego))
+    fin
+
+    público función elige_puntero(id: nat32, k: nat32, aviso: puntero a byte)
+        lee()
+        si id = ID_P_JUEGO y k < N_JUEGOS entonces aj.juego := k fin
+        si id = ID_P_TAMAÑO y k < N_TAMAÑOS entonces aj.tamaño := k fin
+        si id = ID_P_COLOR y k < N_COLORES entonces aj.color := k fin
+        manda(aviso)
+    fin
+
+    ; un botón o una casilla de aquí: cierto si era de aquí («volver»: el de
+    ; volver a Ratón)
+    público función hace_puntero(id: nat32, aviso: puntero a byte, ref volver: bool): bool
+        volver := falso
+        si no es_de_puntero(id) entonces devolver falso fin
+        lee()
+        según nat16(id)
+            caso ID_P_RASTRO:
+                aj.rastro := 1 - aj.rastro
+                manda(aviso)
+            caso ID_P_LOCALIZAR:
+                aj.localizar := 1 - aj.localizar
+                manda(aviso)
+            caso ID_P_ZURDO:
+                aj.espejo := 1 - aj.espejo
+                manda(aviso)
+            caso ID_P_VOLVER: volver := cierto
+        fin
+        devolver cierto
+    fin
+
+    ; (Ratón) se ha marcado o desmarcado «para zurdos» (los botones): el
+    ; puntero, en espejo también (luego se puede cambiar aquí)
+    público función zurdo_cambiado(zurdo: bool, aviso: puntero a byte)
+        lee()
+        si zurdo entonces aj.espejo := 1 sino aj.espejo := 0 fin
+        manda(aviso)
+        si zurdo entonces copiar(aviso, "Hecho: los botones cambiados y el puntero en espejo (Puntero, para cambiarlo)") fin
+    fin
+
+    ; un puntero de la vista previa, con su punto activo en (x, yy)
+    función muestra(f: nat32, x: ent32, yy: ent32)
+        variable p: Pinta_puntero
+        p.forma := f
+        p.juego := aj.juego
+        p.tamaño := aj.tamaño
+        p.color := aj.color
+        p.espejo := aj.espejo
+        p.cuadro := 2
+        p.puntos := lz.puntos
+        p.salto := lz.salto
+        p.ancho := lz.ancho
+        p.alto := lz.alto
+        p.x := x
+        p.ye := yy
+        pinta_puntero(p)
+    fin
+
+    ; la página: lo elegido y la vista previa (sx: donde empieza; abajo:
+    ; donde acaba lo que se puede usar)
+    público función pinta_puntero_panel(sx: ent32, yy: ent32, abajo: ent32)
+        variable an, x, al, cel, k, med, cx, fy: ent32
+        variable f: nat32
+        variable t: arreglo [120] de byte
+        variable formas: arreglo [6] de nat32
+        lee()
+        an := ancho - sx - LA
+        desplegable(ID_P_JUEGO, sx, yy, an div 2 - LA div 2, "Forma", JUEGOS, aj.juego, falso)
+        yy := yy + desplegable(ID_P_TAMAÑO, sx + an div 2 + LA div 2, yy, an div 2 - LA div 2, "Tama\xA4o", TAMAÑOS, aj.tamaño, falso) + 2 * E
+        yy := yy + desplegable(ID_P_COLOR, sx, yy, an div 2 - LA div 2, "Color", COLORES, aj.color, falso) + 3 * E
+        casilla(ID_P_RASTRO, sx, yy, "Rastro: deja una estela al moverlo", aj.rastro = 1)
+        yy := yy + LT + 2 * E
+        casilla(ID_P_LOCALIZAR, sx, yy, "Al pulsar Control, c\xA1rculos que lo se\xA4alan", aj.localizar = 1)
+        yy := yy + LT + 2 * E
+        casilla(ID_P_ZURDO, sx, yy, "Para zurdos: en espejo (apunta a la derecha)", aj.espejo = 1)
+        yy := yy + LT + 3 * E
+        ; la vista previa: seis formas sobre claro y sobre oscuro
+        opción_de(COLORES, aj.color, t, 60)
+        negrita(sx, yy, "As\xA1 se ve:", C_TINTA)
+        Controles.texto(sx + ancho_negrita("As\xA1 se ve:") + LA div 2, yy, t, C_SUAVE)
+        yy := yy + LT + E
+        al := abajo - alto_botón() - 4 * E - yy
+        si al < 2 * LT entonces devolver fin
+        caja(sx, yy, an, al div 2, 0xF4F6F9)
+        caja(sx, yy + al div 2, an, al - al div 2, 0x1F2933)
+        borde(sx, yy, an, al, 1, C_BORDE)
+        formas[0] := P_FLECHA
+        formas[1] := P_TEXTO
+        formas[2] := P_MANO
+        formas[3] := P_ESPERA
+        formas[4] := P_TAMAÑO_D1
+        formas[5] := P_AYUDA
+        cel := an div 6
+        med := 2
+        si aj.tamaño = 1 entonces med := 3 fin
+        si aj.tamaño = 2 entonces med := 4 fin
+        si aj.tamaño = 3 entonces med := 6 fin
+        para k desde 0 hasta 5 hacer
+            f := formas[k]
+            cx := sx + k * cel + cel div 2
+            para fy desde 0 hasta 1 hacer
+                x := cx
+                ; las que tienen el punto activo arriba a la izquierda (o a la
+                ; derecha, en espejo), desde ahí; las demás, por el centro
+                si f = P_FLECHA o f = P_MANO o f = P_AYUDA entonces
+                    si aj.espejo = 1 entonces x := cx + 4 * med sino x := cx - 4 * med fin
+                    muestra(f, x, yy + fy * (al div 2) + (al div 2 - 20 * med div 2) div 2)
+                sino
+                    muestra(f, x, yy + fy * (al div 2) + al div 4)
+                fin
+            fin
+        fin
+    fin
+
+fin Panelpun.

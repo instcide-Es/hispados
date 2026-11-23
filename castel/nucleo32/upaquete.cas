@@ -87,7 +87,7 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
-    constante VERSIÓN_PAQUETES = "1.5"                ; (CORTES)
+    constante VERSIÓN_PAQUETES = "1.6"                ; (CORTES) (COMPAT, 0.8.9: 1.6)
 
     ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
     ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)
@@ -2592,6 +2592,9 @@ módulo UPaquetes
         fin
         di_avance(orden_n, orden_n, "Hecho", "")
         si núcleo_nuevo entonces prepara_arranque() fin
+        ; (COMPAT) si ha cambiado win32, el Asistente de compatibilidad vuelve a
+        ; comprobar lo de este usuario y avisa de lo que ya va (si no está, nada)
+        si no reparando y en_plan("win32") <> NINGUNO entonces lanzar_suelto("\\COMPAT.BIN", "/REVISA") fin
         escribir("Hecho.\n")
         devolver cierto
     fin

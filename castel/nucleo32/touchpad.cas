@@ -1,0 +1,498 @@
+; =============================================================================
+;  touchpad.cas - (TOUCHPAD) el analizador de los paneles táctiles Synaptics
+;  en modo absoluto: de los paquetes de seis octetos (dónde está el dedo, la
+;  presión, el ancho W y los botones) a lo que entiende el escritorio, el
+;  ratón de siempre: lo movido, los botones, la rueda y la rueda a los lados.
+;
+;  No toca el equipo: raton.cas le da cada octeto que llega por la segunda
+;  boca del 8042 (tp_octeto) y los tics del reloj (tp_reloj, cien veces por
+;  segundo), y recoge lo que sale (tp_dx, tp_dy, tp_cambios, tp_rueda...).
+;  Así se prueba igual en Linux, con corre32 (RATON /ANALIZA, castel/pruebas.sh
+;  parte 50), con paquetes grabados o hechos a mano.
+;
+;  Lo que hace:
+;    - los octetos, en su sitio: el primero de cada paquete lleva 10xx0xxx y
+;      el cuarto 11xx0xxx; si no, se tira lo que había y se busca otro
+;      principio (tp_resincros); más de 50 ms a medias, se empieza de nuevo;
+;      con muchos malos seguidos, tp_perdido (raton.cas vuelve al modo relativo)
+;    - el dedo: toca con Z >= 30 y se suelta con Z < 25; W >= 11 o Z >= 200,
+;      la palma (ese toque no mueve ni hace clic)
+;    - mover: lo movido por el dedo, con aceleración suave (de 1 a 3 veces,
+;      según lo deprisa), por la velocidad del touchpad (1 a 10)
+;    - tocar para hacer clic: un toque corto (180 ms) y quieto es un clic; con
+;      dos dedos, el botón derecho; con tres, el del medio. Tocar otra vez
+;      enseguida: doble clic; tocar y, sin levantar, mover: arrastrar
+;    - el borde derecho (tp_zona % del ancho medido): el dedo que empieza ahí
+;      y sube o baja mueve la rueda, tantos pasos como recorre (un paso, la
+;      veinteava parte del alto); el borde de abajo, igual, a los lados
+;    - dos dedos (si el touchpad lo dice: W = 0): desplazar, arriba y abajo o
+;      a los lados (lo primero que sale manda hasta levantarlos)
+;    - al escribir: un toque que empieza menos de tp_pausa tics después de una
+;      tecla no hace nada
+;    - las medidas se aprenden: lo que se ve más allá de lo que dijo el
+;      touchpad, amplía el ancho y el alto (y la zona del borde va con ellos)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Touchpad
+
+    ; ---- lo que viene del Panel de control (los pone preferencias.cas) ----
+    público variable tp_toque: bool = cierto        ; tocar para hacer clic
+    público variable tp_borde_v: bool = cierto      ; el borde derecho, la rueda
+    público variable tp_borde_h: bool = falso       ; el borde de abajo, a los lados
+    público variable tp_dos_dedos: bool = cierto    ; dos dedos para desplazar
+    público variable tp_velocidad: nat32 = 5        ; 1 a 10 (5, como sale)
+    público variable tp_pausa: nat32 = 50           ; los tics tras una tecla sin hacer caso (0: siempre)
+    público variable tp_zona: nat32 = 8             ; el borde, en % del ancho (y del alto, el de abajo)
+
+    ; ---- lo que dice el touchpad de sí (lo pone raton.cas al detectarlo) ----
+    público variable tp_varios_dedos: bool          ; W = 0 son dos dedos (y W = 1, tres)
+    público variable tp_clickpad: bool              ; todo el touchpad es un botón
+    público variable tp_medio: bool                 ; botón del medio
+    público variable tp_cuatro: bool                ; botones de arriba y abajo (la rueda)
+    público variable tp_x_mín: ent32 = 1472         ; las medidas (las de casi todos los Synaptics)
+    público variable tp_x_máx: ent32 = 5472
+    público variable tp_y_mín: ent32 = 1408
+    público variable tp_y_máx: ent32 = 4448
+
+    ; ---- lo que sale (raton.cas lo recoge y lo pone a cero: tp_recogido) ----
+    público constante TP_IZQUIERDO = 1
+    público constante TP_DERECHO = 2
+    público constante TP_MEDIO = 4
+    público variable tp_dx, tp_dy: ent32            ; lo movido, en puntos (abajo, positivo)
+    público variable tp_rueda: ent32                ; pasos de la rueda (arriba, positivos)
+    público variable tp_rueda_h: ent32              ; a los lados (a la derecha, positivos)
+    público constante TP_CAMBIOS = 8
+    público variable tp_cambios: arreglo [TP_CAMBIOS] de nat32  ; cómo quedan los botones tras cada cambio, en orden
+    público variable tp_n_cambios: nat32
+    público variable tp_botones: nat32              ; los de ahora (los de verdad y el del toque)
+    público variable tp_perdido: bool               ; se ha descolocado y no vuelve
+    ; la cuenta (para el registro y las pruebas)
+    público variable tp_paquetes: nat32             ; los buenos
+    público variable tp_malos: nat32                ; los octetos tirados
+    público variable tp_resincros: nat32            ; las veces que se ha buscado otro principio
+    público variable tp_toques: nat32               ; los clics por tocar
+    público variable tp_palmas: nat32               ; los toques de palma
+    público variable tp_ignorados: nat32            ; los toques mientras se escribe
+    ; el último paquete, para el registro
+    público variable tp_x, tp_y, tp_z, tp_w: ent32
+
+    ; ---- por dentro ----
+    constante Z_TOCA = 30
+    constante Z_SUELTA = 25
+    constante Z_PALMA = 200
+    constante W_PALMA = 11
+    constante TOQUE_TICS = 18                   ; lo que dura un toque, como mucho (180 ms)
+    constante SOLTAR_TICS = 18                  ; lo que se espera otro toque (doble clic, arrastrar)
+    constante TOQUE_MOV = 220                   ; lo que se puede mover un toque (en unidades del touchpad, de 4.000 de ancho)
+    constante HUECO_TICS = 20                   ; sin paquetes tanto, el dedo se ha ido
+    constante MALOS_PERDIDO = 60                ; octetos malos seguidos para darlo por perdido
+
+    constante M_MOVER = 0
+    constante M_BORDE_V = 1
+    constante M_BORDE_H = 2
+    constante M_DOS = 3
+    constante M_PALMA = 4
+    constante M_NADA = 5                        ; (mientras se escribe)
+
+    constante T_NADA = 0                        ; el botón del toque
+    constante T_ESPERA = 1                      ; pulsado: se suelta a los SOLTAR_TICS si no se vuelve a tocar
+    constante T_ARRASTRA = 2                    ; pulsado: se ha vuelto a tocar (arrastrar, o el doble clic)
+
+    variable pk: arreglo [6] de nat32
+    variable n_pk: nat32
+    variable t_octeto: nat32
+    variable malos_seguidos: nat32
+
+    variable tocando: bool
+    variable modo: nat32
+    variable t0, t_último: nat32
+    variable x0, y0, ux, uy: ent32
+    variable recorrido: ent32
+    variable dedos, dedos_máx: nat32
+    variable físicos_durante: nat32             ; los botones de verdad pulsados durante el toque
+    variable acum_v, acum_h: ent32              ; lo recorrido y aún sin dar en pasos
+    variable eje: nat32                         ; dos dedos: 0 aún no se sabe, 1 arriba y abajo, 2 a los lados
+    variable resto_x, resto_y: ent32            ; lo movido, en 1/65536 de punto
+    variable estado: nat32                      ; el botón del toque (T_...)
+    variable botón_toque: nat32
+    variable t_toque: nat32
+    variable físicos: nat32                     ; los botones de verdad
+    variable t_tecla: nat32
+    variable hubo_tecla: bool
+    variable ancho_visto, alto_visto: bool
+
+    función abs(n: ent32): ent32
+        si n < 0 entonces devolver -n fin
+        devolver n
+    fin
+
+    función ancho(): ent32
+        si tp_x_máx - tp_x_mín < 1000 entonces devolver 1000 fin
+        devolver tp_x_máx - tp_x_mín
+    fin
+
+    función alto(): ent32
+        si tp_y_máx - tp_y_mín < 800 entonces devolver 800 fin
+        devolver tp_y_máx - tp_y_mín
+    fin
+
+    ; lo de antes de un touchpad nuevo (o después de cambiar de modo)
+    público función tp_empieza()
+        n_pk := 0
+        malos_seguidos := 0
+        tocando := falso
+        estado := T_NADA
+        físicos := 0
+        tp_botones := 0
+        tp_perdido := falso
+        tp_recogido()
+    fin
+
+    ; raton.cas ya ha recogido lo que salía
+    público función tp_recogido()
+        tp_dx := 0
+        tp_dy := 0
+        tp_rueda := 0
+        tp_rueda_h := 0
+        tp_n_cambios := 0
+    fin
+
+    ; los botones cambian: se apunta cómo quedan
+    función pon_botones()
+        variable b: nat32
+        b := (físicos yb 7) ob botón_toque
+        si b = tp_botones entonces devolver fin
+        tp_botones := b
+        si tp_n_cambios < TP_CAMBIOS entonces
+            tp_cambios[tp_n_cambios] := b
+            tp_n_cambios := tp_n_cambios + 1
+        sino
+            tp_cambios[TP_CAMBIOS - 1] := b
+        fin
+    fin
+
+    función suelta_toque()
+        estado := T_NADA
+        botón_toque := 0
+        pon_botones()
+    fin
+
+    ; se ha pulsado una tecla
+    público función tp_tecla(t: nat32)
+        t_tecla := t
+        hubo_tecla := cierto
+    fin
+
+    ; los tics desde la última tecla (mucho, si no ha habido)
+    público función tp_desde_tecla(t: nat32): nat32
+        si no hubo_tecla entonces devolver 0xFFFFFFFF fin
+        devolver t - t_tecla
+    fin
+
+    ; cien veces por segundo: el botón del toque se suelta si no se ha vuelto a tocar
+    público función tp_reloj(t: nat32)
+        si estado = T_ESPERA y t - t_toque >= SOLTAR_TICS entonces suelta_toque() fin
+        ; (y un dedo del que no llega nada hace mucho, se ha ido)
+        si tocando y t - t_último > HUECO_TICS * 3 entonces tocando := falso fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Mover: con aceleración suave
+    ; -------------------------------------------------------------------------
+    función por_octavos(v: nat32): ent32
+        según nat16(v)
+            caso 1: devolver 3
+            caso 2: devolver 4
+            caso 3: devolver 5
+            caso 4: devolver 6
+            caso 6: devolver 10
+            caso 7: devolver 12
+            caso 8: devolver 15
+            caso 9: devolver 18
+            caso 10: devolver 22
+        fin
+        devolver 8
+    fin
+
+    función mueve(dx: ent32, dy: ent32)
+        variable v, g, f, q: ent32
+        si dx > 800 entonces dx := 800 fin
+        si dx < -800 entonces dx := -800 fin
+        si dy > 800 entonces dy := 800 fin
+        si dy < -800 entonces dy := -800 fin
+        v := abs(dx) + abs(dy)
+        ; la ganancia, de 256 (quieto) a 768 (deprisa: 64 unidades por paquete o más)
+        g := 256 + v * 8
+        si g > 768 entonces g := 768 fin
+        ; de unidades a puntos: el ancho entero, unos 600 puntos despacio
+        f := 153600 div ancho()
+        g := g * por_octavos(tp_velocidad) div 8
+        resto_x := resto_x + dx * f * g
+        q := resto_x div 65536
+        resto_x := resto_x - q * 65536
+        tp_dx := tp_dx + q
+        resto_y := resto_y + dy * f * g
+        q := resto_y div 65536
+        resto_y := resto_y - q * 65536
+        tp_dy := tp_dy + q
+    fin
+
+    ; lo recorrido en vertical (arriba, positivo) o a los lados, en pasos de rueda
+    función pasos(ref acum: ent32, d: ent32, uno: ent32): ent32
+        variable n: ent32
+        acum := acum + d
+        n := acum div uno
+        acum := acum - n * uno
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  El dedo
+    ; -------------------------------------------------------------------------
+    función en_borde_derecho(x: ent32): bool
+        devolver x >= tp_x_máx - ancho() * ent32(tp_zona) div 100
+    fin
+
+    función en_borde_abajo(yy: ent32): bool
+        devolver yy <= tp_y_mín + alto() * ent32(tp_zona) div 100
+    fin
+
+    función empieza_toque(x: ent32, yy: ent32, palma: bool, t: nat32)
+        tocando := cierto
+        t0 := t
+        x0 := x
+        y0 := yy
+        ux := x
+        uy := yy
+        recorrido := 0
+        dedos_máx := dedos
+        físicos_durante := físicos
+        acum_v := 0
+        acum_h := 0
+        eje := 0
+        resto_x := 0
+        resto_y := 0
+        si tp_pausa > 0 y hubo_tecla y t - t_tecla < tp_pausa entonces
+            modo := M_NADA
+            tp_ignorados := tp_ignorados + 1
+        sino si palma entonces
+            modo := M_PALMA
+            tp_palmas := tp_palmas + 1
+        sino si estado = T_ESPERA entonces
+            ; se vuelve a tocar con el botón del toque pulsado: arrastrar (o el doble clic)
+            estado := T_ARRASTRA
+            modo := M_MOVER
+        sino si dedos >= 2 y tp_dos_dedos entonces
+            modo := M_DOS
+        sino si tp_borde_v y en_borde_derecho(x) entonces
+            modo := M_BORDE_V
+        sino si tp_borde_h y en_borde_abajo(yy) entonces
+            modo := M_BORDE_H
+        sino
+            modo := M_MOVER
+        fin
+    fin
+
+    función sigue_toque(x: ent32, yy: ent32, palma: bool, cambian: bool)
+        variable d, n: ent32
+        si palma y modo <> M_PALMA y modo <> M_NADA entonces
+            modo := M_PALMA
+            tp_palmas := tp_palmas + 1
+        fin
+        si dedos > dedos_máx entonces dedos_máx := dedos fin
+        d := abs(x - x0) + abs(yy - y0)
+        si d > recorrido entonces recorrido := d fin
+        si cambian entonces
+            ; un dedo más o uno menos: el sitio salta; se sigue desde aquí
+            si dedos >= 2 y tp_dos_dedos y modo = M_MOVER y estado <> T_ARRASTRA entonces
+                modo := M_DOS
+                acum_v := 0
+                acum_h := 0
+                eje := 0
+            fin
+            ux := x
+            uy := yy
+            devolver
+        fin
+        según nat16(modo)
+            caso M_MOVER: mueve(x - ux, uy - yy)
+            caso M_BORDE_V: tp_rueda := tp_rueda + pasos(acum_v, yy - uy, alto() div 20)
+            caso M_BORDE_H: tp_rueda_h := tp_rueda_h + pasos(acum_h, x - ux, ancho() div 20)
+            caso M_DOS:
+                si eje <> 2 entonces
+                    n := pasos(acum_v, yy - uy, alto() div 20)
+                    si n <> 0 entonces
+                        eje := 1
+                        tp_rueda := tp_rueda + n
+                    fin
+                fin
+                si eje <> 1 entonces
+                    n := pasos(acum_h, x - ux, ancho() div 20)
+                    si n <> 0 entonces
+                        eje := 2
+                        tp_rueda_h := tp_rueda_h + n
+                    fin
+                fin
+        fin
+        ux := x
+        uy := yy
+    fin
+
+    función acaba_toque(t: nat32)
+        variable corto: bool
+        tocando := falso
+        corto := tp_toque y modo <> M_PALMA y modo <> M_NADA y t - t0 <= TOQUE_TICS
+        corto := corto y recorrido <= TOQUE_MOV * ancho() div 4000 y físicos_durante = 0
+        si estado = T_ARRASTRA entonces
+            ; lo que se tenía pulsado se suelta; si este también ha sido un
+            ; toque, es el segundo clic (doble clic)
+            suelta_toque()
+            si corto y dedos_máx = 1 entonces
+                botón_toque := TP_IZQUIERDO
+                pon_botones()
+                estado := T_ESPERA
+                t_toque := t
+                tp_toques := tp_toques + 1
+            fin
+            devolver
+        fin
+        si no corto entonces devolver fin
+        tp_toques := tp_toques + 1
+        si dedos_máx >= 2 entonces
+            ; dos dedos, el derecho; tres, el del medio: clic y suelto
+            si dedos_máx = 2 entonces botón_toque := TP_DERECHO sino botón_toque := TP_MEDIO fin
+            pon_botones()
+            suelta_toque()
+            devolver
+        fin
+        botón_toque := TP_IZQUIERDO
+        pon_botones()
+        estado := T_ESPERA
+        t_toque := t
+    fin
+
+    ; las medidas: lo que se ve fuera, las amplía
+    función aprende(x: ent32, yy: ent32)
+        si x > 0 y x < 8000 entonces
+            si x < tp_x_mín entonces tp_x_mín := x fin
+            si x > tp_x_máx entonces tp_x_máx := x fin
+        fin
+        si yy > 0 y yy < 8000 entonces
+            si yy < tp_y_mín entonces tp_y_mín := yy fin
+            si yy > tp_y_máx entonces tp_y_máx := yy fin
+        fin
+    fin
+
+    ; un paquete entero: dónde, la presión, el ancho W y los botones de verdad
+    público función tp_paquete(x: ent32, yy: ent32, z: ent32, w: ent32, b: nat32, t: nat32)
+        variable palma, cambian: bool
+        variable antes: nat32
+        tp_x := x
+        tp_y := yy
+        tp_z := z
+        tp_w := w
+        si tocando y t - t_último > HUECO_TICS entonces tocando := falso fin    ; (se perdió el final)
+        t_último := t
+        ; los botones de verdad (también en los paquetes sin dedo)
+        si b <> físicos entonces
+            físicos := b
+            físicos_durante := físicos_durante ob b
+            pon_botones()
+        fin
+        ; W = 2 (el segundo dedo de los de «gesto avanzado») y W = 3 (lo que
+        ; viene de un ratón de bola de detrás): no son el dedo
+        si w = 2 o w = 3 entonces devolver fin
+        antes := dedos
+        dedos := 1
+        si tp_varios_dedos y w = 0 entonces dedos := 2 fin
+        si tp_varios_dedos y w = 1 entonces dedos := 3 fin
+        palma := z >= Z_PALMA o w >= W_PALMA
+        si no tocando entonces
+            si z >= Z_TOCA entonces
+                aprende(x, yy)
+                empieza_toque(x, yy, palma, t)
+            fin
+        sino si z < Z_SUELTA entonces
+            acaba_toque(t)
+        sino
+            aprende(x, yy)
+            cambian := dedos <> antes
+            sigue_toque(x, yy, palma, cambian)
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los octetos, en su sitio
+    ; -------------------------------------------------------------------------
+    función mira_perdido()
+        si malos_seguidos >= MALOS_PERDIDO entonces tp_perdido := cierto fin
+    fin
+
+    función paquete_entero(t: nat32)
+        variable x, yy, z, w: ent32
+        variable b, e: nat32
+        w := ent32(((pk[0] yb 0x30) >> 2) ob ((pk[0] yb 0x04) >> 1) ob ((pk[3] yb 0x04) >> 2))
+        x := ent32(((pk[3] yb 0x10) << 8) ob ((pk[1] yb 0x0F) << 8) ob pk[4])
+        yy := ent32(((pk[3] yb 0x20) << 7) ob ((pk[1] yb 0xF0) << 4) ob pk[5])
+        z := ent32(pk[2])
+        b := pk[0] yb 3
+        e := (pk[0] xob pk[3]) yb 3
+        si tp_clickpad entonces
+            ; todo el touchpad es el botón (en la cuarta mitad de abajo a la derecha, el derecho)
+            si e yb 1 <> 0 entonces
+                si tocando y ux > tp_x_mín + ancho() div 2 y uy < tp_y_mín + alto() div 4 entonces b := b ob TP_DERECHO sino b := b ob TP_IZQUIERDO fin
+            fin
+        sino si tp_medio y w <> 2 entonces
+            si e yb 1 <> 0 entonces b := b ob TP_MEDIO fin
+        fin
+        si tp_cuatro y no tp_clickpad entonces
+            ; los botones de arriba y abajo: un paso de rueda al pulsarlos
+            si e yb 1 <> 0 y físicos yb 0x10 = 0 entonces tp_rueda := tp_rueda + 1 fin
+            si e yb 2 <> 0 y físicos yb 0x20 = 0 entonces tp_rueda := tp_rueda - 1 fin
+            b := b ob ((e yb 3) << 4)
+        fin
+        tp_paquete(x, yy, z, w, b, t)
+    fin
+
+    ; un octeto que llega del touchpad (por la IRQ 12), a los t tics
+    público función tp_octeto(d: nat32, t: nat32)
+        d := d yb 0xFF
+        si n_pk > 0 y t - t_octeto > 5 entonces
+            ; más de 50 ms a medias: lo que había se tira
+            n_pk := 0
+            tp_resincros := tp_resincros + 1
+        fin
+        t_octeto := t
+        si n_pk = 0 y d yb 0xC8 <> 0x80 entonces
+            tp_malos := tp_malos + 1
+            malos_seguidos := malos_seguidos + 1
+            mira_perdido()
+            devolver
+        fin
+        si n_pk = 3 y d yb 0xC8 <> 0xC0 entonces
+            ; descolocado: lo que había se tira, y este puede ser otro principio
+            tp_malos := tp_malos + 3
+            malos_seguidos := malos_seguidos + 3
+            tp_resincros := tp_resincros + 1
+            n_pk := 0
+            si d yb 0xC8 = 0x80 entonces
+                pk[0] := d
+                n_pk := 1
+            sino
+                tp_malos := tp_malos + 1
+                malos_seguidos := malos_seguidos + 1
+            fin
+            mira_perdido()
+            devolver
+        fin
+        pk[n_pk] := d
+        n_pk := n_pk + 1
+        si n_pk = 6 entonces
+            n_pk := 0
+            malos_seguidos := 0
+            tp_paquetes := tp_paquetes + 1
+            paquete_entero(t)
+        fin
+    fin
+
+fin Touchpad.
