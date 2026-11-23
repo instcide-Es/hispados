@@ -236,9 +236,15 @@ VERSION_088 = '0.8.8'
 # apagar. Suben base (el núcleo: el cuadro de apagar y la llamada 11 con ECX =
 # 2), red, tls (HTTPS reintenta), wifi (REDWIFI /SIMCORTE) y paquetes (1.5)
 VERSION_CORTES = '0.8.8'
+# (TOUCHPAD, 22/11/2026, rama touchpad) el touchpad: Synaptics en modo
+# absoluto (touchpad.cas: el borde derecho para desplazar, tocar para hacer
+# clic, dos dedos, la palma, al escribir), ALPS y Elantech dichos, Panel de
+# control > Ratón > Touchpad (las claves 23 a 31 de la 174) y RATON.BIN
+# (RATON /TOUCHPAD graba lo que manda). Sube la base
+VERSION_TOUCHPAD = '0.8.9'
 SISTEMA = [
-    ('base', VERSION_088, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
-        ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'),
+    ('base', VERSION_TOUCHPAD, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+        ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'), ('RATON.BIN', r'\HISPA\RATON.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
         ('ASISTE.BIN', r'\HISPA\ASISTE.BIN'), ('INSTALAR.BIN', r'\HISPA\INSTALAR.BIN'), ('ACPI.BIN', r'\HISPA\ACPI.BIN'),

@@ -8,7 +8,9 @@
 ;                        verano, la hora por Internet («Sincronizar ahora»)
 ;                        y ponerla a mano
 ;    PANEL /RATON        la velocidad, el doble clic (con su prueba), para
-;                        zurdos y los renglones de la rueda
+;                        zurdos y los renglones de la rueda; (TOUCHPAD) y,
+;                        si hay un touchpad, el suyo: tocar para hacer clic,
+;                        los bordes, dos dedos, la velocidad y al escribir
 ;    PANEL /TECLADO      la distribución, la repetición y Bloq Num
 ;    PANEL /RED          cómo está la red y por dónde va; el Wi-Fi y Tailscale
 ;    PANEL /ENERGIA      apagar la pantalla, la batería baja, el botón de encendido
@@ -72,6 +74,13 @@ módulo UPanel
     constante ID_TAPIZ = 62                     ; 62, 63 y 64
     constante ID_IMAGEN = 65
     constante ID_DOCK = 66
+    constante ID_TP_TOQUE = 71                  ; (TOUCHPAD)
+    constante ID_TP_BORDE_V = 72
+    constante ID_TP_BORDE_H = 73
+    constante ID_TP_DOS = 74
+    constante ID_TP_ESCRIBIR = 75
+    constante ID_TP_VELOCIDAD = 76
+    constante ID_TP_ZONA = 77
 
     constante DOBLES = "Muy r\xA0pido (0,2 s)|R\xA0pido (0,3 s)|Normal (0,45 s)|Lento (0,6 s)|Muy lento (0,9 s)"
     constante RUEDAS = "3 renglones (como siempre)|6 renglones|9 renglones|12 renglones|15 renglones"
@@ -81,6 +90,8 @@ módulo UPanel
     constante PANTALLAS = "Nunca|Al minuto|A los 5 minutos|A los 10 minutos|A los 15 minutos|A la media hora|A la hora"
     constante BATERÍAS = "No apagarlo|Al 3 %|Al 5 % (lo de siempre)|Al 10 %|Al 15 %"
     constante BOTONES = "Apagar el equipo|Preguntar qu\x82 hacer|No hacer nada"
+    constante TP_VELOCIDADES = "Muy lenta|Lenta|Normal|R\xA0pida|Muy r\xA0pida"      ; (TOUCHPAD)
+    constante TP_ZONAS = "Estrecho (5 %)|Normal (8 %)|Ancho (12 %)|Muy ancho (16 %)"
     constante TEMAS = "Azul (el de siempre)|Azul intenso|Verde bosque|Grafito|Granate|Alto contraste"
 
     variable sección: nat32
@@ -116,6 +127,21 @@ módulo UPanel
                 fin
                 devolver 45
             caso ID_RUEDA: devolver (k + 1) * 3
+            caso ID_TP_VELOCIDAD:                   ; (TOUCHPAD)
+                según nat16(k)
+                    caso 0: devolver 2
+                    caso 1: devolver 3
+                    caso 3: devolver 7
+                    caso 4: devolver 9
+                fin
+                devolver 5
+            caso ID_TP_ZONA:
+                según nat16(k)
+                    caso 0: devolver 5
+                    caso 2: devolver 12
+                    caso 3: devolver 16
+                fin
+                devolver 8
             caso ID_DISTRIBUCIÓN:
                 si k = 0 entonces devolver 1 fin
                 si k = 1 entonces devolver 2 fin
@@ -164,6 +190,8 @@ módulo UPanel
         según nat16(id)
             caso ID_DOBLE: devolver AJ_RATÓN_DOBLE
             caso ID_RUEDA: devolver AJ_RATÓN_RUEDA
+            caso ID_TP_VELOCIDAD: devolver AJ_TP_VELOCIDAD     ; (TOUCHPAD)
+            caso ID_TP_ZONA: devolver AJ_TP_ZONA
             caso ID_DISTRIBUCIÓN: devolver AJ_TECLADO
             caso ID_RETARDO: devolver AJ_TECLADO_RETARDO
             caso ID_RITMO: devolver AJ_TECLADO_RITMO
@@ -179,6 +207,8 @@ módulo UPanel
         según nat16(id)
             caso ID_DOBLE: devolver DOBLES
             caso ID_RUEDA: devolver RUEDAS
+            caso ID_TP_VELOCIDAD: devolver TP_VELOCIDADES      ; (TOUCHPAD)
+            caso ID_TP_ZONA: devolver TP_ZONAS
             caso ID_DISTRIBUCIÓN: devolver DISTRIBUCIONES
             caso ID_RETARDO: devolver RETARDOS
             caso ID_RITMO: devolver RITMOS
@@ -575,7 +605,47 @@ módulo UPanel
         apuntar(ID_PRUEBA, K_LISTA, prueba_x, prueba_y, prueba_lado, prueba_lado)
         casilla(ID_ZURDO, sx, yy, "Para zurdos: el bot\xA2n principal, el de la derecha", ajuste(AJ_RATÓN_ZURDO) = 1)
         yy := yy + LT + 4 * E
-        desplegable(ID_RUEDA, sx, yy, an div 2, "La rueda: renglones por paso", RUEDAS, elegida(ID_RUEDA), falso)
+        yy := yy + desplegable(ID_RUEDA, sx, yy, an div 2, "La rueda: renglones por paso", RUEDAS, elegida(ID_RUEDA), falso)
+        ; (TOUCHPAD) el touchpad, si lo hay
+        k := ajuste(AJ_TP_HAY)
+        si k <> 0 y k < 10 entonces pinta_touchpad(yy + 5 * E, k) fin
+    fin
+
+    ; (TOUCHPAD) Ratón > Touchpad: a la izquierda, lo que se marca; a la
+    ; derecha, la velocidad y el ancho del borde. Uno que va como ratón (no
+    ; es Synaptics, o no ha querido el modo absoluto), solo lo de escribir
+    función pinta_touchpad(yy: ent32, k: nat32)
+        variable an, x2, y1: ent32
+        an := ancho - sx - LA
+        caja(sx, yy, an, 1, C_BORDE)
+        yy := yy + 3 * E
+        si k = 1 entonces
+            negrita(sx, yy, "Touchpad (Synaptics)", C_TINTA)
+        sino si k = 3 entonces
+            negrita(sx, yy, "Touchpad (ALPS): va como un rat\xA2n", C_TINTA)
+        sino si k = 4 entonces
+            negrita(sx, yy, "Touchpad (Elantech): va como un rat\xA2n", C_TINTA)
+        sino
+            negrita(sx, yy, "Touchpad (Synaptics): va como un rat\xA2n", C_TINTA)
+        fin
+        yy := yy + LT + 3 * E
+        si k <> 1 entonces
+            casilla(ID_TP_ESCRIBIR, sx, yy, "Quieto mientras se escribe", ajuste(AJ_TP_ESCRIBIR) <> 0)
+            devolver
+        fin
+        x2 := sx + an div 2 + LA
+        y1 := yy
+        casilla(ID_TP_TOQUE, sx, y1, "Tocar para hacer clic", ajuste(AJ_TP_TOQUE) = 1)
+        y1 := y1 + LT + 3 * E
+        casilla(ID_TP_BORDE_V, sx, y1, "Borde derecho: desplazar", ajuste(AJ_TP_BORDE_V) = 1)
+        y1 := y1 + LT + 3 * E
+        casilla(ID_TP_BORDE_H, sx, y1, "Borde de abajo: a los lados", ajuste(AJ_TP_BORDE_H) = 1)
+        y1 := y1 + LT + 3 * E
+        casilla(ID_TP_DOS, sx, y1, "Dos dedos: desplazar", ajuste(AJ_TP_DOS_DEDOS) = 1)
+        y1 := y1 + LT + 3 * E
+        casilla(ID_TP_ESCRIBIR, sx, y1, "Quieto mientras se escribe", ajuste(AJ_TP_ESCRIBIR) <> 0)
+        yy := yy + desplegable(ID_TP_VELOCIDAD, x2, yy, an - an div 2 - LA, "Velocidad", TP_VELOCIDADES, elegida(ID_TP_VELOCIDAD), falso) + 3 * E
+        desplegable(ID_TP_ZONA, x2, yy, an - an div 2 - LA, "Ancho del borde", TP_ZONAS, elegida(ID_TP_ZONA), falso)
     fin
 
     función pinta_teclado(yy: ent32, abajo: ent32)
@@ -822,6 +892,12 @@ módulo UPanel
                 v := ajuste(AJ_RATÓN_VELOCIDAD)
                 si v < 10 entonces pon(AJ_RATÓN_VELOCIDAD, v + 1) fin
             caso ID_ZURDO: pon(AJ_RATÓN_ZURDO, 1 - ajuste(AJ_RATÓN_ZURDO))
+            caso ID_TP_TOQUE: pon(AJ_TP_TOQUE, 1 - ajuste(AJ_TP_TOQUE))        ; (TOUCHPAD)
+            caso ID_TP_BORDE_V: pon(AJ_TP_BORDE_V, 1 - ajuste(AJ_TP_BORDE_V))
+            caso ID_TP_BORDE_H: pon(AJ_TP_BORDE_H, 1 - ajuste(AJ_TP_BORDE_H))
+            caso ID_TP_DOS: pon(AJ_TP_DOS_DEDOS, 1 - ajuste(AJ_TP_DOS_DEDOS))
+            caso ID_TP_ESCRIBIR:
+                si ajuste(AJ_TP_ESCRIBIR) = 0 entonces pon(AJ_TP_ESCRIBIR, 50) sino pon(AJ_TP_ESCRIBIR, 0) fin
             caso ID_BLOQ_NUM: pon(AJ_BLOQ_NUM, 1 - ajuste(AJ_BLOQ_NUM))
             caso ID_RED_AUTO, ID_RED_AUTO + 1, ID_RED_AUTO + 2: pon(AJ_RED, id - ID_RED_AUTO)
             caso ID_WIFI:
