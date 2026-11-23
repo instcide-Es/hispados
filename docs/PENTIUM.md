@@ -9657,6 +9657,47 @@ subir por HTTPS la carpeta TERMO, y una llave Ed25519 propia para el botón
 xterm-256color, 24 bits, cajas, Braille, símbolos, 2026, 2004, el tamaño de
 la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
 
+**El reposo con MWAIT (0.8.9, marcado «(MWAIT)»).** En el MacBook Air 2017 y
+el ASUS GL553V el Termómetro daba **C6 = 0 %**: la tarea ociosa del núcleo
+solo hacía `hlt`, que deja el procesador en C1, y tardaba en enfriarse. Desde
+la 0.8.9 la tarea ociosa (`bucle_ocioso` de `tareas.cas`) llama a
+`Cpu.reposar()`: `monitor` sobre una línea de caché que nadie escribe y
+`mwait` con la pista más honda que da `cpuid 5` (EDX, de 4 en 4 bits: el C
+más hondo con subestados, `((C - 1) << 4) + (subestados - 1)`; si el firmware
+no deja tanto, el procesador lo rebaja solo). Solo despierta una interrupción,
+como `hlt`; entre `sti` y `mwait` no se pierde ninguna. Lo decide
+`mira_reposo` (`semilla.cas`) al arrancar, tras `mira_reloj`, y lo apunta en
+ARRANQUE.TXT con la línea **«reposo:»**. Se usa **solo** si:
+
+- es **Intel** (en AMD, `mwait` es C1: lo mismo que `hlt`);
+- **no es un Atom** (Bonnell, Saltwell, Silvermont, Airmont, Goldmont,
+  Tremont, Gracemont: los Bay Trail del Acer One 10 y el Medion se cuelgan en
+  C6 —en Linux, `intel_idle.max_cstate=1`—; los N455 del HP Mini y el
+  Toshiba, por si acaso tampoco);
+- tiene MONITOR/MWAIT (`cpuid 1`, ECX bit 3) y sus pistas (`cpuid 5`, ECX bit 0);
+- tiene **ARAT** (`cpuid 6`, EAX bit 2: el temporizador del APIC local no se
+  para en C3 y más hondo; el tic puede ser suyo, `relojhpet.cas`) y el **TSC
+  invariante** (`80000007h`, EDX bit 8: lo usan el Termómetro y los tiempos);
+- **no es una máquina virtual** (el bit 31 de `cpuid 1`, ECX: VirtualBox puede
+  tratar `mwait` como `nop` y gastar el procesador del anfitrión);
+- y la pista es más honda que C1 (si no, `hlt`, que es lo mismo).
+
+Si no, `hlt` como siempre, y «reposo:» dice por qué. **`ocioso=hlt`** en la
+línea del cargador (la `e` de GRUB) lo quita en un equipo que dé problemas;
+**`ocioso=mwait`** lo fuerza aunque no se cumpla lo de arriba (solo para
+probar en QEMU). Los demás procesadores que despierta el Termómetro (los AP, solo para
+la carga) siguen con su `hlt`.
+
+**Medirlo**: en QEMU no se ve (no emula los estados C; con TCG y `-cpu max`
+`mwait` es una espera como `hlt`): ahí solo se ha comprobado que con
+`ocioso=mwait` el núcleo sigue contando el tiempo y contesta (la semilla, con
+`hora` antes y después de esperar), y que sin el bit de MONITOR dice «reposo:
+hlt (sin MONITOR/MWAIT...)». **Se mide en el equipo de verdad con el propio
+Termómetro**: la columna C6 (los MSR 3FCh-3FEh, lo que lleva el núcleo en C3,
+C6 y C7) debe pasar de 0 % a casi todo el tiempo en reposo en el MacBook Air
+2017 (Broadwell), el MacBook 2012 (Ivy Bridge), el ASUS (Kaby Lake) y el GT80
+(Haswell); en los Atom y en AMD, igual que antes.
+
 **Equipos probados (de verdad).**
 
 | Equipo | Procesador | Lo que salió | Lo arreglado |
