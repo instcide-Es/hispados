@@ -1,0 +1,85 @@
+name: Informe de un equipo real
+description: Has arrancado un sistema de la familia Hispa-DOS en un equipo de verdad. Sirve igual si todo ha ido bien.
+title: "[Equipo] "
+labels: ["hardware"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ¡Gracias! Probar en equipos reales es lo que más ayuda ahora mismo.
+        - **Hispa-Pentium:** arranca con «registro» y adjunta `X:\ARRANQUE.TXT` (y `X:\ACPI.TXT` si lo hay).
+        - **Termómetro:** adjunta `X:\TERMO\INFORME.TXT`, el `.LOG` y, si quieres, la carpeta `X:\TERMO\EQUIPO` (la ficha técnica del equipo) en un .zip.
+        - **Hispa-386/486:** ejecuta `DIAGNOSTICO` y adjunta la carpeta `\INFORMES\EQUIPOnn` en un .zip.
+
+        Antes de subir nada, mira que no lleve datos personales (correos, contraseñas, claves de licencia).
+  - type: dropdown
+    id: sistema
+    attributes:
+      label: Sistema
+      options:
+        - Hispa-Pentium
+        - El Termómetro (de Hispa-Pentium)
+        - Hispa-386
+        - Hispa-486
+        - Hispa-8086
+        - Hispa-64
+    validations:
+      required: true
+  - type: input
+    id: equipo
+    attributes:
+      label: Equipo
+      description: Marca y modelo, o placa base y procesador, y la memoria.
+      placeholder: "ThinkPad E14 Gen 5, Core i7-1355U, 16 GB"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versión
+      description: La que sale al arrancar (o la orden `VER`).
+      placeholder: "Hispa-Pentium 0.8.8"
+    validations:
+      required: true
+  - type: dropdown
+    id: arranque
+    attributes:
+      label: Cómo arrancaste
+      options:
+        - Memoria USB, por UEFI de 64 bits
+        - Memoria USB, por UEFI de 32 bits (tabletas Atom)
+        - Memoria USB, por BIOS (o CSM)
+        - CD o DVD
+        - Disquete
+        - Disco duro (instalado)
+        - Máquina virtual (VirtualBox, QEMU, 86Box...)
+    validations:
+      required: true
+  - type: checkboxes
+    id: funciona
+    attributes:
+      label: Qué funciona
+      description: Marca lo que has probado y va bien.
+      options:
+        - label: Arranca hasta el escritorio o el símbolo del sistema
+        - label: Pantalla a su resolución
+        - label: Teclado
+        - label: Ratón o touchpad
+        - label: USB (memorias, teclado, ratón)
+        - label: Disco duro o SSD
+        - label: Sonido
+        - label: Red por cable
+        - label: Wi-Fi
+        - label: Batería
+        - label: Instalar en el disco duro
+        - label: Apagar y reiniciar
+  - type: textarea
+    id: fallos
+    attributes:
+      label: Qué ha fallado
+      description: Qué hiciste, qué esperabas y qué pasó. Una foto de la pantalla ayuda mucho.
+  - type: textarea
+    id: informe
+    attributes:
+      label: Registros e informes
+      description: Arrastra aquí los archivos o el .zip (ARRANQUE.TXT, INFORME.TXT, \INFORMES\EQUIPOnn...).

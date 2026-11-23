@@ -1,0 +1,37 @@
+name: Fallo
+description: Algo no funciona como debería (en un emulador, en el navegador o en un equipo).
+title: "[Fallo] "
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Sistema y versión
+      placeholder: "Hispa-Pentium 0.8.8, Hispa-386 0.9.30..."
+    validations:
+      required: true
+  - type: input
+    id: donde
+    attributes:
+      label: Dónde
+      description: Emulador y versión, hispados.es o equipo real.
+      placeholder: "VirtualBox 7, QEMU, hispados.es en Firefox, un ThinkPad E14 por UEFI..."
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Cómo reproducirlo
+      placeholder: |
+        1. Arrancar desde la memoria USB
+        2. Abrir el Explorador
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Qué esperabas y qué pasó
+      description: Si es un programa o juego, dinos cuál y si va en MS-DOS o en Windows. Adjunta el registro si lo hay (ARRANQUE.TXT, WIN32.LOG...).
+    validations:
+      required: true
