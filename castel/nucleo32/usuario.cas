@@ -2643,7 +2643,7 @@ módulo Usuario
     ; y esos argumentos (o nulo). Da la tarea; o nulo, y en «error» por qué.
     ; (PROTEGE) «sello» y «servicio»: lo que es (Permisos.sello_de_carga):
     ; se pone en su ficha antes de que pueda correr
-    función cargar_imagen(nombre: puntero a byte, ini: nat32, largo: nat32, args: puntero a byte, ref error: nat32, sello: nat32, servicio: bool): puntero a Tarea
+    función cargar_imagen(nombre: puntero a byte, ini: nat32, largo: nat32, args: puntero a byte, ref error: nat32, sello: nat32, servicio: bool, teb: nat32): puntero a Tarea
         variable c: puntero a Cabecera
         variable d, v, m, origen, cuánto, n, b: nat32
         variable t: puntero a Tarea
@@ -2696,6 +2696,11 @@ módulo Usuario
         t := crear_tarea_usuario(nombre, d, c.entrada, PILA_FINAL - 16, v)
         si t <> nulo entonces
             t.args := copia
+            ; (JUEGOS, 0.8.9) la TEB de su hilo principal, si es WIN32.BIN: aquí
+            ; y no al volver, porque lo primero que hace es la 183, 9 (quitar
+            ; las primeras 64 K), que sin TEB no vale; si el reloj le daba la
+            ; vez antes, el puntero nulo no fallaba (SEH, a veces)
+            t.teb := teb
             ; (PROTEGE) su sello, y el modo administrador de quien la lanza
             ; (si es un programa que lo tiene; el núcleo no lo da)
             t.sello := sello
@@ -2729,7 +2734,7 @@ módulo Usuario
     público función cargar(i: nat32): puntero a Tarea
         variable t: puntero a Tarea
         variable e: nat32
-        t := cargar_imagen(módulo_nombre(i), módulo_inicio(i), módulo_final(i) - módulo_inicio(i), nulo, e, 0, falso)
+        t := cargar_imagen(módulo_nombre(i), módulo_inicio(i), módulo_final(i) - módulo_inicio(i), nulo, e, 0, falso, 0)
         si t = nulo entonces imprimir1("%s\n", nat32(texto_error(e))) fin
         devolver t
     fin
@@ -2751,6 +2756,12 @@ módulo Usuario
     ; y, de ahí, a su espacio de direcciones. Da la tarea; o nulo, y en
     ; «error» por qué.
     función carga_de(u: nat32, ruta: puntero a byte, args: puntero a byte, ref error: nat32): puntero a Tarea
+        devolver carga_de_con(u, ruta, args, error, 0)
+    fin
+
+    ; lo mismo, con la TEB del hilo principal (teb <> 0: WIN32.BIN, que la
+    ; tiene desde que empieza)
+    función carga_de_con(u: nat32, ruta: puntero a byte, args: puntero a byte, ref error: nat32, teb: nat32): puntero a Tarea
         variable m, largo, leídos: nat32
         variable imagen, nombre, p: puntero a byte
         variable t: puntero a Tarea
@@ -2770,7 +2781,7 @@ módulo Usuario
                 devolver nulo
             fin
             sello := sello_de_carga(u, ruta, servicio)      ; (PROTEGE)
-            devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error, sello, servicio)
+            devolver cargar_imagen(módulo_nombre(m), módulo_inicio(m), módulo_final(m) - módulo_inicio(m), args, error, sello, servicio, teb)
         fin
         m := abrir_archivo(u, ruta, PARA_LEER)
         de_dónde := ruta                        ; (PROTEGE) de dónde se carga de verdad
@@ -2831,7 +2842,7 @@ módulo Usuario
             si valor(p) = '\\' o valor(p) = '/' o valor(p) = ':' entonces nombre := p + 1 fin
             p := p + 1
         fin
-        t := cargar_imagen(nombre, nat32(imagen), largo, args, error, sello, servicio)
+        t := cargar_imagen(nombre, nat32(imagen), largo, args, error, sello, servicio, teb)
         liberar(imagen)
         devolver t
     fin
@@ -2861,7 +2872,7 @@ módulo Usuario
         todo[n + 2] := ' '
         si k > 0 entonces copiar_memoria(todo + n + 3, args, k) fin
         todo[n + 3 + k] := 0
-        t := carga_de(del_sistema, "\\WIN32.BIN", todo, error)
+        t := carga_de_con(del_sistema, "\\WIN32.BIN", todo, error, TEB_PRINCIPAL)
         liberar(todo)
         si t <> nulo entonces
             ; su nombre: el del .EXE
@@ -2873,7 +2884,6 @@ módulo Usuario
             fin
             copiar_hasta(dirección(t.nombre_propio[0]), nombre, 16)
             t.nombre := dirección(t.nombre_propio[0])
-            t.teb := TEB_PRINCIPAL               ; (JUEGOS) la TEB de su hilo principal (FS, tareas.cas)
         fin
         devolver t
     fin
