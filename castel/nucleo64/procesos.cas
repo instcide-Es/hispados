@@ -1,0 +1,897 @@
+; =============================================================================
+;  procesos.cas - Hispa-64, etapa 4: los procesos (docs/64/HISPA-64.md,
+;  sección 10). Un proceso es un espacio de direcciones (Espacios), un hilo
+;  del núcleo que entra en el anillo 3 (Hilos64.crea_de_programa) y lo suyo:
+;
+;   - sus regiones (lo que puede tocar: el programa, la pila, el montón de
+;     brk, lo de mmap), cada una con sus permisos (leer, escribir, ejecutar).
+;     Las páginas se ponen al tocarlas (el fallo de página de una dirección de
+;     una región con permiso pone una a cero y vuelve), menos lo que viene del
+;     archivo, que se copia al cargar;
+;   - sus archivos abiertos (0, 1 y 2: la consola; los de la unidad en memoria);
+;   - el cargador de ELF64 estáticos (PT_LOAD, lo que empieza a cero, la pila
+;     inicial como la de Linux: argc, argv, envp y el vector auxiliar con
+;     AT_PHDR, AT_PHENT, AT_PHNUM, AT_PAGESZ, AT_ENTRY y AT_RANDOM);
+;   - tocar su memoria desde el núcleo (copia_de, copia_a, texto_de): con la
+;     comprobación estricta (cada página, en sus tablas, con la marca de
+;     usuario y el permiso, o en una región que lo tenga) y siempre por el mapa
+;     directo: el núcleo no toca la mitad baja (SMAP lo para si lo intentase);
+;   - lo que hace el planificador al cambiar a uno de sus hilos (al_cambiar:
+;     CR3, TSS.RSP0 y la pila de syscall, FS y GS del programa);
+;   - sus fallos (al_fallo: una división por cero, una instrucción que no
+;     existe, una dirección que no es suya...): se explican en español y se
+;     cierra el programa, solo él (con la señal que le daría Linux: SIGSEGV,
+;     SIGFPE, SIGILL...); el sistema sigue;
+;   - y salir (exit, exit_group, o un fallo): el espacio se deshace entero y
+;     quien lo espera (espera) recibe el código.
+;  En la etapa 4 cada proceso tiene un solo hilo (los hilos de POSIX, con musl:
+;  etapa 7).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Procesos
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64
+
+    público constante MAX_REG = 48
+    público constante MAX_FD = 16
+    público constante LEER = 1                  ; los permisos (los PROT_ de Linux)
+    público constante ESCRIBE = 2
+    público constante EJECUTAR = 4
+    público constante R_PROGRAMA = 1            ; las clases de región
+    público constante R_PILA = 2
+    público constante R_MONTÓN = 3
+    público constante R_MMAP = 4
+    público constante F_CONSOLA = 1             ; las clases de archivo abierto
+    público constante F_UNIDAD = 2
+    público constante PILA_PROG = 0x800000           ; 8 MB de pila
+    público constante MÍNIMO = 0x10000          ; nada por debajo de 64 KB (el puntero nulo)
+    público constante SIGILL = 4
+    público constante SIGTRAP = 5
+    público constante SIGBUS = 7
+    público constante SIGFPE = 8
+    público constante SIGKILL = 9
+    público constante SIGSEGV = 11
+
+    público tipo Proceso = estructura
+        id: nat64
+        espacio: nat64
+        hilo: nat64
+        código: nat64               ; con el que ha salido
+        señal: nat64                ; 0, o la que lo ha cerrado
+        entrada: nat64
+        pila: nat64                 ; RSP al empezar
+        pila_ini: nat64             ; lo más bajo de la región de la pila
+        brk_ini, brk: nat64
+        mmap_próx: nat64
+        tid_dir: nat64
+        desconocidas: nat64         ; las llamadas que no se saben (se dicen las primeras)
+        n_reg: nat64
+        reg_ini, reg_fin: arreglo [MAX_REG] de nat64
+        reg_prot, reg_clase: arreglo [MAX_REG] de nat32
+        fd_clase, fd_arch: arreglo [MAX_FD] de nat32
+        fd_pos: arreglo [MAX_FD] de nat64
+        fpu_bloque: nat64           ; el bloque del montón de sus registros x87 y SSE
+        nombre: arreglo [32] de byte
+        línea: arreglo [256] de byte
+    fin
+
+    público variable motivo: puntero a byte     ; por qué no se ha podido arrancar
+    público variable cerrojo_consola: nat64
+    público variable vivos, arrancados, cerrados_por_fallo: nat64
+    público variable páginas_al_tocar: nat64    ; las que ha puesto un fallo de página
+    variable próximo_pid: nat64
+    variable al_dir: nat64                      ; AT_PHDR del que se carga
+    variable al_phnum: nat64
+    variable azar_estado: nat64
+    variable plantilla: arreglo [512] de byte alineado 16      ; los registros x87 y SSE al empezar (fxsave)
+
+    ; ---- lo de bajo nivel ----
+    función l8(d: nat64): nat32
+        variable p: puntero a byte
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función l16(d: nat64): nat32
+        variable p: puntero a nat16
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función l32(d: nat64): nat32
+        variable p: puntero a nat32
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función l64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función p64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    público función copia_mem(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    público función ceros_mem(a: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    ; el proceso del hilo que corre (o nulo)
+    público función mío(): puntero a Proceso
+        variable h: puntero a Hilo
+        h := actual()
+        devolver puntero(h.proceso)
+    fin
+
+    función espacio_de(p: puntero a Proceso): puntero a Espacio
+        devolver puntero(p.espacio)
+    fin
+
+    ; las marcas de las páginas con esos permisos
+    función marcas(prot: nat32): nat64
+        variable fl: nat64
+        fl := 0
+        si prot yb ESCRIBE <> 0 entonces fl := ESCRIBIR fin
+        si prot yb EJECUTAR = 0 entonces fl := fl ob bit_nx() fin
+        devolver fl
+    fin
+
+    ; ---- las regiones ----
+    ; la región en la que está v, o -1
+    público función región_de(p: puntero a Proceso, v: nat64): ent32
+        variable i: nat32
+        i := 0
+        mientras nat64(i) < p.n_reg hacer
+            si v >= p.reg_ini[i] y v < p.reg_fin[i] entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    función nueva_región(p: puntero a Proceso, a: nat64, b: nat64, prot: nat32, clase: nat32): bool
+        variable i: nat32
+        si p.n_reg >= MAX_REG entonces devolver falso fin
+        i := nat32(p.n_reg)
+        p.reg_ini[i] := a
+        p.reg_fin[i] := b
+        p.reg_prot[i] := prot
+        p.reg_clase[i] := clase
+        p.n_reg := p.n_reg + 1
+        devolver cierto
+    fin
+
+    función quita_región(p: puntero a Proceso, i: nat32)
+        variable u: nat32
+        u := nat32(p.n_reg) - 1
+        p.reg_ini[i] := p.reg_ini[u]
+        p.reg_fin[i] := p.reg_fin[u]
+        p.reg_prot[i] := p.reg_prot[u]
+        p.reg_clase[i] := p.reg_clase[u]
+        p.n_reg := p.n_reg - 1
+    fin
+
+    ; parte en dos la región que tenga v por dentro (no en su principio); falso si no cabe otra
+    función parte(p: puntero a Proceso, v: nat64): bool
+        variable i: ent32
+        variable k: nat32
+        i := región_de(p, v)
+        si i < 0 entonces devolver cierto fin
+        k := nat32(i)
+        si p.reg_ini[k] = v entonces devolver cierto fin
+        si no nueva_región(p, v, p.reg_fin[k], p.reg_prot[k], p.reg_clase[k]) entonces devolver falso fin
+        p.reg_fin[k] := v
+        devolver cierto
+    fin
+
+    ; ¿hay alguna región en [a, b)?
+    función ocupado(p: puntero a Proceso, a: nat64, b: nat64): bool
+        variable i: nat32
+        i := 0
+        mientras nat64(i) < p.n_reg hacer
+            si p.reg_ini[i] < b y p.reg_fin[i] > a entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; un sitio libre de «largo» octetos desde «desde» (y por debajo de «hasta»), o 0
+    público función hueco(p: puntero a Proceso, largo: nat64, mín: nat64, máx: nat64): nat64
+        variable a: nat64
+        variable i: nat32
+        variable otra: bool
+        a := mín
+        otra := cierto
+        mientras otra hacer
+            otra := falso
+            si a + largo < a o a + largo > máx entonces devolver 0 fin
+            i := 0
+            mientras nat64(i) < p.n_reg hacer
+                si p.reg_ini[i] < a + largo y p.reg_fin[i] > a entonces
+                    a := p.reg_fin[i]
+                    otra := cierto
+                fin
+                i := i + 1
+            fin
+        fin
+        devolver a
+    fin
+
+    ; las páginas puestas en [a, b), fuera (con un solo aviso a los demás)
+    función suelta_páginas(p: puntero a Proceso, a: nat64, b: nat64)
+        quita_rango(espacio_de(p), a, b)
+    fin
+
+    ; quita las regiones de [a, b) y sus páginas; falso si no cabe partirlas
+    público función quita_de(p: puntero a Proceso, a: nat64, b: nat64): bool
+        variable i: nat32
+        si no parte(p, a) o no parte(p, b) entonces devolver falso fin
+        i := 0
+        mientras nat64(i) < p.n_reg hacer
+            si p.reg_ini[i] >= a y p.reg_fin[i] <= b entonces
+                quita_región(p, i)
+            sino
+                i := i + 1
+            fin
+        fin
+        suelta_páginas(p, a, b)
+        devolver cierto
+    fin
+
+    ; pone una región nueva [a, b) (que esté libre)
+    público función pon_región(p: puntero a Proceso, a: nat64, b: nat64, prot: nat32, clase: nat32): bool
+        devolver nueva_región(p, a, b, prot, clase)
+    fin
+
+    ; cambia los permisos de [a, b): 0, o -ENOMEM si algo de ahí no es de una región
+    público función protege(p: puntero a Proceso, a: nat64, b: nat64, prot: nat32): ent64
+        variable v: nat64
+        variable i: ent32
+        variable k: nat32
+        ; (todo tiene que estar en regiones, sin huecos)
+        v := a
+        mientras v < b hacer
+            i := región_de(p, v)
+            si i < 0 entonces devolver -12 fin
+            v := p.reg_fin[nat32(i)]
+        fin
+        si no parte(p, a) o no parte(p, b) entonces devolver -12 fin
+        k := 0
+        mientras nat64(k) < p.n_reg hacer
+            si p.reg_ini[k] >= a y p.reg_fin[k] <= b entonces p.reg_prot[k] := prot fin
+            k := k + 1
+        fin
+        remarca_rango(espacio_de(p), a, b, marcas(prot), prot = 0)
+        devolver 0
+    fin
+
+    ; ---- la memoria del programa, desde el núcleo ----
+    ; una página a cero en v (que no está), con los permisos prot; falso si no hay memoria
+    función pon_página(p: puntero a Proceso, v: nat64, prot: nat32): bool
+        variable f: nat64
+        f := pide()
+        si f = 0 entonces devolver falso fin
+        ceros_mem(virt(f), 4096)
+        si no mapea_u(espacio_de(p), abajo(v), f, marcas(prot)) entonces
+            devuelve(f)
+            devolver falso
+        fin
+        suma_atómica(dirección(páginas_al_tocar), 1)
+        devolver cierto
+    fin
+
+    ; la dirección física del octeto v del programa, si puede tocarlo (escribir:
+    ; si va a escribir); si la página no está y es de una región con permiso,
+    ; se pone. nob 0 si no.
+    público función toca(p: puntero a Proceso, v: nat64, para_escribir: bool): nat64
+        variable x: nat64
+        variable i: ent32
+        variable prot: nat32
+        si v >= TOPE entonces devolver nob nat64(0) fin
+        x := pte(espacio_de(p), v)
+        si x yb PRESENTE = 0 entonces
+            i := región_de(p, v)
+            si i < 0 entonces devolver nob nat64(0) fin
+            prot := p.reg_prot[nat32(i)]
+            si prot = 0 o (para_escribir y prot yb ESCRIBE = 0) entonces devolver nob nat64(0) fin
+            si no pon_página(p, v, prot) entonces devolver nob nat64(0) fin
+            x := pte(espacio_de(p), v)
+        fin
+        si x yb USUARIO = 0 entonces devolver nob nat64(0) fin
+        si para_escribir y x yb ESCRIBIR = 0 entonces devolver nob nat64(0) fin
+        devolver marco_de(x) + (v yb 4095)
+    fin
+
+    ; ¿es [v, v + n) del programa (sin dar la vuelta ni pasar de lo suyo)?
+    función rango_bien(v: nat64, n: nat64): bool
+        devolver v + n >= v y v + n <= TOPE
+    fin
+
+    ; n octetos de k (el núcleo) a v (el programa); falso si alguno no es suyo o no puede escribirlo
+    público función copia_a(p: puntero a Proceso, v: nat64, k: nat64, n: nat64): bool
+        variable f, trozo: nat64
+        si no rango_bien(v, n) entonces devolver falso fin
+        mientras n > 0 hacer
+            f := toca(p, v, cierto)
+            si f = nob nat64(0) entonces devolver falso fin
+            trozo := 4096 - (v yb 4095)
+            si trozo > n entonces trozo := n fin
+            copia_mem(virt(f), k, trozo)
+            v := v + trozo
+            k := k + trozo
+            n := n - trozo
+        fin
+        devolver cierto
+    fin
+
+    ; n octetos de v (el programa) a k (el núcleo)
+    público función copia_de(p: puntero a Proceso, k: nat64, v: nat64, n: nat64): bool
+        variable f, trozo: nat64
+        si no rango_bien(v, n) entonces devolver falso fin
+        mientras n > 0 hacer
+            f := toca(p, v, falso)
+            si f = nob nat64(0) entonces devolver falso fin
+            trozo := 4096 - (v yb 4095)
+            si trozo > n entonces trozo := n fin
+            copia_mem(k, virt(f), trozo)
+            v := v + trozo
+            k := k + trozo
+            n := n - trozo
+        fin
+        devolver cierto
+    fin
+
+    ; un texto del programa (acabado en 0) a t (de «máx» octetos); su largo, o
+    ; -14 (EFAULT) si no es suyo, o -36 (ENAMETOOLONG) si no cabe
+    público función texto_de(p: puntero a Proceso, t: puntero a byte, v: nat64, máx: nat32): ent64
+        variable f: nat64
+        variable i: nat32
+        i := 0
+        mientras i < máx hacer
+            f := toca(p, v + i, falso)
+            si f = nob nat64(0) entonces devolver -14 fin
+            t[i] := byte(l8(virt(f)))
+            si t[i] = 0 entonces devolver ent64(i) fin
+            i := i + 1
+        fin
+        devolver -36
+    fin
+
+    ; ---- lo que hace el planificador al cambiar de hilo ----
+    función pon64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    función guarda_fpu(d: nat64)
+        ensamblador
+            mov rax, {d}
+            db 0x48, 0x0F, 0xAE, 0x00   ; fxsave64 [rax]
+        fin
+    fin
+
+    función pon_fpu(d: nat64)
+        ensamblador
+            mov rax, {d}
+            db 0x48, 0x0F, 0xAE, 0x08   ; fxrstor64 [rax]
+        fin
+    fin
+
+    ; (sin interrupciones) de «de» a «a»: lo del programa que deja y lo del que entra
+    función al_cambiar_(de: nat64, a: nat64)
+        variable h, n: puntero a Hilo
+        variable c: puntero a Cpu
+        h := puntero(de)
+        n := puntero(a)
+        c := yo()
+        si h.usuario <> 0 entonces
+            h.fs_u := lee_msr(0xC0000100)
+            h.gs_u := lee_msr(0xC0000102)
+            si h.fpu <> 0 entonces guarda_fpu(h.fpu) fin
+        fin
+        si n.usuario <> 0 entonces
+            si n.fpu <> 0 entonces pon_fpu(n.fpu) fin
+            pon_msr(0xC0000100, n.fs_u)
+            pon_msr(0xC0000102, n.gs_u)
+            c.pila_sys := n.pila
+            pon64(c.tss + 4, n.pila)            ; TSS.RSP0
+        fin
+        activa_espacio(puntero(n.espacio))
+    fin
+
+    ; ---- salir ----
+    ; el programa que corre acaba (con ese código, o cerrado por la señal); no vuelve
+    público función sal(código: nat64, señal: nat64)
+        variable h: puntero a Hilo
+        variable p: puntero a Proceso
+        variable e: puntero a Espacio
+        variable b: nat64
+        h := actual()
+        p := puntero(h.proceso)
+        p.código := código yb 255
+        p.señal := señal
+        e := espacio_de(p)
+        ; el espacio del núcleo, ya (y que el planificador no vuelva a poner el suyo)
+        b := sin_ints()
+        h.espacio := 0
+        activa_espacio(nulo)
+        restaura(b)
+        p.espacio := 0
+        si e <> nulo entonces destruye_espacio(e) fin
+        suma_atómica(dirección(vivos), nob nat64(0))
+        termina()
+    fin
+
+    ; ---- los fallos del programa ----
+    función empieza_aviso(p: puntero a Proceso): nat64
+        variable b: nat64
+        b := toma(dirección(cerrojo_consola))
+        escribir("El programa ", p.nombre, " (proceso ", p.id, ") ")
+        devolver b
+    fin
+
+    función dirección_(v: nat64)
+        escribir("la dirección ")
+        hex16(v)
+    fin
+
+    ; (Excep64, en la excepción n del anillo 3, con su marco d) cierto si se ha
+    ; arreglado; si no, lo explica y cierra el programa (no vuelve)
+    función al_fallo_(n: nat64, d: nat64, err: nat64, c2: nat64): bool
+        variable p: puntero a Proceso
+        variable i: ent32
+        variable prot: nat32
+        variable b, señal: nat64
+        variable bien: bool
+        p := mío()
+        si p = nulo entonces devolver falso fin
+        ; un fallo de página de algo suyo que aún no está: se pone, y sigue
+        si n = 14 y err yb 1 = 0 y c2 < TOPE entonces
+            i := región_de(p, c2)
+            si i >= 0 entonces
+                prot := p.reg_prot[nat32(i)]
+                bien := prot <> 0
+                si err yb 2 <> 0 y prot yb ESCRIBE = 0 entonces bien := falso fin
+                si err yb 16 <> 0 y prot yb EJECUTAR = 0 entonces bien := falso fin
+                si bien entonces
+                    si pon_página(p, c2, prot) entonces devolver cierto fin
+                    b := empieza_aviso(p)
+                    escribir("necesita más memoria y no queda: se cierra.\n")
+                    suelta(dirección(cerrojo_consola), b)
+                    sal(0, SIGKILL)
+                fin
+            fin
+        fin
+        b := empieza_aviso(p)
+        señal := SIGSEGV
+        si n = 14 entonces
+            escribir("ha intentado ")
+            si err yb 16 <> 0 entonces escribir("ejecutar en ")
+            sino si err yb 2 <> 0 entonces escribir("escribir en ")
+            sino escribir("leer ") fin
+            dirección_(c2)
+            i := -1
+            si c2 < TOPE entonces i := región_de(p, c2) fin
+            si c2 >= nat64(0x8000) << 32 entonces
+                escribir(", y no es suya: es del núcleo")
+            sino si i >= 0 y err yb 16 <> 0 entonces
+                escribir(", que es suya, pero no es código (no se puede ejecutar)")
+            sino si i >= 0 y err yb 2 <> 0 entonces
+                escribir(", que es suya, pero es de solo leer")
+            sino si i >= 0 entonces
+                escribir(", que es suya, pero no se puede leer")
+            sino si c2 < MÍNIMO entonces
+                escribir(", y no es suya (un puntero nulo)")
+            sino si c2 < p.pila_ini y c2 + 0x100000 >= p.pila_ini entonces
+                escribir(", y no es suya: está justo debajo de su pila (se le ha desbordado la pila)")
+            sino
+                escribir(", y no es suya")
+            fin
+        sino si n = 0 entonces
+            escribir("ha dividido entre cero")
+            señal := SIGFPE
+        sino si n = 6 entonces
+            escribir("ha intentado ejecutar una instrucción que no existe")
+            señal := SIGILL
+        sino si n = 13 entonces
+            escribir("ha hecho algo que solo puede hacer el núcleo (una instrucción privilegiada, un puerto, una interrupción o una dirección no canónica)")
+        sino si n = 12 entonces
+            escribir("ha usado una pila que no es válida")
+        sino si n = 1 o n = 3 entonces
+            escribir("se ha parado en un punto de parada (int3), y no hay depurador")
+            señal := SIGTRAP
+        sino si n = 16 o n = 19 entonces
+            escribir("ha hecho una cuenta de coma flotante imposible")
+            señal := SIGFPE
+        sino si n = 17 entonces
+            escribir("ha leído o escrito un dato desalineado")
+            señal := SIGBUS
+        sino si n = 4 o n = 5 entonces
+            escribir("se ha salido de un límite (into o bound)")
+        sino
+            escribir("ha provocado la excepción ", n, " del procesador")
+        fin
+        escribir(".\n  (en RIP=")
+        hex16(l64(d))
+        escribir(", RSP=")
+        hex16(l64(d + 24))
+        escribir(") Se cierra el programa; el sistema sigue.\n")
+        suelta(dirección(cerrojo_consola), b)
+        suma_atómica(dirección(cerrados_por_fallo), 1)
+        sal(0, señal)
+        devolver falso
+    fin
+
+    ; ---- el cargador de ELF64 ----
+    función mal_elf(qué: puntero a byte): bool
+        motivo := qué
+        devolver falso
+    fin
+
+    ; copia [f, f + n) del archivo a v (con las páginas que hagan falta, con
+    ; los permisos prot, y juntando los de una página que compartan dos trozos)
+    función copia_trozo(p: puntero a Proceso, v: nat64, f: nat64, n: nat64, prot: nat32): bool
+        variable x, trozo: nat64
+        variable e: puntero a Espacio
+        e := espacio_de(p)
+        mientras n > 0 hacer
+            x := pte(e, v)
+            si x yb PRESENTE = 0 entonces
+                si no pon_página(p, v, prot) entonces devolver falso fin
+                x := pte(e, v)
+            sino
+                ; (una página de dos trozos: con los permisos de los dos)
+                remarca_u(e, abajo(v), (marcas(prot) ob (x yb ESCRIBIR)) yb (x ob (nob bit_nx())))
+                x := pte(e, v)
+            fin
+            trozo := 4096 - (v yb 4095)
+            si trozo > n entonces trozo := n fin
+            copia_mem(virt(marco_de(x)) + (v yb 4095), f, trozo)
+            v := v + trozo
+            f := f + trozo
+            n := n - trozo
+        fin
+        devolver cierto
+    fin
+
+    función carga_elf(p: puntero a Proceso, k: nat32): bool
+        variable d, tam, phoff, ph, off, va, fsz, msz, a, b: nat64
+        variable phnum, i, tipo_, fl: nat32
+        variable prot: nat32
+        variable hay_carga: bool
+        d := dónde(k)
+        tam := cuánto(k)
+        al_dir := 0
+        si tam < 64 entonces devolver mal_elf("no es un programa (es demasiado corto para ser un ELF)") fin
+        si l32(d) <> 0x464C457F entonces devolver mal_elf("no es un programa ELF") fin
+        si l8(d + 4) <> 2 o l8(d + 5) <> 1 entonces devolver mal_elf("es un ELF, pero no de 64 bits (o no es «little endian»)") fin
+        si l16(d + 18) <> 62 entonces devolver mal_elf("es un ELF, pero no de x86-64") fin
+        si l16(d + 16) = 3 entonces devolver mal_elf("es un ELF de posición libre (PIE) o dinámico: aún no se saben cargar (etapa 7)") fin
+        si l16(d + 16) <> 2 entonces devolver mal_elf("es un ELF, pero no un ejecutable") fin
+        p.entrada := l64(d + 24)
+        phoff := l64(d + 32)
+        phnum := l16(d + 56)
+        si l16(d + 54) <> 56 o phnum = 0 o phnum > 64 entonces devolver mal_elf("su tabla de segmentos (las cabeceras de programa) no es válida") fin
+        si phoff >= tam o phoff + nat64(phnum) * 56 > tam entonces devolver mal_elf("su tabla de segmentos se sale del archivo") fin
+        al_phnum := phnum
+        hay_carga := falso
+        p.brk_ini := 0
+        i := 0
+        mientras i < phnum hacer
+            ph := d + phoff + nat64(i) * 56
+            tipo_ := l32(ph)
+            si tipo_ = 3 entonces devolver mal_elf("pide un cargador dinámico (PT_INTERP): aún no se sabe (etapa 7)") fin
+            si tipo_ = 1 entonces
+                fl := l32(ph + 4)
+                off := l64(ph + 8)
+                va := l64(ph + 16)
+                fsz := l64(ph + 32)
+                msz := l64(ph + 40)
+                si fsz > msz o off + fsz < off o off + fsz > tam entonces devolver mal_elf("un segmento se sale del archivo") fin
+                si va < MÍNIMO o va + msz < va o va + msz > TOPE entonces devolver mal_elf("un segmento va donde no puede ir un programa") fin
+                si (va yb 4095) <> (off yb 4095) entonces devolver mal_elf("un segmento no está alineado con su sitio en el archivo") fin
+                prot := 0
+                si fl yb 4 <> 0 entonces prot := prot ob LEER fin
+                si fl yb 2 <> 0 entonces prot := prot ob ESCRIBE fin
+                si fl yb 1 <> 0 entonces prot := prot ob EJECUTAR ob LEER fin
+                ; la región (lo que no esté ya en otra: la página que compartan dos)
+                a := abajo(va)
+                b := arriba(va + msz)
+                mientras a < b y región_de(p, a) >= 0 hacer a := a + 4096 fin
+                si a < b entonces
+                    si ocupado(p, a, b) entonces devolver mal_elf("dos segmentos se pisan") fin
+                    si no nueva_región(p, a, b, prot, R_PROGRAMA) entonces devolver mal_elf("tiene demasiados segmentos") fin
+                fin
+                si no copia_trozo(p, va, d + off, fsz, prot) entonces devolver mal_elf("no queda memoria") fin
+                si b > p.brk_ini entonces p.brk_ini := b fin
+                si phoff >= off y phoff + nat64(phnum) * 56 <= off + fsz entonces al_dir := va + (phoff - off) fin
+                hay_carga := cierto
+            fin
+            i := i + 1
+        fin
+        si no hay_carga entonces devolver mal_elf("no tiene nada que cargar (ningún PT_LOAD)") fin
+        i := 0
+        si región_de(p, p.entrada) < 0 entonces devolver mal_elf("su punto de entrada no está en ningún segmento") fin
+        si p.reg_prot[nat32(región_de(p, p.entrada))] yb EJECUTAR = 0 entonces devolver mal_elf("su punto de entrada no es código") fin
+        p.brk := p.brk_ini
+        devolver cierto
+    fin
+
+    ; 16 octetos al azar (AT_RANDOM): RDRAND si lo hay, y el TSC
+    función azar(): nat64
+        variable r: nat64
+        r := 0
+        si con_rdrand entonces
+            ensamblador
+                db 0x48, 0x0F, 0xC7, 0xF0       ; rdrand rax
+                mov {r}, rax
+            fin
+        fin
+        azar_estado := azar_estado * 6364136223846793005 + 1442695040888963407 + tsc()
+        devolver r xob azar_estado
+    fin
+
+    ; la pila inicial, como la de Linux: arriba, los textos y los 16 octetos al
+    ; azar; debajo (alineado a 16), argc, argv, 0, envp, 0 y el vector auxiliar
+    función pon_pila(p: puntero a Proceso): bool
+        variable tabla: arreglo [64] de nat64
+        variable args: arreglo [17] de nat64
+        variable envs: arreglo [3] de nat64
+        variable sp, rnd, v: nat64
+        variable i, j, n, nt: nat32
+        variable textos: puntero a byte
+        variable e1, e2, plat: puntero a byte
+        p.pila_ini := TOPE - PILA_PROG
+        si no nueva_región(p, p.pila_ini, TOPE, LEER ob ESCRIBE, R_PILA) entonces devolver falso fin
+        sp := TOPE
+        ; los argumentos: las palabras de la línea
+        n := 0
+        i := 0
+        mientras p.línea[i] <> 0 y n < 16 hacer
+            mientras p.línea[i] = ' ' hacer
+                p.línea[i] := 0
+                i := i + 1
+            fin
+            si p.línea[i] = 0 entonces romper fin
+            args[n] := nat64(i)
+            n := n + 1
+            mientras p.línea[i] <> 0 y p.línea[i] <> ' ' hacer i := i + 1 fin
+        fin
+        ; (el resto de la línea, de más de 16 palabras, no se pasa)
+        si n < 16 entonces
+            mientras i < 255 y p.línea[i] <> 0 hacer i := i + 1 fin
+        fin
+        p.línea[255] := 0
+        ; los textos, arriba
+        j := 0
+        mientras j < n hacer
+            textos := dirección(p.línea[nat32(args[j])])
+            nt := 0
+            mientras textos[nt] <> 0 hacer nt := nt + 1 fin
+            sp := sp - nat64(nt) - 1
+            si no copia_a(p, sp, nat64(textos), nat64(nt) + 1) entonces devolver falso fin
+            args[j] := sp
+            j := j + 1
+        fin
+        e1 := "HOME=/"
+        e2 := "PATH=/"
+        plat := "x86_64"
+        sp := sp - 7
+        si no copia_a(p, sp, nat64(e1), 7) entonces devolver falso fin
+        envs[0] := sp
+        sp := sp - 7
+        si no copia_a(p, sp, nat64(e2), 7) entonces devolver falso fin
+        envs[1] := sp
+        sp := sp - 7
+        si no copia_a(p, sp, nat64(plat), 7) entonces devolver falso fin
+        envs[2] := sp
+        sp := sp yb (nob nat64(15))
+        sp := sp - 16
+        rnd := sp
+        tabla[0] := azar()
+        tabla[1] := azar()
+        si no copia_a(p, rnd, nat64(dirección(tabla[0])), 16) entonces devolver falso fin
+        ; la tabla de abajo
+        j := 0
+        tabla[j] := nat64(n)
+        j := j + 1
+        i := 0
+        mientras i < n hacer
+            tabla[j] := args[i]
+            j := j + 1
+            i := i + 1
+        fin
+        tabla[j] := 0
+        tabla[j + 1] := envs[0]
+        tabla[j + 2] := envs[1]
+        tabla[j + 3] := 0
+        j := j + 4
+        ; el vector auxiliar
+        tabla[j] := 3                   ; AT_PHDR
+        tabla[j + 1] := al_dir
+        tabla[j + 2] := 4               ; AT_PHENT
+        tabla[j + 3] := 56
+        tabla[j + 4] := 5               ; AT_PHNUM
+        tabla[j + 5] := al_phnum
+        tabla[j + 6] := 6               ; AT_PAGESZ
+        tabla[j + 7] := 4096
+        tabla[j + 8] := 9               ; AT_ENTRY
+        tabla[j + 9] := p.entrada
+        tabla[j + 10] := 25             ; AT_RANDOM
+        tabla[j + 11] := rnd
+        tabla[j + 12] := 15             ; AT_PLATFORM
+        tabla[j + 13] := envs[2]
+        tabla[j + 14] := 17             ; AT_CLKTCK
+        tabla[j + 15] := 100
+        tabla[j + 16] := 11             ; AT_UID, AT_EUID, AT_GID, AT_EGID: 0
+        tabla[j + 17] := 0
+        tabla[j + 18] := 12
+        tabla[j + 19] := 0
+        tabla[j + 20] := 13
+        tabla[j + 21] := 0
+        tabla[j + 22] := 14
+        tabla[j + 23] := 0
+        tabla[j + 24] := 23             ; AT_SECURE
+        tabla[j + 25] := 0
+        tabla[j + 26] := 0              ; AT_NULL
+        tabla[j + 27] := 0
+        j := j + 28
+        ; (argc en una dirección múltiplo de 16)
+        sp := sp - nat64(j) * 8
+        sp := sp yb (nob nat64(15))
+        si no copia_a(p, sp, nat64(dirección(tabla[0])), nat64(j) * 8) entonces devolver falso fin
+        p.pila := sp
+        devolver cierto
+    fin
+
+    ; lo que hace el hilo de un programa: entrar en él (no vuelve)
+    función arranca_hilo(arg: nat64)
+        variable p: puntero a Proceso
+        p := puntero(arg)
+        a_usuario(p.entrada, p.pila)
+    fin
+
+    función suelta_proceso(p: puntero a Proceso)
+        si p.espacio <> 0 entonces destruye_espacio(espacio_de(p)) fin
+        si p.fpu_bloque <> 0 entonces libera(puntero(p.fpu_bloque)) fin
+        libera(puntero(nat64(p)))
+    fin
+
+    ; arranca el programa de la línea («HOLA uno dos»: el archivo HOLA de la
+    ; unidad, con argv = HOLA, uno, dos); nulo si no se puede (y por qué, en motivo)
+    público función lanza(línea: puntero a byte): puntero a Proceso
+        variable p: puntero a Proceso
+        variable nombre_: arreglo [32] de byte
+        variable i, j: nat32
+        variable k: ent32
+        variable e: puntero a Espacio
+        variable h: puntero a Hilo
+        variable fpu: nat64
+        motivo := nulo
+        i := 0
+        mientras línea[i] = ' ' hacer i := i + 1 fin
+        j := 0
+        mientras línea[i] <> 0 y línea[i] <> ' ' y j < 31 hacer
+            nombre_[j] := línea[i]
+            i := i + 1
+            j := j + 1
+        fin
+        nombre_[j] := 0
+        k := busca_archivo(dirección(nombre_[0]))
+        si k < 0 entonces
+            motivo := "no está en la unidad"
+            devolver nulo
+        fin
+        p := puntero(nat64(reserva(tamaño(Proceso))))
+        si p = nulo entonces
+            motivo := "no queda memoria"
+            devolver nulo
+        fin
+        ceros_mem(nat64(p), tamaño(Proceso))
+        p.id := suma_atómica(dirección(próximo_pid), 1) + 1
+        ; el nombre, sin la extensión y en mayúsculas
+        j := 0
+        mientras nombre_[j] <> 0 y nombre_[j] <> '.' hacer
+            p.nombre[j] := nombre_[j]
+            si p.nombre[j] >= 'a' y p.nombre[j] <= 'z' entonces p.nombre[j] := p.nombre[j] - 32 fin
+            j := j + 1
+        fin
+        p.nombre[j] := 0
+        i := 0
+        mientras línea[i] <> 0 y i < 255 hacer
+            p.línea[i] := línea[i]
+            i := i + 1
+        fin
+        p.línea[i] := 0
+        p.fd_clase[0] := F_CONSOLA
+        p.fd_clase[1] := F_CONSOLA
+        p.fd_clase[2] := F_CONSOLA
+        e := crea_espacio()
+        si e = nulo entonces
+            libera(puntero(nat64(p)))
+            motivo := "no queda memoria"
+            devolver nulo
+        fin
+        p.espacio := nat64(e)
+        si no carga_elf(p, nat32(k)) entonces
+            suelta_proceso(p)
+            devolver nulo
+        fin
+        si no pon_pila(p) entonces
+            motivo := "no queda memoria para su pila"
+            suelta_proceso(p)
+            devolver nulo
+        fin
+        p.mmap_próx := nat64(0x1000) << 32
+        ; sus registros x87 y SSE, los de empezar
+        p.fpu_bloque := nat64(reserva(528))
+        si p.fpu_bloque = 0 entonces
+            motivo := "no queda memoria"
+            suelta_proceso(p)
+            devolver nulo
+        fin
+        fpu := (p.fpu_bloque + 15) yb (nob nat64(15))
+        copia_mem(fpu, nat64(dirección(plantilla)), 512)
+        h := crea_de_programa(nat64(dirección(arranca_hilo)), nat64(p), dirección(p.nombre[0]), nat64(p), p.espacio, fpu)
+        si h = nulo entonces
+            motivo := "no queda memoria para su hilo"
+            suelta_proceso(p)
+            devolver nulo
+        fin
+        p.hilo := nat64(h)
+        suma_atómica(dirección(vivos), 1)
+        suma_atómica(dirección(arrancados), 1)
+        devolver p
+    fin
+
+    ; espera a que acabe p y lo suelta; el código con el que ha acabado (como en
+    ; la consola de Linux: 128 + la señal si lo ha cerrado un fallo)
+    público función espera_proceso(p: puntero a Proceso): nat64
+        variable r: nat64
+        une(puntero(p.hilo))
+        r := p.código
+        si p.señal <> 0 entonces r := 128 + p.señal fin
+        suelta_proceso(p)
+        devolver r
+    fin
+
+    ; en qué procesadores ha corrido (un bit por cada uno; antes de espera)
+    público función procesadores_de(p: puntero a Proceso): nat64
+        variable h: puntero a Hilo
+        h := puntero(p.hilo)
+        devolver h.cpus_vistas
+    fin
+
+    ; lo que hace falta para los programas (en el que arranca, con el planificador en marcha)
+    público función prepara_procesos()
+        variable c: puntero a Cpu
+        c := yo()
+        si nat64(dirección(c.pila_sys)) - nat64(c) <> CPU_PILA_SIS o nat64(dirección(c.rsp_usuario)) - nat64(c) <> CPU_RSP_USUARIO entonces
+            detén_ini("el bloque del procesador no es como lo espera la entrada de syscall")
+            detén_fin()
+        fin
+        azar_estado := tsc()
+        guarda_fpu(nat64(dirección(plantilla)))
+        al_fallo_usuario := nat64(dirección(al_fallo_))
+        al_cambiar := nat64(dirección(al_cambiar_))
+    fin
+
+fin Procesos.

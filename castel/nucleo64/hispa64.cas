@@ -1,6 +1,6 @@
 ; =============================================================================
-;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 3 (varios
-;  procesadores y el planificador).
+;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 4 (los
+;  programas: el anillo 3, syscall y ELF64).
 ;  Lo carga GRUB por multiboot2 (con UEFI de 64 bits: \EFI\BOOT\BOOTX64.EFI; o
 ;  con la BIOS) o QEMU con -kernel (multiboot), en 1 MB; corre en la mitad alta
 ;  (0xFFFFFFFF80100000: «modelo hispa64», que también pasa al modo largo con
@@ -35,7 +35,15 @@
 ;  la etapa 3: panicoap (un fallo de página en otro procesador), paradaap (una
 ;  parada del núcleo en otro procesador), pilahilo (desbordar la pila de un
 ;  hilo), «sinsmp» (sin encender los demás procesadores), «sinpruebas» (sin
-;  las pruebas de los hilos) y «ocioso=hlt» u «ocioso=mwait» (el reposo).
+;  las pruebas de los hilos) y «ocioso=hlt» u «ocioso=mwait» (el reposo); de
+;  la etapa 4: «sinpcid» (sin PCID aunque lo haya; «sinpruebas» quita también
+;  las pruebas de los programas).
+;   - [etapa 4] los programas: las entradas desde el anillo 3 (entradas.cas:
+;     swapgs, syscall/sysret), los espacios de direcciones (espacios.cas), la
+;     unidad en memoria (unidad64.cas: los módulos del cargador), los procesos
+;     y el cargador de ELF64 (procesos.cas), las llamadas al sistema de Linux
+;     (sistema.cas) y sus pruebas (prproc64.cas, con los programas de
+;     programas/).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Hispa64
@@ -44,11 +52,12 @@ módulo Hispa64
 
     importar Cifras64, Cpu64, Pant64, Excep64, Gdt64, Fisica64, Pagina64, Monton64, Nombre64, PrMem64
     importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64, Cerrojo, Hilos64, Smp64, PrSmp64
+    importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
 
-    constante VERSIÓN = "0.3.0"
+    constante VERSIÓN = "0.4.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
-    constante MAX_MÓDULOS = 8
+    constante MAX_MÓDULOS = 16
 
     variable magia, info: nat32
     variable info_largo: nat64
@@ -65,8 +74,10 @@ módulo Hispa64
     variable mapa: nat64                        ; la etiqueta del mapa de memoria (multiboot2; virtual)
     variable mapa1, mapa1_largo: nat64          ; el mapa de multiboot (virtual)
     variable mod_ini, mod_fin: arreglo [MAX_MÓDULOS] de nat64    ; los módulos (física)
-    variable mod_nombre: arreglo [MAX_MÓDULOS] de nat64          ; su línea (virtual)
+    variable mod_nombre: arreglo [MAX_MÓDULOS] de nat64          ; su línea (virtual: su copia en mod_texto)
+    variable mod_texto: arreglo [MAX_MÓDULOS * 64] de byte       ; (copiada al leerla: la de multiboot no está apartada)
     variable módulos: nat32
+    variable sim_índice: nat32                  ; el módulo de los nombres (HISPA64.SIM)
 
     función l8(d: nat64): byte
         variable p: puntero a byte
@@ -122,10 +133,19 @@ módulo Hispa64
     fin
 
     función un_módulo(ini: nat64, fin_: nat64, nombre: nat64)
+        variable i: nat32
         si módulos >= MAX_MÓDULOS o fin_ <= ini entonces devolver fin
         mod_ini[módulos] := ini
         mod_fin[módulos] := fin_
-        mod_nombre[módulos] := nombre
+        ; (la línea, copiada ya: lo de multiboot que no es la información en sí puede reutilizarse)
+        i := 0
+        mientras i < 63 y nombre <> 0 hacer
+            si l8(nombre + i) = 0 entonces romper fin
+            mod_texto[módulos * 64 + i] := l8(nombre + i)
+            i := i + 1
+        fin
+        mod_texto[módulos * 64 + i] := 0
+        mod_nombre[módulos] := nat64(dirección(mod_texto[módulos * 64]))
         módulos := módulos + 1
     fin
 
@@ -322,7 +342,10 @@ módulo Hispa64
         i := 0
         mientras i < módulos y cuántos = 0 hacer
             pon(virt(mod_ini[i]), mod_fin[i] - mod_ini[i])
-            si cuántos > 0 entonces sim := i fin
+            si cuántos > 0 entonces
+                sim := i
+                sim_índice := i
+            fin
             i := i + 1
         fin
         ; lo que se cuenta
@@ -456,6 +479,29 @@ módulo Hispa64
         si tiene("prueba=panicoap") entonces provoca_smp(1) fin
         si tiene("prueba=paradaap") entonces provoca_smp(2) fin
         si tiene("prueba=pilahilo") entonces provoca_smp(3) fin
+    fin
+
+    ; ---- [etapa 4] los programas ----
+    ; los módulos del cargador (menos el de los nombres), a la unidad en memoria
+    función unidad()
+        variable i: nat32
+        i := 0
+        mientras i < módulos hacer
+            si cuántos = 0 o i <> sim_índice entonces añade_archivo(mod_ini[i], mod_fin[i], mod_nombre[i]) fin
+            i := i + 1
+        fin
+    fin
+
+    función etapa4()
+        prepara_procesos()
+        prepara_sistema()
+        si tiene("sinpruebas") entonces
+            escribir("(sinpruebas: sin las pruebas de los programas)\n")
+        sino si no tic_va entonces
+            escribir("(Sin el tic: sin las pruebas de los programas.)\n")
+        sino
+            pruebas_procesos()
+        fin
     fin
 
     ; ---- [etapa 3] los demás procesadores y el planificador ----
@@ -992,7 +1038,7 @@ módulo Hispa64
         pon_color(14, 0)
         escribir("Hispa-64 ", VERSIÓN, " \xC4 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n")
         pon_color(7, 0)
-        escribir("Etapa 3: varios procesadores y el planificador, en Castel de 64 bits.\n\n")
+        escribir("Etapa 4: los programas (anillo 3, syscall y ELF64), en Castel de 64 bits.\n\n")
         ; el cargador
         escribir("Cargador: ")
         si cargador[0] <> 0 entonces escribir(cargador, ", ") fin
@@ -1021,6 +1067,12 @@ módulo Hispa64
         ; la memoria
         el_mapa()
         memoria()
+        ; [etapa 4] la mitad alta, compartida (antes de encender los demás); lo
+        ; de este procesador para los programas; la unidad en memoria
+        prepara_mitad_alta()
+        si tiene("sinpcid") entonces sin_pcid() fin
+        prepara_cpu()
+        unidad()
         si hay_fb y no temprana entonces
             si abre(fb_virt, fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces pon_consola() fin
         fin
@@ -1065,6 +1117,7 @@ módulo Hispa64
         si tiene("prueba=monton") entonces prueba_montón(100000, 1000) fin
         ; [etapa 3] los demás procesadores y el planificador
         etapa3()
+        etapa4()
         ; las excepciones: un punto de parada, que se atiende y se sigue
         escribir("Excepciones: las 32 en la IDT, explicadas en español. Una int3 de prueba:\n  ")
         ensamblador
@@ -1072,14 +1125,14 @@ módulo Hispa64
         fin
         provoca()
         pruebas2()
-        si fallos > 0 entonces
+        si fallos + fallos_proc > 0 entonces
             pon_color(12, 0)
-            escribir("Hispa-64 etapa 3: con fallos (los «MAL» de arriba).\n")
+            escribir("Hispa-64 etapa 4: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             si apagar_al_fallar entonces devolver 43 fin
         sino
             pon_color(10, 0)
-            escribir("Hispa-64 etapa 3: todo en orden.\n")
+            escribir("Hispa-64 etapa 4: todo en orden.\n")
             pon_color(7, 0)
         fin
         si apagar_al_fallar entonces devolver 42 fin

@@ -1,0 +1,52 @@
+; holacas.cas - Hispa-64, etapa 4 (docs/64/HISPA-64.md, sección 10): el
+; primer programa de Castel en el anillo 3 de Hispa-64. Es un programa de
+; «modelo linux64» (CASTEL64.md §7: un ELF estático de Linux x86-64), que
+; corre igual en Linux y en Hispa-64 porque Hispa-64 tiene las llamadas al
+; sistema de Linux (write, exit_group, getpid, uname...).
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo HolaCas
+
+    modelo linux64
+
+    importar Linux
+
+    variable nombre: arreglo [390] de byte
+
+    función texto(en: nat32)
+        variable i: nat32
+        i := en
+        mientras nombre[i] <> 0 y i < en + 64 hacer
+            escribir_car(nombre[i])
+            i := i + 1
+        fin
+    fin
+
+    función principal(): byte
+        variable pila: puntero a nat64
+        variable argc, i: nat64
+        variable a: puntero a byte
+        escribir("Hola desde el anillo 3: soy HOLACAS, un programa de Castel (modelo linux64)\n")
+        pila := pila_inicial()
+        argc := pila[0]
+        escribir("  argc = ", argc, ":")
+        i := 0
+        mientras i < argc hacer
+            a := puntero(pila[i + 1])
+            escribir(" ", a)
+            i := i + 1
+        fin
+        escribir("\n  getpid: ", sistema(39, 0, 0, 0), "\n")
+        si sistema(63, nat64(dirección(nombre)), 0, 0) = 0 entonces
+            escribir("  uname: ")
+            texto(0)
+            escribir(" ")
+            texto(130)
+            escribir(" ")
+            texto(260)
+            escribir("\n")
+        fin
+        escribir("HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)\n")
+        devolver 0
+    fin
+
+fin HolaCas.

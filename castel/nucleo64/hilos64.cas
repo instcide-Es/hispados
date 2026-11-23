@@ -81,6 +81,12 @@ módulo Hilos64
         id: nat32
         suelto: nat32               ; 1: nadie le espera (lo recoge la tarea ociosa)
         nada: nat32
+        ; [etapa 4] los hilos de los programas
+        usuario: nat64              ; 1: es el hilo de un programa (anillo 3)
+        espacio: nat64              ; su espacio de direcciones (Espacios), o 0: el del núcleo
+        proceso: nat64              ; su proceso (Procesos), o 0
+        fs_u, gs_u: nat64           ; FS_BASE y el GS del programa (KERNEL_GS_BASE, dentro del núcleo)
+        fpu: nat64                  ; dónde se guardan sus registros x87 y SSE (fxsave, 512 octetos alineados a 16)
     fin
 
     público tipo Espera = estructura
@@ -106,6 +112,10 @@ módulo Hilos64
     público variable con_mwait: bool
     público variable pista_mwait: nat32
     público variable reposo: puntero a byte     ; por qué hlt o mwait (lo que se dice)
+    ; [etapa 4] lo que se hace al cambiar de hilo cuando uno de los dos es de un
+    ; programa o lleva otro espacio de direcciones: al_cambiar(de, a), de Procesos
+    ; (CR3, TSS.RSP0, FS y GS del programa)
+    público variable al_cambiar: nat64
 
     ; ---- lo de bajo nivel ----
     función ceros(d: nat64, n: nat64)
@@ -155,6 +165,15 @@ módulo Hilos64
 
     función llama1(f: nat64, a: nat64)
         ensamblador
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    función llama2(f: nat64, a: nat64, b: nat64)
+        ensamblador
+            push qword {b}
             push qword {a}
             mov rax, {f}
             call rax
@@ -328,6 +347,8 @@ módulo Hilos64
         c.cambios := c.cambios + 1
         c.anterior := nat64(h)
         c.hilo := nat64(n)
+        ; [etapa 4] el espacio de direcciones y lo del programa
+        si al_cambiar <> 0 y (h.usuario <> 0 o n.usuario <> 0 o n.espacio <> c.espacio) entonces llama2(al_cambiar, nat64(h), nat64(n)) fin
         conmuta(nat64(dirección(h.rsp)), n.rsp)
         tras_cambio()
         restaura(b)
@@ -498,6 +519,27 @@ módulo Hilos64
         si fija <> CUALQUIERA y fija < n_cpus entonces
             si cpu(fija).en_marcha <> 0 entonces h.fija := fija + 1 fin
         fin
+        h.cpu := CUALQUIERA
+        prepara_pila(h, nat64(dirección(arranque_hilo)))
+        h.estado := LISTO
+        suma_atómica(dirección(creados), 1)
+        encola(h)
+        devolver h
+    fin
+
+    ; [etapa 4] el hilo de un programa: como crea, pero con su proceso y su
+    ; espacio de direcciones puestos antes de que corra
+    público función crea_de_programa(f: nat64, arg: nat64, nombre: puntero a byte, proceso: nat64, espacio: nat64, fpu: nat64): puntero a Hilo
+        variable h: puntero a Hilo
+        recoge()
+        h := nuevo(nombre, NORMAL, cierto)
+        si h = nulo entonces devolver nulo fin
+        h.qué_hace := f
+        h.arg := arg
+        h.usuario := 1
+        h.proceso := proceso
+        h.espacio := espacio
+        h.fpu := fpu
         h.cpu := CUALQUIERA
         prepara_pila(h, nat64(dirección(arranque_hilo)))
         h.estado := LISTO

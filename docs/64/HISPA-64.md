@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0, 1, 2 y 3 están hechas** (secciones 6, 7, 8 y 9).
+**etapas 0, 1, 2, 3 y 4 están hechas** (secciones 6, 7, 8, 9 y 10).
 
 ---
 
@@ -57,7 +57,7 @@ pruebas en pruebas64.sh, sin cambiar lo que sale para 16 y 32 bits):
 | **Llamar a C y que C llame** (System V AMD64: argumentos en RDI, RSI, RDX, RCX, R8, R9, pila alineada a 16): `externa función` con su puente | enlazar con código en C (ACPICA, musl, la oficina) | 4–7 (la etapa 2 lee ACPI sin ACPICA: sección 8) |
 | **Números escritos de 64 bits** y constantes de 64 al compilar | las direcciones altas sin `nat64(x) << 32` | **hecho** (etapa 2; CASTEL64.md §10 ter: son `nat64`, sin calcular al compilar) |
 | Variables **alineadas** (`alineado 4096`) | estructuras de los dispositivos | **hecho** (etapa 2, las del módulo sin valor inicial; CASTEL64.md §10 ter) |
-| `modelo usuario64`: programas del anillo 3 con `syscall` | los programas de Castel en Hispa-64 | 4 |
+| ~~`modelo usuario64`~~ `modelo linux64`: programas del anillo 3 con `syscall` (los de Linux corren tal cual: sección 10) | los programas de Castel en Hispa-64 | **hecho** (etapa 4) |
 
 ### 2.2 El arranque: multiboot2 de GRUB (recomendado), cargador UEFI propio más tarde
 
@@ -261,7 +261,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 1 | Núcleo en la mitad alta, memoria física y virtual, montón | **hecha (23/11)** | — |
 | 2 | ACPI (tablas propias), APIC, HPET, tiempo, PCIe, apagar | **hecha (23/11)** | — |
 | 3 | SMP, planificador, hilos del núcleo | **hecha (23/11)** | — |
-| 4 | Anillo 3, syscall/sysret, ELF64, procesos | 4–5 sem. | 5 meses |
+| 4 | Anillo 3, syscall/sysret, ELF64, procesos | **hecha (23/11)** | — |
 | 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | 5–7 sem. | 6,5 meses |
 | 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento | 5–7 sem. | 8 meses |
 | 7 | musl, POSIX, herramientas de compilar cruzado | 6–8 sem. | 9,5 meses |
@@ -323,14 +323,23 @@ que un pánico en cualquier procesador pare a todos y lo explique uno.
   ya prueba carreras). **Taller**: el ThinkPad (híbrido) y el ASUS (4 núcleos, 8
   hilos).
 
-### Etapa 4 — programas: anillo 3, `syscall`, ELF64
+### Etapa 4 — programas: anillo 3, `syscall`, ELF64 (hecha: sección 10)
+
+Lo que cambió del plan al hacerla: **no hace falta un `modelo usuario64`**: los
+programas de `modelo linux64` (ELF estáticos de Linux x86-64) corren tal cual,
+porque Hispa-64 tiene las llamadas de Linux; **copiar al escribir** llega con
+`fork` (etapa 7, con musl); las páginas de los programas se ponen **al tocarlas**
+(menos lo que viene del archivo); el **intérprete de órdenes** en el anillo 3 pide
+leer el teclado desde un programa (etapa 6): en la 4 el núcleo arranca él los
+programas de la unidad en memoria y los espera. Y se ha añadido: SSE para los
+programas (sus registros, guardados al cambiar), SMEP, SMAP y UMIP, PCID, y un CD
+que arranca por BIOS y por UEFI.
 
 - Espacio de direcciones por proceso, `syscall`/`sysret`, cargar ELF64 estáticos,
-  `modelo usuario64` en Castel, las primeras llamadas (escribir, leer, salir,
-  memoria), copiar al escribir.
-- **Se verá**: un intérprete de órdenes de Castel en el anillo 3, programas que se
-  arrancan y acaban; un programa que falla se explica y **no** tumba el sistema.
-- **QEMU** y **taller**: lo mismo, con un disco en memoria (módulo de multiboot2).
+  las primeras llamadas (escribir, leer, salir, memoria).
+- **Se verá**: programas que se arrancan y acaban; un programa que falla se explica
+  y **no** tumba el sistema.
+- **QEMU** y **taller**: lo mismo, con un disco en memoria (módulos de multiboot2).
 
 ### Etapa 5 — discos y archivos
 
@@ -974,3 +983,139 @@ módulos nuevos; CASTEL32 con corre32, también), `SOLO=castel32` y `SOLO=16`: 8
   procesadores y 64 hilos esperando a que acabe uno.
 - Las estadísticas (`robados`, `expropiaciones`) se suman sin `lock`: son para
   contar, no para decidir.
+
+---
+
+## 10. La etapa 4, hecha (23/11/2026): los programas (anillo 3, `syscall` y ELF64)
+
+### Las decisiones
+
+- **Los programas de Linux x86-64, tal cual.** Las llamadas al sistema tienen los
+  números y la forma de Linux (2.6), y los ejecutables son ELF64 estáticos: un
+  programa en C hecho con el gcc del servidor (`-static -nostdlib`) y uno de Castel
+  de `modelo linux64` (CASTEL64.md §7) corren en Hispa-64 sin cambiar un octeto (y
+  los dos corren igual en Linux). Por eso no hace falta un `modelo usuario64`.
+- **`swapgs` en todas las entradas.** El núcleo lee lo de su procesador en `gs:[0]`;
+  con programas, cualquier interrupción puede llegar en el anillo 3 con el GS que
+  haya puesto el programa (con un `mov gs` basta: no se le puede impedir). Las
+  funciones de interrupción de Castel no saben hacer `swapgs`, así que la IDT
+  apunta a una entrada por vector (`entradas.cas`, 256, en ensamblador) que, si se
+  viene del anillo 3, hace `swapgs` y pone debajo un **marco de `iretq` falso** que
+  «vuelve» a `E64_salida` (que hace `swapgs` y el `iretq` de verdad); desde el
+  núcleo, salta tal cual. El NMI, el doble fallo y el fallo de máquina (con su IST:
+  pueden llegar entre un `swapgs` y un `sysret`) miran `GS_BASE` con `rdmsr`. Así
+  no ha hecho falta tocar el compilador ni las funciones de interrupción que ya
+  había: `Excep64.explica` reconoce el marco falso y busca el de verdad.
+- **`syscall`/`sysret`**, con STAR (el núcleo en 0x08; los programas desde 0x10:
+  datos 0x1B, código 0x23, como ya dejó la GDT de la etapa 1), LSTAR y SFMASK (IF,
+  TF, DF, AC, NT fuera). La entrada guarda la pila del programa en el bloque del
+  procesador, toma **la pila del núcleo del hilo** (la que pone el planificador al
+  cambiar, igual que TSS.RSP0), arma el mismo marco que una interrupción y llama a
+  `Sistema` **con las interrupciones puestas** (una llamada larga, como
+  `nanosleep`, duerme el hilo y deja el procesador a otro). Vuelve con `sysret`, con
+  las banderas limpiadas y la dirección comprobada (el fallo de `sysret` de Intel
+  con una dirección no canónica no puede darse: un programa nunca tiene la última
+  página de la mitad baja).
+- **La mitad alta, la misma para todos**: sus 256 PDPT se hacen al arrancar, antes
+  de encender los demás procesadores; cada PML4 de un programa copia esas 256
+  entradas y el núcleo ya nunca añade una a la suya.
+- **CR3 al cambiar de hilo, y el aviso de vaciar la TLB solo a quien lo tiene
+  puesto.** El planificador llama a `Procesos.al_cambiar` cuando uno de los dos
+  hilos es de un programa o lleva otro espacio: pone su CR3 (los hilos del núcleo,
+  el del núcleo), TSS.RSP0, la pila de `syscall`, FS y el GS del programa, y sus
+  registros x87/SSE. Quitar una página de un programa (`munmap`, `mprotect`,
+  `brk` que mengua) avisa con un IPI **solo a los procesadores que tienen ese
+  espacio puesto ahora** (`Smp64.derriba_espacio`); los demás, si vuelven a él,
+  ven por la cuenta de avisos del espacio (`tlb_gen`) que su TLB no está al día.
+  Con **PCID** (si lo hay), cada espacio lleva un número (1 a 63) y CR3 se carga
+  sin vaciar la TLB cuando el procesador sabe que lo que tiene de ese número es de
+  ese espacio (su id, que no se repite) y está al día. El TCG de QEMU no tiene
+  PCID: ese camino se prueba en el taller, y por si acaso hay una entrada del menú
+  «sin PCID» (`sinpcid`).
+- **Comprobación estricta de los punteros de los programas**: el núcleo no toca
+  nunca la mitad baja (con SMAP, si lo intentase, fallaría); cada octeto que lee o
+  escribe de un programa lo busca en las tablas de **su** espacio (presente, con la
+  marca de usuario y, para escribir, con permiso) o en una de sus regiones con
+  permiso (y entonces pone la página), y lo toca **por el mapa directo**. Un
+  puntero al núcleo, a nada, nulo, que da la vuelta o a algo de solo leer cuando
+  se va a escribir da **-EFAULT** (los números de error, los de Linux).
+- **Las páginas, al tocarlas.** Cada proceso tiene sus regiones (el programa, la
+  pila de 8 MB, el montón de `brk`, lo de `mmap`), con sus permisos; un fallo de
+  página de algo suyo que aún no está pone una página a cero y sigue. Solo lo que
+  viene del archivo se copia al cargar. (Un programa de Castel lleva 16 MB de pila
+  en lo que empieza a cero: solo se ponen las páginas que usa.)
+- **Los fallos de los programas, explicados, y solo él cerrado**: «El programa MALO
+  (proceso 13) ha intentado leer la dirección 0xFFFFFFFF80100000, y no es suya: es
+  del núcleo.», con RIP y RSP, y el código con el que acaba es el de Linux (128 +
+  SIGSEGV, SIGFPE, SIGILL...).
+- **SSE para los programas** (los compiladores de hoy lo dan por hecho): CR0 y CR4
+  con SSE, y el planificador guarda y pone los registros x87/SSE de cada programa
+  (`fxsave64`/`fxrstor64`, 512 octetos por hilo). El núcleo no los usa. AVX
+  (XSAVE) más adelante.
+- **Un hilo por proceso** en esta etapa; los hilos de POSIX (`clone`), con musl.
+
+### Qué hace
+
+Hispa-64 0.4.0. Los módulos nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `entradas.cas` | las 256 entradas de la IDT (con `swapgs` y el marco falso), la de `syscall` (`E64_sistema`), `a_usuario` (el primer `iretq` al anillo 3) y lo de cada procesador para los programas (`prepara_cpu`: EFER.SCE, STAR, LSTAR, SFMASK, SMEP, SMAP, UMIP, PCID, SSE) |
+| `espacios.cas` | los espacios de direcciones: la mitad alta hecha de antemano, `crea_espacio`, `mapea_u`, `quita_u`, `quita_rango`, `remarca_rango` (con el aviso a quien lo tiene puesto), `activa_espacio` (CR3, con PCID), `destruye_espacio` |
+| `unidad64.cas` | la unidad en memoria: los módulos del cargador por su nombre |
+| `procesos.cas` | los procesos: las regiones, los archivos abiertos, el cargador de ELF64 (PT_LOAD, lo que empieza a cero, la pila de Linux con argc, argv, envp y el vector auxiliar: AT_PHDR, AT_PHENT, AT_PHNUM, AT_PAGESZ, AT_ENTRY, AT_RANDOM, AT_PLATFORM, AT_CLKTCK...), tocar la memoria de un programa, `al_cambiar`, los fallos, salir y esperar |
+| `sistema.cas` | las llamadas: read, write, open, close, lseek, mmap, mprotect, munmap, brk, ioctl (-ENOTTY), writev, sched_yield, nanosleep, getpid, exit, uname, getuid y compañía, arch_prctl (FS y GS), gettid, set_tid_address, clock_gettime, exit_group, openat; las demás, -ENOSYS (y se dicen); lo que se escribe en UTF-8 pasa a la página 437 |
+| `prproc64.cas` | las pruebas de cada arranque (abajo) |
+| `programas/` | los programas de prueba: `hola.c`, `memoria.c`, `cuenta.c`, `malo.c` (con `sis.h`: `syscall` directo), `holacas.cas` (Castel, `modelo linux64`), `saludo.txt`; `hazlos.sh` los hace |
+| `excep64.cas` | la IDT apunta a Entradas; las excepciones del anillo 3 van a `Procesos` |
+| `hilos64.cas` | lo del programa en cada hilo (su espacio, su proceso, FS, GS, los registros SSE), `crea_de_programa` y la llamada a `al_cambiar` |
+| `smp64.cas` | `derriba_espacio` (el aviso solo a quien tiene el espacio puesto) y `prepara_cpu` en cada procesador |
+| `porcpu64.cas` | la pila de `syscall`, el espacio puesto y hasta qué aviso está al día |
+| `reloj64.cas` | `lee_fecha` y `segundos_unix` (CLOCK_REALTIME) |
+| `imagen.sh` | los programas en `\boot\prog` (`module2`), la entrada «sin PCID» y el CD (`hispa64-cd.iso`, `grub-mkrescue`: BIOS y UEFI) |
+
+Lo que dice (QEMU, q35, multiboot, 4 procesadores, `-cpu max`; abreviado):
+
+```
+Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo
+  SMEP: sí; SMAP: sí; UMIP: sí; PCID: no; la mitad alta, compartida: sus 256 PDPT, hechas al arrancar (254 nuevas)
+Unidad en memoria: 6 archivos: CUENTA (9 KB) HOLA (14 KB) HOLACAS (0 KB) MALO (10 KB) MEMORIA (10 KB) SALUDO.TXT (0 KB)
+Hola desde el anillo 3: soy HOLA, un programa en C (ELF64 estático, sin biblioteca)
+  argc = 4: HOLA uno dos tres
+  el vector auxiliar: AT_PAGESZ 4096, AT_ENTRY 0x0000000000401000, AT_PHDR con 6 segmentos, AT_RANDOM sí
+  ...
+HOLA: todo bien (28 pruebas)
+Programa «HOLA uno dos tres»: acaba con el código 0, como debe (en 37 ms)
+Hola desde el anillo 3: soy HOLACAS, un programa de Castel (modelo linux64)
+...
+MEMORIA: 29 pruebas, todas bien
+CUENTA 1: proceso 4, 0x7F03F5F9F0925A31, 12188758, igual en las dos vueltas
+...
+A la vez: 8 procesos CUENTA: los 8 acaban con su código (10 a 80), sus registros intactos; en los procesadores 0, 1, 2, 3; en 119 ms
+MALO punteros: 24 llamadas con punteros malos, todas con su error (-EFAULT, -EPERM...); sigue vivo
+MALO leer: voy a leer la memoria del núcleo
+El programa MALO (proceso 13) ha intentado leer la dirección 0xFFFFFFFF80100000, y no es suya: es del núcleo.
+  (en RIP=0x000000000040172D, RSP=0x00007FFFFFFFEE50) Se cierra el programa; el sistema sigue.
+El programa MALO (proceso 16) ha dividido entre cero.
+El programa MALO (proceso 22) ha intentado leer la dirección 0x00007FFFFF7FE398, y no es suya: está justo debajo de su pila (se le ha desbordado la pila).
+...
+Malos: 11 programas que fallan, a la vez: todos cerrados con su señal (SIGSEGV 139, SIGFPE 136, SIGILL 132), en 140 ms; el sistema sigue
+No se arrancan: «NOESTA»: no está en la unidad; «SALUDO.TXT»: no es un programa ELF
+Después: 0 procesos, 0 espacios, 0 tablas de programas; 23 arrancados, 11 cerrados por un fallo, 426 llamadas al sistema, 2509 páginas puestas al tocarlas
+  la memoria: la de antes; el montón: 11 bloques (los de antes); las pilas: 13 (las de antes)
+TLB de un espacio: una página de un espacio de prueba, leída desde el procesador 1 y el 2: 0x1111; el 2 deja el espacio
+  quitada (desde el procesador 0, sin el espacio puesto): 1 aviso por IPI; al 1 le falla la lectura: sí; al 2, al volver a ponerlo, también: sí
+Hispa-64 etapa 4: todo en orden.
+```
+
+Los once de MALO: leer el núcleo, escribir en su mapa directo, el puntero nulo,
+dividir entre cero, `ud2`, `cli`, `in al, 0x60`, ejecutar en la pila (NX),
+escribir en su código, desbordar la pila y saltar al núcleo; los once a la vez, y
+cada uno explicado y cerrado. Las 24 llamadas de `MALO punteros`: `write` desde el
+núcleo, el mapa directo, nada, el puntero nulo, más allá de la mitad baja y dando
+la vuelta; `read` al núcleo, al mapa directo y a su código (de solo leer); `open`,
+`clock_gettime`, `uname`, `nanosleep`, `writev` y `arch_prctl` con punteros del
+núcleo; `mmap` fijo en el núcleo y en la página 0; `munmap` y `mprotect` del
+núcleo; `brk` hasta el núcleo: todas dan su error y el programa sigue.
+
+El núcleo ocupa 124 KB.

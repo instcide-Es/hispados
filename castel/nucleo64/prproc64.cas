@@ -1,0 +1,357 @@
+; =============================================================================
+;  prproc64.cas - Hispa-64, etapa 4: las pruebas de cada arranque de los
+;  programas (docs/64/HISPA-64.md, sección 10). Con los programas de la unidad
+;  en memoria (los módulos del cargador: castel/nucleo64/programas):
+;    - HOLA (C) y HOLACAS (Castel, modelo linux64): arrancan, escriben, acaban
+;      con 0;
+;    - MEMORIA: brk, mmap, munmap, mprotect;
+;    - ocho CUENTA a la vez (cada uno comprueba que sus registros, también los
+;      SSE y FS, no cambian al ceder el procesador): cada uno con su código;
+;    - MALO: los punteros malos dan su error, y cada forma de fallar (leer o
+;      escribir el núcleo, el puntero nulo, dividir entre cero, ud2, cli, un
+;      puerto, ejecutar en la pila, escribir en el código, desbordar la pila,
+;      saltar al núcleo) cierra el programa con su señal, todos a la vez;
+;    - lo que no se puede arrancar (uno que no está, uno que no es un ELF);
+;    - y que después el núcleo sigue como antes: ni un marco de memoria, ni un
+;      bloque del montón, ni una pila de más;
+;    - la TLB de un espacio (con 2 procesadores o más): el aviso de quitar una
+;      página va solo a los que lo tienen puesto.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PrProc64
+
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema
+
+    público variable fallos_proc: nat32
+
+    función mal(qué: puntero a byte)
+        fallos_proc := fallos_proc + 1
+        pon_color(12, 0)
+        escribir("  MAL: ", qué, "\n")
+        pon_color(7, 0)
+    fin
+
+    función ms_desde(t0: nat64): nat64
+        devolver (ahora_ns() - t0) div 1000000
+    fin
+
+    ; arranca la línea, espera a que acabe y mira su código; dice qué ha pasado
+    función corre(línea: puntero a byte, esperado: nat64): bool
+        variable p: puntero a Proceso
+        variable r, t0: nat64
+        t0 := ahora_ns()
+        p := lanza(línea)
+        si p = nulo entonces
+            escribir("Programa «", línea, "»: no se ha podido arrancar: ", motivo, "\n")
+            mal("no arranca")
+            devolver falso
+        fin
+        r := espera_proceso(p)
+        escribir("Programa «", línea, "»: acaba con el código ", r)
+        si r = esperado entonces
+            escribir(", como debe (en ", ms_desde(t0), " ms)\n")
+            devolver cierto
+        fin
+        escribir("\n")
+        mal("no acaba con el código que debe")
+        devolver falso
+    fin
+
+    ; la memoria que se cuenta: los marcos libres, más los que tiene el montón y
+    ; las tablas del núcleo (que se quedan)
+    función memoria_ahora(): nat64
+        devolver libres + páginas + nat64(tablas)
+    fin
+
+    función lista_cpus(m: nat64)
+        variable k, n: nat32
+        n := 0
+        k := 0
+        mientras k < 64 hacer
+            si (m >> k) yb 1 <> 0 entonces
+                si n > 0 entonces escribir(",") fin
+                escribir(" ", k)
+                n := n + 1
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; ---- la TLB de un espacio ----
+    constante V_PRUEBA = 0x0000200000000000
+    variable e_prueba: puntero a Espacio
+    variable leído, falló, listo: arreglo [2] de nat64
+    variable ronda: nat64
+
+    ; leer V_PRUEBA con red (SMAP: el núcleo no lee la mitad baja sin stac)
+    función lee_v(i: nat32): bool
+        variable l, f: nat64
+        variable bien: bool
+        si con_smap entonces
+            ensamblador
+                db 0x0F, 0x01, 0xCB     ; stac
+            fin
+        fin
+        bien := lee_con_red(V_PRUEBA, l, f)
+        si con_smap entonces
+            ensamblador
+                db 0x0F, 0x01, 0xCA     ; clac
+            fin
+        fin
+        leído[i] := l
+        devolver bien
+    fin
+
+    función pon_espacio(e: puntero a Espacio)
+        variable h: puntero a Hilo
+        variable b: nat64
+        b := sin_ints()
+        h := actual()
+        h.espacio := nat64(e)
+        activa_espacio(e)
+        restaura(b)
+    fin
+
+    ; el lector i: con el espacio puesto, lee; el 1 lo quita; espera la segunda ronda y lee otra vez
+    función lector(arg: nat64)
+        variable i: nat32
+        i := nat32(arg)
+        pon_espacio(e_prueba)
+        si lee_v(i) entonces falló[i] := 0 sino falló[i] := 1 fin
+        si i = 1 entonces pon_espacio(nulo) fin
+        pon_atómico(dirección(listo[i]), 1)
+        mientras ronda = 0 hacer pausa() fin
+        si i = 1 entonces pon_espacio(e_prueba) fin
+        si lee_v(i) entonces falló[i] := 0 sino falló[i] := 1 fin
+        pon_espacio(nulo)
+        pon_atómico(dirección(listo[i]), 2)
+    fin
+
+    función prueba_tlb_espacio()
+        variable f, x, antes, t0: nat64
+        variable n, k: nat32
+        variable h: arreglo [2] de nat64
+        variable c: puntero a Cpu
+        si n_en_marcha < 2 entonces devolver fin
+        n := 1
+        si n_en_marcha >= 3 entonces n := 2 fin
+        e_prueba := crea_espacio()
+        f := pide()
+        si e_prueba = nulo o f = 0 entonces
+            mal("no hay memoria para la prueba de la TLB de un espacio")
+            devolver
+        fin
+        p64_(virt(f), 0x1111)
+        si no mapea_u(e_prueba, V_PRUEBA, f, bit_nx()) entonces mal("no se pone la página de prueba") fin
+        ronda := 0
+        k := 0
+        mientras k < n hacer
+            listo[k] := 0
+            h[k] := nat64(crea(nat64(dirección(lector)), nat64(k), "lector", INTERACTIVO, k + 1))
+            k := k + 1
+        fin
+        t0 := ahora_ns()
+        k := 0
+        mientras k < n hacer
+            mientras listo[k] = 0 y ahora_ns() - t0 < 5000000000 hacer duerme_ms(1) fin
+            k := k + 1
+        fin
+        escribir("TLB de un espacio: una página de un espacio de prueba, leída desde el procesador 1")
+        si n = 2 entonces escribir(" y el 2") fin
+        escribir(": ")
+        hex(leído[0])
+        si leído[0] <> 0x1111 o falló[0] <> 0 entonces mal("el lector 1 no lee la página") fin
+        si n = 2 entonces
+            si leído[1] <> 0x1111 o falló[1] <> 0 entonces mal("el lector 2 no lee la página") fin
+            escribir("; el 2 deja el espacio")
+            si con_pcid entonces escribir(" (con PCID: lo de ese espacio se queda en su TLB)") fin
+        fin
+        escribir("\n")
+        ; quitarla: el aviso, solo al 1 (el que lo tiene puesto)
+        antes := avisos_esp
+        x := quita_u(e_prueba, V_PRUEBA)
+        c := yo()
+        escribir("  quitada (desde el procesador ", c.número, ", sin el espacio puesto): ", avisos_esp - antes, " aviso por IPI")
+        si avisos_esp - antes <> 1 entonces mal("el aviso no va solo al procesador que tiene el espacio puesto") fin
+        si x <> f entonces mal("no se quita la página de prueba") fin
+        ronda := 1
+        k := 0
+        mientras k < n hacer
+            mientras listo[k] <> 2 y ahora_ns() - t0 < 5000000000 hacer duerme_ms(1) fin
+            k := k + 1
+        fin
+        escribir("; al 1 le falla la lectura: ")
+        si falló[0] = 1 entonces escribir("sí") sino escribir("NO") fin
+        si n = 2 entonces
+            escribir("; al 2, al volver a ponerlo, también: ")
+            si falló[1] = 1 entonces escribir("sí") sino escribir("NO") fin
+            si falló[1] <> 1 entonces mal("el procesador 2 aún ve la página al volver al espacio") fin
+        fin
+        escribir("\n")
+        si falló[0] <> 1 entonces mal("el procesador 1 aún ve la página quitada") fin
+        k := 0
+        mientras k < n hacer
+            une(puntero(h[k]))
+            k := k + 1
+        fin
+        devuelve(f)
+        destruye_espacio(e_prueba)
+    fin
+
+    función p64_(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    ; ---- las pruebas ----
+    público función pruebas_procesos()
+        variable i: nat32
+        variable mem0, montón0, pilas0, t0, cpus, r: nat64
+        variable p: arreglo [16] de nat64
+        variable bien: bool
+        variable línea: arreglo [32] de byte
+        variable malos: arreglo [11] de puntero a byte
+        variable señales: arreglo [11] de nat64
+        pon_color(14, 0)
+        escribir("Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo")
+        pon_color(7, 0)
+        escribir("\n  SMEP: ")
+        si con_smep entonces escribir("sí") sino escribir("no") fin
+        escribir("; SMAP: ")
+        si con_smap entonces escribir("sí") sino escribir("no") fin
+        escribir("; UMIP: ")
+        si con_umip entonces escribir("sí") sino escribir("no") fin
+        escribir("; PCID: ")
+        si con_pcid entonces escribir("sí") sino escribir("no") fin
+        escribir("; la mitad alta, compartida: sus 256 PDPT, hechas al arrancar (", altas, " nuevas)\n")
+        escribir("Unidad en memoria: ", n_archivos, " archivos:")
+        i := 0
+        mientras i < n_archivos hacer
+            escribir(" ", nombre_de(i), " (")
+            tamaño_legible(cuánto(i))
+            escribir(")")
+            i := i + 1
+        fin
+        escribir("\n")
+        si busca_archivo("HOLA") < 0 entonces
+            escribir("(Sin los programas de prueba en la unidad: sin las pruebas de los programas.)\n")
+            devolver
+        fin
+        mem0 := memoria_ahora()
+        montón0 := en_uso
+        pilas0 := nat64(n_pilas)
+        corre("HOLA uno dos tres", 0)
+        si busca_archivo("HOLACAS") >= 0 entonces corre("HOLACAS de Castel", 0) fin
+        si busca_archivo("MEMORIA") >= 0 entonces corre("MEMORIA", 0) fin
+        ; ocho a la vez
+        si busca_archivo("CUENTA") >= 0 entonces
+            t0 := ahora_ns()
+            i := 0
+            mientras i < 8 hacer
+                línea[0] := 'C'
+                línea[1] := 'U'
+                línea[2] := 'E'
+                línea[3] := 'N'
+                línea[4] := 'T'
+                línea[5] := 'A'
+                línea[6] := ' '
+                línea[7] := byte('1' + i)
+                línea[8] := 0
+                p[i] := nat64(lanza(dirección(línea[0])))
+                si p[i] = 0 entonces mal("no arranca un CUENTA") fin
+                i := i + 1
+            fin
+            bien := cierto
+            cpus := 0
+            i := 0
+            mientras i < 8 hacer
+                si p[i] <> 0 entonces
+                    cpus := cpus ob procesadores_de(puntero(p[i]))
+                    r := espera_proceso(puntero(p[i]))
+                    si r <> nat64(10 * (i + 1)) entonces bien := falso fin
+                fin
+                i := i + 1
+            fin
+            escribir("A la vez: 8 procesos CUENTA: ")
+            si bien entonces escribir("los 8 acaban con su código (10 a 80), sus registros intactos") sino escribir("NO todos acaban bien") fin
+            escribir("; en los procesadores")
+            lista_cpus(cpus)
+            escribir("; en ", ms_desde(t0), " ms\n")
+            si no bien entonces mal("los CUENTA a la vez") fin
+            si n_en_marcha > 1 y cpus yb (cpus - 1) = 0 entonces mal("los CUENTA han ido todos en un solo procesador") fin
+        fin
+        ; los malos
+        si busca_archivo("MALO") >= 0 entonces
+            corre("MALO punteros", 0)
+            malos[0] := "MALO leer"
+            malos[1] := "MALO escribir"
+            malos[2] := "MALO nulo"
+            malos[3] := "MALO division"
+            malos[4] := "MALO ud"
+            malos[5] := "MALO cli"
+            malos[6] := "MALO puerto"
+            malos[7] := "MALO nx"
+            malos[8] := "MALO codigo"
+            malos[9] := "MALO pila"
+            malos[10] := "MALO saltar"
+            señales[0] := 139
+            señales[1] := 139
+            señales[2] := 139
+            señales[3] := 136
+            señales[4] := 132
+            señales[5] := 139
+            señales[6] := 139
+            señales[7] := 139
+            señales[8] := 139
+            señales[9] := 139
+            señales[10] := 139
+            t0 := ahora_ns()
+            i := 0
+            mientras i < 11 hacer
+                p[i] := nat64(lanza(malos[i]))
+                si p[i] = 0 entonces mal("no arranca un MALO") fin
+                i := i + 1
+            fin
+            bien := cierto
+            i := 0
+            mientras i < 11 hacer
+                si p[i] <> 0 entonces
+                    r := espera_proceso(puntero(p[i]))
+                    si r <> señales[i] entonces
+                        escribir("  «", malos[i], "» acaba con ", r, " (y debería con ", señales[i], ")\n")
+                        bien := falso
+                    fin
+                fin
+                i := i + 1
+            fin
+            escribir("Malos: 11 programas que fallan, a la vez: ")
+            si bien entonces escribir("todos cerrados con su señal (SIGSEGV 139, SIGFPE 136, SIGILL 132)") sino escribir("NO todos se cierran como deben") fin
+            escribir(", en ", ms_desde(t0), " ms; el sistema sigue\n")
+            si no bien entonces mal("los programas que fallan") fin
+        fin
+        ; lo que no se arranca
+        escribir("No se arrancan: «NOESTA»: ")
+        si lanza("NOESTA") <> nulo entonces mal("arranca uno que no está") sino escribir(motivo) fin
+        escribir("; «SALUDO.TXT»: ")
+        si lanza("SALUDO.TXT") <> nulo entonces mal("arranca un texto") sino escribir(motivo) fin
+        escribir("\n")
+        ; el núcleo, como antes
+        recoge()
+        escribir("Después: ", vivos, " procesos, ", n_espacios, " espacios, ", tablas_usuario, " tablas de programas; ")
+        escribir(arrancados, " arrancados, ", cerrados_por_fallo, " cerrados por un fallo, ", Sistema.llamadas, " llamadas al sistema, ", páginas_al_tocar, " páginas puestas al tocarlas\n")
+        escribir("  la memoria: ")
+        si memoria_ahora() = mem0 entonces escribir("la de antes") sino escribir("¡distinta! (", mem0, " -> ", memoria_ahora(), " marcos)") fin
+        escribir("; el montón: ", en_uso, " bloques")
+        si en_uso = montón0 entonces escribir(" (los de antes)") fin
+        escribir("; las pilas: ", n_pilas)
+        si nat64(n_pilas) = pilas0 entonces escribir(" (las de antes)") fin
+        escribir("\n")
+        si vivos <> 0 o n_espacios <> 0 o tablas_usuario <> 0 entonces mal("quedan procesos, espacios o tablas") fin
+        si memoria_ahora() <> mem0 entonces mal("se ha perdido memoria") fin
+        si en_uso <> montón0 entonces mal("se han perdido bloques del montón") fin
+        si nat64(n_pilas) <> pilas0 entonces mal("se han perdido pilas") fin
+        prueba_tlb_espacio()
+    fin
+
+fin PrProc64.

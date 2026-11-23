@@ -1,0 +1,434 @@
+; =============================================================================
+;  espacios.cas - Hispa-64, etapa 4: los espacios de direcciones de los
+;  programas (docs/64/HISPA-64.md, 2.3 y sección 10).
+;
+;  Cada proceso tiene su PML4: la mitad baja (0 - 0x00007FFFFFFFFFFF) es suya,
+;  con sus tablas (con la marca de usuario); la mitad alta son las 256
+;  entradas de la PML4 del núcleo, copiadas. Para que todos vean siempre lo
+;  mismo del núcleo, sus 256 PDPT se hacen al arrancar (prepara_mitad_alta,
+;  antes de encender los demás procesadores): desde ahí el núcleo nunca añade
+;  una entrada a su PML4, solo por debajo, en tablas que comparten todos.
+;
+;  Cambiar de espacio (activa, desde el planificador): CR3. Con PCID (si el
+;  procesador lo tiene), cada espacio lleva un número de 1 a 63 y CR3 se carga
+;  sin vaciar la TLB (el bit 63) si este procesador sabe que lo que tiene de
+;  ese número es de este espacio y está al día: por cada procesador y cada
+;  número, de quién es (el id del espacio, que no se repite) y hasta qué aviso
+;  de vaciar la TLB llega (tlb_gen del espacio). Si no, se carga vaciando lo
+;  de ese número. Sin PCID, cada carga de CR3 vacía la TLB (menos lo global:
+;  el núcleo).
+;
+;  Quitar una página (quita): fuera de la tabla, fuera de la TLB de este
+;  procesador y, con Smp64.derriba_espacio, de la de los procesadores que
+;  tienen el espacio puesto ahora (solo esos: un aviso por IPI a cada uno);
+;  los demás, si lo vuelven a poner, ven por tlb_gen que no están al día.
+;  Después, y solo después, se puede dar el marco a otro.
+;
+;  Las páginas de los programas son de 4 KB. Las tablas de los espacios se
+;  cuentan aparte (tablas_usuario) y se devuelven todas al deshacer el espacio
+;  (destruye), cuando ya no lo tiene puesto ningún procesador.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Espacios
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Smp64, Entradas
+
+    público constante TOPE = 0x00007FFFFFFFF000         ; lo más alto de un programa (la última página, nunca)
+    constante N_PCID = 64
+    constante MÁSCARA = 0x000FFFFFFFFFF000
+
+    público tipo Espacio = estructura
+        raíz: nat64                 ; su PML4 (física)
+        id: nat64                   ; no se repite (los PCID)
+        tlb_gen: nat64              ; los avisos de vaciar la TLB de este espacio (Smp64)
+        cerrojo: nat64
+        tablas: nat64               ; sus tablas (con la PML4)
+        páginas: nat64              ; sus páginas puestas
+        pcid: nat32
+        nada: nat32
+    fin
+
+    variable próximo_id: nat64
+    variable pcid_dueño: arreglo [4096] de nat64        ; [procesador * 64 + pcid]: el id del espacio
+    variable pcid_gen: arreglo [4096] de nat64          ;   y hasta qué aviso llega
+    público variable n_espacios: nat64                  ; los que hay
+    público variable tablas_usuario: nat64              ; sus tablas, de todos
+    público variable altas: nat32                       ; las PDPT de la mitad alta hechas al arrancar
+    público variable cargas_cr3, cargas_sin_vaciar: nat64
+
+    función tabla(f: nat64): puntero a nat64
+        devolver puntero(virt(f))
+    fin
+
+    función carga_cr3(v: nat64)
+        ensamblador
+            mov rax, {v}
+            mov cr3, rax
+        fin
+    fin
+
+    ; una tabla nueva, a cero (física), o 0
+    función tabla_nueva(): nat64
+        variable f: nat64
+        variable t: puntero a nat64
+        variable i: nat32
+        f := pide()
+        si f = 0 entonces devolver 0 fin
+        t := tabla(f)
+        i := 0
+        mientras i < 512 hacer
+            t[i] := 0
+            i := i + 1
+        fin
+        devolver f
+    fin
+
+    ; las 256 PDPT de la mitad alta del núcleo, hechas ya (antes de encender
+    ; los demás procesadores y de que haya programas)
+    público función prepara_mitad_alta()
+        variable r: puntero a nat64
+        variable i: nat32
+        variable f: nat64
+        r := tabla(raíz)
+        i := 256
+        mientras i < 512 hacer
+            si r[i] yb PRESENTE = 0 entonces
+                f := tabla_nueva()
+                si f = 0 entonces
+                    detén_ini("no hay memoria para las tablas de la mitad alta")
+                    detén_fin()
+                fin
+                r[i] := f ob PRESENTE ob ESCRIBIR
+                altas := altas + 1
+                tablas := tablas + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; un espacio nuevo, vacío por abajo; nulo si no hay memoria
+    público función crea_espacio(): puntero a Espacio
+        variable e: puntero a Espacio
+        variable r, k: puntero a nat64
+        variable i: nat32
+        e := puntero(nat64(reserva(tamaño(Espacio))))
+        si e = nulo entonces devolver nulo fin
+        e.raíz := tabla_nueva()
+        si e.raíz = 0 entonces
+            libera(puntero(nat64(e)))
+            devolver nulo
+        fin
+        r := tabla(e.raíz)
+        k := tabla(raíz)
+        i := 256
+        mientras i < 512 hacer
+            r[i] := k[i]
+            i := i + 1
+        fin
+        e.id := suma_atómica(dirección(próximo_id), 1) + 1
+        e.pcid := nat32(e.id mod (N_PCID - 1)) + 1
+        e.tlb_gen := 0
+        e.cerrojo := 0
+        e.tablas := 1
+        e.páginas := 0
+        suma_atómica(dirección(tablas_usuario), 1)
+        suma_atómica(dirección(n_espacios), 1)
+        devolver e
+    fin
+
+    función índice(v: nat64, nivel: nat32): nat64
+        devolver (v >> (12 + 9 * (nivel - 1))) yb 511
+    fin
+
+    ; la entrada de la PT de v (con «crea», poniendo las tablas que falten, con
+    ; la marca de usuario); nulo si no está o no hay memoria
+    público función entrada_u(e: puntero a Espacio, v: nat64, crea_: bool): puntero a nat64
+        variable t: puntero a nat64
+        variable n: nat32
+        variable x, f: nat64
+        si v >= TOPE entonces devolver nulo fin
+        t := tabla(e.raíz)
+        n := 4
+        mientras n > 1 hacer
+            x := t[índice(v, n)]
+            si x yb PRESENTE = 0 entonces
+                si no crea_ entonces devolver nulo fin
+                f := tabla_nueva()
+                si f = 0 entonces devolver nulo fin
+                e.tablas := e.tablas + 1
+                suma_atómica(dirección(tablas_usuario), 1)
+                x := f ob PRESENTE ob ESCRIBIR ob USUARIO
+                t[índice(v, n)] := x
+            fin
+            t := tabla(x yb MÁSCARA)
+            n := n - 1
+        fin
+        devolver dirección(t[índice(v, 1)])
+    fin
+
+    ; pone la página v (de 4 KB) en el marco f con esas marcas (más PRESENTE y
+    ; USUARIO); falso si ya había otra o no hay memoria para las tablas
+    público función mapea_u(e: puntero a Espacio, v: nat64, f: nat64, fl: nat64): bool
+        variable p: puntero a nat64
+        variable b: nat64
+        variable bien: bool
+        b := toma(dirección(e.cerrojo))
+        p := entrada_u(e, v, cierto)
+        bien := p <> nulo
+        si bien entonces bien := valor(p) yb PRESENTE = 0 fin
+        si bien entonces
+            valor(p) := f ob fl ob PRESENTE ob USUARIO
+            e.páginas := e.páginas + 1
+        fin
+        suelta(dirección(e.cerrojo), b)
+        devolver bien
+    fin
+
+    ; la entrada de la página de v (con su marco y sus marcas), o 0
+    público función pte(e: puntero a Espacio, v: nat64): nat64
+        variable p: puntero a nat64
+        p := entrada_u(e, v, falso)
+        si p = nulo entonces devolver 0 fin
+        devolver valor(p)
+    fin
+
+    ; el marco de una entrada
+    público función marco_de(x: nat64): nat64
+        devolver x yb MÁSCARA
+    fin
+
+    ; de la TLB de este procesador (si tiene puesto e) y de la de los demás que lo tienen puesto
+    función derriba_u(e: puntero a Espacio, v: nat64, n: nat64)
+        variable c: puntero a Cpu
+        variable b: nat64
+        variable i: nat64
+        b := sin_ints()
+        c := yo()
+        si c.espacio = nat64(e) entonces
+            si n > 32 entonces
+                ; (vacía lo de su número, o todo sin PCID)
+                si con_pcid entonces carga_cr3(e.raíz ob e.pcid) sino carga_cr3(e.raíz) fin
+            sino
+                i := 0
+                mientras i < n hacer
+                    invlpg(v + (i << 12))
+                    i := i + 1
+                fin
+            fin
+        fin
+        restaura(b)
+        derriba_espacio(nat64(e), dirección(e.tlb_gen), v, n)
+    fin
+
+    ; quita la página v de e y de la TLB de quien la pueda tener; su marco (ya
+    ; libre de verdad para darlo), o 0 si no estaba. Sin cerrojos tomados.
+    público función quita_u(e: puntero a Espacio, v: nat64): nat64
+        variable p: puntero a nat64
+        variable x, b: nat64
+        b := toma(dirección(e.cerrojo))
+        p := entrada_u(e, v, falso)
+        x := 0
+        si p <> nulo entonces
+            x := valor(p)
+            si x yb PRESENTE <> 0 entonces
+                valor(p) := 0
+                e.páginas := e.páginas - 1
+            fin
+        fin
+        suelta(dirección(e.cerrojo), b)
+        si x yb PRESENTE = 0 entonces devolver 0 fin
+        derriba_u(e, v, 1)
+        devolver x yb MÁSCARA
+    fin
+
+    ; cambia las marcas de la página v (si está): las de quitar permisos, con aviso
+    público función remarca_u(e: puntero a Espacio, v: nat64, fl: nat64): bool
+        variable p: puntero a nat64
+        variable x, b: nat64
+        b := toma(dirección(e.cerrojo))
+        p := entrada_u(e, v, falso)
+        x := 0
+        si p <> nulo entonces
+            x := valor(p)
+            si x yb PRESENTE <> 0 entonces valor(p) := (x yb MÁSCARA) ob fl ob PRESENTE ob USUARIO fin
+        fin
+        suelta(dirección(e.cerrojo), b)
+        si x yb PRESENTE = 0 entonces devolver falso fin
+        derriba_u(e, v, 1)
+        devolver cierto
+    fin
+
+    ; la entrada de la PT de v, o nulo; en «salta», cuánto se puede saltar si
+    ; falta una tabla (lo que cubre la que falta)
+    función entrada_o_salto(e: puntero a Espacio, v: nat64, ref salta: nat64): puntero a nat64
+        variable t: puntero a nat64
+        variable n: nat32
+        variable x: nat64
+        t := tabla(e.raíz)
+        n := 4
+        mientras n > 1 hacer
+            x := t[índice(v, n)]
+            si x yb PRESENTE = 0 entonces
+                salta := nat64(1) << (12 + 9 * (n - 1))
+                devolver nulo
+            fin
+            t := tabla(x yb MÁSCARA)
+            n := n - 1
+        fin
+        salta := 4096
+        devolver dirección(t[índice(v, 1)])
+    fin
+
+    ; quita las páginas puestas en [a, b) (alineados a 4 KB), con un aviso a
+    ; los demás cada 64 (y sus marcos, libres después); cuántas
+    público función quita_rango(e: puntero a Espacio, a: nat64, b: nat64): nat64
+        variable lista: arreglo [64] de nat64
+        variable n, i: nat32
+        variable v, ini, salta, total, bl: nat64
+        variable p: puntero a nat64
+        total := 0
+        v := a
+        ini := a
+        n := 0
+        mientras v < b hacer
+            bl := toma(dirección(e.cerrojo))
+            p := entrada_o_salto(e, v, salta)
+            si p <> nulo entonces
+                si valor(p) yb PRESENTE <> 0 entonces
+                    lista[n] := valor(p) yb MÁSCARA
+                    n := n + 1
+                    valor(p) := 0
+                    e.páginas := e.páginas - 1
+                fin
+            fin
+            suelta(dirección(e.cerrojo), bl)
+            v := (v + salta) yb (nob (salta - 1))
+            si v > b entonces v := b fin
+            si n = 64 o (v >= b y n > 0) entonces
+                derriba_u(e, ini, (v - ini) >> 12)
+                i := 0
+                mientras i < n hacer
+                    devuelve(lista[i])
+                    i := i + 1
+                fin
+                total := total + n
+                n := 0
+                ini := v
+            fin
+        fin
+        devolver total
+    fin
+
+    ; las páginas puestas en [a, b), con las marcas fl (más PRESENTE y USUARIO); con aviso
+    público función remarca_rango(e: puntero a Espacio, a: nat64, b: nat64, fl: nat64, ninguna: bool)
+        variable v, salta, bl: nat64
+        variable p: puntero a nat64
+        variable hubo: bool
+        hubo := falso
+        v := a
+        mientras v < b hacer
+            bl := toma(dirección(e.cerrojo))
+            p := entrada_o_salto(e, v, salta)
+            si p <> nulo entonces
+                si valor(p) yb PRESENTE <> 0 entonces
+                    ; (sin ningún permiso, la página se queda, pero sin la marca de usuario)
+                    si ninguna entonces
+                        valor(p) := (valor(p) yb MÁSCARA) ob bit_nx() ob PRESENTE
+                    sino
+                        valor(p) := (valor(p) yb MÁSCARA) ob fl ob PRESENTE ob USUARIO
+                    fin
+                    hubo := cierto
+                fin
+            fin
+            suelta(dirección(e.cerrojo), bl)
+            v := (v + salta) yb (nob (salta - 1))
+        fin
+        si hubo entonces derriba_u(e, a, (b - a) >> 12) fin
+    fin
+
+    ; [planificador, sin interrupciones] pone el espacio e (nulo: el del núcleo) en este procesador
+    público función activa_espacio(e: puntero a Espacio)
+        variable c: puntero a Cpu
+        variable viejo: puntero a Espacio
+        variable k: nat32
+        variable g, v: nat64
+        c := yo()
+        si c.espacio = nat64(e) entonces devolver fin
+        ; lo que queda en la TLB del que se deja (con PCID): de quién es y hasta dónde llega
+        si c.espacio <> 0 y con_pcid entonces
+            viejo := puntero(c.espacio)
+            k := c.número * N_PCID + viejo.pcid
+            pcid_dueño[k] := viejo.id
+            pcid_gen[k] := c.esp_gen
+        fin
+        cargas_cr3 := cargas_cr3 + 1
+        si e = nulo entonces
+            pon_atómico(dirección(c.espacio), 0)
+            si con_pcid entonces
+                carga_cr3(raíz ob (nat64(1) << 63))
+                cargas_sin_vaciar := cargas_sin_vaciar + 1
+            sino
+                carga_cr3(raíz)
+            fin
+            devolver
+        fin
+        ; (antes de leer tlb_gen: quien avise a la vez lo verá puesto)
+        pon_atómico(dirección(c.espacio), nat64(e))
+        g := e.tlb_gen
+        v := e.raíz
+        si con_pcid entonces
+            k := c.número * N_PCID + e.pcid
+            v := v ob e.pcid
+            si pcid_dueño[k] = e.id y pcid_gen[k] = g entonces
+                v := v ob (nat64(1) << 63)
+                cargas_sin_vaciar := cargas_sin_vaciar + 1
+            fin
+        fin
+        c.esp_gen := g
+        carga_cr3(v)
+    fin
+
+    función suelta_nivel(f: nat64, nivel: nat32, ref pág: nat64, ref tab: nat64)
+        variable t: puntero a nat64
+        variable i: nat32
+        variable x: nat64
+        t := tabla(f)
+        i := 0
+        mientras i < 512 hacer
+            x := t[i]
+            si x yb PRESENTE <> 0 entonces
+                si nivel = 1 entonces
+                    devuelve(x yb MÁSCARA)
+                    pág := pág + 1
+                sino
+                    suelta_nivel(x yb MÁSCARA, nivel - 1, pág, tab)
+                fin
+            fin
+            i := i + 1
+        fin
+        devuelve(f)
+        tab := tab + 1
+    fin
+
+    ; deshace el espacio: sus páginas, sus tablas y él. Ningún procesador debe
+    ; tenerlo puesto (el último hilo ya ha puesto el del núcleo).
+    público función destruye_espacio(e: puntero a Espacio)
+        variable r: puntero a nat64
+        variable i: nat32
+        variable pág, tab: nat64
+        pág := 0
+        tab := 0
+        r := tabla(e.raíz)
+        i := 0
+        mientras i < 256 hacer
+            si r[i] yb PRESENTE <> 0 entonces suelta_nivel(r[i] yb MÁSCARA, 3, pág, tab) fin
+            i := i + 1
+        fin
+        devuelve(e.raíz)
+        tab := tab + 1
+        suma_atómica(dirección(tablas_usuario), nob (tab - 1))     ; (restar tab)
+        suma_atómica(dirección(n_espacios), nob nat64(0))
+        libera(puntero(nat64(e)))
+    fin
+
+fin Espacios.

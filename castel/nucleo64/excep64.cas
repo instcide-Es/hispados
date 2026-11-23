@@ -24,7 +24,7 @@
 ; =============================================================================
 módulo Excep64
 
-    importar Cifras64, Nombre64, Gdt64, PorCpu64
+    importar Cifras64, Nombre64, Gdt64, PorCpu64, Entradas
 
     ; una puerta de la IDT de 64 bits: 16 octetos
     tipo Puerta = estructura
@@ -54,6 +54,11 @@ módulo Excep64
     público variable parados: nat32         ; cuántos se han parado (lo dice al_parar)
     público variable otros: nat32           ; a cuántos se ha mandado parar
     variable parada_de: nat64               ; 0, o el número + 1 del procesador que se está parando
+    ; [etapa 4] lo que se hace con una excepción de un programa (Procesos):
+    ; al_fallo_usuario(n, marco, error, cr2) devuelve cierto si se ha
+    ; arreglado (una página que se pone al tocarla) y, si no, cierra el
+    ; programa y no vuelve
+    público variable al_fallo_usuario: nat64
     ; la zona de las pilas de los hilos y de los procesadores (Pagina64): cada
     ; sitio, 32 KB; la pila, los 16 KB de arriba; los de abajo, sin poner
     público constante ZONA_PILAS = 0xFFFFE00000000000
@@ -110,7 +115,11 @@ módulo Excep64
         fin
     fin
 
+    ; [etapa 4] la puerta n lleva a la entrada de Entradas (que hace swapgs
+    ; si se viene del anillo 3) y esta, a la función f
     función pon_puerta(n: nat32, f: nat64, ist: byte)
+        manejadores[n] := f
+        f := entrada_de(n)
         idt[n].bajo := nat16(f)
         idt[n].selector := 0x08
         idt[n].ist := ist
@@ -136,6 +145,17 @@ módulo Excep64
 
     función llama0(f: nat64)
         ensamblador
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    función llama4(f: nat64, a: nat64, b: nat64, c: nat64, d: nat64): bool
+        ensamblador
+            push qword {d}
+            push qword {c}
+            push qword {b}
+            push qword {a}
             mov rax, {f}
             call rax
         fin
@@ -203,6 +223,12 @@ módulo Excep64
             d := d + 8
         fin
         si n = 14 entonces c2 := cr2() fin
+        ; [etapa 4] desde el anillo 3: el marco de verdad está donde diga el
+        ; falso (Entradas), y lo explica y lo arregla Procesos
+        si lee64(d) = dir_salida() entonces d := lee64(d + 24) fin
+        si lee64(d + 8) yb 3 = 3 y al_fallo_usuario <> 0 y n <> 2 y n <> 8 y n <> 18 entonces
+            si llama4(al_fallo_usuario, nat64(n), d, err, c2) entonces devolver fin
+        fin
         ; [etapa 3] un fallo de página con red: se vuelve adonde diga el procesador
         c := yo_si_hay()
         si n = 14 y c <> nulo entonces

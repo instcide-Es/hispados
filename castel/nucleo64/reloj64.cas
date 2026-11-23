@@ -157,9 +157,9 @@ módulo Reloj64
         devolver cmos(0)
     fin
 
-    ; la fecha y la hora: «23/11/2026 18:30:05»
-    público función escribe_hora()
-        variable s, mi, h, d, me, a, c, b, s2: nat32
+    ; [etapa 4] la fecha y la hora del CMOS: día, mes, año (con el siglo), hora, minuto, segundo
+    público función lee_fecha(ref d: nat32, ref me: nat32, ref año: nat32, ref h: nat32, ref mi: nat32, ref s: nat32)
+        variable a, c, b, s2: nat32
         variable pm: bool
         mientras cierto hacer
             mientras cmos(0x0A) yb 0x80 <> 0 hacer pausa() fin
@@ -189,8 +189,32 @@ módulo Reloj64
         fin
         si b yb 2 = 0 y pm entonces h := (h mod 12) + 12 fin
         si c = 0 entonces c := 20 fin
-        escribir(d div 10, d mod 10, "/", me div 10, me mod 10, "/", c, a div 10, a mod 10, " ")
+        año := c * 100 + a
+    fin
+
+    ; la fecha y la hora: «23/11/2026 18:30:05»
+    público función escribe_hora()
+        variable s, mi, h, d, me, a: nat32
+        lee_fecha(d, me, a, h, mi, s)
+        escribir(d div 10, d mod 10, "/", me div 10, me mod 10, "/", a, " ")
         escribir(h div 10, h mod 10, ":", mi div 10, mi mod 10, ":", s div 10, s mod 10)
+    fin
+
+    ; [etapa 4] los segundos desde el 1/1/1970 (la hora del CMOS, tomada como UTC)
+    público función segundos_unix(): nat64
+        variable s, mi, h, d, me, a: nat32
+        variable an, m, era, yoe, doy, doe, días: nat64
+        lee_fecha(d, me, a, h, mi, s)
+        ; (días desde la época: el algoritmo de «days_from_civil», con años desde el 0)
+        an := nat64(a)
+        m := nat64(me)
+        si m <= 2 entonces an := an - 1 fin
+        era := an div 400
+        yoe := an - era * 400
+        si m > 2 entonces doy := (153 * (m - 3) + 2) div 5 + nat64(d) - 1 sino doy := (153 * (m + 9) + 2) div 5 + nat64(d) - 1 fin
+        doe := yoe * 365 + yoe div 4 - yoe div 100 + doy
+        días := era * 146097 + doe - 719468
+        devolver días * 86400 + nat64(h) * 3600 + nat64(mi) * 60 + nat64(s)
     fin
 
 fin Reloj64.

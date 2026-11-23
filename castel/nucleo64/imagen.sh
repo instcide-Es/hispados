@@ -3,6 +3,10 @@
 # nucleo64/imagen.sh - Hispa-64 (docs/64/HISPA-64.md): hace el núcleo y la
 # imagen de arranque por UEFI de 64 bits.
 #   imagen.sh SALIDA [prueba [LÍNEA]]
+# [etapa 4] con los programas de prueba (programas/hazlos.sh) en \boot\prog,
+# que GRUB carga como módulos (la unidad en memoria); y, además del disco, un
+# CD (hispa64-cd.iso, con grub-mkrescue: arranca por BIOS y por UEFI de 64
+# bits) si no es «prueba» o si se pide con CD=1.
 # (solo los drivers de pantalla del firmware, efi_gop y efi_uga: con los de
 # QEMU, como video_bochs, GRUB cambiaría de modo y no dejaría el del GOP)
 # deja en la carpeta SALIDA:
@@ -13,7 +17,8 @@
 #                                   con \EFI\BOOT\BOOTX64.EFI, el GRUB de
 #                                   x86_64-efi con lo que usa el menú dentro,
 #                                   \boot\grub\grub.cfg, \boot\HISPA64.BIN y
-#                                   \boot\HISPA64.SIM)
+#                                   \boot\HISPA64.SIM y \boot\prog\*)
+#   hispa64-cd.iso                  el CD (BIOS y UEFI), con lo mismo
 # Con «prueba», el menú no espera, escribe por el puerto serie y el núcleo
 # arranca con la línea de órdenes LÍNEA («apagar» si no se dice: acaba en
 # QEMU con el código 42): lo usa pruebas.sh.
@@ -30,6 +35,12 @@ python3 -I "$C/ccastel.py" "$AQUI/hispa64.cas" -o "$S/hispa64.asm" -I "$C/nucleo
 nasm -f bin "$S/hispa64m.asm" -o "$S/HISPA64.BIN"
 rm -f "$S/hispa64m.asm"
 python3 -I "$AQUI/simbolos.py" "$S/hispa64.map" "$S/HISPA64.SIM"
+# los programas de la unidad en memoria, y sus líneas de module2
+"$AQUI/programas/hazlos.sh" "$S/prog" > /dev/null
+PROGS=$(cd "$S/prog" && ls)
+MODS2=""
+for f in $PROGS; do MODS2="$MODS2  module2 /boot/prog/$f $f
+"; done
 MODS="normal configfile part_gpt part_msdos fat multiboot2 efi_gop efi_uga video_fb gfxterm font echo test sleep cpuid serial terminal reboot halt efifwsetup ls search"
 # shellcheck disable=SC2086
 grub-mkimage -O x86_64-efi -o "$S/BOOTX64.EFI" -p /boot/grub $MODS
@@ -43,12 +54,16 @@ set gfxpayload=keep
 menuentry "Hispa-64 (prueba)" {
   multiboot2 /boot/HISPA64.BIN $LINEA
   module2 /boot/HISPA64.SIM HISPA64.SIM
-  boot
+$MODS2  boot
 }
 CFG
 else
-  cat > "$S/grub.cfg" <<'CFG'
-# Hispa-64 0.3.0 (etapa 3). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+  entrada() {   # TÍTULO LÍNEA
+    printf '  menuentry "%s" {\n    multiboot2 /boot/HISPA64.BIN %s\n    module2 /boot/HISPA64.SIM HISPA64.SIM\n%s    boot\n  }\n' "$1" "$2" "$MODS2"
+  }
+  {
+    cat <<'CFG'
+# Hispa-64 0.4.0 (etapa 4). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -57,51 +72,18 @@ terminal_output console serial
 # la pantalla, tal cual la deja el firmware (su resolución de siempre)
 set gfxpayload=keep
 if cpuid -l; then
-  menuentry "Hispa-64 0.3.0 (etapa 3: varios procesadores y el planificador)" {
-    multiboot2 /boot/HISPA64.BIN
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: con un solo procesador (si se queda al encender los demás)" {
-    multiboot2 /boot/HISPA64.BIN sinsmp
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: la tarea ociosa con hlt (si da problemas con mwait)" {
-    multiboot2 /boot/HISPA64.BIN ocioso=hlt
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: prueba de un fallo en otro procesador (se paran todos y uno lo explica)" {
-    multiboot2 /boot/HISPA64.BIN prueba=panicoap
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: sin el temporizador del APIC (si se queda parado en el tic)" {
-    multiboot2 /boot/HISPA64.BIN prueba=sintic
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: apagar el equipo por ACPI (prueba)" {
-    multiboot2 /boot/HISPA64.BIN prueba=acpiapagar
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: la prueba larga del montón (100.000 reservas)" {
-    multiboot2 /boot/HISPA64.BIN prueba=monton
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: prueba de un doble fallo (desbordar la pila, a propósito)" {
-    multiboot2 /boot/HISPA64.BIN prueba=doble
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
-  menuentry "Hispa-64: prueba de un fallo de página (a propósito)" {
-    multiboot2 /boot/HISPA64.BIN prueba=pagina
-    module2 /boot/HISPA64.SIM HISPA64.SIM
-    boot
-  }
+CFG
+    entrada "Hispa-64 0.4.0 (etapa 4: los programas, en el anillo 3)" ""
+    entrada "Hispa-64: sin PCID (si la 1 falla al cambiar de programa)" "sinpcid"
+    entrada "Hispa-64: con un solo procesador (si se queda al encender los demás)" "sinsmp"
+    entrada "Hispa-64: la tarea ociosa con hlt (si da problemas con mwait)" "ocioso=hlt"
+    entrada "Hispa-64: prueba de un fallo en otro procesador (se paran todos y uno lo explica)" "prueba=panicoap"
+    entrada "Hispa-64: sin el temporizador del APIC (si se queda parado en el tic)" "prueba=sintic"
+    entrada "Hispa-64: apagar el equipo por ACPI (prueba)" "prueba=acpiapagar"
+    entrada "Hispa-64: la prueba larga del montón (100.000 reservas)" "prueba=monton"
+    entrada "Hispa-64: prueba de un doble fallo (desbordar la pila, a propósito)" "prueba=doble"
+    entrada "Hispa-64: prueba de un fallo de página del núcleo (a propósito)" "prueba=pagina"
+    cat <<'CFG'
 else
   menuentry "Este procesador no es de 64 bits: Hispa-64 no puede arrancar aquí (use Hispa-Pentium)" {
     echo "Hispa-64 necesita un procesador de 64 bits (x86-64). Use Hispa-Pentium."
@@ -115,6 +97,7 @@ menuentry "Apagar" {
   halt
 }
 CFG
+  } > "$S/grub.cfg"
 fi
 # el disco: 64 MB, GPT, la partición EFI desde el sector 2048 hasta el final
 I="$S/hispa64.img"; P="$S/esp.part"
@@ -128,5 +111,16 @@ mcopy -i "$P" "$S/BOOTX64.EFI" ::EFI/BOOT/BOOTX64.EFI
 mcopy -i "$P" "$S/grub.cfg" ::boot/grub/grub.cfg
 mcopy -i "$P" "$S/HISPA64.BIN" ::boot/HISPA64.BIN
 mcopy -i "$P" "$S/HISPA64.SIM" ::boot/HISPA64.SIM
+mmd -i "$P" ::boot/prog
+for f in $PROGS; do mcopy -i "$P" "$S/prog/$f" "::boot/prog/$f"; done
 dd if="$P" of="$I" bs=512 seek=2048 conv=notrunc status=none
 rm -f "$P"
+# [etapa 4] el CD: BIOS (i386-pc, El Torito) y UEFI de 64 bits, con lo mismo
+if [ "$MODO" != prueba ] || [ "${CD:-0}" = 1 ]; then
+  D="$S/cd"; rm -rf "$D"; mkdir -p "$D/boot/grub" "$D/boot/prog"
+  cp "$S/HISPA64.BIN" "$S/HISPA64.SIM" "$D/boot/"
+  cp "$S/grub.cfg" "$D/boot/grub/grub.cfg"
+  for f in $PROGS; do cp "$S/prog/$f" "$D/boot/prog/"; done
+  grub-mkrescue -o "$S/hispa64-cd.iso" "$D" -- -volid HISPA64 > /dev/null 2>&1
+  rm -rf "$D"
+fi

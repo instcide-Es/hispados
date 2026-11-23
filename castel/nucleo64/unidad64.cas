@@ -1,0 +1,91 @@
+; =============================================================================
+;  unidad64.cas - Hispa-64, etapa 4: la «unidad en memoria» (docs/64/HISPA-64.md,
+;  sección 10): los módulos que ha cargado GRUB (module2) o QEMU (-initrd), cada
+;  uno un archivo de solo leer, con el último trozo de su línea por nombre
+;  («/boot/HOLA HOLA» o «/tmp/x/HOLA»: HOLA). Los programas los abren con open
+;  y openat (Sistema) y el núcleo los arranca (Procesos) hasta que haya
+;  discos de verdad (etapa 5). Los nombres se comparan sin mirar mayúsculas y
+;  minúsculas, como en FAT.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Unidad64
+
+    importar Fisica64
+
+    público constante MAX_ARCHIVOS = 16
+    público constante LARGO_NOMBRE = 32
+
+    público variable n_archivos: nat32
+    variable ini, largos: arreglo [MAX_ARCHIVOS] de nat64      ; dónde se ve (virtual) y cuánto ocupa
+    variable nombres: arreglo [MAX_ARCHIVOS * LARGO_NOMBRE] de byte
+
+    función l8(d: nat64): byte
+        variable p: puntero a byte
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función mayúscula(c: byte): byte
+        si c >= 'a' y c <= 'z' entonces devolver c - 32 fin
+        devolver c
+    fin
+
+    ; un módulo: [f_ini, f_fin) de memoria física (en el mapa directo), con su
+    ; línea en lín (virtual; puede ser 0): el nombre es su último trozo
+    público función añade_archivo(f_ini: nat64, f_fin: nat64, lín: nat64)
+        variable i, j, k, n: nat32
+        variable c: byte
+        si n_archivos >= MAX_ARCHIVOS o f_fin < f_ini entonces devolver fin
+        n := n_archivos
+        ini[n] := virt(f_ini)
+        largos[n] := f_fin - f_ini
+        ; el último trozo de la primera palabra de la línea (sin la ruta)
+        j := 0
+        k := 0
+        si lín <> 0 entonces
+            i := 0
+            mientras i < 200 y l8(lín + i) <> 0 y l8(lín + i) <> ' ' hacer
+                si l8(lín + i) = '/' entonces j := i + 1 fin
+                i := i + 1
+            fin
+            mientras j < i y k < LARGO_NOMBRE - 1 hacer
+                nombres[n * LARGO_NOMBRE + k] := l8(lín + j)
+                j := j + 1
+                k := k + 1
+            fin
+        fin
+        nombres[n * LARGO_NOMBRE + k] := 0
+        n_archivos := n_archivos + 1
+    fin
+
+    ; el archivo de ese nombre (sin mirar mayúsculas), o -1
+    público función busca_archivo(nombre: puntero a byte): ent32
+        variable i, j: nat32
+        variable c: byte
+        i := 0
+        mientras i < n_archivos hacer
+            j := 0
+            mientras j < LARGO_NOMBRE hacer
+                c := nombres[i * LARGO_NOMBRE + j]
+                si mayúscula(c) <> mayúscula(nombre[j]) entonces romper fin
+                si c = 0 entonces devolver ent32(i) fin
+                j := j + 1
+            fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    público función nombre_de(i: nat32): puntero a byte
+        devolver dirección(nombres[i * LARGO_NOMBRE])
+    fin
+
+    público función dónde(i: nat32): nat64
+        devolver ini[i]
+    fin
+
+    público función cuánto(i: nat32): nat64
+        devolver largos[i]
+    fin
+
+fin Unidad64.

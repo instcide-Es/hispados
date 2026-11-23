@@ -1,0 +1,496 @@
+; =============================================================================
+;  sistema.cas - Hispa-64, etapa 4: las llamadas al sistema (docs/64/HISPA-64.md,
+;  2.6 y sección 10). Llegan por «syscall» (Entradas.E64_sistema) con el marco
+;  de los registros: el número en RAX, los argumentos en RDI, RSI, RDX, R10, R8
+;  y R9, y lo que se devuelve en RAX (un error, en negativo: -EFAULT...).
+;  **Los números y la forma, los de Linux x86-64**: así la libc (musl, etapa 7)
+;  se porta casi sin tocarla, y un programa estático de Linux que solo use
+;  estas corre tal cual. Las que hay en la etapa 4:
+;    0 read, 1 write, 2 open, 3 close, 8 lseek, 9 mmap, 10 mprotect,
+;    11 munmap, 12 brk, 16 ioctl (-ENOTTY), 20 writev, 24 sched_yield,
+;    35 nanosleep, 39 getpid, 60 exit, 63 uname, 102/104/107/108 getuid y
+;    compañía (0), 158 arch_prctl (FS y GS), 186 gettid, 218 set_tid_address,
+;    228 clock_gettime, 231 exit_group, 257 openat;
+;  las demás, -ENOSYS (y se dicen las tres primeras de cada programa).
+;  Todo puntero del programa se comprueba (Procesos.copia_de, copia_a,
+;  texto_de: cada página, suya y con permiso): uno que apunte al núcleo, a nada
+;  o a algo de solo leer cuando se va a escribir da -EFAULT, nunca un fallo
+;  del núcleo. Los archivos: la consola (0, 1, 2; leer da 0: la entrada llega
+;  en la etapa 6) y los de la unidad en memoria (Unidad64), de solo leer.
+;  Lo que el programa escribe en la consola, si viene en UTF-8 (lo de Linux), se
+;  pasa a la página 437 (la de la consola); lo que no es UTF-8 (lo de Castel,
+;  que ya escribe en 437) va tal cual.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sistema
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64, Procesos
+
+    constante EPERM = -1
+    constante ENOENT = -2
+    constante EBADF = -9
+    constante ENOMEM = -12
+    constante EFAULT = -14
+    constante ENODEV = -19
+    constante ENOTDIR = -20
+    constante EISDIR = -21
+    constante EINVAL = -22
+    constante EMFILE = -24
+    constante ENOTTY = -25
+    constante ESPIPE = -29
+    constante EROFS = -30
+    constante ENOSYS = -38
+
+    público variable llamadas: nat64            ; cuántas se han atendido
+    variable época: nat64                       ; los segundos de Unix al arrancar
+    variable época_ns: nat64                    ; ahora_ns() entonces
+
+    función l64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función p64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    ; ¿es fd un archivo abierto del programa?
+    función fd_bien(p: puntero a Proceso, fd: nat64): bool
+        si fd >= MAX_FD entonces devolver falso fin
+        devolver p.fd_clase[nat32(fd)] <> 0
+    fin
+
+    ; ---- la consola ----
+    ; el carácter de la página 437 de un punto de Unicode (o «?»)
+    función a_437(u: nat32): nat32
+        según u
+            caso 0xC7: devolver 0x80
+            caso 0xFC: devolver 0x81
+            caso 0xE9: devolver 0x82
+            caso 0xE2: devolver 0x83
+            caso 0xE4: devolver 0x84
+            caso 0xE0: devolver 0x85
+            caso 0xE7: devolver 0x87
+            caso 0xEA: devolver 0x88
+            caso 0xE8: devolver 0x8A
+            caso 0xEF: devolver 0x8B
+            caso 0xEE: devolver 0x8C
+            caso 0xC9: devolver 0x90
+            caso 0xF4: devolver 0x93
+            caso 0xF6: devolver 0x94
+            caso 0xF2: devolver 0x95
+            caso 0xFB: devolver 0x96
+            caso 0xF9: devolver 0x97
+            caso 0xDC: devolver 0x9A
+            caso 0xE1: devolver 0xA0
+            caso 0xED: devolver 0xA1
+            caso 0xF3: devolver 0xA2
+            caso 0xFA: devolver 0xA3
+            caso 0xF1: devolver 0xA4
+            caso 0xD1: devolver 0xA5
+            caso 0xAA: devolver 0xA6
+            caso 0xBA: devolver 0xA7
+            caso 0xBF: devolver 0xA8
+            caso 0xA1: devolver 0xAD
+            caso 0xAB: devolver 0xAE
+            caso 0xBB: devolver 0xAF
+            caso 0xB0: devolver 0xF8
+            caso 0xB7: devolver 0xFA
+            caso 0x2500: devolver 0xC4
+            caso 0x2502: devolver 0xB3
+            si no: devolver '?'
+        fin
+    fin
+
+    función es_seguida(c: nat32): bool
+        devolver c >= 0x80 y c <= 0xBF
+    fin
+
+    ; escribe t[0..n) en la consola (con el cerrojo de la consola tomado)
+    función a_consola(t: puntero a byte, n: nat32)
+        variable i: nat32
+        variable c, u: nat32
+        i := 0
+        mientras i < n hacer
+            c := t[i]
+            si c >= 0xC2 y c <= 0xDF y i + 1 < n entonces
+                si es_seguida(t[i + 1]) entonces
+                    u := ((c yb 0x1F) << 6) ob (t[i + 1] yb 0x3F)
+                    escribir_car(byte(a_437(u)))
+                    i := i + 2
+                    seguir
+                fin
+            fin
+            si c >= 0xE0 y c <= 0xEF y i + 2 < n entonces
+                si es_seguida(t[i + 1]) y es_seguida(t[i + 2]) entonces
+                    u := ((c yb 0x0F) << 12) ob ((t[i + 1] yb 0x3F) << 6) ob (t[i + 2] yb 0x3F)
+                    escribir_car(byte(a_437(u)))
+                    i := i + 3
+                    seguir
+                fin
+            fin
+            escribir_car(byte(c))
+            i := i + 1
+        fin
+    fin
+
+    ; write a la consola: n octetos desde v (del programa), de 512 en 512
+    función escribe_consola(p: puntero a Proceso, v: nat64, n: nat64): ent64
+        variable t: arreglo [512] de byte
+        variable hecho, trozo, b: nat64
+        hecho := 0
+        mientras hecho < n hacer
+            trozo := n - hecho
+            si trozo > 512 entonces trozo := 512 fin
+            si no copia_de(p, nat64(dirección(t[0])), v + hecho, trozo) entonces
+                si hecho = 0 entonces devolver EFAULT fin
+                devolver ent64(hecho)
+            fin
+            b := toma(dirección(cerrojo_consola))
+            a_consola(dirección(t[0]), nat32(trozo))
+            suelta(dirección(cerrojo_consola), b)
+            hecho := hecho + trozo
+        fin
+        devolver ent64(hecho)
+    fin
+
+    ; ---- los archivos ----
+    función lee(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
+        variable k: nat32
+        variable queda: nat64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si n = 0 entonces devolver 0 fin
+        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver 0 fin
+        k := p.fd_arch[nat32(fd)]
+        queda := 0
+        si p.fd_pos[nat32(fd)] < cuánto(k) entonces queda := cuánto(k) - p.fd_pos[nat32(fd)] fin
+        si n > queda entonces n := queda fin
+        si n = 0 entonces devolver 0 fin
+        si no copia_a(p, v, dónde(k) + p.fd_pos[nat32(fd)], n) entonces devolver EFAULT fin
+        p.fd_pos[nat32(fd)] := p.fd_pos[nat32(fd)] + n
+        devolver ent64(n)
+    fin
+
+    función escribe(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] <> F_CONSOLA entonces devolver EBADF fin
+        si n = 0 entonces devolver 0 fin
+        devolver escribe_consola(p, v, n)
+    fin
+
+    función escribe_v(p: puntero a Proceso, fd: nat64, iov: nat64, cuántos: nat64): ent64
+        variable par: arreglo [2] de nat64
+        variable i: nat64
+        variable total, r: ent64
+        si cuántos > 1024 entonces devolver EINVAL fin
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        total := 0
+        i := 0
+        mientras i < cuántos hacer
+            si no copia_de(p, nat64(dirección(par[0])), iov + i * 16, 16) entonces
+                si total = 0 entonces devolver EFAULT fin
+                devolver total
+            fin
+            r := escribe(p, fd, par[0], par[1])
+            si r < 0 entonces
+                si total = 0 entonces devolver r fin
+                devolver total
+            fin
+            total := total + r
+            i := i + 1
+        fin
+        devolver total
+    fin
+
+    función abre(p: puntero a Proceso, dirfd: ent64, ruta: nat64, marcas_: nat64): ent64
+        variable t: arreglo [256] de byte
+        variable r: ent64
+        variable i, fd: nat32
+        variable k: ent32
+        r := texto_de(p, dirección(t[0]), ruta, 256)
+        si r < 0 entonces devolver r fin
+        si t[0] = 0 entonces devolver ENOENT fin
+        i := 0
+        si t[0] <> '/' y dirfd <> -100 entonces
+            si dirfd >= 0 y fd_bien(p, nat64(dirfd)) entonces devolver ENOTDIR fin
+            devolver EBADF
+        fin
+        mientras t[i] = '/' hacer i := i + 1 fin
+        si t[i] = 0 entonces devolver EISDIR fin
+        ; (sin carpetas: «a/b» no está)
+        r := ent64(i)
+        mientras t[i] <> 0 hacer
+            si t[i] = '/' entonces devolver ENOENT fin
+            i := i + 1
+        fin
+        k := busca_archivo(dirección(t[nat32(r)]))
+        si k < 0 entonces
+            si marcas_ yb 0x40 <> 0 entonces devolver EROFS fin
+            devolver ENOENT
+        fin
+        si marcas_ yb 3 <> 0 o marcas_ yb 0x200 <> 0 entonces devolver EROFS fin
+        si marcas_ yb 0x10000 <> 0 entonces devolver ENOTDIR fin
+        fd := 0
+        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
+        si fd >= MAX_FD entonces devolver EMFILE fin
+        p.fd_clase[fd] := F_UNIDAD
+        p.fd_arch[fd] := nat32(k)
+        p.fd_pos[fd] := 0
+        devolver ent64(fd)
+    fin
+
+    función cierra(p: puntero a Proceso, fd: nat64): ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        p.fd_clase[nat32(fd)] := 0
+        devolver 0
+    fin
+
+    función sitúa(p: puntero a Proceso, fd: nat64, d: ent64, de_dónde: nat64): ent64
+        variable n: ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver ESPIPE fin
+        si de_dónde = 0 entonces n := d
+        sino si de_dónde = 1 entonces n := ent64(p.fd_pos[nat32(fd)]) + d
+        sino si de_dónde = 2 entonces n := ent64(cuánto(p.fd_arch[nat32(fd)])) + d
+        sino devolver EINVAL fin
+        si n < 0 entonces devolver EINVAL fin
+        p.fd_pos[nat32(fd)] := nat64(n)
+        devolver n
+    fin
+
+    ; ---- la memoria ----
+    función mapea_(p: puntero a Proceso, dir_: nat64, largo: nat64, prot: nat64, marcas_: nat64, fd: ent64): ent64
+        variable a, l: nat64
+        si largo = 0 o prot yb (nob nat64(7)) <> 0 entonces devolver EINVAL fin
+        si marcas_ yb 3 <> 1 y marcas_ yb 3 <> 2 entonces devolver EINVAL fin
+        ; (de un archivo: etapa 7; como Linux, -EBADF si no está abierto)
+        si marcas_ yb 0x20 = 0 entonces
+            si fd < 0 entonces devolver EBADF fin
+            si no fd_bien(p, nat64(fd)) entonces devolver EBADF fin
+            devolver ENODEV
+        fin
+        l := arriba(largo)
+        si l < largo o l > nat64(1) << 40 entonces devolver ENOMEM fin
+        si marcas_ yb 0x10 <> 0 entonces
+            ; MAP_FIXED: ahí, quitando lo que hubiese
+            si dir_ yb 4095 <> 0 entonces devolver EINVAL fin
+            si dir_ < MÍNIMO entonces devolver EPERM fin
+            si dir_ + l < dir_ o dir_ + l > TOPE entonces devolver ENOMEM fin
+            si no quita_de(p, dir_, dir_ + l) entonces devolver ENOMEM fin
+            si no pon_región(p, dir_, dir_ + l, nat32(prot), R_MMAP) entonces devolver ENOMEM fin
+            devolver ent64(dir_)
+        fin
+        a := 0
+        ; la pista, si está libre
+        si dir_ >= MÍNIMO y dir_ yb 4095 = 0 y dir_ + l > dir_ y dir_ + l <= TOPE entonces
+            si hueco(p, l, dir_, dir_ + l) = dir_ entonces a := dir_ fin
+        fin
+        si a = 0 y marcas_ yb 0x40 <> 0 entonces a := hueco(p, l, 0x40000000, 0x80000000) fin    ; MAP_32BIT
+        si a = 0 y marcas_ yb 0x40 = 0 entonces
+            a := hueco(p, l, p.mmap_próx, TOPE - PILA_PROG)
+            si a = 0 entonces a := hueco(p, l, nat64(0x1000) << 32, TOPE - PILA_PROG) fin
+        fin
+        si a = 0 entonces devolver ENOMEM fin
+        si no pon_región(p, a, a + l, nat32(prot), R_MMAP) entonces devolver ENOMEM fin
+        si marcas_ yb 0x40 = 0 entonces p.mmap_próx := a + l fin
+        devolver ent64(a)
+    fin
+
+    función desmapea_(p: puntero a Proceso, dir_: nat64, largo: nat64): ent64
+        variable l: nat64
+        si dir_ yb 4095 <> 0 o largo = 0 entonces devolver EINVAL fin
+        l := arriba(largo)
+        si l < largo o dir_ + l < dir_ o dir_ + l > TOPE entonces devolver EINVAL fin
+        si no quita_de(p, dir_, dir_ + l) entonces devolver ENOMEM fin
+        devolver 0
+    fin
+
+    función protege_(p: puntero a Proceso, dir_: nat64, largo: nat64, prot: nat64): ent64
+        variable l: nat64
+        si dir_ yb 4095 <> 0 o prot yb (nob nat64(7)) <> 0 entonces devolver EINVAL fin
+        si largo = 0 entonces devolver 0 fin
+        l := arriba(largo)
+        si l < largo o dir_ + l < dir_ o dir_ + l > TOPE entonces devolver ENOMEM fin
+        devolver protege(p, dir_, dir_ + l, nat32(prot))
+    fin
+
+    ; brk: lo nuevo, o lo de antes si no se puede (como Linux)
+    función brk_(p: puntero a Proceso, nuevo: nat64): ent64
+        variable viejo_fin, nuevo_fin: nat64
+        variable i: nat32
+        variable hecho: bool
+        si nuevo < p.brk_ini o nuevo - p.brk_ini > nat64(1) << 30 entonces devolver ent64(p.brk) fin
+        viejo_fin := arriba(p.brk)
+        nuevo_fin := arriba(nuevo)
+        si nuevo_fin > viejo_fin entonces
+            si hueco(p, nuevo_fin - viejo_fin, viejo_fin, nuevo_fin) <> viejo_fin entonces devolver ent64(p.brk) fin
+            ; (se alarga la región del montón, si la hay; si no, una nueva)
+            hecho := falso
+            i := 0
+            mientras nat64(i) < p.n_reg hacer
+                si p.reg_clase[i] = R_MONTÓN y p.reg_fin[i] = viejo_fin entonces
+                    p.reg_fin[i] := nuevo_fin
+                    hecho := cierto
+                fin
+                i := i + 1
+            fin
+            si no hecho entonces
+                si no pon_región(p, viejo_fin, nuevo_fin, LEER ob ESCRIBE, R_MONTÓN) entonces devolver ent64(p.brk) fin
+            fin
+        sino si nuevo_fin < viejo_fin entonces
+            si no quita_de(p, nuevo_fin, viejo_fin) entonces devolver ent64(p.brk) fin
+        fin
+        p.brk := nuevo
+        devolver ent64(nuevo)
+    fin
+
+    ; ---- el tiempo ----
+    función reloj(p: puntero a Proceso, cuál: nat64, v: nat64): ent64
+        variable ts: arreglo [2] de nat64
+        variable ns: nat64
+        ns := ahora_ns()
+        según cuál
+            caso 0, 5: ns := época * 1000000000 + (ns - época_ns)      ; REALTIME, REALTIME_COARSE
+            caso 1, 4, 6, 7: ns := ns                                   ; MONOTONIC, _RAW, _COARSE, BOOTTIME
+            si no: devolver EINVAL
+        fin
+        ts[0] := ns div 1000000000
+        ts[1] := ns mod 1000000000
+        si no copia_a(p, v, nat64(dirección(ts[0])), 16) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    función duerme_(p: puntero a Proceso, v: nat64): ent64
+        variable ts: arreglo [2] de nat64
+        si no copia_de(p, nat64(dirección(ts[0])), v, 16) entonces devolver EFAULT fin
+        si ts[0] >= nat64(1) << 62 o ts[1] >= 1000000000 entonces devolver EINVAL fin
+        si ts[0] > 1000000 entonces ts[0] := 1000000 fin
+        duerme_ns(ts[0] * 1000000000 + ts[1])
+        devolver 0
+    fin
+
+    ; ---- lo demás ----
+    función pon_texto(t: puntero a byte, en: nat32, s: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras s[i] <> 0 hacer
+            t[en + i] := s[i]
+            i := i + 1
+        fin
+    fin
+
+    función nombre_(p: puntero a Proceso, v: nat64): ent64
+        variable t: arreglo [390] de byte
+        variable i: nat32
+        i := 0
+        mientras i < 390 hacer
+            t[i] := 0
+            i := i + 1
+        fin
+        pon_texto(dirección(t[0]), 0, "Hispa-64")
+        pon_texto(dirección(t[0]), 65, "hispa64")
+        pon_texto(dirección(t[0]), 130, "0.4.0")
+        pon_texto(dirección(t[0]), 195, "etapa 4 (anillo 3 y ELF64)")
+        pon_texto(dirección(t[0]), 260, "x86_64")
+        pon_texto(dirección(t[0]), 325, "(none)")
+        si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    función arch_(p: puntero a Proceso, qué: nat64, v: nat64): ent64
+        variable h: puntero a Hilo
+        variable b, x: nat64
+        h := actual()
+        según qué
+            caso 0x1002, 0x1001:
+                si v >= nat64(0x8000) << 32 entonces devolver EPERM fin
+                b := sin_ints()
+                si qué = 0x1002 entonces
+                    pon_msr(0xC0000100, v)
+                    h.fs_u := v
+                sino
+                    pon_msr(0xC0000102, v)          ; (el GS del programa, mientras se está en el núcleo)
+                    h.gs_u := v
+                fin
+                restaura(b)
+                devolver 0
+            caso 0x1003, 0x1004:
+                b := sin_ints()
+                si qué = 0x1003 entonces x := lee_msr(0xC0000100) sino x := lee_msr(0xC0000102) fin
+                restaura(b)
+                si no copia_a(p, v, nat64(dirección(x)), 8) entonces devolver EFAULT fin
+                devolver 0
+            si no: devolver EINVAL
+        fin
+    fin
+
+    función desconocida(p: puntero a Proceso, n: nat64): ent64
+        variable b: nat64
+        p.desconocidas := p.desconocidas + 1
+        si p.desconocidas <= 3 entonces
+            b := toma(dirección(cerrojo_consola))
+            escribir("El programa ", p.nombre, " (proceso ", p.id, ") ha pedido la llamada al sistema ", n, ", que Hispa-64 aún no tiene (devuelve -ENOSYS).\n")
+            suelta(dirección(cerrojo_consola), b)
+        fin
+        devolver ENOSYS
+    fin
+
+    ; la llamada del marco m (Entradas): el resultado, en su RAX
+    función atiende(m: nat64)
+        variable p: puntero a Proceso
+        variable n, a1, a2, a3, a4, a5: nat64
+        variable r: ent64
+        p := mío()
+        n := l64(m + 112)
+        a1 := l64(m + 64)
+        a2 := l64(m + 72)
+        a3 := l64(m + 96)
+        a4 := l64(m + 40)
+        a5 := l64(m + 56)
+        llamadas := llamadas + 1
+        según n
+            caso 0: r := lee(p, a1, a2, a3)
+            caso 1: r := escribe(p, a1, a2, a3)
+            caso 2: r := abre(p, -100, a1, a2)
+            caso 3: r := cierra(p, a1)
+            caso 8: r := sitúa(p, a1, ent64(a2), a3)
+            caso 9: r := mapea_(p, a1, a2, a3, a4, ent64(a5))
+            caso 10: r := protege_(p, a1, a2, a3)
+            caso 11: r := desmapea_(p, a1, a2)
+            caso 12: r := brk_(p, a1)
+            caso 16:
+                si fd_bien(p, a1) entonces r := ENOTTY sino r := EBADF fin
+            caso 20: r := escribe_v(p, a1, a2, a3)
+            caso 24:
+                cede()
+                r := 0
+            caso 35: r := duerme_(p, a1)
+            caso 39, 186: r := ent64(p.id)
+            caso 60, 231: sal(a1, 0)
+            caso 63: r := nombre_(p, a1)
+            caso 102, 104, 107, 108: r := 0
+            caso 158: r := arch_(p, a1, a2)
+            caso 218:
+                p.tid_dir := a1
+                r := ent64(p.id)
+            caso 228: r := reloj(p, a1, a2)
+            caso 257: r := abre(p, ent64(a1), a2, a3)
+            si no: r := desconocida(p, n)
+        fin
+        p64(m + 112, nat64(r))
+        ; (las marcas_ que puede devolver sysret: las de las cuentas, con IF)
+        p64(m + 136, (l64(m + 136) yb 0xCD5) ob 0x202)
+        si l64(m + 120) >= TOPE entonces sal(0, SIGSEGV) fin
+    fin
+
+    ; las llamadas al sistema, en marcha (después de Procesos.prepara_procesos)
+    público función prepara_sistema()
+        época := segundos_unix()
+        época_ns := ahora_ns()
+        al_sistema := nat64(dirección(atiende))
+    fin
+
+fin Sistema.

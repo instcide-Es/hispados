@@ -1,0 +1,1375 @@
+; =============================================================================
+;  entradas.cas - Hispa-64, etapa 4: las puertas de entrada al núcleo desde
+;  los programas (docs/64/HISPA-64.md, sección 10).
+;
+;  Con programas en el anillo 3, cada interrupción y cada excepción puede
+;  llegar estando en el anillo 3, con GS apuntando a lo que quiera el
+;  programa: el núcleo lee lo de su procesador en gs:[0] (PorCpu64.yo), así
+;  que, al entrar desde el anillo 3, hay que hacer «swapgs» (GS pasa a ser el
+;  bloque del procesador, que estaba en KERNEL_GS_BASE) y, al volver, otra
+;  vez. Las funciones de interrupción de Castel (las que guardan los quince
+;  registros y vuelven con iretq) no lo saben hacer, así que la IDT no apunta
+;  a ellas, sino a una entrada de aquí por vector (E64_vN: guarda RAX, pone el
+;  número del vector y salta a lo común), que:
+;    - si se viene del núcleo (CS del marco con RPL 0), salta a la función de
+;      Castel (manejadores[N]) con la pila como estaba: igual que antes;
+;    - si se viene del anillo 3, hace swapgs y pone debajo un marco de iretq
+;      falso que «vuelve» a E64_salida (en el anillo 0, con la pila apuntando
+;      al marco de verdad): la función de Castel acaba con su iretq, llega a
+;      E64_salida, que hace swapgs y el iretq de verdad al programa;
+;    - el NMI, el doble fallo y el fallo de máquina (con su IST: pueden llegar
+;      en cualquier instrucción, también entre un swapgs y el sysret) miran
+;      GS_BASE con rdmsr y hacen swapgs solo si es del programa (no vuelven).
+;  Excep64.explica reconoce el marco falso (su RIP es E64_salida) y busca el de
+;  verdad en su RSP.
+;
+;  La entrada de «syscall» (E64_sistema; LSTAR): swapgs, la pila del núcleo
+;  del hilo (la del bloque del procesador, que pone el planificador al
+;  cambiar de hilo, igual que TSS.RSP0), un marco como el de las
+;  interrupciones (el de iretq y los quince registros: RAX en +112, RIP en
+;  +120) y la función de Castel al_sistema(marco) (Sistema), con las
+;  interrupciones puestas. Vuelve con sysret (RCX y R11 del marco).
+;  STAR: el núcleo, 0x08 (y 0x10); el anillo 3, desde 0x10: los datos en
+;  0x18 | 3 y el código de 64 bits en 0x20 | 3 (gdt64.cas). SFMASK quita IF,
+;  TF, DF, AC y NT al entrar.
+;
+;  Y lo de cada procesador para los programas (prepara_cpu): EFER.SCE y los
+;  MSR de syscall, SMEP y SMAP (el núcleo no ejecuta ni toca la memoria de los
+;  programas sin querer: la toca por el mapa directo), UMIP y PCID, si los hay.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Entradas
+
+    importar Es64, Cpu64
+
+    ; donde están en el bloque del procesador (PorCpu64.Cpu): lo comprueba
+    ; Procesos al empezar
+    público constante CPU_PILA_SIS = 184
+    público constante CPU_RSP_USUARIO = 192
+
+    público variable manejadores: arreglo [256] de nat64   ; la función de Castel de cada vector
+    público variable al_sistema: nat64          ; la función de las llamadas al sistema: al_sistema(marco)
+    público variable con_smep, con_smap, con_umip, con_pcid, con_rdrand: bool
+    variable visto: bool
+    variable sitio: nat64
+
+    ; la entrada del vector n (la que va en la IDT)
+    público función entrada_de(n: nat32): nat64
+        ensamblador
+            lea rax, [E64_tabla]
+            mov ecx, {n}
+            mov rax, [rax+rcx*8]
+        fin
+    fin
+
+    ; adonde «vuelve» el marco falso (Excep64 lo reconoce)
+    público función dir_salida(): nat64
+        ensamblador
+            lea rax, [E64_salida]
+        fin
+    fin
+
+    ; lo que se pone en LSTAR
+    público función dir_sistema(): nat64
+        ensamblador
+            lea rax, [E64_sistema]
+        fin
+    fin
+
+    ; (no se llama nunca: es el sitio del código de las entradas)
+    función entradas()
+        ensamblador
+            jmp E64_fin
+        ; ---- lo común: sin número de error (en la pila: RAX y el marco) ----
+        E64_comun_sin:
+            push rbx
+            lea rbx, {manejadores}
+            mov rbx, [rbx+rax*8]
+            mov rax, [rsp+24]
+            and eax, 3
+            jz E64_nucleo
+            db 0x0F, 0x01, 0xF8         ; swapgs
+            mov rax, rsp
+            add rax, 16
+            push 0x10
+            push rax
+            db 0x9C                     ; pushfq (IF = 0: puerta de interrupción)
+            push 0x08
+            lea rax, [E64_salida]
+            push rax
+            push rbx
+            mov rbx, [rsp+48]
+            mov rax, [rsp+56]
+            ret
+        ; desde el núcleo: RBX y RAX como estaban, y a la función con el marco tal cual
+        E64_nucleo:
+            mov rax, [rsp+8]
+            mov [rsp+8], rbx
+            pop rbx
+            ret
+        ; ---- con número de error (en la pila: RAX, el error y el marco) ----
+        E64_comun_con:
+            push rbx
+            lea rbx, {manejadores}
+            mov rbx, [rbx+rax*8]
+            mov rax, [rsp+32]
+            and eax, 3
+            jz E64_nucleo
+            db 0x0F, 0x01, 0xF8         ; swapgs
+            mov rax, rsp
+            add rax, 24
+            push 0x10
+            push rax
+            db 0x9C                     ; pushfq
+            push 0x08
+            lea rax, [E64_salida]
+            push rax
+            mov rax, [rsp+56]
+            push rax
+            push rbx
+            mov rbx, [rsp+56]
+            mov rax, [rsp+64]
+            ret
+        ; ---- el NMI, el doble fallo, el fallo de máquina: GS, según GS_BASE ----
+        E64_comun_par:
+            push rbx
+            push rcx
+            push rdx
+            mov rbx, rax
+            mov ecx, 0xC0000101
+            rdmsr
+            shr edx, 31
+            jnz E64_par_ya
+            db 0x0F, 0x01, 0xF8         ; swapgs
+        E64_par_ya:
+            pop rdx
+            pop rcx
+            lea rax, {manejadores}
+            mov rbx, [rax+rbx*8]
+            jmp E64_nucleo
+        ; ---- la vuelta al anillo 3 de una interrupción ----
+        E64_salida:
+            db 0x0F, 0x01, 0xF8         ; swapgs
+            iretq
+        ; ---- syscall ----
+        E64_sistema:
+            db 0x0F, 0x01, 0xF8                                 ; swapgs
+            db 0x65, 0x48, 0x89, 0x24, 0x25, 0xC0, 0, 0, 0      ; mov [gs:192], rsp
+            db 0x65, 0x48, 0x8B, 0x24, 0x25, 0xB8, 0, 0, 0      ; mov rsp, [gs:184]
+            push 0x1B
+            db 0x65, 0xFF, 0x34, 0x25, 0xC0, 0, 0, 0            ; push qword [gs:192]
+            push r11
+            push 0x23
+            push rcx
+            push rax
+            push rcx
+            push rdx
+            push rbx
+            push rbp
+            push rsi
+            push rdi
+            push r8
+            push r9
+            push r10
+            push r11
+            push r12
+            push r13
+            push r14
+            push r15
+            mov rbp, rsp
+            cld
+            sti
+            mov rax, rsp
+            push rax
+            mov rax, {al_sistema}
+            call rax
+            cli
+            pop r15
+            pop r14
+            pop r13
+            pop r12
+            pop r11
+            pop r10
+            pop r9
+            pop r8
+            pop rdi
+            pop rsi
+            pop rbp
+            pop rbx
+            pop rdx
+            pop rcx
+            pop rax
+            mov rcx, [rsp]
+            mov r11, [rsp+16]
+            mov rsp, [rsp+24]
+            db 0x0F, 0x01, 0xF8                                 ; swapgs
+            db 0x48, 0x0F, 0x07                                 ; sysretq
+        ; ---- una entrada por vector ----
+        E64_v0:
+            push rax
+            mov eax, 0
+            jmp E64_comun_sin
+        E64_v1:
+            push rax
+            mov eax, 1
+            jmp E64_comun_sin
+        E64_v2:
+            push rax
+            mov eax, 2
+            jmp E64_comun_par
+        E64_v3:
+            push rax
+            mov eax, 3
+            jmp E64_comun_sin
+        E64_v4:
+            push rax
+            mov eax, 4
+            jmp E64_comun_sin
+        E64_v5:
+            push rax
+            mov eax, 5
+            jmp E64_comun_sin
+        E64_v6:
+            push rax
+            mov eax, 6
+            jmp E64_comun_sin
+        E64_v7:
+            push rax
+            mov eax, 7
+            jmp E64_comun_sin
+        E64_v8:
+            push rax
+            mov eax, 8
+            jmp E64_comun_par
+        E64_v9:
+            push rax
+            mov eax, 9
+            jmp E64_comun_sin
+        E64_v10:
+            push rax
+            mov eax, 10
+            jmp E64_comun_con
+        E64_v11:
+            push rax
+            mov eax, 11
+            jmp E64_comun_con
+        E64_v12:
+            push rax
+            mov eax, 12
+            jmp E64_comun_con
+        E64_v13:
+            push rax
+            mov eax, 13
+            jmp E64_comun_con
+        E64_v14:
+            push rax
+            mov eax, 14
+            jmp E64_comun_con
+        E64_v15:
+            push rax
+            mov eax, 15
+            jmp E64_comun_sin
+        E64_v16:
+            push rax
+            mov eax, 16
+            jmp E64_comun_sin
+        E64_v17:
+            push rax
+            mov eax, 17
+            jmp E64_comun_con
+        E64_v18:
+            push rax
+            mov eax, 18
+            jmp E64_comun_par
+        E64_v19:
+            push rax
+            mov eax, 19
+            jmp E64_comun_sin
+        E64_v20:
+            push rax
+            mov eax, 20
+            jmp E64_comun_sin
+        E64_v21:
+            push rax
+            mov eax, 21
+            jmp E64_comun_con
+        E64_v22:
+            push rax
+            mov eax, 22
+            jmp E64_comun_sin
+        E64_v23:
+            push rax
+            mov eax, 23
+            jmp E64_comun_sin
+        E64_v24:
+            push rax
+            mov eax, 24
+            jmp E64_comun_sin
+        E64_v25:
+            push rax
+            mov eax, 25
+            jmp E64_comun_sin
+        E64_v26:
+            push rax
+            mov eax, 26
+            jmp E64_comun_sin
+        E64_v27:
+            push rax
+            mov eax, 27
+            jmp E64_comun_sin
+        E64_v28:
+            push rax
+            mov eax, 28
+            jmp E64_comun_sin
+        E64_v29:
+            push rax
+            mov eax, 29
+            jmp E64_comun_con
+        E64_v30:
+            push rax
+            mov eax, 30
+            jmp E64_comun_con
+        E64_v31:
+            push rax
+            mov eax, 31
+            jmp E64_comun_sin
+        E64_v32:
+            push rax
+            mov eax, 32
+            jmp E64_comun_sin
+        E64_v33:
+            push rax
+            mov eax, 33
+            jmp E64_comun_sin
+        E64_v34:
+            push rax
+            mov eax, 34
+            jmp E64_comun_sin
+        E64_v35:
+            push rax
+            mov eax, 35
+            jmp E64_comun_sin
+        E64_v36:
+            push rax
+            mov eax, 36
+            jmp E64_comun_sin
+        E64_v37:
+            push rax
+            mov eax, 37
+            jmp E64_comun_sin
+        E64_v38:
+            push rax
+            mov eax, 38
+            jmp E64_comun_sin
+        E64_v39:
+            push rax
+            mov eax, 39
+            jmp E64_comun_sin
+        E64_v40:
+            push rax
+            mov eax, 40
+            jmp E64_comun_sin
+        E64_v41:
+            push rax
+            mov eax, 41
+            jmp E64_comun_sin
+        E64_v42:
+            push rax
+            mov eax, 42
+            jmp E64_comun_sin
+        E64_v43:
+            push rax
+            mov eax, 43
+            jmp E64_comun_sin
+        E64_v44:
+            push rax
+            mov eax, 44
+            jmp E64_comun_sin
+        E64_v45:
+            push rax
+            mov eax, 45
+            jmp E64_comun_sin
+        E64_v46:
+            push rax
+            mov eax, 46
+            jmp E64_comun_sin
+        E64_v47:
+            push rax
+            mov eax, 47
+            jmp E64_comun_sin
+        E64_v48:
+            push rax
+            mov eax, 48
+            jmp E64_comun_sin
+        E64_v49:
+            push rax
+            mov eax, 49
+            jmp E64_comun_sin
+        E64_v50:
+            push rax
+            mov eax, 50
+            jmp E64_comun_sin
+        E64_v51:
+            push rax
+            mov eax, 51
+            jmp E64_comun_sin
+        E64_v52:
+            push rax
+            mov eax, 52
+            jmp E64_comun_sin
+        E64_v53:
+            push rax
+            mov eax, 53
+            jmp E64_comun_sin
+        E64_v54:
+            push rax
+            mov eax, 54
+            jmp E64_comun_sin
+        E64_v55:
+            push rax
+            mov eax, 55
+            jmp E64_comun_sin
+        E64_v56:
+            push rax
+            mov eax, 56
+            jmp E64_comun_sin
+        E64_v57:
+            push rax
+            mov eax, 57
+            jmp E64_comun_sin
+        E64_v58:
+            push rax
+            mov eax, 58
+            jmp E64_comun_sin
+        E64_v59:
+            push rax
+            mov eax, 59
+            jmp E64_comun_sin
+        E64_v60:
+            push rax
+            mov eax, 60
+            jmp E64_comun_sin
+        E64_v61:
+            push rax
+            mov eax, 61
+            jmp E64_comun_sin
+        E64_v62:
+            push rax
+            mov eax, 62
+            jmp E64_comun_sin
+        E64_v63:
+            push rax
+            mov eax, 63
+            jmp E64_comun_sin
+        E64_v64:
+            push rax
+            mov eax, 64
+            jmp E64_comun_sin
+        E64_v65:
+            push rax
+            mov eax, 65
+            jmp E64_comun_sin
+        E64_v66:
+            push rax
+            mov eax, 66
+            jmp E64_comun_sin
+        E64_v67:
+            push rax
+            mov eax, 67
+            jmp E64_comun_sin
+        E64_v68:
+            push rax
+            mov eax, 68
+            jmp E64_comun_sin
+        E64_v69:
+            push rax
+            mov eax, 69
+            jmp E64_comun_sin
+        E64_v70:
+            push rax
+            mov eax, 70
+            jmp E64_comun_sin
+        E64_v71:
+            push rax
+            mov eax, 71
+            jmp E64_comun_sin
+        E64_v72:
+            push rax
+            mov eax, 72
+            jmp E64_comun_sin
+        E64_v73:
+            push rax
+            mov eax, 73
+            jmp E64_comun_sin
+        E64_v74:
+            push rax
+            mov eax, 74
+            jmp E64_comun_sin
+        E64_v75:
+            push rax
+            mov eax, 75
+            jmp E64_comun_sin
+        E64_v76:
+            push rax
+            mov eax, 76
+            jmp E64_comun_sin
+        E64_v77:
+            push rax
+            mov eax, 77
+            jmp E64_comun_sin
+        E64_v78:
+            push rax
+            mov eax, 78
+            jmp E64_comun_sin
+        E64_v79:
+            push rax
+            mov eax, 79
+            jmp E64_comun_sin
+        E64_v80:
+            push rax
+            mov eax, 80
+            jmp E64_comun_sin
+        E64_v81:
+            push rax
+            mov eax, 81
+            jmp E64_comun_sin
+        E64_v82:
+            push rax
+            mov eax, 82
+            jmp E64_comun_sin
+        E64_v83:
+            push rax
+            mov eax, 83
+            jmp E64_comun_sin
+        E64_v84:
+            push rax
+            mov eax, 84
+            jmp E64_comun_sin
+        E64_v85:
+            push rax
+            mov eax, 85
+            jmp E64_comun_sin
+        E64_v86:
+            push rax
+            mov eax, 86
+            jmp E64_comun_sin
+        E64_v87:
+            push rax
+            mov eax, 87
+            jmp E64_comun_sin
+        E64_v88:
+            push rax
+            mov eax, 88
+            jmp E64_comun_sin
+        E64_v89:
+            push rax
+            mov eax, 89
+            jmp E64_comun_sin
+        E64_v90:
+            push rax
+            mov eax, 90
+            jmp E64_comun_sin
+        E64_v91:
+            push rax
+            mov eax, 91
+            jmp E64_comun_sin
+        E64_v92:
+            push rax
+            mov eax, 92
+            jmp E64_comun_sin
+        E64_v93:
+            push rax
+            mov eax, 93
+            jmp E64_comun_sin
+        E64_v94:
+            push rax
+            mov eax, 94
+            jmp E64_comun_sin
+        E64_v95:
+            push rax
+            mov eax, 95
+            jmp E64_comun_sin
+        E64_v96:
+            push rax
+            mov eax, 96
+            jmp E64_comun_sin
+        E64_v97:
+            push rax
+            mov eax, 97
+            jmp E64_comun_sin
+        E64_v98:
+            push rax
+            mov eax, 98
+            jmp E64_comun_sin
+        E64_v99:
+            push rax
+            mov eax, 99
+            jmp E64_comun_sin
+        E64_v100:
+            push rax
+            mov eax, 100
+            jmp E64_comun_sin
+        E64_v101:
+            push rax
+            mov eax, 101
+            jmp E64_comun_sin
+        E64_v102:
+            push rax
+            mov eax, 102
+            jmp E64_comun_sin
+        E64_v103:
+            push rax
+            mov eax, 103
+            jmp E64_comun_sin
+        E64_v104:
+            push rax
+            mov eax, 104
+            jmp E64_comun_sin
+        E64_v105:
+            push rax
+            mov eax, 105
+            jmp E64_comun_sin
+        E64_v106:
+            push rax
+            mov eax, 106
+            jmp E64_comun_sin
+        E64_v107:
+            push rax
+            mov eax, 107
+            jmp E64_comun_sin
+        E64_v108:
+            push rax
+            mov eax, 108
+            jmp E64_comun_sin
+        E64_v109:
+            push rax
+            mov eax, 109
+            jmp E64_comun_sin
+        E64_v110:
+            push rax
+            mov eax, 110
+            jmp E64_comun_sin
+        E64_v111:
+            push rax
+            mov eax, 111
+            jmp E64_comun_sin
+        E64_v112:
+            push rax
+            mov eax, 112
+            jmp E64_comun_sin
+        E64_v113:
+            push rax
+            mov eax, 113
+            jmp E64_comun_sin
+        E64_v114:
+            push rax
+            mov eax, 114
+            jmp E64_comun_sin
+        E64_v115:
+            push rax
+            mov eax, 115
+            jmp E64_comun_sin
+        E64_v116:
+            push rax
+            mov eax, 116
+            jmp E64_comun_sin
+        E64_v117:
+            push rax
+            mov eax, 117
+            jmp E64_comun_sin
+        E64_v118:
+            push rax
+            mov eax, 118
+            jmp E64_comun_sin
+        E64_v119:
+            push rax
+            mov eax, 119
+            jmp E64_comun_sin
+        E64_v120:
+            push rax
+            mov eax, 120
+            jmp E64_comun_sin
+        E64_v121:
+            push rax
+            mov eax, 121
+            jmp E64_comun_sin
+        E64_v122:
+            push rax
+            mov eax, 122
+            jmp E64_comun_sin
+        E64_v123:
+            push rax
+            mov eax, 123
+            jmp E64_comun_sin
+        E64_v124:
+            push rax
+            mov eax, 124
+            jmp E64_comun_sin
+        E64_v125:
+            push rax
+            mov eax, 125
+            jmp E64_comun_sin
+        E64_v126:
+            push rax
+            mov eax, 126
+            jmp E64_comun_sin
+        E64_v127:
+            push rax
+            mov eax, 127
+            jmp E64_comun_sin
+        E64_v128:
+            push rax
+            mov eax, 128
+            jmp E64_comun_sin
+        E64_v129:
+            push rax
+            mov eax, 129
+            jmp E64_comun_sin
+        E64_v130:
+            push rax
+            mov eax, 130
+            jmp E64_comun_sin
+        E64_v131:
+            push rax
+            mov eax, 131
+            jmp E64_comun_sin
+        E64_v132:
+            push rax
+            mov eax, 132
+            jmp E64_comun_sin
+        E64_v133:
+            push rax
+            mov eax, 133
+            jmp E64_comun_sin
+        E64_v134:
+            push rax
+            mov eax, 134
+            jmp E64_comun_sin
+        E64_v135:
+            push rax
+            mov eax, 135
+            jmp E64_comun_sin
+        E64_v136:
+            push rax
+            mov eax, 136
+            jmp E64_comun_sin
+        E64_v137:
+            push rax
+            mov eax, 137
+            jmp E64_comun_sin
+        E64_v138:
+            push rax
+            mov eax, 138
+            jmp E64_comun_sin
+        E64_v139:
+            push rax
+            mov eax, 139
+            jmp E64_comun_sin
+        E64_v140:
+            push rax
+            mov eax, 140
+            jmp E64_comun_sin
+        E64_v141:
+            push rax
+            mov eax, 141
+            jmp E64_comun_sin
+        E64_v142:
+            push rax
+            mov eax, 142
+            jmp E64_comun_sin
+        E64_v143:
+            push rax
+            mov eax, 143
+            jmp E64_comun_sin
+        E64_v144:
+            push rax
+            mov eax, 144
+            jmp E64_comun_sin
+        E64_v145:
+            push rax
+            mov eax, 145
+            jmp E64_comun_sin
+        E64_v146:
+            push rax
+            mov eax, 146
+            jmp E64_comun_sin
+        E64_v147:
+            push rax
+            mov eax, 147
+            jmp E64_comun_sin
+        E64_v148:
+            push rax
+            mov eax, 148
+            jmp E64_comun_sin
+        E64_v149:
+            push rax
+            mov eax, 149
+            jmp E64_comun_sin
+        E64_v150:
+            push rax
+            mov eax, 150
+            jmp E64_comun_sin
+        E64_v151:
+            push rax
+            mov eax, 151
+            jmp E64_comun_sin
+        E64_v152:
+            push rax
+            mov eax, 152
+            jmp E64_comun_sin
+        E64_v153:
+            push rax
+            mov eax, 153
+            jmp E64_comun_sin
+        E64_v154:
+            push rax
+            mov eax, 154
+            jmp E64_comun_sin
+        E64_v155:
+            push rax
+            mov eax, 155
+            jmp E64_comun_sin
+        E64_v156:
+            push rax
+            mov eax, 156
+            jmp E64_comun_sin
+        E64_v157:
+            push rax
+            mov eax, 157
+            jmp E64_comun_sin
+        E64_v158:
+            push rax
+            mov eax, 158
+            jmp E64_comun_sin
+        E64_v159:
+            push rax
+            mov eax, 159
+            jmp E64_comun_sin
+        E64_v160:
+            push rax
+            mov eax, 160
+            jmp E64_comun_sin
+        E64_v161:
+            push rax
+            mov eax, 161
+            jmp E64_comun_sin
+        E64_v162:
+            push rax
+            mov eax, 162
+            jmp E64_comun_sin
+        E64_v163:
+            push rax
+            mov eax, 163
+            jmp E64_comun_sin
+        E64_v164:
+            push rax
+            mov eax, 164
+            jmp E64_comun_sin
+        E64_v165:
+            push rax
+            mov eax, 165
+            jmp E64_comun_sin
+        E64_v166:
+            push rax
+            mov eax, 166
+            jmp E64_comun_sin
+        E64_v167:
+            push rax
+            mov eax, 167
+            jmp E64_comun_sin
+        E64_v168:
+            push rax
+            mov eax, 168
+            jmp E64_comun_sin
+        E64_v169:
+            push rax
+            mov eax, 169
+            jmp E64_comun_sin
+        E64_v170:
+            push rax
+            mov eax, 170
+            jmp E64_comun_sin
+        E64_v171:
+            push rax
+            mov eax, 171
+            jmp E64_comun_sin
+        E64_v172:
+            push rax
+            mov eax, 172
+            jmp E64_comun_sin
+        E64_v173:
+            push rax
+            mov eax, 173
+            jmp E64_comun_sin
+        E64_v174:
+            push rax
+            mov eax, 174
+            jmp E64_comun_sin
+        E64_v175:
+            push rax
+            mov eax, 175
+            jmp E64_comun_sin
+        E64_v176:
+            push rax
+            mov eax, 176
+            jmp E64_comun_sin
+        E64_v177:
+            push rax
+            mov eax, 177
+            jmp E64_comun_sin
+        E64_v178:
+            push rax
+            mov eax, 178
+            jmp E64_comun_sin
+        E64_v179:
+            push rax
+            mov eax, 179
+            jmp E64_comun_sin
+        E64_v180:
+            push rax
+            mov eax, 180
+            jmp E64_comun_sin
+        E64_v181:
+            push rax
+            mov eax, 181
+            jmp E64_comun_sin
+        E64_v182:
+            push rax
+            mov eax, 182
+            jmp E64_comun_sin
+        E64_v183:
+            push rax
+            mov eax, 183
+            jmp E64_comun_sin
+        E64_v184:
+            push rax
+            mov eax, 184
+            jmp E64_comun_sin
+        E64_v185:
+            push rax
+            mov eax, 185
+            jmp E64_comun_sin
+        E64_v186:
+            push rax
+            mov eax, 186
+            jmp E64_comun_sin
+        E64_v187:
+            push rax
+            mov eax, 187
+            jmp E64_comun_sin
+        E64_v188:
+            push rax
+            mov eax, 188
+            jmp E64_comun_sin
+        E64_v189:
+            push rax
+            mov eax, 189
+            jmp E64_comun_sin
+        E64_v190:
+            push rax
+            mov eax, 190
+            jmp E64_comun_sin
+        E64_v191:
+            push rax
+            mov eax, 191
+            jmp E64_comun_sin
+        E64_v192:
+            push rax
+            mov eax, 192
+            jmp E64_comun_sin
+        E64_v193:
+            push rax
+            mov eax, 193
+            jmp E64_comun_sin
+        E64_v194:
+            push rax
+            mov eax, 194
+            jmp E64_comun_sin
+        E64_v195:
+            push rax
+            mov eax, 195
+            jmp E64_comun_sin
+        E64_v196:
+            push rax
+            mov eax, 196
+            jmp E64_comun_sin
+        E64_v197:
+            push rax
+            mov eax, 197
+            jmp E64_comun_sin
+        E64_v198:
+            push rax
+            mov eax, 198
+            jmp E64_comun_sin
+        E64_v199:
+            push rax
+            mov eax, 199
+            jmp E64_comun_sin
+        E64_v200:
+            push rax
+            mov eax, 200
+            jmp E64_comun_sin
+        E64_v201:
+            push rax
+            mov eax, 201
+            jmp E64_comun_sin
+        E64_v202:
+            push rax
+            mov eax, 202
+            jmp E64_comun_sin
+        E64_v203:
+            push rax
+            mov eax, 203
+            jmp E64_comun_sin
+        E64_v204:
+            push rax
+            mov eax, 204
+            jmp E64_comun_sin
+        E64_v205:
+            push rax
+            mov eax, 205
+            jmp E64_comun_sin
+        E64_v206:
+            push rax
+            mov eax, 206
+            jmp E64_comun_sin
+        E64_v207:
+            push rax
+            mov eax, 207
+            jmp E64_comun_sin
+        E64_v208:
+            push rax
+            mov eax, 208
+            jmp E64_comun_sin
+        E64_v209:
+            push rax
+            mov eax, 209
+            jmp E64_comun_sin
+        E64_v210:
+            push rax
+            mov eax, 210
+            jmp E64_comun_sin
+        E64_v211:
+            push rax
+            mov eax, 211
+            jmp E64_comun_sin
+        E64_v212:
+            push rax
+            mov eax, 212
+            jmp E64_comun_sin
+        E64_v213:
+            push rax
+            mov eax, 213
+            jmp E64_comun_sin
+        E64_v214:
+            push rax
+            mov eax, 214
+            jmp E64_comun_sin
+        E64_v215:
+            push rax
+            mov eax, 215
+            jmp E64_comun_sin
+        E64_v216:
+            push rax
+            mov eax, 216
+            jmp E64_comun_sin
+        E64_v217:
+            push rax
+            mov eax, 217
+            jmp E64_comun_sin
+        E64_v218:
+            push rax
+            mov eax, 218
+            jmp E64_comun_sin
+        E64_v219:
+            push rax
+            mov eax, 219
+            jmp E64_comun_sin
+        E64_v220:
+            push rax
+            mov eax, 220
+            jmp E64_comun_sin
+        E64_v221:
+            push rax
+            mov eax, 221
+            jmp E64_comun_sin
+        E64_v222:
+            push rax
+            mov eax, 222
+            jmp E64_comun_sin
+        E64_v223:
+            push rax
+            mov eax, 223
+            jmp E64_comun_sin
+        E64_v224:
+            push rax
+            mov eax, 224
+            jmp E64_comun_sin
+        E64_v225:
+            push rax
+            mov eax, 225
+            jmp E64_comun_sin
+        E64_v226:
+            push rax
+            mov eax, 226
+            jmp E64_comun_sin
+        E64_v227:
+            push rax
+            mov eax, 227
+            jmp E64_comun_sin
+        E64_v228:
+            push rax
+            mov eax, 228
+            jmp E64_comun_sin
+        E64_v229:
+            push rax
+            mov eax, 229
+            jmp E64_comun_sin
+        E64_v230:
+            push rax
+            mov eax, 230
+            jmp E64_comun_sin
+        E64_v231:
+            push rax
+            mov eax, 231
+            jmp E64_comun_sin
+        E64_v232:
+            push rax
+            mov eax, 232
+            jmp E64_comun_sin
+        E64_v233:
+            push rax
+            mov eax, 233
+            jmp E64_comun_sin
+        E64_v234:
+            push rax
+            mov eax, 234
+            jmp E64_comun_sin
+        E64_v235:
+            push rax
+            mov eax, 235
+            jmp E64_comun_sin
+        E64_v236:
+            push rax
+            mov eax, 236
+            jmp E64_comun_sin
+        E64_v237:
+            push rax
+            mov eax, 237
+            jmp E64_comun_sin
+        E64_v238:
+            push rax
+            mov eax, 238
+            jmp E64_comun_sin
+        E64_v239:
+            push rax
+            mov eax, 239
+            jmp E64_comun_sin
+        E64_v240:
+            push rax
+            mov eax, 240
+            jmp E64_comun_sin
+        E64_v241:
+            push rax
+            mov eax, 241
+            jmp E64_comun_sin
+        E64_v242:
+            push rax
+            mov eax, 242
+            jmp E64_comun_sin
+        E64_v243:
+            push rax
+            mov eax, 243
+            jmp E64_comun_sin
+        E64_v244:
+            push rax
+            mov eax, 244
+            jmp E64_comun_sin
+        E64_v245:
+            push rax
+            mov eax, 245
+            jmp E64_comun_sin
+        E64_v246:
+            push rax
+            mov eax, 246
+            jmp E64_comun_sin
+        E64_v247:
+            push rax
+            mov eax, 247
+            jmp E64_comun_sin
+        E64_v248:
+            push rax
+            mov eax, 248
+            jmp E64_comun_sin
+        E64_v249:
+            push rax
+            mov eax, 249
+            jmp E64_comun_sin
+        E64_v250:
+            push rax
+            mov eax, 250
+            jmp E64_comun_sin
+        E64_v251:
+            push rax
+            mov eax, 251
+            jmp E64_comun_sin
+        E64_v252:
+            push rax
+            mov eax, 252
+            jmp E64_comun_sin
+        E64_v253:
+            push rax
+            mov eax, 253
+            jmp E64_comun_sin
+        E64_v254:
+            push rax
+            mov eax, 254
+            jmp E64_comun_sin
+        E64_v255:
+            push rax
+            mov eax, 255
+            jmp E64_comun_sin
+        E64_tabla:
+            dq E64_v0, E64_v1, E64_v2, E64_v3, E64_v4, E64_v5, E64_v6, E64_v7
+            dq E64_v8, E64_v9, E64_v10, E64_v11, E64_v12, E64_v13, E64_v14, E64_v15
+            dq E64_v16, E64_v17, E64_v18, E64_v19, E64_v20, E64_v21, E64_v22, E64_v23
+            dq E64_v24, E64_v25, E64_v26, E64_v27, E64_v28, E64_v29, E64_v30, E64_v31
+            dq E64_v32, E64_v33, E64_v34, E64_v35, E64_v36, E64_v37, E64_v38, E64_v39
+            dq E64_v40, E64_v41, E64_v42, E64_v43, E64_v44, E64_v45, E64_v46, E64_v47
+            dq E64_v48, E64_v49, E64_v50, E64_v51, E64_v52, E64_v53, E64_v54, E64_v55
+            dq E64_v56, E64_v57, E64_v58, E64_v59, E64_v60, E64_v61, E64_v62, E64_v63
+            dq E64_v64, E64_v65, E64_v66, E64_v67, E64_v68, E64_v69, E64_v70, E64_v71
+            dq E64_v72, E64_v73, E64_v74, E64_v75, E64_v76, E64_v77, E64_v78, E64_v79
+            dq E64_v80, E64_v81, E64_v82, E64_v83, E64_v84, E64_v85, E64_v86, E64_v87
+            dq E64_v88, E64_v89, E64_v90, E64_v91, E64_v92, E64_v93, E64_v94, E64_v95
+            dq E64_v96, E64_v97, E64_v98, E64_v99, E64_v100, E64_v101, E64_v102, E64_v103
+            dq E64_v104, E64_v105, E64_v106, E64_v107, E64_v108, E64_v109, E64_v110, E64_v111
+            dq E64_v112, E64_v113, E64_v114, E64_v115, E64_v116, E64_v117, E64_v118, E64_v119
+            dq E64_v120, E64_v121, E64_v122, E64_v123, E64_v124, E64_v125, E64_v126, E64_v127
+            dq E64_v128, E64_v129, E64_v130, E64_v131, E64_v132, E64_v133, E64_v134, E64_v135
+            dq E64_v136, E64_v137, E64_v138, E64_v139, E64_v140, E64_v141, E64_v142, E64_v143
+            dq E64_v144, E64_v145, E64_v146, E64_v147, E64_v148, E64_v149, E64_v150, E64_v151
+            dq E64_v152, E64_v153, E64_v154, E64_v155, E64_v156, E64_v157, E64_v158, E64_v159
+            dq E64_v160, E64_v161, E64_v162, E64_v163, E64_v164, E64_v165, E64_v166, E64_v167
+            dq E64_v168, E64_v169, E64_v170, E64_v171, E64_v172, E64_v173, E64_v174, E64_v175
+            dq E64_v176, E64_v177, E64_v178, E64_v179, E64_v180, E64_v181, E64_v182, E64_v183
+            dq E64_v184, E64_v185, E64_v186, E64_v187, E64_v188, E64_v189, E64_v190, E64_v191
+            dq E64_v192, E64_v193, E64_v194, E64_v195, E64_v196, E64_v197, E64_v198, E64_v199
+            dq E64_v200, E64_v201, E64_v202, E64_v203, E64_v204, E64_v205, E64_v206, E64_v207
+            dq E64_v208, E64_v209, E64_v210, E64_v211, E64_v212, E64_v213, E64_v214, E64_v215
+            dq E64_v216, E64_v217, E64_v218, E64_v219, E64_v220, E64_v221, E64_v222, E64_v223
+            dq E64_v224, E64_v225, E64_v226, E64_v227, E64_v228, E64_v229, E64_v230, E64_v231
+            dq E64_v232, E64_v233, E64_v234, E64_v235, E64_v236, E64_v237, E64_v238, E64_v239
+            dq E64_v240, E64_v241, E64_v242, E64_v243, E64_v244, E64_v245, E64_v246, E64_v247
+            dq E64_v248, E64_v249, E64_v250, E64_v251, E64_v252, E64_v253, E64_v254, E64_v255
+        E64_fin:
+        fin
+    fin
+
+    ; ¿qué tiene este procesador? (en el que arranca, una vez)
+    público función mira_cpu()
+        variable máx: nat32
+        si visto entonces devolver fin
+        visto := cierto
+        sitio := nat64(dirección(entradas))     ; (para que el compilador no la quite)
+        cpuid(0, 0)
+        máx := ra
+        cpuid(1, 0)
+        con_pcid := rc yb 0x20000 <> 0
+        con_rdrand := rc yb 0x40000000 <> 0
+        si máx >= 7 entonces
+            cpuid(7, 0)
+            con_smep := rb yb 0x80 <> 0
+            con_smap := rb yb 0x100000 <> 0
+            con_umip := rc yb 4 <> 0
+        fin
+    fin
+
+    ; sin PCID aunque lo haya («sinpcid» en la línea de órdenes: el TCG de QEMU
+    ; no lo tiene, así que ese camino solo se prueba en el taller)
+    público función sin_pcid()
+        mira_cpu()
+        con_pcid := falso
+    fin
+
+    función cr4_ob(b: nat64)
+        ensamblador
+            mov rax, cr4
+            or rax, {b}
+            mov cr4, rax
+        fin
+    fin
+
+    función cr0_cambia(quita: nat64, pon: nat64)
+        ensamblador
+            mov rax, cr0
+            mov rcx, {quita}
+            not rcx
+            and rax, rcx
+            or rax, {pon}
+            mov cr0, rax
+        fin
+    fin
+
+    función cr0_ob_sse()
+        cr0_cambia(0xC, 2)
+    fin
+
+    ; lo de este procesador para los programas: syscall (EFER.SCE, STAR,
+    ; LSTAR, SFMASK), KERNEL_GS_BASE a cero, SMEP, SMAP, UMIP y PCID, y SSE
+    ; (CR0.EM y TS fuera, MP; CR4.OSFXSR y OSXMMEXCPT: los programas de hoy lo
+    ; usan; el núcleo no, y el planificador guarda y pone los de cada programa)
+    público función prepara_cpu()
+        variable b: nat64
+        mira_cpu()
+        pon_msr(0xC0000080, lee_msr(0xC0000080) ob 1)
+        pon_msr(0xC0000081, (nat64(0x10) << 48) ob (nat64(0x08) << 32))
+        pon_msr(0xC0000082, dir_sistema())
+        pon_msr(0xC0000084, 0x47700)
+        pon_msr(0xC0000102, 0)
+        cr0_ob_sse()
+        b := 0x600
+        si con_smep entonces b := b ob 0x100000 fin
+        si con_smap entonces b := b ob 0x200000 fin
+        si con_umip entonces b := b ob 0x800 fin
+        si con_pcid entonces b := b ob 0x20000 fin
+        cr4_ob(b)
+        ensamblador
+            db 0xDB, 0xE3               ; fninit
+        fin
+    fin
+
+    ; la primera entrada de un hilo en su programa: iretq al anillo 3, en rip
+    ; con la pila en rsp, los registros a cero y las interrupciones puestas
+    ; (el planificador ya ha puesto CR3, FS y la pila del núcleo). No vuelve.
+    público función a_usuario(rip: nat64, rsp: nat64)
+        ensamblador
+            cli
+            mov rax, {rsp}
+            mov rcx, {rip}
+            push 0x1B
+            push rax
+            push 0x202
+            push 0x23
+            push rcx
+            xor eax, eax
+            xor ebx, ebx
+            xor ecx, ecx
+            xor edx, edx
+            xor esi, esi
+            xor edi, edi
+            xor ebp, ebp
+            xor r8d, r8d
+            xor r9d, r9d
+            xor r10d, r10d
+            xor r11d, r11d
+            xor r12d, r12d
+            xor r13d, r13d
+            xor r14d, r14d
+            xor r15d, r15d
+            db 0x0F, 0x01, 0xF8         ; swapgs
+            iretq
+        fin
+    fin
+
+fin Entradas.
