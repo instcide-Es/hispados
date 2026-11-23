@@ -3,6 +3,10 @@
 # nucleo64/imagen.sh - Hispa-64 (docs/64/HISPA-64.md): hace el núcleo y la
 # imagen de arranque por UEFI de 64 bits.
 #   imagen.sh SALIDA [prueba [LÍNEA]]
+# [etapa 5] el disco lleva además una partición de pruebas (FAT32, «PRUEBAS»,
+# con la marca HISPA64.PRB: el programa ARCHIVOS solo escribe en las que la
+# tienen) y, si no es «prueba» (o con VDI=1), sale también el disco para
+# VirtualBox (hispa64.vdi, con qemu-img).
 # [etapa 4] con los programas de prueba (programas/hazlos.sh) en \boot\prog,
 # que GRUB carga como módulos (la unidad en memoria); y, además del disco, un
 # CD (hispa64-cd.iso, con grub-mkrescue: arranca por BIOS y por UEFI de 64
@@ -13,11 +17,13 @@
 #   HISPA64.BIN                     el núcleo (ccastel.py y NASM)
 #   HISPA64.SIM                     los nombres de sus funciones (simbolos.py, con
 #                                   el mapa de NASM): GRUB lo carga como módulo
-#   hispa64.img                     el disco (GPT, una partición EFI en FAT32
-#                                   con \EFI\BOOT\BOOTX64.EFI, el GRUB de
+#   hispa64.img                     el disco (128 MB, GPT: la partición EFI en
+#                                   FAT32 con \EFI\BOOT\BOOTX64.EFI, el GRUB de
 #                                   x86_64-efi con lo que usa el menú dentro,
 #                                   \boot\grub\grub.cfg, \boot\HISPA64.BIN y
-#                                   \boot\HISPA64.SIM y \boot\prog\*)
+#                                   \boot\HISPA64.SIM y \boot\prog\*; y la de
+#                                   pruebas, FAT32, con la marca)
+#   hispa64.vdi                     el mismo disco, para VirtualBox
 #   hispa64-cd.iso                  el CD (BIOS y UEFI), con lo mismo
 # Con «prueba», el menú no espera, escribe por el puerto serie y el núcleo
 # arranca con la línea de órdenes LÍNEA («apagar» si no se dice: acaba en
@@ -63,7 +69,7 @@ else
   }
   {
     cat <<'CFG'
-# Hispa-64 0.4.0 (etapa 4). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Hispa-64 0.5.0 (etapa 5). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -73,7 +79,9 @@ terminal_output console serial
 set gfxpayload=keep
 if cpuid -l; then
 CFG
-    entrada "Hispa-64 0.4.0 (etapa 4: los programas, en el anillo 3)" ""
+    entrada "Hispa-64 0.5.0 (etapa 5: los discos y los archivos; los discos, solo leer)" ""
+    entrada "Hispa-64: con escritura en los discos (SOLO en VirtualBox o en discos de prueba)" "escribir"
+    entrada "Hispa-64: los discos sin MSI ni MSI-X (si se queda al leer un disco)" "sinmsix sinmsi"
     entrada "Hispa-64: sin PCID (si la 1 falla al cambiar de programa)" "sinpcid"
     entrada "Hispa-64: con un solo procesador (si se queda al encender los demás)" "sinsmp"
     entrada "Hispa-64: la tarea ociosa con hlt (si da problemas con mwait)" "ocioso=hlt"
@@ -99,12 +107,13 @@ menuentry "Apagar" {
 CFG
   } > "$S/grub.cfg"
 fi
-# el disco: 64 MB, GPT, la partición EFI desde el sector 2048 hasta el final
-I="$S/hispa64.img"; P="$S/esp.part"
-rm -f "$I" "$P"
-truncate -s 64M "$I"
-sgdisk -n 1:2048:0 -t 1:ef00 -c 1:HISPA64 "$I" > /dev/null
-SECT=$(( $(stat -c %s "$I") / 512 - 2048 - 33 ))
+# el disco: 128 MB, GPT, la partición EFI (80 MB) y la de pruebas (el resto)
+I="$S/hispa64.img"; P="$S/esp.part"; Q="$S/pruebas.part"
+rm -f "$I" "$P" "$Q"
+truncate -s 128M "$I"
+sgdisk -n 1:2048:+80M -t 1:ef00 -c 1:HISPA64 -n 2:0:0 -t 2:0700 -c 2:PRUEBAS "$I" > /dev/null
+SECT=$(( 80 * 2048 ))
+read -r I2 F2 <<< "$(sgdisk -i 2 "$I" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
 mkfs.fat -F 32 -n HISPA64 -C "$P" $(( SECT / 2 )) > /dev/null
 mmd -i "$P" ::EFI ::EFI/BOOT ::boot ::boot/grub
 mcopy -i "$P" "$S/BOOTX64.EFI" ::EFI/BOOT/BOOTX64.EFI
@@ -115,6 +124,25 @@ mmd -i "$P" ::boot/prog
 for f in $PROGS; do mcopy -i "$P" "$S/prog/$f" "::boot/prog/$f"; done
 dd if="$P" of="$I" bs=512 seek=2048 conv=notrunc status=none
 rm -f "$P"
+# [etapa 5] la de pruebas: FAT32 con cúmulos de 512 octetos, la marca y unos archivos
+mkfs.fat -F 32 -s 1 -n PRUEBAS -C "$Q" $(( (F2 - I2 + 1) / 2 )) > /dev/null
+printf 'Disco de pruebas de Hispa-64: se puede escribir en \xc3\xa9l.\r\n' > "$S/marca.txt"
+printf 'Hola desde el anfitri\xc3\xb3n: este disco es de prueba.\n' > "$S/leeme.txt"
+printf 'Un nombre largo, con acentos y e\xc3\xb1e.\n' > "$S/largo.txt"
+python3 -I -c '
+import sys
+sys.stdout.buffer.write(bytes(((i * 131 + (i >> 8)) & 255) for i in range(300000)))' > "$S/patron.bin"
+mcopy -i "$Q" "$S/marca.txt" ::HISPA64.PRB
+mcopy -i "$Q" "$S/leeme.txt" ::LEEME.TXT
+mcopy -i "$Q" "$S/patron.bin" ::PATRON.BIN
+mmd -i "$Q" "::Carpeta con nombre largo"
+mcopy -i "$Q" "$S/largo.txt" "::Carpeta con nombre largo/Canción de cuna ñandú.txt"
+dd if="$Q" of="$I" bs=512 seek="$I2" conv=notrunc status=none
+rm -f "$Q" "$S/marca.txt" "$S/leeme.txt" "$S/largo.txt" "$S/patron.bin"
+if [ "$MODO" != prueba ] || [ "${VDI:-0}" = 1 ]; then
+  rm -f "$S/hispa64.vdi"
+  qemu-img convert -f raw -O vdi "$I" "$S/hispa64.vdi"
+fi
 # [etapa 4] el CD: BIOS (i386-pc, El Torito) y UEFI de 64 bits, con lo mismo
 if [ "$MODO" != prueba ] || [ "${CD:-0}" = 1 ]; then
   D="$S/cd"; rm -rf "$D"; mkdir -p "$D/boot/grub" "$D/boot/prog"

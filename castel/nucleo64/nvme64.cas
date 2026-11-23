@@ -160,7 +160,7 @@ módulo Nvme64
         x.sq_cola[q] := (x.sq_cola[q] + 1) mod ENTRADAS
         rearma(dirección(x.suceso[q]))
         ensamblador
-            mfence
+            db 0x0F, 0xAE, 0xF0         ; mfence
         fin
         p32(x, 0x1000 + nat32(x.timbre) * (2 * q), x.sq_cola[q])
         nv_órdenes := nv_órdenes + 1
@@ -314,6 +314,14 @@ módulo Nvme64
         x.timbre := nat64(4) << ((cap >> 32) yb 15)
         si (cap >> 37) yb 1 = 0 entonces
             nv_motivo := "no sabe la orden NVM (CAP.CSS)"
+            devolver falso
+        fin
+        si (cap >> 48) yb 15 <> 0 entonces
+            nv_motivo := "sus páginas son de más de 4 KB (CAP.MPSMIN)"
+            devolver falso
+        fin
+        si cap yb 0xFFFF < ENTRADAS - 1 entonces
+            nv_motivo := "sus colas son de menos de 64 órdenes (CAP.MQES)"
             devolver falso
         fin
         ; parada, sus colas de administración, y en marcha

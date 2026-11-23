@@ -458,7 +458,7 @@ módulo Procesos
     ; ---- los fallos del programa ----
     función empieza_aviso(p: puntero a Proceso): nat64
         variable b: nat64
-        b := toma(dirección(cerrojo_consola))
+        b := toma_atento(dirección(cerrojo_consola))
         escribir("El programa ", p.nombre, " (proceso ", p.id, ") ")
         devolver b
     fin

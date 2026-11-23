@@ -251,7 +251,7 @@ módulo Ahci64
         rearma(dirección(d_suceso[d]))
         pon(c, pu(p, P_IS), 0xFFFFFFFF)
         ensamblador
-            mfence
+            db 0x0F, 0xAE, 0xF0         ; mfence
         fin
         pon(c, pu(p, P_CI), 1)
         sa_órdenes := sa_órdenes + 1

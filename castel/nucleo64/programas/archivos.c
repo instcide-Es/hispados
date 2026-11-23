@@ -466,7 +466,8 @@ int principal(i64 *sp)
 		prueba(montajes[i]);
 		escritos++;
 	}
-	pon("ARCHIVOS: "); pon_n(de_prueba); pon(" discos de prueba ("); pon_n(escritos); pon(" escritos); ");
+	pon("ARCHIVOS: "); pon_n(de_prueba); pon(de_prueba == 1 ? " disco de prueba (" : " discos de prueba (");
+	pon_n(escritos); pon(escritos == 1 ? " escrito); " : " escritos); ");
 	if (fallos == 0) { pon("todo bien ("); pon_n(pruebas); pon(" pruebas)\n"); }
 	else { pon_n(fallos); pon(" MAL de "); pon_n(pruebas); pon("\n"); }
 	return fallos;

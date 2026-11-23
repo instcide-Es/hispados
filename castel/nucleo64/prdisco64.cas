@@ -218,6 +218,11 @@ módulo PrDisco64
         devolver falso
     fin
 
+    ; un programa de un disco (su ruta, sin argumentos)
+    público función corre_de_disco(ruta: puntero a byte)
+        corre(ruta, 0)
+    fin
+
     público función pruebas_discos(con_programas: bool, línea_dir: puntero a byte)
         variable d: nat32
         variable b: arreglo [64] de byte

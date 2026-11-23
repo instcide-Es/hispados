@@ -1,6 +1,7 @@
 ; =============================================================================
-;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 4 (los
-;  programas: el anillo 3, syscall y ELF64).
+;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 5 (los
+;  discos y los archivos: NVMe, AHCI, GPT y MBR, la caché de bloques, el VFS,
+;  FAT32 y exFAT).
 ;  Lo carga GRUB por multiboot2 (con UEFI de 64 bits: \EFI\BOOT\BOOTX64.EFI; o
 ;  con la BIOS) o QEMU con -kernel (multiboot), en 1 MB; corre en la mitad alta
 ;  (0xFFFFFFFF80100000: «modelo hispa64», que también pasa al modo largo con
@@ -37,13 +38,24 @@
 ;  hilo), «sinsmp» (sin encender los demás procesadores), «sinpruebas» (sin
 ;  las pruebas de los hilos) y «ocioso=hlt» u «ocioso=mwait» (el reposo); de
 ;  la etapa 4: «sinpcid» (sin PCID aunque lo haya; «sinpruebas» quita también
-;  las pruebas de los programas).
+;  las pruebas de los programas); de la etapa 5: «escribir» (se puede escribir
+;  en los discos: si no, todos son de solo leer), «sinmsix» y «sinmsi» (los
+;  discos sin esas interrupciones: se mira la cola), «dir=RUTA» (ARCHIVOS dir
+;  RUTA: lo que hay), «rapido=RUTA» (escribir y leer 8 MB) y «programa=RUTA»
+;  (arrancar un programa de un disco).
 ;   - [etapa 4] los programas: las entradas desde el anillo 3 (entradas.cas:
 ;     swapgs, syscall/sysret), los espacios de direcciones (espacios.cas), la
 ;     unidad en memoria (unidad64.cas: los módulos del cargador), los procesos
 ;     y el cargador de ELF64 (procesos.cas), las llamadas al sistema de Linux
 ;     (sistema.cas) y sus pruebas (prproc64.cas, con los programas de
 ;     programas/).
+;   - [etapa 5] los discos y los archivos: las interrupciones por mensaje
+;     (msi64.cas), NVMe (nvme64.cas), SATA por AHCI (ahci64.cas), los discos,
+;     sus particiones (GPT y MBR) y la caché de bloques con escritura diferida
+;     (bloques64.cas), lo común de los sistemas de archivos (archivos64.cas),
+;     FAT32 (fat64.cas), exFAT (exfat64.cas), el VFS (vfs64.cas: los montajes,
+;     las rutas, lo abierto) y sus pruebas (prdisco64.cas, con el programa
+;     ARCHIVOS); al apagar, lo que quede en la caché, al disco.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Hispa64
@@ -55,7 +67,7 @@ módulo Hispa64
     importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
     importar Msi64, Nvme64, Ahci64, Bloques64, Archivos64, Fat64, Exfat64, Vfs64, PrDisco64
 
-    constante VERSIÓN = "0.4.0"
+    constante VERSIÓN = "0.5.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 16
@@ -560,6 +572,9 @@ módulo Hispa64
             pruebas_discos(falso, nulo)
         sino
             pruebas_discos(cierto, dirección(l[0]))
+            ; un programa de un disco, por su ruta («programa=/sata0p1/boot/prog/HOLA»)
+            valor_de("programa=", dirección(v[0]))
+            si v[0] <> 0 entonces corre_de_disco(dirección(v[0])) fin
         fin
     fin
 
@@ -598,8 +613,11 @@ módulo Hispa64
             c := cpu(i)
             si c.en_marcha <> 0 y (tipo_ = 0 o c.tipo_núcleo = tipo_) entonces
                 si n > 0 entonces escribir(",") fin
-                si n < 16 entonces escribir(" ", c.apic) fin
-                si n = 16 entonces escribir(" ...") fin
+                si n < 16 entonces
+                    escribir(" ", c.apic)
+                sino si n = 16 entonces
+                    escribir(" ...")
+                fin
                 n := n + 1
             fin
             i := i + 1
@@ -1123,7 +1141,7 @@ módulo Hispa64
         pon_color(14, 0)
         escribir("Hispa-64 ", VERSIÓN, " \xC4 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n")
         pon_color(7, 0)
-        escribir("Etapa 4: los programas (anillo 3, syscall y ELF64), en Castel de 64 bits.\n\n")
+        escribir("Etapa 5: los discos y los archivos (NVMe, AHCI, GPT, el VFS, FAT32 y exFAT), en Castel de 64 bits.\n\n")
         ; el cargador
         escribir("Cargador: ")
         si cargador[0] <> 0 entonces escribir(cargador, ", ") fin
@@ -1214,7 +1232,7 @@ módulo Hispa64
         pruebas2()
         si fallos + fallos_proc + fallos_disco > 0 entonces
             pon_color(12, 0)
-            escribir("Hispa-64 etapa 4: con fallos (los «MAL» de arriba).\n")
+            escribir("Hispa-64 etapa 5: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             si apagar_al_fallar entonces
                 al_apagar()
@@ -1222,7 +1240,7 @@ módulo Hispa64
             fin
         sino
             pon_color(10, 0)
-            escribir("Hispa-64 etapa 4: todo en orden.\n")
+            escribir("Hispa-64 etapa 5: todo en orden.\n")
             pon_color(7, 0)
         fin
         al_apagar()

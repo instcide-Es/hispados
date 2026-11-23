@@ -152,7 +152,7 @@ módulo Sistema
                 si hecho = 0 entonces devolver EFAULT fin
                 devolver ent64(hecho)
             fin
-            b := toma(dirección(cerrojo_consola))
+            b := toma_atento(dirección(cerrojo_consola))
             a_consola(dirección(t[0]), nat32(trozo))
             suelta(dirección(cerrojo_consola), b)
             hecho := hecho + trozo
@@ -716,8 +716,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.4.0")
-        pon_texto(dirección(t[0]), 195, "etapa 4 (anillo 3 y ELF64)")
+        pon_texto(dirección(t[0]), 130, "0.5.0")
+        pon_texto(dirección(t[0]), 195, "etapa 5 (discos y archivos)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -755,7 +755,7 @@ módulo Sistema
         variable b: nat64
         p.desconocidas := p.desconocidas + 1
         si p.desconocidas <= 3 entonces
-            b := toma(dirección(cerrojo_consola))
+            b := toma_atento(dirección(cerrojo_consola))
             escribir("El programa ", p.nombre, " (proceso ", p.id, ") ha pedido la llamada al sistema ", n, ", que Hispa-64 aún no tiene (devuelve -ENOSYS).\n")
             suelta(dirección(cerrojo_consola), b)
         fin

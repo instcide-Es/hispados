@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0, 1, 2, 3 y 4 están hechas** (secciones 6, 7, 8, 9 y 10).
+**etapas 0, 1, 2, 3, 4 y 5 están hechas** (secciones 6, 7, 8, 9, 10 y 11).
 
 ---
 
@@ -262,7 +262,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 2 | ACPI (tablas propias), APIC, HPET, tiempo, PCIe, apagar | **hecha (23/11)** | — |
 | 3 | SMP, planificador, hilos del núcleo | **hecha (23/11)** | — |
 | 4 | Anillo 3, syscall/sysret, ELF64, procesos | **hecha (23/11)** | — |
-| 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | 5–7 sem. | 6,5 meses |
+| 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | **hecha (24/11)** | — |
 | 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento | 5–7 sem. | 8 meses |
 | 7 | musl, POSIX, herramientas de compilar cruzado | 6–8 sem. | 9,5 meses |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | 5–7 sem. | 11 meses |
@@ -341,7 +341,15 @@ que arranca por BIOS y por UEFI.
   y **no** tumba el sistema.
 - **QEMU** y **taller**: lo mismo, con un disco en memoria (módulos de multiboot2).
 
-### Etapa 5 — discos y archivos
+### Etapa 5 — discos y archivos (hecha: sección 11)
+
+Lo que cambió del plan al hacerla: la caché es **de bloques** (la de páginas, para
+`mmap` de archivos, con musl: etapa 7); **exFAT, solo para leer** (escribirlo, en
+la etapa 6, con las memorias USB); FAT12 y FAT16 no (FAT32 sí); NVMe con **una
+cola por procesador** y MSI-X, AHCI con MSI, y las dos sin ellas mirando la cola;
+el VFS con un solo mutex; los discos, **de solo leer salvo con `escribir`**; los
+discos de 2 TB del plan son de **3 TB** (una partición más allá de 2^32 sectores),
+por NVMe y por SATA; y se ha añadido arrancar un programa desde un disco.
 
 - NVMe (colas con MSI-X), AHCI (de Hispa-Pentium), GPT, un VFS con caché de páginas,
   FAT32 y exFAT (las memorias USB y la partición EFI); leer NTFS y ext4, más tarde.
@@ -440,7 +448,7 @@ con la imagen y un LEEME.TXT.
   órdenes). La pantalla se comprueba con un pantallazo (`screendump` por el monitor
   de QEMU). Ojo con lo que QEMU no tiene igual que el hardware: no hay GOP por
   encima de 4 GB, sí hay 8254 y COM1. Por eso cada etapa va también al taller.
-- `castel/nucleo64/pruebas.sh` (solo, unos 6 minutos desde la etapa 4) y `SOLO=castel64 ./pruebas.sh`
+- `castel/nucleo64/pruebas.sh` (solo, unos 8 minutos desde la etapa 5) y `SOLO=castel64 ./pruebas.sh`
   (CASTEL64 entero, que lo llama). **Los martes y jueves de 16:30 a 21:00, nada
   pesado en el servidor** (el bingo).
 
@@ -1189,3 +1197,177 @@ falla. Y, como antes, x2APIC y los híbridos.
   de los programas, sí (al acabar).
 - Como mucho 48 regiones y 16 archivos abiertos por proceso; `brk` hasta 1 GB y
   `mmap` hasta 1 TB de una vez.
+
+---
+
+## 11. La etapa 5, hecha (24/11/2026): los discos y los archivos
+
+### Las decisiones
+
+- **NVMe, con una cola por procesador.** La cola de administración y, de E/S,
+  una por procesador (hasta 8, o las que dé la controladora con «Set Features»):
+  cada procesador manda por la suya sin esperar a los demás. Cada cola, de 64
+  órdenes, con su mutex (una orden en marcha por cola: lo que hace falta mientras
+  el VFS haga una cosa a la vez) y su suceso. Los datos, por DMA a memoria física
+  seguida: PRP1, PRP2 o una lista de PRP (una página por cola), hasta 128 KB por
+  orden (o lo que diga MDTS). «Flush» al vaciar, si tiene caché de escritura. La
+  BAR 0 de 64 bits, donde esté (también por encima de 4 GB: la del ThinkPad y el
+  Monovate).
+- **AHCI, lo de Hispa-Pentium pasado a 64 bits.** El orden de la norma al
+  preparar cada puerto (parar, sus tablas, FRE, limpiar, mirar TFD y, si el disco
+  sigue ocupado, el COMRESET con FRE puesto: lo que pedía el ICH7 del Toshiba),
+  pedir la controladora a la BIOS (BOHC), sin reiniciarla. READ/WRITE DMA EXT
+  (LBA de 48 bits: los discos sin ella no se usan) y FLUSH CACHE EXT, un PRD de
+  hasta 128 KB. Con CAP.S64A, las direcciones de 64 bits; sin él, lo que esté por
+  encima de 4 GB pasa por una memoria de paso de debajo.
+- **Las interrupciones por mensaje (MSI-X y MSI), con plan B.** NVMe usa MSI-X
+  (la entrada 0 para todas las colas: la interrupción mira qué colas tienen
+  respuesta y despierta a quien espera en ellas); AHCI, MSI. Sin ellas
+  (`sinmsix`, `sinmsi`, o si el aparato no las tiene) **se mira la cola**,
+  cediendo el procesador. Y con ellas, por si una se pierde: quien espera mira
+  primero un momento (las órdenes rápidas no duermen), luego duerme en el suceso
+  **con plazo** (20 ms: `Sinc64.espera_plazo`, nuevo, con `Hilos64.duerme_en_hasta`)
+  y vuelve a mirar; a los 5 s sin respuesta, la orden falla (y se dice). Las
+  patillas INTx y el `_PRT` del AML no hacen falta.
+- **La caché de bloques, no una de páginas (aún).** Trozos de 4 KB de cada
+  disco, una página física cada uno (el disco los deja ahí por DMA), buscados por
+  (disco, bloque) en una tabla de dispersión, y el «reloj» para elegir cuál se
+  va. 1/16 de la memoria libre, de 1 a 64 MB. **Escritura diferida**: escribir
+  solo cambia la memoria; los bloques sucios van al disco cuando hace falta su
+  sitio, al pedirlo fsync, sync o el apagado, y si no, el hilo «vaciador» los
+  escribe a los 5 s. La caché de páginas (para `mmap` de archivos) llega con
+  musl (etapa 7), encima de esta.
+- **Un VFS sencillo y entero.** «/» es la unidad en memoria (un sistema de
+  archivos más, de solo leer); cada volumen que se sabe leer se ve como
+  «/nvme0p2», «/sata0p1»... (los nombres de Linux sin «n1»: «nvme0» es el espacio
+  de nombres 1; el 2 sería «nvme0n2»). Las rutas se limpian antes («.», «..», «//»:
+  no hay enlaces) y se busca el montaje más largo que encaje; dentro, sin mirar
+  mayúsculas (como FAT y exFAT, también las de Latin-1: «CANCIÓN» = «canción»).
+  Un nodo por archivo aunque se abra varias veces; lo abierto (posición y marcas)
+  lo comparten los descriptores hechos con `dup`. **Un mutex para todo el VFS**
+  (una operación a la vez): sencillo y seguro; los discos y la caché tienen los
+  suyos. Cuando haya hilos de POSIX y un navegador, se afinará (etapa 7).
+- **FAT32 entero (leer y escribir) y exFAT para leer.** FAT32: nombres largos
+  (VFAT, en UTF-16; aquí UTF-8), los cortos con las minúsculas de Windows NT (si
+  un nombre cabe en 8.3, corto; si no, el largo y «BASE~N» que no esté), las FAT
+  todas iguales, FSInfo al día (se fía de él si está bien; si no, cuenta la FAT),
+  borrar con el archivo abierto (como Linux: los cúmulos, al cerrarlo), mover
+  carpetas (con su «..»). exFAT, para leer: la suma del sector de arranque y la de
+  cada grupo de entradas, las cadenas de la FAT y los archivos seguidos
+  («NoFatChain»), ValidDataLength. **La escritura de exFAT queda para la etapa 6**
+  (el mapa de bits, las sumas y el «hash» del nombre con la tabla de mayúsculas),
+  con las memorias USB, que es cuando hace falta.
+- **Nada se escribe sin permiso.** Todos los discos son de solo leer salvo con
+  `escribir` en la línea de órdenes (el menú lo pone como entrada aparte, «solo en
+  VirtualBox o en discos de prueba»: el plan dice que nunca se escribe en el disco
+  interno de un equipo del taller sin permiso). Y las pruebas solo escriben en los
+  volúmenes que llevan la marca `HISPA64.PRB`, y a pelo solo en un disco que
+  empieza por «HISPA64 CRUDO».
+- **Los programas, también desde un disco.** `lanza` acepta una ruta
+  («/sata0p1/boot/prog/HOLACAS»): el archivo se lee entero por el VFS y se carga
+  igual que los de la unidad en memoria.
+- **Las pilas de los hilos, de 32 KB** (eran 16): las llamadas de los archivos
+  (VFS, FAT, caché, driver, esperas) son más hondas que las de la etapa 4.
+- **La consola, sin quitar las interrupciones mientras se espera** (`toma_atento`):
+  con la pantalla del GOP (dibujada letra a letra) y varios programas escribiendo a
+  la vez, un procesador podía esperar el cerrojo más de 2 s sin atender el aviso de
+  vaciar la TLB, y el núcleo se paraba («un procesador no contesta al aviso de
+  vaciar su TLB»); salió en la prueba por UEFI con 4 procesadores de esta etapa. Era
+  de la etapa 4.
+
+### Qué hace
+
+Hispa-64 0.5.0. Los módulos nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `msi64.cas` | MSI-X (la tabla de su BAR) y MSI (la capacidad de PCI), hacia el procesador que arranca; los vectores de los aparatos, desde 0x50 |
+| `nvme64.cas` | NVMe: reiniciar, la cola de administración, Identify (la controladora y los espacios de nombres), una cola de E/S por procesador, Read/Write con PRP y lista de PRP, Flush; la interrupción (MSI-X) o mirar la cola |
+| `ahci64.cas` | SATA por AHCI: el traspaso de la BIOS, cada puerto como dice la norma (con el COMRESET), IDENTIFY, READ/WRITE DMA EXT, FLUSH CACHE EXT; MSI o mirar el puerto; la memoria de paso sin S64A |
+| `bloques64.cas` | los discos y las particiones (GPT con su CRC32 y la copia del final; MBR con las lógicas de la extendida; un volumen sin tabla), la caché de bloques con escritura diferida y el hilo vaciador |
+| `archivos64.cas` | lo común: los nodos, los montajes, los errores de Linux, los nombres (UTF-8/UTF-16, sin mirar mayúsculas), la hora del DOS, el mutex del VFS |
+| `fat64.cas` | FAT32: montar, buscar, listar, leer, escribir, acortar, crear, borrar, renombrar y mover, carpetas; vaciar (FSInfo) |
+| `exfat64.cas` | exFAT, para leer: montar (con la suma), buscar, listar, leer |
+| `vfs64.cas` | el VFS: los montajes, las rutas, lo abierto, open/read/write/lseek/getdents64/stat/mkdir/unlink/rmdir/rename/ftruncate/fsync/sync, chdir; cargar un archivo entero (para arrancar un programa de un disco) |
+| `prdisco64.cas` | las pruebas de cada arranque (abajo) |
+| `sistema.cas` | las llamadas nuevas: 4 stat, 5 fstat, 6 lstat, 17 pread64, 18 pwrite64, 19 readv, 21 access, 32 dup, 33 dup2, 72 fcntl, 74 fsync, 75 fdatasync, 76 truncate, 77 ftruncate, 79 getcwd, 80 chdir, 81 fchdir, 82 rename, 83 mkdir, 84 rmdir, 87 unlink, 162 sync, 217 getdents64, 258 mkdirat, 262 newfstatat, 263 unlinkat (con AT_REMOVEDIR), 264 renameat, 269 faccessat, 292 dup3, 316 renameat2 (sin marcas); open y openat ya con O_CREAT, O_EXCL, O_TRUNC, O_APPEND y O_DIRECTORY; read y write a archivos |
+| `procesos.cas` | los descriptores (32) apuntan a lo abierto del VFS y se cierran al salir; la carpeta actual; arrancar un programa por su ruta |
+| `sinc64.cas`, `hilos64.cas` | esperar un suceso con plazo (`espera_plazo`, `duerme_en_hasta`) |
+| `cerrojo.cas` | `toma_atento` (el cerrojo de la consola) |
+| `pci64.cas` | lo de cada aparato para los drivers: la clase, las BAR, la configuración, las capacidades, habilitar DMA |
+| `programas/` | `archivos.c` (ARCHIVOS: las pruebas de los archivos desde el anillo 3), `hazdiscos.sh` (los discos de prueba) y `hazexfat.py` (un volumen exFAT, sin mkfs.exfat) |
+| `imagen.sh` | el disco, de 128 MB con una partición de pruebas (FAT32, con la marca); el VDI para VirtualBox (qemu-img); las entradas del menú «con escritura» y «sin MSI ni MSI-X» |
+
+Lo que dice (QEMU, q35, multiboot, 4 procesadores, con `escribir`; abreviado):
+
+```
+Discos:
+NVMe: 00:02.0 1B36:0010, «QEMU NVMe Ctrl» (serie hispa64), versión 1.4
+  BAR 0 en 0xFEBF0000; 4 colas de E/S (una por procesador) de 64 órdenes; MSI-X; hasta 128 KB por orden; con caché de escritura
+SATA (AHCI): 00:1F.2 8086:2922, AHCI 1.0, 6 puertos, direcciones de 64 bits; MSI; 1 disco
+  la caché de bloques: 4037 bloques de 4 KB (15,7 MB), con escritura diferida (a los 5 s, o al vaciar)
+  nvme0: «QEMU NVMe Ctrl», 112,0 MB (229376 sectores de 512 octetos), tabla GPT; se puede escribir
+    nvme0p1: 40,0 MB, desde el sector 2048, EFI
+    nvme0p2: 70,9 MB, desde el sector 83968, datos (Windows: FAT, exFAT o NTFS)
+  nvme1: «QEMU NVMe Ctrl», 16,0 MB (32768 sectores de 512 octetos), sin tabla de particiones; se puede escribir
+  sata0: «QEMU HARDDISK», 128,0 MB (262144 sectores de 512 octetos), tabla MBR; se puede escribir
+    sata0p1: 84,0 MB, desde el sector 2048, FAT32
+    sata0p5: 32,0 MB, desde el sector 182272, exFAT o NTFS
+Archivos (el VFS): 5 montajes
+  /: la unidad en memoria (7 archivos), de solo leer
+  /nvme0p1: FAT32 «ESP», 39,3 MB en 80628 cúmulos de 512 octetos, 39,3 MB libres; de leer y escribir
+  /nvme0p2: FAT32 «DATOS», 69,8 MB en 143076 cúmulos de 512 octetos, 69,5 MB libres; de leer y escribir
+  /sata0p1: FAT32 «SATAFAT», 83,3 MB en 85332 cúmulos de 1 KB, 83,0 MB libres; de leer y escribir
+  /sata0p5: exFAT «EXFATPRB», 31,9 MB en 8168 cúmulos de 4 KB; de solo leer
+...
+La caché: los primeros 4 KB de los 3 discos, iguales por la caché y a pelo
+Disco crudo de pruebas: nvme1 (16,0 MB)
+  escribir y leer a pelo: 1 sector, 8, 256 (128 KB), 500 (varias órdenes) y los 300 del final: iguales; más allá del final, no
+  leerlo entero (de 128 KB en 128 KB): 16 MB en 29 ms (573 MB/s)
+  4 hilos a la vez, cada uno en su procesador, 32 lecturas de 128 KB cada uno: bien; colas de NVMe usadas: 4
+ARCHIVOS: 4 volúmenes en /: /nvme0p1 /nvme0p2 /sata0p1 /sata0p5
+ARCHIVOS en /nvme0p2 (un disco de prueba):
+  lee lo del anfitrión: LEEME.TXT, un nombre largo con acentos y PATRON.BIN (300000 octetos), bien
+  la prueba en /nvme0p2/Prueba de Hispa-64: crear, escribir, leer, O_APPEND, pwrite, 1,2 MB, huecos, ftruncate, nombres largos, 40 archivos, rename, unlink abierto, *at, chdir, los errores
+ARCHIVOS en /sata0p1 (un disco de prueba): ...
+ARCHIVOS en /sata0p5 (un disco de prueba):
+  lee lo del anfitrión: LEEME.TXT, un nombre largo con acentos y PATRON.BIN (300000 octetos), bien
+  de solo leer (EROFS): no se escribe
+ARCHIVOS: 3 discos de prueba (2 escritos); todo bien (192 pruebas)
+Programa «ARCHIVOS auto»: acaba con el código 0, como debe (en ... ms)
+/:
+  ARCHIVOS (25960 octetos)
+  ...
+  nvme0p2/
+    HISPA64.PRB (56 octetos)
+    LEEME.TXT (51 octetos)
+    PATRON.BIN (300000 octetos)
+    Carpeta con nombre largo/
+      Canción de cuna ñandú.txt (37 octetos)
+    Prueba de Hispa-64/
+      grande.bin (1234567 octetos)
+      ...
+Después de los archivos: 0 abiertos, 5 nodos (los de antes: las raíces), el montón como antes
+Hispa-64 etapa 5: todo en orden.
+Al apagar: 6 bloques sin escribir en la caché; vaciados (sync): 8 escritos
+```
+
+La prueba de ARCHIVOS en cada volumen de prueba (92 comprobaciones): mkdir con
+nombre largo (y otra vez: EEXIST), crear, escribir y leer, stat, O_APPEND, fstat,
+pwrite (sin mover la posición), O_CREAT|O_EXCL, un archivo de 1.234.567 octetos en
+trozos de 64 KB con fsync, 100 octetos cambiados en medio con lseek y leído entero,
+un hueco (pwrite más allá del final: lo de en medio, a cero), ftruncate más corto y
+más largo (a cero), O_TRUNC, truncate por la ruta, un nombre largo con acentos
+abierto en mayúsculas («ÁÉÍÓÚ», «Ñ»), 40 archivos con nombre largo en una carpeta
+(con cúmulos de 512 octetos crece 8 veces) y 20 borrados, getdents64 (con «.» y
+«..»), rename en la misma carpeta, a otra, de una carpeta, de una carpeta a otra
+carpeta y vuelta, dentro de sí misma (EINVAL), encima de otro, unlink de uno
+abierto (se sigue leyendo), openat, newfstatat (también con AT_EMPTY_PATH),
+mkdirat, renameat, unlinkat (con y sin AT_REMOVEDIR), chdir y getcwd, rutas con
+«.» y «..», y los errores: ENOENT, EISDIR, ENOTDIR (O_DIRECTORY, pasar por un
+archivo, rmdir de un archivo, openat desde la consola), ENOTEMPTY, EINVAL (un
+nombre con «:»), ENAMETOOLONG (300 letras), EXDEV (a otro montaje), EROFS (la
+unidad en memoria), EBUSY (rmdir de un montaje); dup (comparten la posición), sync,
+y ULTIMO.TXT escrito sin fsync, que lo vacía el apagado.
+
+El núcleo ocupa 188 KB (eran 124).

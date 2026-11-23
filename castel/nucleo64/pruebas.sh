@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
-# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0, 1, 2, 3 y 4:
+# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0, 1, 2, 3, 4 y 5:
 #   - el núcleo (hispa64.cas) se compila igual con ccastel.py y NASM que con
 #     ensambla.py (y, si se da CASTEL64=ruta y ENSAMB64=ruta, con ellos);
 #   - arranca en QEMU por multiboot (-kernel, con HISPA64.SIM de módulo) con
@@ -59,7 +59,21 @@
 #     pilas); y con 2 procesadores o más, que el aviso de quitar una página de
 #     un espacio va solo al que lo tiene puesto (con SMEP, SMAP y UMIP con
 #     -cpu max); y el CD (grub-mkrescue) por BIOS y por UEFI.
-# Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 5 minutos)
+#   - [etapa 5] los discos y los archivos, con los discos de prueba de
+#     programas/hazdiscos.sh (NVMe con GPT, SATA con MBR y una lógica exFAT,
+#     dos de 3 TB con una partición más allá de 2^32 sectores, uno crudo):
+#     NVMe (con MSI-X y una cola por procesador) y AHCI (con MSI), y sin
+#     ellas («sinmsix sinmsi», con la AHCI aparte de «pc»); las particiones;
+#     el disco crudo escrito y leído a pelo y por cuatro hilos a la vez; el
+#     programa ARCHIVOS (crear, escribir, leer, O_APPEND, O_TRUNC,
+#     pread/pwrite, huecos, ftruncate, nombres largos con acentos, 40
+#     archivos, getdents64, rename, unlink de uno abierto, las *at, chdir,
+#     los errores; exFAT, de solo leer); al apagar, lo que quedaba en la
+#     caché, al disco; y desde el anfitrión, fsck.fat sin quejas y lo dejado
+#     comprobado con mtools; sin «escribir», ni un octeto cambiado; y por UEFI
+#     desde el disco de la imagen puesto en SATA (la partición EFI a la vista,
+#     un programa arrancado desde ella).
+# Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
 T=${1:-/tmp/hispa64-pruebas}
@@ -72,7 +86,7 @@ OVMF_C=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_V=/usr/share/OVMF/OVMF_VARS_4M.fd
 DBG="-device isa-debug-exit,iobase=0xf4,iosize=0x04"
 
-echo "== Hispa-64, etapas 0, 1, 2, 3 y 4 =="
+echo "== Hispa-64, etapas 0, 1, 2, 3, 4 y 5 =="
 # ---- compilar ----
 if python3 -I "$C/ccastel.py" "$AQUI/hispa64.cas" -o "$T/hispa64.asm" -I "$C/nucleo32" > "$T/comp.txt" 2>&1 \
    && nasm -f bin "$T/hispa64.asm" -o "$T/HISPA64.BIN" 2>> "$T/comp.txt" \
@@ -152,14 +166,14 @@ e3_bien() {   # SALIDA N
     && grep -q "^  y uno interactivo que duerme 10 ms, 10 veces, en ese mismo procesador: se pasa de media [0-9,]* ms (pasa por delante: [1-9][0-9]* expropiaciones)$" <<< "$v" \
     && entre "$s" "se pasa de media " 0 25 \
     && { [ "$n" = 1 ] || grep -q "^  y, ya con el marco nuevo en su TLB (lee 0x2222), quitada con aviso (desmapea: 1 aviso por IPI): al [0-9]* le falla la lectura (fallo de página en 0xFFFFD00100000000, con red), como debe$" <<< "$v"; } \
-    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 4: todo en orden.$" <<< "$v"
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 5: todo en orden.$" <<< "$v"
 }
 # [etapa 4] los programas, con N procesadores
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 6 archivos: " <<< "$v" \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.4.0 x86_64$" <<< "$v" \
+    && grep -q "^Unidad en memoria: 7 archivos: " <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.5.0 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -181,7 +195,7 @@ e4_bien() {   # SALIDA N
     && grep -q "^  la memoria: la de antes; el montón: [0-9]* bloques (los de antes); las pilas: [0-9]* (las de antes)$" <<< "$v" \
     && { [ "$n" = 1 ] || grep -q "^  quitada (desde el procesador [0-9]*, sin el espacio puesto): 1 aviso por IPI; al 1 le falla la lectura: sí" <<< "$v"; } \
     && { [ "$n" -lt 3 ] || grep -q "; al 2, al volver a ponerlo, también: sí$" <<< "$v"; } \
-    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 4: todo en orden.$" <<< "$v"
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 5: todo en orden.$" <<< "$v"
 }
 e4_dice() {   # SALIDA
   serie "$1" | grep -E '^Programa|^HOLA|^MEMORIA|^A la vez|^Malos|^Después|^  la memoria|^  quitada|MAL|parado' | cut -c1-120 | paste -sd '|'
@@ -208,14 +222,14 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.4.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.5.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 12[0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9]* KB usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
    && hay $S "^Páginas: de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día); de 2 MB, también; de 1 GB, no (el procesador no las tiene)$" \
    && hay $S "^  el código del núcleo, sin escribir: sí; los datos, sin ejecutar: sí; la guarda de la pila, sin poner: sí$" \
    && hay $S "^Montón: 2000 reservas y liberaciones al azar .*, comprobadas; al acabar, 0 en uso y la memoria física, la de antes" \
-   && hay $S "Punto de parada (int3) número 1 .*: atendido, sigue." && hay $S "^Hispa-64 etapa 4: todo en orden.$"; then
+   && hay $S "Punto de parada (int3) número 1 .*: atendido, sigue." && hay $S "^Hispa-64 etapa 5: todo en orden.$"; then
   ok "por multiboot con 128 MB: en la mitad alta, «$(serie $S | grep '^Memoria:')», sin la identidad, las páginas de 4 KB y 2 MB, el montón y «todo en orden» (código 42)"
 else ko "por multiboot con 128 MB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|Páginas|Montón|parado' | paste -sd ' ')"; fi
 # [etapa 2] lo mismo, con «-machine pc» (i440FX y PIIX4: sin MCFG, PCI por los puertos)
@@ -245,7 +259,7 @@ S=$T/q35.txt
 if [ $c = 85 ] && hay $S "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" && hay $S "^  MCFG: PCIe por ECAM en 0xB0000000, segmento 0, buses 0 a 255$" \
    && hay $S "^  FADT: .*8042: sí" && tics_bien $S "el HPET" && hay $S "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" \
    && hay $S "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 puentes$" && hay $S "^  01:00.0 1B36:000D bus serie: USB 3 (xHCI)" \
-   && hay $S "^      BAR0 0x[0-9A-F]*, 16 KB de memoria de 64 bits$" && pci_igual $S -m 256 $PCIQ && hay $S "^Hispa-64 etapa 4: todo en orden.$"; then
+   && hay $S "^      BAR0 0x[0-9A-F]*, 16 KB de memoria de 64 bits$" && pci_igual $S -m 256 $PCIQ && hay $S "^Hispa-64 etapa 5: todo en orden.$"; then
   ok "etapa 2, por multiboot, «q35» con 4 procesadores: la MADT con 4, PCIe por ECAM, $(pci_nucleo $S | wc -l) funciones (el puente y el xHCI del bus 1, con su BAR de 64 bits), las mismas que dice QEMU; «$(serie $S | grep '^Tic:')»"
 else ko "etapa 2 con «q35» y 4 procesadores no dice lo que debe (código $c): $(serie $S | grep -E 'MADT|^Tic|^IOAPIC:|^PCI|parado' | paste -sd ' ')"; diff <(pci_nucleo $S) <(pci_qemu -m 256 $PCIQ) | head -5 | sed 's/^/        /'; fi
 if e3_bien $S 4 && hay $S "^  con INIT-SIPI-SIPI y el trampolín en 0x[0-9A-F]* (16, 32 y 64 bits)"; then
@@ -283,7 +297,7 @@ if [ $c = 85 ] && e3_bien $S 4 && hay $S "la tarea ociosa, con mwait, FORZADO (o
   ok "ocioso=mwait con -cpu max y 4 procesadores: la tarea ociosa con monitor/mwait, y todo igual"
 else ko "ocioso=mwait no sale (código $c): $(serie $S | grep -E '^Planificador' | cut -c1-120) $(e3_dice $S)"; fi
 mb1 "apagar sinpruebas sinsmp" "$T/sinsmp.txt" 256 -machine q35 -smp 4; c=$?
-if [ $c = 85 ] && hay "$T/sinsmp.txt" "^Procesadores: 1 en marcha (APIC 0) (sinsmp: los demás, apagados)$" && hay "$T/sinsmp.txt" "^Hispa-64 etapa 4: todo en orden.$"; then
+if [ $c = 85 ] && hay "$T/sinsmp.txt" "^Procesadores: 1 en marcha (APIC 0) (sinsmp: los demás, apagados)$" && hay "$T/sinsmp.txt" "^Hispa-64 etapa 5: todo en orden.$"; then
   ok "sinsmp: con 4 en la MADT, solo el que arranca (los demás, apagados)"
 else ko "sinsmp no sale (código $c): $(serie "$T/sinsmp.txt" | grep -E '^Procesadores|parado' | paste -sd ' ')"; fi
 # el teclado (las teclas, desde el monitor de QEMU), el botón de encendido y apagar por ACPI
@@ -313,13 +327,13 @@ else ko "prueba=acpiapagar no apaga (código $c): $(serie "$T/acpiapagar.txt" | 
 mb1 apagar "$T/mb3g.txt" 3G -cpu max; c=$?
 S=$T/mb3g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 2,9 GB libres" && hay $S "en páginas de 1 GB: [1-9]" && hay $S "; de 1 GB, también$" \
-   && hay $S "^Hispa-64 etapa 4: todo en orden.$"; then
+   && hay $S "^Hispa-64 etapa 5: todo en orden.$"; then
   ok "por multiboot con 3 GB y -cpu max: «$(serie $S | grep '^Memoria:' | cut -d';' -f1)»; el mapa directo con páginas de 1 GB; una de 1 GB puesta, leída y quitada"
 else ko "por multiboot con 3 GB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|Páginas|parado' | paste -sd ' ')"; fi
 mb1 apagar "$T/mb8g.txt" 8G; c=$?
 S=$T/mb8g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 7,9 GB libres en [0-9]* trozos (de 7,9 GB" && hay $S "en páginas de 1 GB: 0; de 2 MB: 4[0-9][0-9][0-9];" \
-   && hay $S "^Hispa-64 etapa 4: todo en orden.$"; then
+   && hay $S "^Hispa-64 etapa 5: todo en orden.$"; then
   ok "por multiboot con 8 GB (qemu64, sin páginas de 1 GB): «$(serie $S | grep '^Memoria:' | cut -d';' -f1)»; el mapa directo, con páginas de 2 MB"
 else ko "por multiboot con 8 GB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|directo|parado' | paste -sd ' ')"; fi
 mb1 "apagar sinmedir sinpruebas prueba=monton" "$T/monton.txt" 256; c=$?
@@ -397,6 +411,125 @@ if [ $c = 124 ] && grep -q "Hispa-64: el procesador no es de 64 bits. Use Hispa-
   ok "con un procesador sin modo largo lo dice por el puerto serie y se para"
 else ko "sin modo largo no lo dice (código $c): $(tr -d '\r' < "$T/no64.txt" | paste -sd ' ')"; fi
 
+# ---- [etapa 5] los discos y los archivos ----
+# los discos de prueba (programas/hazdiscos.sh), y una copia de trabajo de cada uno
+DS=$T/discos
+if "$AQUI/programas/hazdiscos.sh" "$DS" > "$T/discos.txt" 2>&1; then
+  ok "los discos de prueba (hazdiscos.sh: GPT y MBR con una lógica, FAT32 con mkfs.fat, exFAT con hazexfat.py; 3 TB dispersos): $(tail -1 "$T/discos.txt" | cut -d: -f2)"
+else ko "no se hacen los discos de prueba: $(tail -2 "$T/discos.txt" | paste -sd ' ')"; fi
+copia_discos() { rm -rf "$T/w5"; mkdir -p "$T/w5"; cp --sparse=always "$DS"/*.img "$T/w5/"; }
+# una partición de una imagen, suelta: IMAGEN PRIMER_SECTOR SECTORES SALIDA
+saca() { dd if="$1" of="$4" bs=512 skip="$2" count="$3" status=none; }
+# fsck.fat -n de una partición: 0 y sin quejas (también el resumen de libres)
+fsck_bien() {   # IMAGEN PRIMER_SECTOR SECTORES
+  saca "$1" "$2" "$3" "$T/fsck.part"
+  local r c
+  r=$(fsck.fat -n -v "$T/fsck.part" 2>&1); c=$?
+  [ $c = 0 ] && ! grep -qiE 'wrong|differ|dirty|bad|lost|invalid' <<< "$r"
+}
+fsck_dice() { fsck.fat -n "$T/fsck.part" 2>&1 | tail -1; }
+# lo que deja ARCHIVOS en un volumen (comprobado desde el anfitrión, con mtools)
+lo_dejado() {   # IMAGEN PRIMER_SECTOR SECTORES
+  local p="$T/dejado.part" d="::Prueba de Hispa-64"
+  saca "$1" "$2" "$3" "$p"
+  [ "$(mtype -i "$p" ::ULTIMO.TXT 2> /dev/null)" = "Escrito sin fsync: lo vacía el apagado." ] \
+    && [ "$(mtype -i "$p" "$d/adios.txt" 2> /dev/null)" = "$(printf 'Hola, MUNDO\nsegunda línea')" ] \
+    && [ "$(mtype -i "$p" "$d/Un nombre muy largo con acentos áéíóú y eñe ñ.txt" 2> /dev/null)" = "¡Hola!" ] \
+    && [ "$(mtype -i "$p" "$d/sub2/Dentro/movido.txt" 2> /dev/null)" = "me han movido" ] \
+    && [ "$(mdir -b -i "$p" "$d/Muchos" 2> /dev/null | grep -c 'archivo número [0-9][13579].txt$')" = 20 ] \
+    && [ "$(mdir -b -i "$p" "$d/Muchos" 2> /dev/null | wc -l)" = 20 ] \
+    && mcopy -n -i "$p" "$d/grande.bin" "$T/grande.bin" 2> /dev/null \
+    && python3 -I -c '
+import sys
+d = open(sys.argv[1], "rb").read()
+e = bytearray(((i * 131 + (i >> 8)) & 255) for i in range(1234567))
+e[500000:500100] = b"X" * 100
+sys.exit(0 if d == bytes(e) else 1)' "$T/grande.bin" \
+    && [ "$(mdir -i "$p" "$d" 2> /dev/null | grep -c '^hueco *bin *3 ')" = 1 ] \
+    && ! mdir -i "$p" "$d" 2> /dev/null | grep -qE 'hola *txt|uno *txt|dos *txt|abierto|desde|movido'
+}
+e5_bien() {   # SALIDA: lo que dice siempre una vuelta de la etapa 5 sin fallos
+  local v; v=$(serie "$1")
+  grep -q "^Después de los archivos: 0 abiertos, [0-9]* nodos (los de antes: las raíces), el montón como antes$" <<< "$v" \
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 5: todo en orden.$" <<< "$v"
+}
+e5_dice() { serie "$1" | grep -E '^NVMe|^SATA|^  /|^ARCHIVOS|MAL|^Después de los|parado|^Al apagar' | cut -c1-140 | paste -sd '|'; }
+NVME5="-drive file=$T/w5/nvme.img,if=none,id=n0,format=raw -device nvme,serial=hispa64,drive=n0"
+CRUDO5="-drive file=$T/w5/crudo.img,if=none,id=n1,format=raw -device nvme,serial=crudo,drive=n1"
+SATA5="-drive file=$T/w5/sata.img,if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0"
+# 1. q35 con 4 procesadores: NVMe (GPT), un NVMe crudo y SATA (MBR con una exFAT), escribiendo
+copia_discos
+# shellcheck disable=SC2086
+mb1 "apagar escribir" "$T/e5.txt" 256 -machine q35 -smp 4 $NVME5 $CRUDO5 $SATA5; c=$?
+S=$T/e5.txt
+if [ $c = 85 ] && hay $S "^NVMe: 00:0[0-9A-F].0 1B36:0010, «QEMU NVMe Ctrl» (serie hispa64), versión 1.4$" \
+   && hay $S "^  BAR 0 en 0x[0-9A-F]*; 4 colas de E/S (una por procesador) de 64 órdenes; MSI-X; hasta 128 KB por orden; con caché de escritura$" \
+   && hay $S "^SATA (AHCI): 00:1F.2 8086:2922, AHCI 1.0, 6 puertos, direcciones de 64 bits; MSI; 1 disco$" \
+   && hay $S "^  nvme0: «QEMU NVMe Ctrl», 112,0 MB (229376 sectores de 512 octetos), tabla GPT; se puede escribir$" \
+   && hay $S "^    nvme0p1: 40,0 MB, desde el sector 2048, EFI$" && hay $S "^    nvme0p2: 70,9 MB, desde el sector 83968, datos (Windows: FAT, exFAT o NTFS)$" \
+   && hay $S "^  sata0: «QEMU HARDDISK», 128,0 MB (262144 sectores de 512 octetos), tabla MBR; se puede escribir$" \
+   && hay $S "^    sata0p1: 84,0 MB, desde el sector 2048, FAT32$" && hay $S "^    sata0p5: 32,0 MB, desde el sector 182272, exFAT o NTFS$" \
+   && hay $S "^  nvme1: «QEMU NVMe Ctrl», 16,0 MB (32768 sectores de 512 octetos), sin tabla de particiones; se puede escribir$" \
+   && hay $S "^Archivos (el VFS): 5 montajes$" && hay $S "^  /nvme0p1: FAT32 «ESP», .*; de leer y escribir$" \
+   && hay $S "^  /nvme0p2: FAT32 «DATOS», 69,8 MB en 143076 cúmulos de 512 octetos, " && hay $S "^  /sata0p1: FAT32 «SATAFAT», 83,3 MB en 85332 cúmulos de 1 KB" \
+   && hay $S "^  /sata0p5: exFAT «EXFATPRB», 31,9 MB en 8168 cúmulos de 4 KB; de solo leer$" \
+   && hay $S "^La caché: los primeros 4 KB de los 3 discos, iguales por la caché y a pelo$" \
+   && hay $S "^  escribir y leer a pelo: 1 sector, 8, 256 (128 KB), 500 (varias órdenes) y los 300 del final: iguales; más allá del final, no$" \
+   && hay $S "^  4 hilos a la vez, cada uno en su procesador, 32 lecturas de 128 KB cada uno: bien; colas de NVMe usadas: 4$" \
+   && hay $S "^ARCHIVOS: 3 discos de prueba (2 escritos); todo bien ([0-9]* pruebas)$" && hay $S "^Programa «ARCHIVOS auto»: acaba con el código 0, como debe" \
+   && hay $S "^      Canción de cuna ñandú.txt (37 octetos)$" && hay $S "^Al apagar: [1-9][0-9]* bloques sin escribir en la caché; vaciados (sync): [1-9][0-9]* escritos$" \
+   && e5_bien $S; then
+  ok "etapa 5 (q35, 4 procesadores, MSI-X y MSI): NVMe con 4 colas, SATA, GPT y MBR con una lógica, 4 volúmenes (FAT32 y exFAT); «$(serie $S | grep '^  leerlo entero' | cut -d: -f2- | sed 's/^ //')»; «$(serie $S | grep '^ARCHIVOS: 3')»; al apagar, lo sin vaciar, al disco"
+else ko "etapa 5 en q35 no dice lo que debe (código $c): $(e5_dice $S)"; fi
+e4_ok $S 4 "con los discos (q35, 4 procesadores)"
+if fsck_bien "$T/w5/nvme.img" 83968 145375 && lo_dejado "$T/w5/nvme.img" 83968 145375 \
+   && fsck_bien "$T/w5/sata.img" 2048 172032 && lo_dejado "$T/w5/sata.img" 2048 172032 \
+   && fsck_bien "$T/w5/nvme.img" 2048 81920; then
+  ok "desde el anfitrión: fsck.fat sin quejas en los dos FAT32 escritos (y la EFI) y, con mtools, lo que ha dejado ARCHIVOS (los nombres largos con acentos, grande.bin byte a byte, los 20 de Muchos, ULTIMO.TXT, que vació el apagado)"
+else ko "desde el anfitrión, los volúmenes escritos no están bien: $(fsck_dice)"; fi
+# 2. 3 TB: las particiones de más allá de 2^32 sectores, por NVMe y por SATA (LBA de 48 bits)
+# shellcheck disable=SC2086
+mb1 "apagar escribir" "$T/e5g.txt" 512 -machine q35 -smp 2 -drive file="$T/w5/grande.img",if=none,id=n0,format=raw -device nvme,serial=grande,drive=n0 \
+  -drive file="$T/w5/grande2.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.1; c=$?
+S=$T/e5g.txt
+if [ $c = 85 ] && hay $S "^  nvme0: «QEMU NVMe Ctrl», 3072,0 GB (6442450944 sectores de 512 octetos), tabla GPT; se puede escribir$" \
+   && hay $S "^    nvme0p2: 80,0 MB, desde el sector 4999999488, " && hay $S "^    sata0p2: 80,0 MB, desde el sector 4999999488, " \
+   && hay $S "^  /nvme0p2: FAT32 «G2ALTO»" && hay $S "^  /sata0p2: FAT32 «G2ALTO»" \
+   && hay $S "^ARCHIVOS: 4 discos de prueba (4 escritos); todo bien ([0-9]* pruebas)$" && e5_bien $S \
+   && fsck_bien "$T/w5/grande.img" 4999999488 163840 && lo_dejado "$T/w5/grande.img" 4999999488 163840 \
+   && fsck_bien "$T/w5/grande2.img" 4999999488 163840 && lo_dejado "$T/w5/grande2.img" 4999999488 163840; then
+  ok "etapa 5 con dos discos de 3 TB (NVMe y SATA): las particiones desde el sector 4.999.999.488 (más allá de 2^32), escritas y leídas; fsck.fat sin quejas y lo dejado, bien"
+else ko "etapa 5 con discos de 3 TB no sale (código $c): $(e5_dice $S) $(fsck_dice)"; fi
+# 3. sin interrupciones (sinmsix sinmsi), «pc» con una AHCI aparte: se mira la cola
+copia_discos
+# shellcheck disable=SC2086
+mb1 "apagar escribir sinmsix sinmsi" "$T/e5s.txt" 256 -machine pc -smp 2 $NVME5 $CRUDO5 -device ahci,id=ah \
+  -drive file="$T/w5/sata.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ah.2; c=$?
+S=$T/e5s.txt
+if [ $c = 85 ] && [ "$(serie $S | grep -c '; sin interrupciones (se mira la cola);')" = 3 ] \
+   && hay $S "^ARCHIVOS: 3 discos de prueba (2 escritos); todo bien" && e5_bien $S \
+   && fsck_bien "$T/w5/sata.img" 2048 172032 && lo_dejado "$T/w5/sata.img" 2048 172032; then
+  ok "etapa 5 sin MSI ni MSI-X («pc», 2 procesadores, la AHCI aparte): las tres controladoras mirando la cola, y todo igual (fsck.fat, bien)"
+else ko "etapa 5 sin interrupciones no sale (código $c): $(e5_dice $S)"; fi
+# 4. sin «escribir»: nada cambia en los discos (ni un octeto)
+copia_discos
+antes=$(cat "$T"/w5/nvme.img "$T"/w5/sata.img "$T"/w5/crudo.img | md5sum)
+# shellcheck disable=SC2086
+mb1 "apagar" "$T/e5r.txt" 256 -machine q35 -smp 2 $NVME5 $CRUDO5 $SATA5; c=$?
+S=$T/e5r.txt
+if [ $c = 85 ] && [ "$(cat "$T"/w5/nvme.img "$T"/w5/sata.img "$T"/w5/crudo.img | md5sum)" = "$antes" ] \
+   && [ "$(serie $S | grep -c '; solo se lee$')" = 3 ] && hay $S "^  no se escribe en él (sin «escribir» en la línea de órdenes)$" \
+   && [ "$(serie $S | grep -c '^  de solo leer (EROFS): no se escribe$')" = 3 ] \
+   && hay $S "^ARCHIVOS: 3 discos de prueba (0 escritos); todo bien" && ! hay $S "^Al apagar" && e5_bien $S; then
+  ok "etapa 5 sin «escribir»: todo de solo leer (EROFS), y los discos, iguales octeto a octeto (md5sum)"
+else ko "etapa 5 sin «escribir» no sale (código $c): $(e5_dice $S)"; fi
+# 5. el núcleo de antes de la etapa 5 no escribía; el de ahora, con los discos y sin pruebas
+# shellcheck disable=SC2086
+mb1 "apagar sinpruebas escribir" "$T/e5n.txt" 256 -machine q35 -smp 4 $NVME5 $CRUDO5 $SATA5; c=$?
+if [ $c = 85 ] && hay "$T/e5n.txt" "^Hispa-64 etapa 5: todo en orden.$" && hay "$T/e5n.txt" "^  4 hilos a la vez"; then
+  ok "sinpruebas con los discos: el disco crudo sí (es del núcleo), los programas no"
+else ko "sinpruebas con los discos no sale (código $c): $(e5_dice "$T/e5n.txt")"; fi
+
 # ---- por UEFI de 64 bits (OVMF), con GRUB y multiboot2 ----
 if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /dev/null; then
   "$AQUI/imagen.sh" "$T/uefi" prueba > "$T/img.txt" 2>&1 || ko "imagen.sh no hace la imagen: $(tail -2 "$T/img.txt" | paste -sd ' ')"
@@ -409,13 +542,13 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   }
   uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.4.0 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.5.0 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
      && grep -q "^Memoria: 1[0-9][0-9],[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
      && grep -q "^ACPI: 2.0 o más, de «BOCHS »; XSDT en 0x[0-9A-F]*, [0-9]* tablas: FACP APIC HPET MCFG .*DSDT (todas con la suma bien)$" <<< "$S" \
-     && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 4: todo en orden.$" <<< "$S"; then
+     && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 5: todo en orden.$" <<< "$S"; then
     ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 128 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
   else ko "por UEFI con 128 MB no dice lo que debe (código $c): $(grep -E 'Memoria:|pantalla, en|parado' <<< "$S" | paste -sd ' ')"; fi
   e4_ok "$T/uefi.txt" 1 "por UEFI (GRUB, module2) con 1 procesador"
@@ -423,7 +556,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   S=$(serie "$T/uefi-max.txt")
   if [ $c = 85 ] && grep -q "páginas de 1 GB: sí" <<< "$S" && grep -q "; 4 procesadores lógicos en el paquete" <<< "$S" \
      && grep -q "^  0x00000001.*disponible$" <<< "$S" && grep -q "^Memoria: 2,9 GB libres" <<< "$S" && grep -q "en páginas de 1 GB: [1-9]" <<< "$S" \
-     && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 4: todo en orden.$" <<< "$S" \
+     && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 5: todo en orden.$" <<< "$S" \
      && grep -q "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" <<< "$S" && tics_bien "$T/uefi-max.txt" "el HPET" 50 \
      && grep -q "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" <<< "$S" \
      && grep -q "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 BAR por encima de 4 GB$" <<< "$S" \
@@ -452,6 +585,25 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
      && e3_bien "$T/uefi-pc.txt" 2; then
     ok "por UEFI con «-machine pc» (i440FX, 2 procesadores): la MADT con 2, PCI por los puertos, la misma lista que QEMU; «$(grep '^Tic:' <<< "$S")»"
   else ko "por UEFI con «pc» no dice lo que debe (código $c): $(grep -E 'MADT|^Tic|^PCI|parado' <<< "$S" | paste -sd ' ')"; fi
+  # [etapa 5] por UEFI desde el disco de la imagen puesto en SATA (q35): la
+  # partición EFI y la de pruebas, a la vista; un programa arrancado desde el disco
+  "$AQUI/imagen.sh" "$T/uefi5" prueba "apagar escribir dir=/sata0p1 programa=/sata0p1/boot/prog/HOLACAS" > "$T/img5.txt" 2>&1 \
+    || ko "imagen.sh (etapa 5) no hace la imagen: $(tail -2 "$T/img5.txt" | paste -sd ' ')"
+  rm -f "$T/uefi5.txt"; cp $OVMF_V "$T/vars5.fd"
+  timeout 200 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/vars5.fd" \
+    -drive file="$T/uefi5/hispa64.img",if=none,id=b0,format=raw -device ide-hd,drive=b0,bus=ide.0 -m 512 -smp 4 \
+    -display none -serial file:"$T/uefi5.txt" -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
+  S="$T/uefi5.txt"
+  read -r i2 f2 <<< "$(sgdisk -i 2 "$T/uefi5/hispa64.img" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
+  if [ $c = 85 ] && hay $S "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" && hay $S "^    sata0p1: 80,0 MB, desde el sector 2048, EFI$" \
+     && hay $S "^  /sata0p1: FAT32 «HISPA64», " && hay $S "^  /sata0p2: FAT32 «PRUEBAS», " \
+     && hay $S "^        BOOTX64.EFI ([0-9]* octetos)$" && hay $S "^      HISPA64.BIN ([0-9]* octetos)$" \
+     && hay $S "^ARCHIVOS: 1 disco de prueba (1 escrito); todo bien" \
+     && hay $S "^Programa «/sata0p1/boot/prog/HOLACAS»: acaba con el código 0, como debe" && e5_bien $S \
+     && fsck_bien "$T/uefi5/hispa64.img" 2048 163840 && fsck_bien "$T/uefi5/hispa64.img" "$i2" $(( f2 - i2 + 1 )) \
+     && lo_dejado "$T/uefi5/hispa64.img" "$i2" $(( f2 - i2 + 1 )); then
+    ok "etapa 5 por UEFI desde SATA (el disco de la imagen): la partición EFI a la vista (BOOTX64.EFI, HISPA64.BIN), HOLACAS arrancado desde ella, la de pruebas escrita; fsck.fat, bien en las dos"
+  else ko "etapa 5 por UEFI desde SATA no sale (código $c): $(e5_dice $S) $(fsck_dice)"; fi
   # [etapa 4] el CD (grub-mkrescue): por BIOS (-cdrom) y por UEFI
   if command -v grub-mkrescue > /dev/null && CD=1 "$AQUI/imagen.sh" "$T/cd" prueba > "$T/cd.txt" 2>&1 && [ -s "$T/cd/hispa64-cd.iso" ]; then
     rm -f "$T/cd-bios.txt"
