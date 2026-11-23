@@ -786,7 +786,7 @@ static void ta_equipo(void)
 		/* MSDM y SLIC llevan la licencia de Windows del equipo (la clave del
 		   producto): no se copian nunca (el equipo puede ser de otro) */
 		if (!memcmp(h->Signature, "MSDM", 4) || !memcmp(h->Signature, "SLIC", 4)) {
-			reg("ACPI: (TERMO) la tabla %.4s no se guarda: lleva la licencia de Windows\n", h->Signature);
+			reg("ACPI: (TERMO) la tabla %c%c%c%c no se guarda: lleva la licencia de Windows\n", h->Signature[0], h->Signature[1], h->Signature[2], h->Signature[3]);
 			continue;
 		}
 		if (!memcmp(h->Signature, "SSDT", 4))
