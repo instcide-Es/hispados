@@ -9,7 +9,7 @@
 ; =============================================================================
 módulo Pci
 
-    importar Cpu
+    importar Cpu, Multiboot
 
     constante DIRECCIÓN = 0xCF8
     constante DATOS = 0xCFC
@@ -155,14 +155,223 @@ módulo Pci
         devolver NO_HAY_PCI
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  (USB) Las zonas de 64 bits por encima de los 4 GB. Los Intel nuevos (el
+    ;  ThinkPad E14 de Raptor Lake por UEFI, el Monovate de Tiger Lake por la
+    ;  BIOS) y OVMF ponen la zona de memoria del xHCI (y de otros) por encima
+    ;  de los 4 GB, donde el núcleo, de 32 bits y sin PAE, no llega: sin USB
+    ;  (ni teclado, ni ratón, ni la memoria X:). Se mueve debajo, a un hueco
+    ;  libre: fuera del mapa de memoria (lo libre y lo reservado, que es donde
+    ;  están la configuración PCIe, la memoria de la gráfica...), de las zonas
+    ;  de los demás aparatos y de las ventanas de los puentes, y por debajo de
+    ;  FC000000h (lo de más arriba es del chipset: el P2SB oculto en
+    ;  FD000000h, el PMC, el HPET, los APIC, la BIOS). Primero, justo encima
+    ;  de las zonas que ha puesto el firmware (que es donde reparte las de 32
+    ;  bits, dentro de la ventana del puente raíz); si no, de arriba abajo.
+    ;  Solo los aparatos del bus 0 (los del chipset: sin puente por medio, la
+    ;  dirección les llega sin más).
+    ; -------------------------------------------------------------------------
+    constante MAX_OCUPADAS = 96
+    constante TECHO = 0xFC000000
+    variable ocu_base, ocu_fin: arreglo [MAX_OCUPADAS] de nat32
+    variable n_ocu: nat32
+    público variable movidas: nat32             ; las zonas movidas debajo de los 4 GB
+    público variable movida_aparato, movida_alta, movida_baja, movida_a, movida_tam: nat32   ; la última
+    público variable sin_mover: nat32           ; las que estaban arriba y no se han podido mover
+    público variable sin_mover_aparato, sin_mover_alta, sin_mover_por: nat32   ; la última (por: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja)
+
+    función ocupa(b: nat32, f: nat32)
+        si f <= b o n_ocu >= MAX_OCUPADAS entonces devolver fin
+        ocu_base[n_ocu] := b
+        ocu_fin[n_ocu] := f
+        n_ocu := n_ocu + 1
+    fin
+
+    ; lo que mide la zona del registro reg del aparato a (como Linux: con su
+    ; memoria apagada un momento y sin interrupciones). 0 si mide 4 GB o más
+    ; (o no se deja medir)
+    función mide_zona(a: nat32, reg: nat32, de64: bool): nat32
+        variable orden, lo, hi, t, th, ints: nat32
+        ints := sin_interrupciones()
+        orden := pci_leer16(a, PCI_ORDEN)
+        pci_escribir16(a, PCI_ORDEN, orden yb nob 2)
+        lo := pci_leer(a, reg)
+        pci_escribir(a, reg, 0xFFFFFFFF)
+        t := pci_leer(a, reg) yb 0xFFFFFFF0
+        pci_escribir(a, reg, lo)
+        th := 0xFFFFFFFF
+        si de64 entonces
+            hi := pci_leer(a, reg + 4)
+            pci_escribir(a, reg + 4, 0xFFFFFFFF)
+            th := pci_leer(a, reg + 4)
+            pci_escribir(a, reg + 4, hi)
+        fin
+        pci_escribir16(a, PCI_ORDEN, orden)
+        reponer(ints)
+        si th <> 0xFFFFFFFF o t = 0 entonces devolver 0 fin
+        devolver (nob t) + 1
+    fin
+
+    ; el final de la zona puesta en b, que mide t (0: no se sabe: hasta su
+    ; alineación, que es lo más que puede medir)
+    función fin_de_zona(b: nat32, t: nat32): nat32
+        si t = 0 entonces t := b yb (0 - b) fin
+        si t = 0 o b + t < b entonces devolver 0xFFFFFFFF fin
+        devolver b + t
+    fin
+
+    ; lo ocupado: el mapa de memoria, las zonas de los aparatos (menos la que
+    ; se mueve) y las ventanas de los puentes
+    función mira_ocupadas(propio: nat32, reg: nat32)
+        variable i, n, a, cab, k, v, hi, b, l, f: nat32
+        variable r: puntero a Región
+        n_ocu := 0
+        n := regiones()
+        para i desde 0 hasta n hacer
+            si i < n entonces
+                r := región(i)
+                si r.base_alta = 0 entonces
+                    f := r.base + r.largo
+                    si r.largo_alto <> 0 o f < r.base entonces f := 0xFFFFFFFF fin
+                    ocupa(r.base, f)
+                fin
+            fin
+        fin
+        a := pci_busca(0, 0, NO_HAY_PCI)
+        mientras a <> NO_HAY_PCI hacer
+            cab := pci_leer8(a, 0x0E) yb 0x7F
+            n := 6
+            si cab = 1 entonces
+                n := 2
+                ; las ventanas de memoria del puente (la normal y la prefetchable, sus 32 bits bajos)
+                v := pci_leer(a, 0x20)
+                b := (v yb 0xFFF0) << 16
+                l := (v yb 0xFFF00000) ob 0xFFFFF
+                si l > b entonces ocupa(b, l + 1) fin
+                v := pci_leer(a, 0x24)
+                si pci_leer(a, 0x2C) = 0 entonces
+                    b := (v yb 0xFFF0) << 16
+                    l := (v yb 0xFFF00000) ob 0xFFFFF
+                    si l > b entonces ocupa(b, l + 1) fin
+                fin
+            sino si cab <> 0 entonces
+                n := 0
+            fin
+            k := 0
+            mientras k < n hacer
+                v := pci_leer(a, PCI_BAR0 + k * 4)
+                hi := 0
+                si v yb 1 = 0 y (v yb 6) = 4 y k + 1 < n entonces hi := pci_leer(a, PCI_BAR0 + k * 4 + 4) fin
+                si v yb 1 = 0 y hi = 0 y (v yb 0xFFFFFFF0) <> 0 y no (a = propio y PCI_BAR0 + k * 4 = reg) entonces
+                    ocupa(v yb 0xFFFFFFF0, fin_de_zona(v yb 0xFFFFFFF0, mide_zona(a, PCI_BAR0 + k * 4, (v yb 6) = 4)))
+                fin
+                si v yb 1 = 0 y (v yb 6) = 4 entonces k := k + 1 fin
+                k := k + 1
+            fin
+            a := pci_busca(0, 0, a)
+        fin
+    fin
+
+    función libre(b: nat32, t: nat32): bool
+        variable i: nat32
+        si b < 0x10000000 o b + t < b o b + t > TECHO entonces devolver falso fin
+        i := 0
+        mientras i < n_ocu hacer
+            si b < ocu_fin[i] y ocu_base[i] < b + t entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; mueve debajo de los 4 GB la zona de 64 bits del registro «reg» del
+    ; aparato a, que está arriba (alta: su parte alta). Da la nueva, o 0.
+    función baja_zona(a: nat32, reg: nat32, alta: nat32): nat32
+        variable orden, lo, hi, t, c, i, techo_ram, f: nat32
+        variable r: puntero a Región
+        sin_mover_aparato := a
+        sin_mover_alta := alta
+        si (a >> 16) yb 0xFF <> 0 entonces
+            sin_mover := sin_mover + 1
+            sin_mover_por := 1
+            devolver 0
+        fin
+        lo := pci_leer(a, reg)
+        hi := pci_leer(a, reg + 4)
+        t := mide_zona(a, reg, cierto)
+        orden := pci_leer16(a, PCI_ORDEN)
+        si t = 0 o t > 0x4000000 entonces
+            sin_mover := sin_mover + 1
+            sin_mover_por := 2
+            devolver 0
+        fin
+        si t < 0x1000 entonces t := 0x1000 fin
+        mira_ocupadas(a, reg)
+        ; lo más alto de la memoria libre por debajo de los 4 GB
+        techo_ram := 0
+        para i desde 0 hasta regiones() hacer
+            si i < regiones() entonces
+                r := región(i)
+                si r.base_alta = 0 y r.clase = LIBRE y r.largo_alto = 0 entonces
+                    f := r.base + r.largo
+                    si f > r.base y f > techo_ram entonces techo_ram := f fin
+                fin
+            fin
+        fin
+        c := 0
+        ; justo encima de las zonas de 32 bits de los aparatos (de las de
+        ; encima de la memoria)
+        f := 0
+        i := 0
+        mientras i < n_ocu hacer
+            si ocu_base[i] >= techo_ram y ocu_fin[i] <= TECHO y ocu_fin[i] > f y ocu_base[i] < 0xF0000000 entonces f := ocu_fin[i] fin
+            i := i + 1
+        fin
+        si f <> 0 entonces
+            f := (f + t - 1) yb (0 - t)
+            mientras c = 0 y f <> 0 y f + t <= TECHO hacer
+                si libre(f, t) entonces c := f sino f := f + t fin
+            fin
+        fin
+        ; si no, de arriba abajo
+        si c = 0 entonces
+            f := (TECHO - t) yb (0 - t)
+            mientras c = 0 y f > techo_ram y f >= 0x10000000 hacer
+                si libre(f, t) entonces c := f sino f := f - t fin
+            fin
+        fin
+        si c = 0 entonces
+            sin_mover := sin_mover + 1
+            sin_mover_por := 3
+            devolver 0
+        fin
+        pci_escribir16(a, PCI_ORDEN, orden yb nob 2)
+        pci_escribir(a, reg, (lo yb 0xF) ob c)
+        pci_escribir(a, reg + 4, 0)
+        pci_escribir16(a, PCI_ORDEN, orden)
+        si (pci_leer(a, reg) yb 0xFFFFFFF0) <> c o pci_leer(a, reg + 4) <> 0 entonces
+            sin_mover := sin_mover + 1
+            sin_mover_por := 4
+            devolver 0
+        fin
+        movidas := movidas + 1
+        movida_aparato := a
+        movida_alta := hi
+        movida_baja := lo yb 0xFFFFFFF0
+        movida_a := c
+        movida_tam := t
+        devolver c
+    fin
+
     ; la dirección de memoria del registro base número n (0 a 5) del aparato;
-    ; 0 si es de puertos, no está puesta o cae por encima de los 4 GB
+    ; 0 si es de puertos o no está puesta. (USB) Si es de 64 bits y está por
+    ; encima de los 4 GB, se mueve debajo (baja_zona); 0 si no se puede.
     público función pci_memoria(a: nat32, n: nat32): nat32
-        variable v: nat32
+        variable v, hi: nat32
         v := pci_leer(a, PCI_BAR0 + n * 4)
         si v yb 1 <> 0 entonces devolver 0 fin
         si (v yb 6) = 4 y n < 5 entonces
-            si pci_leer(a, PCI_BAR0 + n * 4 + 4) <> 0 entonces devolver 0 fin
+            hi := pci_leer(a, PCI_BAR0 + n * 4 + 4)
+            si hi <> 0 entonces devolver baja_zona(a, PCI_BAR0 + n * 4, hi) fin
         fin
         devolver v yb 0xFFFFFFF0
     fin

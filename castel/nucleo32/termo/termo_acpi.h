@@ -51,6 +51,20 @@ struct termo_acpi {
 	 * asus_escribe: el AML ha querido escribir en el EC al leerlo (no fiable) */
 	int32_t asus_vent_cpu, asus_vent_gpu, asus_temp;
 	uint32_t asus_hay, asus_escribe;
+	/* (TERMO) lo que ha contestado DSTS a cada ventilador, tal cual (o
+	 * 0xFFFFFFFF si el método falla): 0 r.p.m. es «parado»; TA_NO en
+	 * asus_vent_*, «no disponible» */
+	uint32_t asus_crudo_cpu, asus_crudo_gpu;
+	/* (TERMO) la batería, de _BST: lo que gasta o lo que carga ahora (mW,
+	 * de todas las que se gastan o se cargan; con mA, por el voltaje), TA_NO
+	 * si no lo dice; bat_estado: bit 0 descargando, 1 cargando */
+	int32_t bat_mw;
+	uint32_t bat_estado;
+	/* (TERMO) lo guardado en \TERMO\EQUIPO de la unidad del sistema (para el
+	 * futuro controlador del ratón táctil I2C-HID): las tablas ACPI, tal cual
+	 * (DSDT.BIN, SSDT1.BIN...), y la lista PCI (PCI.TXT); equipo_hecho: 1 si
+	 * ya se ha intentado, 2 si no se ha podido escribir */
+	uint32_t equipo_tablas, equipo_pci, equipo_hecho;
 };
 
 _Static_assert(sizeof(struct termo_acpi) <= TA_TAM, "termo_acpi: no cabe en lo que copia el núcleo");

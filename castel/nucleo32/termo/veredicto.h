@@ -31,6 +31,12 @@ struct ve_prueba {
 	int t_ini, pico_ref, t_parada;	/* los del de referencia */
 	int baja30, baja60, vuelve_s, ultimo, ult_seg;
 	int ocup_suma, ocup_n, ocup_max;	/* lo ocupado que está el procesador enfriando (%) */
+	/* (TERMO) la frecuencia en la carga: la media medida (MHz, de
+	 * ve_frecuencia), la nominal (la de la marca o la del TSC; 0: no se
+	 * sabe), en cuántos procesadores se ha cargado y si se ha frenado
+	 * (PROCHOT, temperatura, potencia) durante la carga: lo pone quien llama,
+	 * después de ve_empieza */
+	int mhz_suma, mhz_n, mhz_nominal, procesadores, frenado;
 };
 
 void ve_empieza(struct ve_prueba *p, int ns, const struct ve_sensor *s, const int *t);
@@ -42,6 +48,11 @@ int ve_enfria(struct ve_prueba *p, int seg, const int *t);
 /* lo ocupado que está el procesador (0-100) en una medida enfriando: si no
  * baja, el enfriamiento no se puede juzgar */
 void ve_ocupacion(struct ve_prueba *p, int pct);
+void ve_frecuencia(struct ve_prueba *p, int mhz);	/* una medida de la frecuencia durante la carga */
+int ve_mhz_carga(const struct ve_prueba *p);		/* la media (0: no se sabe) */
+int ve_mhz_nominal(const char *marca, int mhz_tsc);	/* la de la marca («@ 1.33GHz»), o la del TSC */
+/* ¿ha ido lento sin frenarse (el estado P mínimo)? Escribe la frase */
+int ve_lento(const struct ve_prueba *p, char *d, int cabe);
 /* ¿es creíble la primera lectura de un sensor en reposo? (0-125 °C y por
  * debajo de su límite: el ThinkPad A275 daba 114,3 °C de 90, fijos) */
 int ve_creible(int t, int limite);

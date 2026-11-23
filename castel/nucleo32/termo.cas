@@ -37,6 +37,7 @@
 ;        las zonas hace menos de 6 s: si se cuelga o se cierra, la carga para);
 ;        (con la carga, también los demás procesadores: «Los otros
 ;        procesadores», abajo; EBX = 4, su tabla)
+;        EBX = 5: el registro del arranque (ECX octetos como mucho, en EDX)
 ;        EBX = 2: los tics que ha corrido la tarea ociosa (el «hlt»); 3: los
 ;        del reloj (con los dos, lo ocupado que está el procesador)
 ;        En la 220, también (Intel de Nehalem en adelante) 3F8h, 3F9h, 3FAh,
@@ -47,7 +48,7 @@
 ; =============================================================================
 módulo Termo
 
-    importar Cpu, Tareas, Paginas, Mem32, Energia, Multiboot, Formato
+    importar Cpu, Tareas, Paginas, Mem32, Energia, Multiboot, Formato, Registro
 
     constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
     constante TAM_BLOQUE = 1024
@@ -720,6 +721,7 @@ módulo Termo
     ; las llamadas 220 a 224 (usuario.cas)
     público función atender_termo(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable p: puntero a nat32
+        variable k: nat32
         según n
             caso 220:
                 si no msr_de_la_lista(a) entonces devolver NO_VALE fin
@@ -778,6 +780,18 @@ módulo Termo
                         llenar(puntero(b + 16), 512, 0)
                     fin
                     devolver ap_activos
+                fin
+                ; (TERMO) 5: el registro del arranque (lo de ARRANQUE.TXT: el
+                ; USB, los discos, las unidades), hasta c octetos en b -> los
+                ; copiados. Para enseñarlo en pantalla si la memoria USB no
+                ; aparece (y entonces no hay ARRANQUE.TXT que leer)
+                si a = 5 entonces
+                    k := registro_largo
+                    si k > c entonces k := c fin
+                    si k = 0 entonces devolver 0 fin
+                    si no usuario_puede(actual.cr3, b, k, cierto) entonces devolver NO_VALE fin
+                    copiar_memoria(puntero(b), puntero(dirección(registro)), k)
+                    devolver k
                 fin
                 si a = 1 entonces
                     carga := b yb 1

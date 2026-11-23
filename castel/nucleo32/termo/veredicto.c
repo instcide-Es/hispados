@@ -89,6 +89,59 @@ static int ocupado(const struct ve_prueba *p)
 	return p->ocup_n ? p->ocup_suma / p->ocup_n : -1;
 }
 
+void ve_frecuencia(struct ve_prueba *p, int mhz)
+{
+	if (mhz > 50 && mhz < 10000)
+		p->mhz_suma += mhz, p->mhz_n++;
+}
+
+int ve_mhz_carga(const struct ve_prueba *p)
+{
+	return p->mhz_n >= 3 ? p->mhz_suma / p->mhz_n : 0;
+}
+
+/* «Intel(R) Atom(TM) CPU  Z3735F @ 1.33GHz»: 1330; sin «@», la del TSC */
+int ve_mhz_nominal(const char *marca, int mhz_tsc)
+{
+	const char *a = marca;
+	int ent = 0, dec = 0, nd = 0;
+
+	while (*a && *a != '@')
+		a++;
+	if (*a == '@') {
+		a++;
+		while (*a == ' ')
+			a++;
+		while (*a >= '0' && *a <= '9')
+			ent = ent * 10 + (*a++ - '0');
+		if (*a == '.')
+			for (a++; *a >= '0' && *a <= '9'; a++)
+				if (nd < 3)
+					dec = dec * 10 + (*a - '0'), nd++;
+		while (nd < 3)
+			dec *= 10, nd++;
+		if (a[0] == 'G' && a[1] == 'H' && ent < 10 && (ent || dec))
+			return ent * 1000 + dec;
+		if (a[0] == 'M' && a[1] == 'H' && ent >= 100)
+			return ent;
+	}
+	return mhz_tsc > 100 && mhz_tsc < 10000 ? mhz_tsc : 0;
+}
+
+int ve_lento(const struct ve_prueba *p, char *d, int cabe)
+{
+	int m = ve_mhz_carga(p);
+
+	d[0] = 0;
+	if (!m || p->mhz_nominal <= 0 || m * 10 >= p->mhz_nominal * 6)
+		return 0;
+	if (p->frenado)
+		snprintf(d, (size_t)cabe, "El procesador ha ido a %d MHz de %d, y se ha frenado (ver FRENADOS): la prueba no lo ha calentado de verdad. ", m, p->mhz_nominal);
+	else
+		snprintf(d, (size_t)cabe, "El procesador ha ido a %d MHz de %d: la prueba no lo ha calentado de verdad; el sistema no ha subido la frecuencia (estado P), y no se ha frenado por calor. ", m, p->mhz_nominal);
+	return 1;
+}
+
 int ve_creible(int t, int limite)
 {
 	if (t == VE_NO)
@@ -179,7 +232,8 @@ static char *tiempo(char *d, int seg)
 
 void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int seguridad, const char *motivo, int esc, int simula)
 {
-	char a[24], b[24], c[24];
+	char a[24], b[24], c[24], a2[240];
+	int lento_dicho = 0;
 	int m = 0, k, r = p->ref, sube = 0, lim = VE_NO, nfijas = 0, nsin = 0, b60;
 
 	d[0] = 0;
@@ -275,12 +329,20 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 		PON("La subida en carga es normal. ");
 	else if (lim != VE_NO && p->pico_ref >= lim - 200)
 		PON("Se calienta bastante: en carga es normal en un portátil, pero queda cerca del límite (%s); conviene revisar la limpieza del ventilador y de las rejillas. ", ve_grados(a, lim));
+	else if (ve_lento(p, a2, (int)sizeof a2) && sube < 100) {
+		PON("%s", a2);
+		lento_dicho = 1;
+	}
+	else if (sube < 50 && !simula && p->procesadores > 1)
+		PON("Casi no ha subido, con la carga en %d procesadores: se enfría muy bien. ", p->procesadores);
 	else if (sube < 50 && !simula)
 		PON("Casi no ha subido: o se enfría muy bien, o la carga de un solo núcleo no basta para calentarlo. ");
 	else if (lim != VE_NO)
 		PON("La temperatura en carga es buena: %s, lejos de su límite (%s). ", ve_grados(a, p->pico_ref), ve_grados(b, lim));
 	else
 		PON("La temperatura en carga es buena (%s). ", ve_grados(a, p->pico_ref));
+	if (!lento_dicho && !seguridad && ve_lento(p, a2, (int)sizeof a2))
+		PON("%s", a2);
 	/* (el MacBook Air 2012: si algo no deja al procesador en reposo, no baja
 	 * aunque el ventilador vaya bien: no se juzga) */
 	if (p->ocup_n && p->ocup_max >= 50 && ocupado(p) < 30)

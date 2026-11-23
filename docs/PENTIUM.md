@@ -9661,6 +9661,7 @@ la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
 | **MSI GT80 Titan 2QD/2QE** (el objetivo, sin probar aún) | i7 Haswell HQ, 4 núcleos / 8 hilos, TjMax del MSR; 2 × GTX 970M/980M (GM204) en SLI | — | la carga en todos los procesadores (los AP, despertados solo para la prueba); un sensor por núcleo; las GPU por el BAR0 (solo leer, receta de nouveau); los frenos (PROCHOT, VR Therm Alert, PL1/PL2, 690h); el informe para el técnico; en el LEEME, Supr/F11 y CSM |
 
 | **ASUS ROG GL553V** (de Carlos, objetivo) | i7-7700HQ Kaby Lake (4/8); GTX 1050/1050 Ti (GP107, Optimus) | — | la GPU Pascal (20460h, solo leer) sin despertarla si duerme (Optimus: el enlace del puerto); ventiladores y temperatura por el WMI de ASUS (DSTS, nunca DEVS); en el LEEME, Esc/F2 y «Launch CSM» |
+| **ASUS ROG GL553VD** (real, 23/11 por UEFI) | i5-7300HQ Kaby Lake (4 núcleos / 4 hilos); GTX 1050 | GOP 1920x1080 | todo leído: núcleos 0-3 y paquete (26→54 °C), GPU 21→41 °C, THRM, ventilador del CPU por WMI (1900→2700 r.p.m.; antes de girar, «parado»), el de la GPU «no disponible»; la topología por CPUID 0Bh (decía «2 núcleos, 2 hilos»: CPUID 1/4 dan lo que cabe, no lo que hay); en el informe, el consumo (_BST) y la autonomía (bajó del 42 al 25 % en 9 min con la carga) |
 
 Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
 

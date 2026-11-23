@@ -859,7 +859,46 @@ módulo Usb
             d[0] := pci_leer(xhcis[c].pci, 0) yb 0xFFFF
             d[1] := pci_leer(xhcis[c].pci, 0) >> 16
             d[2] := xhcis[c].puertos
-            apunta("usb: controladora xHCI %04X:%04X, %u puertos\n", d)
+            apunta("usb: controladora xHCI %04X:%04X, %u puertos", d)
+            si Xhci.traspaso[c] = 2 entonces apunta0(" (la BIOS no la soltaba: se le ha quitado)") fin
+            apunta0("\n")
+            c := c + 1
+        fin
+        ; (USB) las zonas de 64 bits que estaban por encima de los 4 GB
+        si movidas <> 0 entonces
+            d[0] := (movida_aparato >> 16) yb 0xFF
+            d[1] := (movida_aparato >> 11) yb 0x1F
+            d[2] := (movida_aparato >> 8) yb 7
+            d[3] := movida_alta
+            apunta("pci: la zona de memoria del %02X:%02X.%u estaba por encima de los 4 GB (%X", d)
+            d[0] := movida_baja
+            d[1] := movida_a
+            d[2] := movida_tam >> 10
+            d[3] := movidas
+            apunta("%08Xh): movida a %08Xh (%u K); movidas, %u\n", d)
+        fin
+        si sin_mover <> 0 entonces
+            d[0] := (sin_mover_aparato >> 16) yb 0xFF
+            d[1] := (sin_mover_aparato >> 11) yb 0x1F
+            d[2] := (sin_mover_aparato >> 8) yb 7
+            d[3] := sin_mover_alta
+            apunta("pci: la zona del %02X:%02X.%u está por encima de los 4 GB (%Xh...) y no se ha podido mover debajo", d)
+            según sin_mover_por
+                caso 1: apunta0(": no es del bus 0")
+                caso 2: apunta0(": demasiado grande")
+                caso 3: apunta0(": no hay hueco libre")
+                caso 4: apunta0(": no se deja")
+            fin
+            apunta0("\n")
+        fin
+        ; (USB) las xHCI que no se han podido poner en marcha, y en qué paso
+        c := 0
+        mientras c < Xhci.fallidas y c < Xhci.MAX_FALLIDAS hacer
+            d[0] := pci_leer(Xhci.fallida_pci[c], 0) yb 0xFFFF
+            d[1] := pci_leer(Xhci.fallida_pci[c], 0) >> 16
+            d[2] := nat32(Xhci.fallida_paso[c])
+            d[3] := Xhci.fallida_dato[c]
+            apunta("usb: controladora xHCI %04X:%04X NO se ha podido poner en marcha: %s (%08Xh)\n", d)
             c := c + 1
         fin
         c := 0

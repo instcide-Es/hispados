@@ -568,6 +568,7 @@ static void ta_lee_vent(int i)
  * leer; nunca DEVS (0x53564544), que escribe. ~0: no existe; sin el bit
  * 0x00010000: no está. -1 si no vale */
 static ACPI_HANDLE ta_atkd;
+static u32 ta_asus_crudo;	/* lo último que ha contestado, tal cual (0xFFFFFFFF: el método falla) */
 
 static int64_t ta_asus(u32 id)
 {
@@ -586,28 +587,45 @@ static int64_t ta_asus(u32 id)
 	a[2].Type = ACPI_TYPE_BUFFER;
 	a[2].Buffer.Length = 8;
 	a[2].Buffer.Pointer = entrada;
+	ta_asus_crudo = 0xFFFFFFFFu;
 	if (ACPI_FAILURE(AcpiEvaluateObjectTyped(ta_atkd, "WMNB", &l, &b, ACPI_TYPE_INTEGER)))
 		return -1;
 	v = (u32)r.Integer.Value;
+	ta_asus_crudo = v;
 	if (v == 0xFFFFFFFEu || v == 0xFFFFFFFFu || !(v & 0x00010000))
 		return -1;
 	return v;
 }
 
+/* un ventilador de ASUS: r.p.m.; 0 si está parado (con el bit de «está» y 0,
+ * o, sin el bit, si alguna vez ha dado vueltas: en el GL553VD, el del CPU
+ * contesta así hasta que arranca); TA_NO, «no disponible» */
+static int32_t ta_asus_vent(u32 id, int *visto, uint32_t *crudo)
+{
+	int64_t v = ta_asus(id);
+
+	*crudo = ta_asus_crudo;
+	if (v >= 0 && (v & 0xFFFF) < 200) {
+		if (v & 0xFFFF)
+			*visto = 1;
+		return (int32_t)(v & 0xFFFF) * 100;
+	}
+	if (*visto && ta_asus_crudo != 0xFFFFFFFFu && ta_asus_crudo != 0xFFFFFFFEu)
+		return 0;
+	return TA_NO;
+}
+
 static void ta_lee_asus(void)
 {
+	static int visto_cpu, visto_gpu;
 	int64_t v;
 	u32 antes = ec_ignoradas;
 
 	ta.asus_vent_cpu = ta.asus_vent_gpu = ta.asus_temp = TA_NO;
 	if (!ta.asus_hay)
 		return;
-	v = ta_asus(0x00110013);
-	if (v >= 0 && (v & 0xFFFF) < 200)
-		ta.asus_vent_cpu = (int32_t)(v & 0xFFFF) * 100;
-	v = ta_asus(0x00110014);
-	if (v >= 0 && (v & 0xFFFF) < 200)
-		ta.asus_vent_gpu = (int32_t)(v & 0xFFFF) * 100;
+	ta.asus_vent_cpu = ta_asus_vent(0x00110013, &visto_cpu, &ta.asus_crudo_cpu);
+	ta.asus_vent_gpu = ta_asus_vent(0x00110014, &visto_gpu, &ta.asus_crudo_gpu);
 	v = ta_asus(0x00110011);
 	if (v >= 0 && (v & 0xFFFF) >= 2732 && (v & 0xFFFF) <= 4232)
 		ta.asus_temp = (int32_t)(v & 0xFFFF) - 2732;
@@ -698,6 +716,136 @@ static void ta_smbios(void)
 	    ta.placa_fab, ta.placa, ta.bios);
 }
 
+/* (TERMO) lo que gasta (o carga) la batería ahora, en mW: de lo último que
+ * ha leído bateria.c de _BST (el ritmo; con mA, por el voltaje: el de ahora
+ * o, si no lo dice, el de diseño) */
+static void ta_lee_bateria(void)
+{
+	u32 i, mw = 0, est = 0;
+	int hay = 0;
+
+	for (i = 0; i < LL_NBAT; i++) {
+		const struct ll_bat *b = &estado.bat[i];
+		u32 vol = b->voltaje && b->voltaje != 0xFFFFFFFFu ? b->voltaje : b->voltaje_diseno;
+
+		if (!b->hay || !b->valida || !(b->estado & 3) || b->queda == 0xFFFFFFFFu)
+			continue;
+		est |= b->estado & 3;
+		if (b->ritmo == 0 || b->ritmo == 0xFFFFFFFFu || b->ritmo > 0x7FFFFFFF)	/* (0: no lo dice) */
+			continue;
+		if (b->unidad == 0)
+			mw += b->ritmo;
+		else if (vol && vol != 0xFFFFFFFFu && vol < 100000)
+			mw += (u32)((u64)b->ritmo * vol / 1000);
+		else
+			continue;
+		hay = 1;
+	}
+	ta.bat_estado = est;
+	ta.bat_mw = hay && mw < 1000000 ? (int32_t)mw : TA_NO;
+}
+
+/* (TERMO) a \TERMO\EQUIPO: las tablas ACPI tal cual y la lista PCI. Solo
+ * leer el equipo (la configuración PCI, sin tocar nada: sin medir las zonas,
+ * que pararía los aparatos un momento); las tablas no llevan datos
+ * personales. Una vez, la primera vez que el Termómetro pregunta */
+static int ta_archivo(const char *nombre, const void *d, u32 n)
+{
+	char r[48];
+	u32 m, w;
+
+	snprintf(r, sizeof r, "\\TERMO\\EQUIPO\\%s", nombre);
+	m = sc(SC_ABRIR, (u32)r, 2, 0);
+	if (ES_ERROR(m))
+		return 0;
+	w = sc(SC_ESCRIBIR_ARCHIVO, m, (u32)d, n);
+	sc(SC_CERRAR, m, 0, 0);
+	return w == n;
+}
+
+static u32 ta_pci(u32 bus, u32 dis, u32 fun, u32 reg)
+{
+	return sc(SC_PCI, 0x80000000u | (bus << 16) | (dis << 11) | (fun << 8) | reg, 0, 4);
+}
+
+static void ta_equipo(void)
+{
+	static char t[24576];
+	ACPI_TABLE_HEADER *h;
+	u32 i, n = 0, nssdt = 0, bus, dis, fun, k;
+	char nombre[16];
+
+	ta.equipo_hecho = 1;
+	sc(SC_CREAR_CARPETA, (u32)"\\TERMO", 0, 0);
+	sc(SC_CREAR_CARPETA, (u32)"\\TERMO\\EQUIPO", 0, 0);
+	for (i = 0; i < 64; i++) {
+		if (ACPI_FAILURE(AcpiGetTableByIndex(i, &h)))
+			break;
+		if (!h || h->Length < sizeof *h || h->Length > 0x200000)
+			continue;
+		if (!memcmp(h->Signature, "SSDT", 4))
+			snprintf(nombre, sizeof nombre, "SSDT%u.BIN", ++nssdt);
+		else {
+			for (k = 0; k < 4; k++)
+				nombre[k] = (h->Signature[k] >= 'A' && h->Signature[k] <= 'Z') || (h->Signature[k] >= '0' && h->Signature[k] <= '9') ? h->Signature[k] : '_';
+			snprintf(nombre + 4, sizeof nombre - 4, ".BIN");
+		}
+		if (ta_archivo(nombre, h, h->Length))
+			n++;
+		else if (n == 0) {
+			ta.equipo_hecho = 2;
+			reg("ACPI: (TERMO) no se puede escribir en \\TERMO\\EQUIPO\n");
+			return;
+		}
+	}
+	ta.equipo_tablas = n;
+	/* la lista PCI: lo que dice cada aparato de sí mismo */
+	k = (u32)snprintf(t, sizeof t, "Lista PCI del equipo (Termómetro de Hispa-Pentium): bus:aparato.función, fabricante:producto, clase, y sus zonas\r\n"
+			  "(tal como están ahora: si el núcleo ha movido alguna por encima de los 4 GB, lo dice la línea «pci:» de INFORME.TXT)\r\n\r\n");
+	for (bus = 0; bus < 256 && k < sizeof t - 400; bus++)
+		for (dis = 0; dis < 32 && k < sizeof t - 400; dis++)
+			for (fun = 0; fun < 8 && k < sizeof t - 400; fun++) {
+				u32 id = ta_pci(bus, dis, fun, 0), cl, cab, b, nb, j;
+
+				if ((id & 0xFFFF) == 0xFFFF || (id & 0xFFFF) == 0) {
+					if (fun == 0)
+						break;
+					continue;
+				}
+				cl = ta_pci(bus, dis, fun, 8);
+				cab = (ta_pci(bus, dis, fun, 0x0C) >> 16) & 0xFF;
+				k += (u32)snprintf(t + k, sizeof t - k, "%02X:%02X.%u %04X:%04X clase %06X rev %02X cab %02X subsistema %08X\r\n", bus, dis, fun,
+						   id & 0xFFFF, id >> 16, cl >> 8, cl & 0xFF, cab, (cab & 0x7F) == 0 ? ta_pci(bus, dis, fun, 0x2C) : 0);
+				nb = (cab & 0x7F) == 0 ? 6 : (cab & 0x7F) == 1 ? 2 : 0;
+				for (j = 0; j < nb; j++) {
+					b = ta_pci(bus, dis, fun, 0x10 + j * 4);
+					if (!b)
+						continue;
+					if (b & 1)
+						k += (u32)snprintf(t + k, sizeof t - k, "    zona %u: puertos %04Xh\r\n", j, b & 0xFFFC);
+					else if ((b & 6) == 4 && j + 1 < nb) {
+						u32 hi = ta_pci(bus, dis, fun, 0x10 + (j + 1) * 4);
+
+						k += (u32)snprintf(t + k, sizeof t - k, "    zona %u: memoria de 64 bits %08X%08Xh%s%s\r\n", j, hi, b & 0xFFFFFFF0u,
+								   b & 8 ? ", prefetchable" : "", hi ? " (POR ENCIMA DE LOS 4 GB)" : "");
+						j++;
+					} else
+						k += (u32)snprintf(t + k, sizeof t - k, "    zona %u: memoria %08Xh%s\r\n", j, b & 0xFFFFFFF0u, b & 8 ? ", prefetchable" : "");
+				}
+				if ((cab & 0x7F) == 1) {
+					u32 bb = ta_pci(bus, dis, fun, 0x18), mv = ta_pci(bus, dis, fun, 0x20);
+
+					k += (u32)snprintf(t + k, sizeof t - k, "    puente: buses %u a %u; ventana de memoria %08Xh-%08Xh\r\n", (bb >> 8) & 0xFF, (bb >> 16) & 0xFF,
+							   (mv & 0xFFF0) << 16, (mv & 0xFFF00000u) | 0xFFFFF);
+				}
+				if (fun == 0 && !(cab & 0x80))
+					break;
+			}
+	if (ta_archivo("PCI.TXT", t, k))
+		ta.equipo_pci = 1;
+	reg("ACPI: (TERMO) en \\TERMO\\EQUIPO: %u tablas ACPI y la lista PCI%s\n", ta.equipo_tablas, ta.equipo_pci ? "" : " (NO)");
+}
+
 static void ta_lee(void)
 {
 	u32 i;
@@ -706,6 +854,7 @@ static void ta_lee(void)
 		ta_buscado = 1;
 		ta.version = TA_VERSION;
 		ta_smbios();
+		ta_equipo();			/* (TERMO) las tablas ACPI y la lista PCI, a \TERMO\EQUIPO */
 		if (apm.fase != FASE_ERROR || mq_rsdp()) {
 			AcpiWalkNamespace(ACPI_TYPE_THERMAL, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_una_zona, NULL, NULL, NULL);
 			AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_un_ventilador, NULL, NULL, NULL);
@@ -741,6 +890,7 @@ static void ta_lee(void)
 			if (ta.lecturas == 0 || ta.lecturas % 30 == 0 || (ta.vent[i].estado_fst == 0 || ta.vent[i].estado_psc == 0))
 				ta_lee_vent(i);		/* (los que no dan nada: una vez por minuto) */
 		ta_lee_asus();			/* (TERMO) los ASUS, por WMI (DSTS) */
+		ta_lee_bateria();		/* (TERMO) lo que gasta la batería (de lo último de _BST) */
 		ec_solo_lectura = 0;
 		ta.ec_hay = estado.ec_hay;
 		ta.ec_lecturas += estado.ec_lecturas - l0;

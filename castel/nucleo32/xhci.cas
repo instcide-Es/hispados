@@ -253,15 +253,36 @@ módulo Xhci
     ; -------------------------------------------------------------------------
     ;  Tomar la controladora
     ; -------------------------------------------------------------------------
+    ; (USB) las que no se han podido poner en marcha, y en qué paso: para el
+    ; registro del arranque (usb.cas, enseña)
+    público constante MAX_FALLIDAS = 4
+    público variable fallidas: nat32
+    público variable fallida_pci: arreglo [MAX_FALLIDAS] de nat32
+    público variable fallida_paso: arreglo [MAX_FALLIDAS] de puntero a byte
+    público variable fallida_dato: arreglo [MAX_FALLIDAS] de nat32
+    ; y lo del traspaso desde la BIOS de cada una que va (1: la soltó; 2: no la
+    ; soltó en 1 s y se le quitó; 0: no tiene esa capacidad)
+    público variable traspaso: arreglo [MAX_XHCI] de nat32
+
+    función falla(pci: nat32, qué: puntero a byte, dato: nat32): nat32
+        si fallidas < MAX_FALLIDAS entonces
+            fallida_pci[fallidas] := pci
+            fallida_paso[fallidas] := qué
+            fallida_dato[fallidas] := dato
+        fin
+        fallidas := fallidas + 1
+        devolver NINGUNA
+    fin
+
     público función prepara(pci: nat32): nat32
-        variable c, base, v, hcs1, hcs2, hcc, i, n, d, largo: nat32
+        variable c, base, v, hcs1, hcs2, hcc, i, n, d, largo, tr: nat32
         variable cap, x, t, tabla: puntero a nat32
-        si cuántas >= MAX_XHCI entonces devolver NINGUNA fin
+        si cuántas >= MAX_XHCI entonces devolver falla(pci, "ya hay demasiadas controladoras xHCI", cuántas) fin
         base := pci_memoria(pci, 0)
-        si base = 0 entonces devolver NINGUNA fin
+        si base = 0 entonces devolver falla(pci, "su zona de memoria no se puede usar (por encima de los 4 GB y sin hueco debajo; ver «pci:»)", pci_leer(pci, 0x14)) fin
         pci_enciende(pci)
         v := mapear_aparato(base, 0x1000)
-        si v = 0 entonces devolver NINGUNA fin
+        si v = 0 entonces devolver falla(pci, "no se puede ver su zona de memoria", base) fin
         cap := puntero(v)
         hcs1 := cap[1]
         hcs2 := cap[2]
@@ -278,9 +299,9 @@ módulo Xhci
         ; que mide el sitio de un xHCI de verdad, por lo menos)
         si largo < 0x10000 entonces largo := 0x10000 fin
         si largo > 0x1000 entonces
-            si largo > 0x40000 entonces devolver NINGUNA fin
+            si largo > 0x40000 entonces devolver falla(pci, "sus registros miden demasiado", largo) fin
             v := mapear_aparato(base, largo)
-            si v = 0 entonces devolver NINGUNA fin
+            si v = 0 entonces devolver falla(pci, "no se puede ver toda su zona de memoria", largo) fin
             cap := puntero(v)
         fin
         c := cuántas
@@ -300,6 +321,7 @@ módulo Xhci
         ; SMI apagadas
         d := (hcc >> 16) << 2
         n := 0
+        tr := 0
         mientras d <> 0 y n < 64 hacer
             x := puntero(v + d)
             si (x[0] yb 0xFF) = 1 entonces
@@ -307,6 +329,12 @@ módulo Xhci
                 i := tics + 100
                 mientras x[0] yb 0x00010000 <> 0 y tics < i hacer
                     espera_ms(10)
+                fin
+                tr := 1
+                ; (como Linux: si la BIOS no la suelta en 1 s, se le quita)
+                si x[0] yb 0x00010000 <> 0 entonces
+                    x[0] := (x[0] yb nob 0x00010000) ob 0x01000000
+                    tr := 2
                 fin
                 x[1] := (x[1] yb nob 0x0000E011) ob 0xE0000000
             fin
@@ -317,31 +345,37 @@ módulo Xhci
             fin
             n := n + 1
         fin
-        ; parar y reiniciar
+        traspaso[c] := tr
+        ; parar y reiniciar (antes, que esté lista: CNR a 0)
+        espera(c, USBSTS, 0x800, 0, 100)
         pon(c, USBCMD, lee(c, USBCMD) yb nob 1)
         espera(c, USBSTS, 1, 1, 20)
         pon(c, USBCMD, 2)
-        si no espera(c, USBCMD, 2, 0, 100) entonces devolver NINGUNA fin
-        si no espera(c, USBSTS, 0x800, 0, 100) entonces devolver NINGUNA fin    ; (aún no está lista)
+        ; (como Linux en las de Intel: 1 ms sin tocarla tras el reinicio;
+        ; algunas se cuelgan si se les lee algo antes)
+        espera_ms(2)
+        si no espera(c, USBCMD, 2, 0, 100) entonces devolver falla(pci, "el reinicio (HCRST) no acaba", lee(c, USBCMD)) fin
+        si no espera(c, USBSTS, 0x800, 0, 100) entonces devolver falla(pci, "tras el reinicio no queda lista (CNR)", lee(c, USBSTS)) fin    ; (aún no está lista)
         ; su memoria
         si xhcis[c].tabla = 0 entonces xhcis[c].tabla := reservar_marco() fin
         si xhcis[c].sucesos = 0 entonces xhcis[c].sucesos := reservar_marco() fin
         si xhcis[c].entrada = 0 entonces xhcis[c].entrada := reservar_marco() fin
         si xhcis[c].búferes = 0 entonces xhcis[c].búferes := reservar_marco() fin
-        si xhcis[c].tabla = 0 o xhcis[c].sucesos = 0 o xhcis[c].entrada = 0 o xhcis[c].búferes = 0 entonces devolver NINGUNA fin
-        si no nuevo_anillo(xhcis[c].órdenes) entonces devolver NINGUNA fin
+        si xhcis[c].tabla = 0 o xhcis[c].sucesos = 0 o xhcis[c].entrada = 0 o xhcis[c].búferes = 0 entonces devolver falla(pci, "sin memoria para sus tablas", 0) fin
+        si no nuevo_anillo(xhcis[c].órdenes) entonces devolver falla(pci, "sin memoria para el anillo de órdenes", 0) fin
         tabla := puntero(xhcis[c].tabla)
         ; las páginas «de borrador» que pida la controladora: su lista va
         ; en la entrada 0 de la tabla
         n := (((hcs2 >> 21) yb 0x1F) << 5) ob (hcs2 >> 27)
         si n > 0 entonces
-            si n > 512 entonces devolver NINGUNA fin
+            si n > 512 entonces devolver falla(pci, "pide demasiadas páginas de borrador", n) fin
             d := reservar_marco()
-            si d = 0 entonces devolver NINGUNA fin
+            si d = 0 entonces devolver falla(pci, "sin memoria para las páginas de borrador", n) fin
             t := puntero(d)
             para i desde 0 hasta n - 1 hacer
                 t[i * 2] := reservar_marco()
-                si t[i * 2] = 0 entonces devolver NINGUNA fin
+                t[i * 2 + 1] := 0
+                si t[i * 2] = 0 entonces devolver falla(pci, "sin memoria para las páginas de borrador", n) fin
             fin
             tabla[0] := d
         fin
@@ -367,7 +401,8 @@ módulo Xhci
         x[5] := 0
         xhcis[c].n_tubos := 0
         pon(c, USBCMD, 1)                       ; en marcha
-        si no espera(c, USBSTS, 1, 0, 50) entonces devolver NINGUNA fin
+        si no espera(c, USBSTS, 1, 0, 50) entonces devolver falla(pci, "no se pone en marcha (sigue parada: HCHalted)", lee(c, USBSTS)) fin
+        si lee(c, USBSTS) yb 0x1004 <> 0 entonces devolver falla(pci, "en marcha, pero con error (HSE o HCE)", lee(c, USBSTS)) fin
         ; corriente a los puertos
         para i desde 0 hasta xhcis[c].puertos - 1 hacer
             d := lee(c, PORTSC + i * 0x10)

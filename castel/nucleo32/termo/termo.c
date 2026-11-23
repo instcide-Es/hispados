@@ -383,6 +383,31 @@ struct energia {
 };
 static struct energia en;
 static int hay_bateria;
+/* (TERMO) la batería sin enchufar: el primer y el último porcentaje vistos y
+ * cuándo (cuenta_s), si ha habido carga entretanto, y lo que gastaba (mW, de
+ * _BST: lo más alto y la última lectura); para el consumo y la autonomía del
+ * informe */
+static int desc_pct0 = -1, desc_pct1, desc_carga, desc_enchufado, desc_mw = -1, desc_mw_max = -1;
+static u32 desc_s0, desc_s1;
+static int en_carga(void);
+
+/* un ventilador de los ASUS: «parado», «no disponible» o sus r.p.m. */
+static const char *vent_asus(char *t, int v)
+{
+	if (v == NO)
+		return "no disponible";
+	if (v == 0)
+		return "parado";
+	snprintf(t, 16, "%d r.p.m.", v);
+	return t;
+}
+
+/* los vatios, con una cifra decimal («12,3») */
+static const char *vatios(char *t, int mw)
+{
+	snprintf(t, 16, "%d,%d", mw / 1000, (mw % 1000 + 50) / 100 > 9 ? 9 : (mw % 1000 + 50) / 100);
+	return t;
+}
 
 static void lee_zonas(void)
 {
@@ -539,17 +564,88 @@ static void fecha_hora(u32 *a, u32 *me, u32 *d, u32 *h, u32 *mi, u32 *s)
 	*s = (ho & 31) * 2;
 }
 
+/* (TERMO) lo último que ha fallado al escribir (el código del sistema) */
+static u32 ult_error;
+
+/* Escribe (al final, o creándolo) y lo cierra: al cerrar, el sistema lo pasa
+ * todo a la memoria (la entrada, la FAT y SYNCHRONIZE CACHE), así que un
+ * apagado a lo bruto no pierde lo ya escrito. Desde la 0.8.9, el cierre dice
+ * también si esa escritura a la memoria ha fallado. */
 static int escribe(const char *ruta, const void *b, u32 n, int crear)
 {
-	u32 m = sc(SC_ABRIR, (u32)ruta, crear ? PARA_CREAR : PARA_ESCRIBIR, 0), r;
+	u32 m = sc(SC_ABRIR, (u32)ruta, crear ? PARA_CREAR : PARA_ESCRIBIR, 0), r, c;
 
-	if (ES_ERROR(m))
+	if (ES_ERROR(m)) {
+		ult_error = m;
 		return 0;
+	}
 	if (!crear)
 		sc(SC_MOVER, m, 0, 2);
 	r = sc(SC_ESCRIBIR_ARCHIVO, m, (u32)b, n);
+	c = sc(SC_CERRAR, m, 0, 0);
+	if (r != n) {
+		ult_error = ES_ERROR(r) ? r : 0xFFFFFFF8u;	/* (menos de lo pedido: lleno) */
+		return 0;
+	}
+	if (ES_ERROR(c)) {
+		ult_error = c;
+		return 0;
+	}
+	return 1;
+}
+
+static const char *motivo_error(u32 e)
+{
+	switch (e) {
+	case 0xFFFFFFFFu: return "la carpeta o la unidad no existe";
+	case 0xFFFFFFFCu: return "error al escribir en el aparato (el USB no contesta o falla)";
+	case 0xFFFFFFF8u: return "el disco está lleno";
+	case 0xFFFFFFF5u: return "es de solo lectura (¿protegida contra escritura?)";
+	case 0xFFFFFFF0u: return "sin permiso para escribir ahí";
+	case 0xFFFFFFF9u: return "el sistema no lo acepta";
+	default: return "error del sistema";
+	}
+}
+
+/* (TERMO) no se puede guardar: se dice en grande, en la pantalla, en el
+ * puerto serie y, si se puede, en el registro */
+static int guarda_mal;
+static char guarda_aviso[200];
+
+static void no_se_guarda(const char *ruta, const char *motivo)
+{
+	if (guarda_mal)
+		return;
+	guarda_mal = 1;
+	if (!ruta || !ruta[0])
+		snprintf(guarda_aviso, sizeof guarda_aviso, "NO encuentro la memoria USB: el registro se pierde al apagar");
+	else
+		snprintf(guarda_aviso, sizeof guarda_aviso, "NO se puede guardar en %c: (%s): %s", ruta[0], ruta, motivo);
+	serie("termo: %s\n", guarda_aviso);
+}
+
+/* lee lo escrito y lo compara (lo que ha llegado de verdad a la memoria: lo
+ * del archivo no se queda en ningún sitio del sistema al cerrarlo) */
+static int comprueba(const char *ruta, const char *b, u32 n)
+{
+	static char t[2048];
+	u32 m = sc(SC_ABRIR, (u32)ruta, PARA_LEER, 0), hecho = 0, r;
+	int bien = 1;
+
+	if (ES_ERROR(m)) {
+		ult_error = m;
+		return 0;
+	}
+	while (hecho < n && bien) {
+		u32 q = n - hecho > sizeof t ? (u32)sizeof t : n - hecho;
+
+		r = sc(SC_LEER, m, (u32)t, q);
+		if (ES_ERROR(r) || r != q || memcmp(t, b + hecho, q))
+			bien = 0, ult_error = 0xFFFFFFFCu;
+		hecho += q;
+	}
 	sc(SC_CERRAR, m, 0, 0);
-	return r == n;
+	return bien;
 }
 
 typedef struct {
@@ -608,16 +704,86 @@ static void elige_carpeta(void)
 	}
 }
 
+/* (TERMO) lo que ha encontrado el sistema al arrancar (las líneas «usb:»,
+ * «disco», «unidades:» y «arranque:» del registro del arranque, la 224 con
+ * 5): para verlo en la pantalla aunque no haya memoria USB donde guardar */
+#define MAX_HALLADO 14
+static char hallado[MAX_HALLADO][100];
+static int nhallado;
+
+static void lee_hallado(void)
+{
+	static char r[12001];
+	u32 n = sc(SC_CARGA, 5, (u32)r, sizeof r - 1), i = 0;
+
+	if (ES_ERROR(n) || n == 0 || n >= sizeof r)
+		return;
+	r[n] = 0;
+	while (i < n && nhallado < MAX_HALLADO) {
+		u32 j = i, k;
+
+		while (j < n && r[j] != '\r' && r[j] != '\n')
+			j++;
+		if (!strncmp(r + i, "usb:", 4) || !strncmp(r + i, "unidades:", 9) || !strncmp(r + i, "disco ", 6) || !strncmp(r + i, "arranque:", 9) || !strncmp(r + i, "pci:", 4)) {
+			k = j - i < sizeof hallado[0] - 1 ? j - i : (u32)sizeof hallado[0] - 1;
+			memcpy(hallado[nhallado], r + i, k);
+			hallado[nhallado++][k] = 0;
+		}
+		while (j < n && (r[j] == '\r' || r[j] == '\n'))
+			j++;
+		i = j;
+	}
+}
+
+/* (TERMO) el disco C: del equipo no se toca nunca (es el del portátil
+ * ajeno; la memoria arranca con «escritura=usb»): si no se puede guardar en
+ * la memoria, se dice, y lo que ha encontrado el sistema sale en pantalla */
+/* escribe, lee de vuelta y borra un archivo de 4 K en la carpeta: así se
+ * sabe al empezar si lo que se guarde va a llegar de verdad */
+static int prueba_escritura(void)
+{
+	static char b[4096];
+	char r[120];
+	u32 i;
+	int bien;
+
+	for (i = 0; i < sizeof b; i++)
+		b[i] = (char)('A' + (i * 7 + i / 512) % 26);
+	snprintf(r, sizeof r, "%s\\PRUEBA.TMP", carpeta);
+	bien = escribe(r, b, sizeof b, 1) && comprueba(r, b, sizeof b);
+	sc(SC_BORRAR, (u32)r, 0, 0);
+	serie("termo: prueba de escritura en %s: %s%s\n", carpeta, bien ? "bien (escrita y leída de vuelta)" : "MAL: ", bien ? "" : motivo_error(ult_error));
+	return bien;
+}
+
 static void prepara_archivos(void)
 {
 	u32 a, me, d, h, mi, s;
 
+	lee_hallado();
 	if (!carpeta[0] || (en_memoria && unidad == 'C')) {
-		snprintf(aviso_archivo, sizeof aviso_archivo, "No se guarda el registro: no hay dónde (el sistema no ha arrancado desde una memoria USB en la que se pueda escribir).");
-		csv_malo = 1;
-		return;
+		/* (TERMO) no está la memoria USB (X:): el registro, a C: si es FAT */
+		no_se_guarda("", "no encuentro la memoria USB: el registro se perdería al apagar");
+		{
+			snprintf(aviso_archivo, sizeof aviso_archivo, "No se guarda nada: encima, lo que ha encontrado el sistema (haga una foto).");
+			csv_malo = 1;
+			return;
+		}
 	}
 	sc(SC_HACER_CARPETA, (u32)carpeta, 0, 0);
+	if (!prueba_escritura()) {
+		char c0[96];
+
+		snprintf(c0, sizeof c0, "%s", carpeta);
+		no_se_guarda(c0, motivo_error(ult_error));
+		carpeta[0] = 0;
+		{
+			snprintf(aviso_archivo, sizeof aviso_archivo, "No se guarda nada: encima, lo que ha encontrado el sistema (haga una foto).");
+			csv_malo = 1;
+			log_malo = 1;
+			return;
+		}
+	}
 	fecha_hora(&a, &me, &d, &h, &mi, &s);
 	snprintf(ruta_csv, sizeof ruta_csv, "%s\\%02u%02u%02u%02u.CSV", carpeta, me, d, h, mi);
 	snprintf(ruta_txt, sizeof ruta_txt, "%s\\%02u%02u%02u%02u.TXT", carpeta, me, d, h, mi);
@@ -629,10 +795,19 @@ static void prepara_archivos(void)
 
 		if (!escribe(ruta_log, t, (u32)n, 1)) {
 			log_malo = 1;
+			no_se_guarda(ruta_log, motivo_error(ult_error));
 			return;
 		}
 	}
 	log_arranque();
+	if (guarda_aviso[0])
+		log_escribe("SUCESO", guarda_aviso);
+	{
+		int i;
+
+		for (i = 0; i < nhallado; i++)
+			log_escribe("HALLADO", hallado[i]);
+	}
 	if (anterior[0])
 		log_escribe("SUCESO", anterior);
 }
@@ -656,7 +831,8 @@ static void csv_cabecera(void)
 	}
 	if (!escribe(ruta_csv, b, (u32)m, 1)) {
 		csv_malo = 1;
-		snprintf(aviso_archivo, sizeof aviso_archivo, "No se puede escribir %s (¿la memoria está protegida contra escritura?).", ruta_csv);
+		snprintf(aviso_archivo, sizeof aviso_archivo, "No se puede escribir %s: %s.", ruta_csv, motivo_error(ult_error));
+		no_se_guarda(ruta_csv, motivo_error(ult_error));
 		serie("termo: no se puede crear %s\n", ruta_csv);
 		return;
 	}
@@ -689,7 +865,8 @@ static void csv_linea(void)
 		m += snprintf(b + m, sizeof b - (size_t)m, ";\r\n");
 	if (!escribe(ruta_csv, b, (u32)m, 0)) {
 		csv_malo = 1;
-		snprintf(aviso_archivo, sizeof aviso_archivo, "Se ha dejado de poder escribir %s.", ruta_csv);
+		snprintf(aviso_archivo, sizeof aviso_archivo, "Se ha dejado de poder escribir %s: %s.", ruta_csv, motivo_error(ult_error));
+		no_se_guarda(ruta_csv, motivo_error(ult_error));
 	}
 }
 
@@ -718,8 +895,10 @@ static void log_escribe(const char *clase, const char *texto)
 	n = snprintf(b, sizeof b, "%02u:%02u:%02u %s %s\r\n", h, mi, se, clase, l);
 	if (n > (int)sizeof b - 1)
 		n = (int)sizeof b - 1;
-	if (!escribe(ruta_log, b, (u32)n, 0) && !escribe(ruta_log, b, (u32)n, 1))
+	if (!escribe(ruta_log, b, (u32)n, 0) && !escribe(ruta_log, b, (u32)n, 1)) {
 		log_malo = 1;
+		no_se_guarda(ruta_log, motivo_error(ult_error));
+	}
 }
 
 static void suceso_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -745,8 +924,11 @@ static void log_datos(void)
 	for (k = 0; k < ns; k++)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | %s=%s", S[k].csv, grados(g, S[k].t));
 	m += snprintf(b + m, sizeof b - (size_t)m, " | MHz=%u", mhz_ahora);
-	if (hay_zonas && za.t.asus_hay && (za.t.asus_vent_cpu != NO || za.t.asus_vent_gpu != NO))
-		m += snprintf(b + m, sizeof b - (size_t)m, " | vent_cpu=%d vent_gpu=%d", za.t.asus_vent_cpu == NO ? -1 : za.t.asus_vent_cpu, za.t.asus_vent_gpu == NO ? -1 : za.t.asus_vent_gpu);
+	if (hay_zonas && za.t.asus_hay) {
+		char v1[16], v2[16];
+
+		m += snprintf(b + m, sizeof b - (size_t)m, " | vent_cpu=%s vent_gpu=%s", vent_asus(v1, za.t.asus_vent_cpu), vent_asus(v2, za.t.asus_vent_gpu));
+	}
 	if (ocup_pct >= 0)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | ocupado=%d%%", ocup_pct);
 	if (c0_pct >= 0)
@@ -754,7 +936,12 @@ static void log_datos(void)
 	if (c6_pct >= 0)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | C6=%d%%", c6_pct);
 	if (hay_bateria && en.pct <= 100)
-		snprintf(b + m, sizeof b - (size_t)m, " | bateria=%u%% %s", en.pct, en.ca == 1 ? "enchufado" : en.ca == 0 ? "sin enchufar" : "");
+		m += snprintf(b + m, sizeof b - (size_t)m, " | bateria=%u%% %s", en.pct, en.ca == 1 ? "enchufado" : en.ca == 0 ? "sin enchufar" : "");
+	if (hay_bateria && hay_zonas && za.t.bat_mw != NO && (za.t.bat_estado & 3)) {
+		char w[16];
+
+		snprintf(b + m, sizeof b - (size_t)m, " | %s=%s W", za.t.bat_estado & 1 ? "gasta" : "carga", vatios(w, za.t.bat_mw));
+	}
 	log_escribe("DATOS", b);
 }
 
@@ -839,9 +1026,13 @@ static void mira_cambios(void)
 	if (cuenta_s == 4 && !hay_gpus)
 		suceso_log("gráficas NVIDIA Maxwell: ninguna en el PCI%s", busca(za.t.producto, "GT80") ? " (en el GT80: el interruptor de gráficos las apaga)" : "");
 	if (hay_zonas && za.t.asus_hay && cuenta_s == 6)
-		suceso_log("ASUS (WMI, DSTS: solo leer): ventilador CPU %d, ventilador GPU %d r.p.m., temperatura %d décimas%s", za.t.asus_vent_cpu == NO ? -1 : za.t.asus_vent_cpu,
-			   za.t.asus_vent_gpu == NO ? -1 : za.t.asus_vent_gpu, za.t.asus_temp == NO ? -1 : za.t.asus_temp,
+	{
+		char v1[16], v2[16];
+
+		suceso_log("ASUS (WMI, DSTS: solo leer): ventilador CPU %s, ventilador GPU %s (DSTS: %08Xh, %08Xh), temperatura %d décimas%s", vent_asus(v1, za.t.asus_vent_cpu),
+			   vent_asus(v2, za.t.asus_vent_gpu), za.t.asus_crudo_cpu, za.t.asus_crudo_gpu, za.t.asus_temp == NO ? -1 : za.t.asus_temp,
 			   za.t.asus_escribe ? "; el AML quiso escribir en el EC al leerlo: no se fía" : "");
+	}
 	if (hay_zonas && (cuenta_s == 10 || cuenta_s == 120) && za.t.ec_hay)
 		suceso_log("ACPI: el controlador embebido (EC), al leer las zonas: %u lecturas, %u sin respuesta a tiempo, %u escrituras del AML no hechas (solo lectura); una lectura entera tarda %u ms",
 			   za.t.ec_lecturas, za.t.ec_fallos, za.t.ec_ignoradas, za.t.ms_lectura);
@@ -911,6 +1102,26 @@ static void mira_cambios(void)
 			suceso_log("batería al %u %%", en.pct);
 			pct_antes = (int)en.pct;
 		}
+		if (en.ca == 0 && en.pct <= 100) {
+			if (desc_pct0 < 0 || desc_enchufado || (int)en.pct > desc_pct1) {	/* (empieza, otra vez sin enchufar o ha subido: de nuevo) */
+				desc_pct0 = (int)en.pct, desc_s0 = cuenta_s, desc_carga = 0, desc_mw_max = -1;
+				desc_mw = -1;
+			}
+			desc_pct1 = (int)en.pct, desc_s1 = cuenta_s, desc_enchufado = 0;
+			if (en_carga())
+				desc_carga = 1;
+			if (hay_zonas && za.t.bat_mw != NO && (za.t.bat_estado & 1)) {
+				desc_mw = za.t.bat_mw;
+				if (za.t.bat_mw > desc_mw_max)
+					desc_mw_max = za.t.bat_mw;
+				if (cuenta_s % 60 == 0) {
+					char w[16];
+
+					suceso_log("batería: gasta unos %s W (ACPI, _BST), al %u %%", vatios(w, za.t.bat_mw), en.pct);
+				}
+			}
+		} else if (en.ca == 1)
+			desc_enchufado = 1;	/* (lo medido se queda para el informe hasta que se desenchufe otra vez) */
 	}
 }
 
@@ -1107,6 +1318,7 @@ static void captura_en(const char *nombre);
 static u8 *bmp_pend;		/* (PARPADEO/TERMO) la pantalla que se está guardando */
 static u32 bmp_total, bmp_hecho;
 static char bmp_ruta[120];
+static char informe_dicho[200];
 
 /* cada pulso: otro trozo de la pantalla que se está guardando */
 static void bmp_trozo(void)
@@ -1125,7 +1337,10 @@ static void bmp_trozo(void)
 	if (bmp_hecho >= bmp_total) {
 		free(bmp_pend);
 		bmp_pend = 0;
-		snprintf(aviso_archivo, sizeof aviso_archivo, "Pantalla guardada.");
+		if (informe_dicho[0] && busca(bmp_ruta, "INFORME.BMP"))	/* (lo del informe se queda a la vista) */
+			snprintf(aviso_archivo, sizeof aviso_archivo, "%s (y la pantalla, INFORME.BMP)", informe_dicho);
+		else
+			snprintf(aviso_archivo, sizeof aviso_archivo, "Pantalla guardada.");
 	}
 }
 
@@ -1204,6 +1419,11 @@ static void captura_en(const char *nombre)
 /* ---------------------------------------------------------------- la prueba */
 enum { F_REPOSO, F_CARGA, F_ENFRIA, F_RESULTADO };
 static int fase = F_REPOSO, minutos = 10, dura_s, enfria_max = 180;
+
+static int en_carga(void)
+{
+	return fase == F_CARGA;
+}
 static u32 t_fase;
 static int t_ini, pico, por_seguridad, por_esc, seg_carga;
 static struct ve_prueba VP;	/* (veredicto.c) con qué sensor se mide y qué ha pasado */
@@ -1254,9 +1474,24 @@ static void temperaturas(int *t)
 struct ap_ficha { u32 apic, estado, vueltas, msr, lecturas, latido, tsc, z; };
 struct ap_tabla { u32 n, motivo, base, r; struct ap_ficha e[16]; };
 static struct ap_tabla apt;
-static int hilos_nucleo = 1, nucleo_bsp;
+static int smt_bits, nucleo_bsp, nucleos_vistos = 1, hilos_vistos = 1;	/* (cuántos núcleos y hilos de verdad: los vistos en la carga) */
 static const char *const motivo_ap[] = { "", "sin APIC", "el APIC está apagado (lo dejó así la BIOS)", "no se puede ver el APIC",
 					 "no hay sitio libre en la memoria baja", "el trampolín no cabe", "ningún otro procesador ha contestado (tiene uno, o no responden)" };
+
+/* La topología: de qué núcleo es cada procesador (su APIC sin los bits de
+ * los hilos). Lo bueno es CPUID 0Bh (nivel 1, el de los hilos: EAX[4:0], los
+ * bits que ocupan). Sin él, CPUID 1 EBX[23:16] y 4 EAX[31:26]+1, que son
+ * «cuántos caben» (potencias de 2), no cuántos hay: un i5-7300HQ (4 núcleos,
+ * 4 hilos) dice 16 y 8, como si tuviera 2 hilos por núcleo. Por eso cuántos
+ * núcleos e hilos hay se cuenta después, con los procesadores que contestan. */
+static int log2_arriba(int n)
+{
+	int b = 0;
+
+	while ((1 << b) < n && b < 8)
+		b++;
+	return b;
+}
 
 static void cuenta_hilos(void)
 {
@@ -1266,14 +1501,25 @@ static void cuenta_hilos(void)
 	cpuid(1, r);
 	nucleo_bsp = (int)(r[1] >> 24);
 	logicos = (r[3] & (1u << 28)) ? (int)((r[1] >> 16) & 0xFF) : 1;
+	smt_bits = 0;
+	if ((cpu.intel || cpu.amd) && cpu.max_hoja >= 0xB) {
+		__asm__ volatile("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(0xB), "c"(0));
+		if (((r[2] >> 8) & 0xFF) == 1 && (r[1] & 0xFFFF)) {	/* (nivel 0: el de los hilos, «SMT») */
+			smt_bits = (int)(r[0] & 0x1F);
+			goto hecho;
+		}
+	}
 	if (cpu.intel && cpu.max_hoja >= 4) {
 		__asm__ volatile("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(4), "c"(0));
 		nucleos = (int)(r[0] >> 26) + 1;
-	}
-	hilos_nucleo = cpu.intel && nucleos > 0 && logicos >= nucleos ? logicos / nucleos : 1;	/* (AMD: cada uno, como núcleo) */
-	if (hilos_nucleo < 1 || hilos_nucleo > 4)
-		hilos_nucleo = 1;
-	nucleo_bsp /= hilos_nucleo;
+		if (logicos > nucleos)
+			smt_bits = log2_arriba(logicos / nucleos);
+	}	/* (AMD sin 0Bh: cada uno, como núcleo) */
+hecho:
+	if (smt_bits > 3)
+		smt_bits = 0;
+	serie("termo: topología: CPUID 0Bh %s, %d bits de hilo en el APIC\n", cpu.max_hoja >= 0xB ? "sí" : "no", smt_bits);
+	nucleo_bsp >>= smt_bits;
 }
 
 static void ap_sensores(void)
@@ -1288,7 +1534,7 @@ static void ap_sensores(void)
 	}
 	ap_cargados = (int)apt.n;
 	for (i = 0; i < apt.n && i < 16; i++) {
-		int nucleo = (int)apt.e[i].apic / hilos_nucleo;
+		int nucleo = (int)apt.e[i].apic >> smt_bits;
 		char n[48], c[24];
 
 		if (nucleo == nucleo_bsp || !cpu.intel || !cpu.dts)
@@ -1304,8 +1550,23 @@ static void ap_sensores(void)
 		if (k >= 0)
 			S[k].zona = 0x10000 | nucleo;
 	}
-	suceso_log("la carga, en %d procesadores (este y %d más: %d núcleos, %d hilos por núcleo)", ap_cargados + 1, ap_cargados,
-		   (ap_cargados + 1) / hilos_nucleo, hilos_nucleo);
+	{	/* los núcleos de verdad: los distintos entre este y los que han contestado */
+		int vistos[17], nv = 0, j;
+
+		vistos[nv++] = nucleo_bsp;
+		for (i = 0; i < apt.n && i < 16; i++) {
+			int nucleo = (int)apt.e[i].apic >> smt_bits;
+
+			for (j = 0; j < nv && vistos[j] != nucleo; j++)
+				;
+			if (j == nv)
+				vistos[nv++] = nucleo;
+		}
+		nucleos_vistos = nv;
+		hilos_vistos = (ap_cargados + 1 + nv - 1) / nv;
+	}
+	suceso_log("la carga, en %d procesadores (este y %d más: %d %s, %d %s)", ap_cargados + 1, ap_cargados,
+		   nucleos_vistos, nucleos_vistos == 1 ? "núcleo" : "núcleos", hilos_vistos, hilos_vistos == 1 ? "hilo por núcleo" : "hilos por núcleo");
 	if (csv_listo)
 		csv_cabecera();
 }
@@ -1328,7 +1589,7 @@ static void lee_ap(void)
 		if (S[k].clase != CL_CPU || !(S[k].zona & 0x10000))
 			continue;
 		for (i = 0; i < apt.n && i < 16; i++)
-			if ((int)apt.e[i].apic / hilos_nucleo == (S[k].zona & 0xFFFF) && apt.e[i].lecturas && (apt.e[i].msr & 0x80000000u)) {
+			if ((int)apt.e[i].apic >> smt_bits == (S[k].zona & 0xFFFF) && apt.e[i].lecturas && (apt.e[i].msr & 0x80000000u)) {
 				int v = (cpu.tjmax - (int)((apt.e[i].msr >> 16) & 0x7F)) * 10;
 
 				if (t == NO || v > t)
@@ -1409,8 +1670,13 @@ static void empieza(void)
 	{
 		char g[24];
 
-		suceso_log("EMPIEZA la prueba de esfuerzo: %d s, carga de coma flotante (x87) en 1 núcleo (%s); el más caliente, a %s",
-			   dura_s, solo_aqui ? "en la tarea del Termómetro, unos 8 ms de cada 10" : "tarea hija TERMO.BIN /CARGA, al 100 %", grados(g, t_ini));
+		/* (lo de los demás procesadores ya está: ap_sensores, al pedir la carga) */
+		if (ap_cargados > 0)
+			suceso_log("EMPIEZA la prueba de esfuerzo: %d s, carga de coma flotante (x87) en %d procesadores (este, %s, y %d más, del núcleo); el más caliente, a %s",
+				   dura_s, ap_cargados + 1, solo_aqui ? "en la tarea del Termómetro, unos 8 ms de cada 10" : "con la tarea hija TERMO.BIN /CARGA al 100 %", ap_cargados, grados(g, t_ini));
+		else
+			suceso_log("EMPIEZA la prueba de esfuerzo: %d s, carga de coma flotante (x87) en 1 procesador (%s); el más caliente, a %s",
+				   dura_s, solo_aqui ? "en la tarea del Termómetro, unos 8 ms de cada 10" : "tarea hija TERMO.BIN /CARGA, al 100 %", grados(g, t_ini));
 	}
 }
 
@@ -1459,6 +1725,38 @@ static void para_carga(int seguridad, int esc)
  * para el Bloc de notas de Windows); y la pantalla con la gráfica, en
  * INFORME.BMP */
 
+/* (TERMO) el consumo y la autonomía, para el informe: lo que dice _BST
+ * (vatios), lo que calcula la BIOS (minutos) y lo medido aquí (lo que ha
+ * bajado el porcentaje sin enchufar: con 3 minutos y 2 puntos, al menos) */
+static void informe_autonomia(char *b, size_t cabe)
+{
+	int m = 0, d_s = (int)(desc_s1 - desc_s0), d_p = desc_pct0 - desc_pct1;
+	char w[16], w2[16];
+
+	b[0] = 0;
+	if (desc_pct0 < 0)
+		return;
+	if (desc_mw > 0)
+		m += snprintf(b + m, cabe - (size_t)m, "  Consumo sin enchufar: unos %s W en la última lectura (lo dice la batería, ACPI _BST)%s%s%s.\r\n", vatios(w, desc_mw),
+			      desc_mw_max > desc_mw + 500 ? "; lo más alto visto, " : "", desc_mw_max > desc_mw + 500 ? vatios(w2, desc_mw_max) : "",
+			      desc_mw_max > desc_mw + 500 ? " W" : "");
+	else
+		m += snprintf(b + m, cabe - (size_t)m, "  Consumo: la batería no dice cuánto gasta (ACPI _BST sin el ritmo).\r\n");
+	if (en.ca == 0 && en.minutos != 0xFFFF && en.minutos > 0 && en.minutos < 6000)
+		m += snprintf(b + m, cabe - (size_t)m, "  Autonomía según la batería: unas %u h %02u min con lo que le queda.\r\n", en.minutos / 60, en.minutos % 60);
+	if (d_s >= 180 && d_p >= 2) {
+		int ppm10 = d_p * 600 / d_s;		/* (décimas de punto por minuto) */
+		int queda = desc_pct1 * d_s / d_p / 60, llena = 100 * d_s / d_p / 60;
+
+		m += snprintf(b + m, cabe - (size_t)m, "  Medido aquí: del %d %% al %d %% en %d min (%d,%d puntos por minuto). A ese ritmo, con lo que le queda,"
+			      " unas %d h %02d min; con la batería llena, unas %d h %02d min.\r\n", desc_pct0, desc_pct1, d_s / 60, ppm10 / 10, ppm10 % 10,
+			      queda / 60, queda % 60, llena / 60, llena % 60);
+		if (desc_carga)
+			m += snprintf(b + m, cabe - (size_t)m, "  (Ha sido con la prueba de esfuerzo, que gasta mucho más que el uso normal: con un uso normal durará bastante más.)\r\n");
+	} else if (d_s < 180)
+		m += snprintf(b + m, cabe - (size_t)m, "  Para medir la autonomía aquí hace falta al menos 3 minutos sin enchufar.\r\n");
+}
+
 static void escribe_informe(void)
 {
 	static char t[6000];
@@ -1490,6 +1788,13 @@ static void escribe_informe(void)
 	{
 		char fr[1500];
 
+		if (ve_mhz_carga(&VP)) {
+			char le[240];
+
+			IN("\r\nFrecuencia en la carga: %d MHz de media (la nominal: %d MHz).\r\n", ve_mhz_carga(&VP), VP.mhz_nominal);
+			if (ve_lento(&VP, le, (int)sizeof le))
+				IN("  %s\r\n", le);
+		}
 		IN("\r\nFRENADOS DEL PROCESADOR\r\n");
 		if (!cpu.intel || !cpu.dts)
 			IN("  (este procesador no dice por qué se frena)\r\n");
@@ -1505,11 +1810,27 @@ static void escribe_informe(void)
 		if (en.ciclos1 != 0xFFFF && en.ciclos1 != 0 && en.ciclos1 < 100000)
 			IN("; %u ciclos de carga", en.ciclos1);
 		IN("\r\n");
+		{
+			char au[900];
+
+			informe_autonomia(au, sizeof au);
+			IN("%s", au);
+		}
 		if (en.salud_pct < 50)
 			IN("  La batería está muy gastada (menos de la mitad de lo que guardaba nueva): conviene cambiarla. Si la tapa de abajo o el ratón táctil abomban, puede estar hinchada: llévelo al técnico cuanto antes.\r\n");
 	}
 	if (anterior[0])
 		IN("\r\nLA VEZ ANTERIOR\r\n  %s\r\n", anterior);
+	if (hay_zonas && za.t.equipo_hecho == 1 && (za.t.equipo_tablas || za.t.equipo_pci))
+		IN("\r\nGuardado también, para Carlos: %c:\\TERMO\\EQUIPO (%u tablas ACPI tal cual%s): solo lo que dice el equipo de sí mismo, sin datos personales.\r\n",
+		   unidad, za.t.equipo_tablas, za.t.equipo_pci ? " y la lista PCI, PCI.TXT" : "");
+	if (nhallado) {
+		int i;
+
+		IN("\r\nLO QUE HA ENCONTRADO EL SISTEMA AL ARRANCAR\r\n");
+		for (i = 0; i < nhallado; i++)
+			IN("  %s\r\n", hallado[i]);
+	}
 	{
 		char r2[120];
 
@@ -1525,15 +1846,24 @@ static void escribe_informe(void)
 	IN("Hecho con el Termómetro de Hispa-Pentium (GPL-2.0 o posterior). No contiene datos personales.\r\n");
 #undef IN
 	snprintf(r, sizeof r, "%s\\INFORME.TXT", carpeta);
-	escribe(r, t, (u32)n, 1);
+	if (escribe(r, t, (u32)n, 1) && comprueba(r, t, (u32)n)) {
+		snprintf(informe_dicho, sizeof informe_dicho, "Informe guardado y comprobado (leído de vuelta): %s", r);
+		snprintf(aviso_archivo, sizeof aviso_archivo, "%s", informe_dicho);
+	} else {
+		no_se_guarda(r, motivo_error(ult_error));
+		snprintf(informe_dicho, sizeof informe_dicho, "NO se ha podido guardar el informe en %s: %s", r, motivo_error(ult_error));
+	}
 	captura_en("INFORME.BMP");
-	suceso_log("informe para el técnico: %s y INFORME.BMP", r);
+	suceso_log("informe para el técnico: %s y INFORME.BMP (%s)", r, guarda_mal ? informe_dicho : "comprobado: leído de vuelta");
 }
+
+static int frenado_en_carga(void);
 
 static void escribe_resumen(void)
 {
 	int k;
 
+	VP.frenado = frenado_en_carga();
 	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
 	for (k = 0; k < ns && k < VE_MAXS; k++)
 		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
@@ -1564,6 +1894,10 @@ static void prueba_segundo(void)
 	temperaturas(t);
 	if (fase == F_CARGA) {
 		ve_carga(&VP, t);
+		VP.procesadores = ap_cargados + 1;
+		VP.mhz_nominal = ve_mhz_nominal(cpu.marca, (int)mhz_tsc);
+		if (cpu.aperf && seg >= 5)	/* (la frecuencia de la carga: sin los primeros segundos, que sube) */
+			ve_frecuencia(&VP, (int)mhz_ahora);
 		if (p != NO && (pico == NO || p > pico))
 			pico = p;
 		/* la parada de seguridad: el límite menos 10 °C (o 95 °C sin límite) */
@@ -1811,6 +2145,17 @@ static void mira_frenos(void)
 	}
 }
 
+/* ¿se ha frenado durante la carga (por lo que sea)? */
+static int frenado_en_carga(void)
+{
+	int i;
+
+	for (i = 0; i < NFRENOS; i++)
+		if (frenos_cuenta[i][1])
+			return 1;
+	return 0;
+}
+
 /* lo de los frenos, para el informe (0 si no hay nada) */
 static int informe_frenos(char *d, int cabe)
 {
@@ -1942,7 +2287,7 @@ static const char *nucleos_texto(void)
 
 	if (!ap_cargados)
 		return "solo 1 núcleo cargado";
-	snprintf(t, sizeof t, "%d procesadores cargados (%d por núcleo)", ap_cargados + 1, hilos_nucleo);
+	snprintf(t, sizeof t, "%d procesadores cargados (%d núcleos, %d por núcleo)", ap_cargados + 1, nucleos_vistos, hilos_vistos);
 	return t;
 }
 
@@ -2304,12 +2649,13 @@ static void pinta(void)
 				m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador %u: %s", i + 1, v->encendido == 1 ? "en marcha" : v->encendido == 0 ? "parado" : "sin datos");
 		}
 			if (hay_zonas && za.t.asus_hay) {
-				if (za.t.asus_vent_cpu != NO)
-					m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador CPU (ASUS): %d r.p.m.", za.t.asus_vent_cpu);
-				if (za.t.asus_vent_gpu != NO)
-					m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador GPU (ASUS): %d r.p.m.", za.t.asus_vent_gpu);
+				char v1[16], v2[16];
+
 				if (za.t.asus_vent_cpu == NO && za.t.asus_vent_gpu == NO)
 					m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventiladores ASUS (WMI): no disponible");
+				else
+					m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador CPU (ASUS): %s  ·  Ventilador GPU (ASUS): %s",
+						      vent_asus(v1, za.t.asus_vent_cpu), vent_asus(v2, za.t.asus_vent_gpu));
 			} else if (hay_zonas && za.t.nvent == 0)
 				m += snprintf(a + m, sizeof a - (size_t)m, "  ·  Ventilador: la BIOS no lo da por ACPI (que se oiga)");
 		lineas += nota(y + 4 + 16 * lineas, a, C_TINTA);
@@ -2374,7 +2720,24 @@ static void pinta(void)
 				boton(xb, yb, an_ter, 32, "Terminal", B_TERMINAL, 1, 0);
 		}
 		lz_texto(&LZ, 12, H - 20, midiendo || aviso_mide[0] ? aviso_mide : aviso_envio[0] ? aviso_envio : aviso_archivo,
-			 midiendo || aviso_mide[0] || aviso_envio[0] ? C_TINTA : C_GRIS, 1);
+			 midiendo || aviso_mide[0] || aviso_envio[0] || informe_dicho[0] ? C_TINTA : C_GRIS, 1);
+		/* (TERMO) no se puede guardar en la memoria: en grande, en rojo,
+		 * encima de la línea de abajo (y lo que se ha hecho en su lugar) */
+		if (guarda_aviso[0]) {
+			int esc = (int)strlen(guarda_aviso) * 16 + 40 <= W ? 2 : 1, al = esc == 2 ? 44 : 30, i;
+
+			lz_rect(&LZ, 6, H - 30 - al, W - 12, al, 0xB3261E);
+			lz_negrita(&LZ, 16, H - 30 - al + (al - 8 * esc * 2 + 4) / 2 + 2, guarda_aviso, 0xFFFFFF, esc);
+			/* lo que ha encontrado el sistema (para la foto), encima */
+			if (nhallado) {
+				int ah = 26 + 16 * nhallado, y0 = H - 30 - al - 6 - ah;
+
+				lz_rect(&LZ, 6, y0, W - 12, ah, 0xFFF3C4);
+				lz_negrita(&LZ, 14, y0 + 4, "Qué ha encontrado el sistema al arrancar (haga una foto y mándemela):", C_TINTA, 1);
+				for (i = 0; i < nhallado; i++)
+					lz_texto(&LZ, 14, y0 + 22 + 16 * i, hallado[i], C_TINTA, 1);
+			}
+		}
 		/* la vez anterior no acabó bien: se dice, encima de todo */
 		if (ver_anterior) {
 			int an = W - 120, rx = 60, ry = 100, al = 90 + 18 * lz_parrafo(0, 0, 0, an - 28, anterior, 0, 1, 18);
