@@ -5893,6 +5893,131 @@ Hispa-Pentium; en Hispa-486 sí va): la imagen
 con su `LEEME.TXT`: arrancar de la memoria, conectar a su Wi-Fi desde el
 icono, `PING` y Google en el Navegador; si falla, `X:\WIFI.LOG`.
 
+### El Wi-Fi de Intel (radio_iwl.c, 23/11; marcado «(INTEL)»)
+
+Las Wi-Fi de Intel son las más comunes en los portátiles, y las de Carlos lo
+son: el **ASUS GL553VD** lleva una **Wireless-AC 7265** (`8086:095A`, en
+02:00.0), el **Monovate 14.1** (i3-1115G4, Tiger Lake) una CNVi con el
+Bluetooth `8087:0AAA` (una 9560/9462, «Jefferson Peak») y el **ThinkPad E14
+Gen 5** una CNVi con el Bluetooth `8087:0026` (una AX201). No hay controlador
+de Linux que se pueda pasar como `brcmsmac` o `ath9k`: iwlwifi es enorme y
+depende de mac80211. Así que es **un controlador nuevo**, escrito aquí
+(`wifi/nucleo/radio_iwl.c`), que hace lo que hace iwlwifi con el firmware de
+Intel, que es quien hace casi todo (iwlwifi es GPL-2.0/BSD; de allí solo se
+han tomado los hechos —los números de los registros, los bits, la forma y el
+orden de las órdenes—, cada paso con la función de Linux 6.6 de la que sale;
+ni una línea de su código).
+
+**Etapa 1 (hecha): la 7265 encuentra las redes.**
+
+- **La tarjeta**: `iwl_reconoce` (las 7265, 3165 y 3168, y, para decirlo en
+  `WIFI.LOG`, las 7260/3160, 8260/8265, las 9000 y las CNVi de Cannon Lake a
+  Meteor Lake con su plataforma); `CSR_HW_REV` dice si es una **7265D** (tipo
+  210h: `iwlwifi-7265D-29.ucode`) o una 7265 sin «D» (`iwlwifi-7265-17`).
+  `RED.BIN` pone en marcha `WIFI.BIN` con cualquier Intel de la clase 0280h.
+- **El firmware** (`wifi/nucleo/iwl_fw.c`, `iwl_fw.h`): su cabecera y sus TLV;
+  las secciones de las imágenes INIT y RT (con el separador de la CPU2 y la
+  memoria paginada), `PHY_SKU`, `DEF_CALIB`, las capacidades y las versiones
+  de las órdenes. Desconfía de todo el archivo (largos, tablas llenas).
+- **El transporte PCIe «gen1»** (el de la familia 7000): despertarla
+  (`prepare_card_hw`, `apm_init` con lo de APMG, `nic_config` con el PHY_SKU),
+  el «NIC access» pedido una vez y guardado (se sondea: sin ahorro de
+  energía), la cola de recepción (256 RBD con 64 búferes de 4 K de verdad: la
+  ranura *s* usa el *s* mod 64, y el puntero de escritura, de 8 en 8, nunca
+  deja a la tarjeta dos ranuras con el mismo), la cola de órdenes (la 0, en el
+  FIFO 7, por DQA: TFD de 128 octetos, el primer TB con una copia de los
+  primeros 20 octetos, cabecera «ancha» de 8 octetos) y la carga del firmware
+  por el canal de servicio del FH, en trozos de 32 K, con `LMPM_CHICK` en la
+  zona extendida (40000h-57FFFh); al soltar la CPU, el ALIVE (con la base del
+  planificador) y el planificador (SCD) en marcha.
+- **MVM**: con la imagen **INIT**, BT_CONFIG, la MAC del NVM (sección 0,
+  octeto 2Ah, de dos en dos al revés), los canales del NVM (sección 1),
+  TX_ANT, PHY_CONFIGURATION con su calibración y guardar el **PHY DB** hasta
+  INIT_COMPLETE; se para la tarjeta y, con la **RT**, se le devuelve el PHY DB
+  (CFG, NCH, PAPD, TXP), TX_ANT, PHY_CONFIGURATION, BT_CONFIG, **DQA_ENABLE**,
+  la **estación auxiliar** (la 1, con su cola 1 en el FIFO 5: la de los
+  sondeos del escaneo), el contexto PHY 0, POWER_TABLE sin ahorro y el país
+  por **LAR** (`MCC_UPDATE` «ZZ»: sin él el firmware no escanea), que dice qué
+  canales valen.
+- **El escaneo**: este firmware no tiene el escaneo UMAC, así que es la orden
+  **LMAC** (`SCAN_OFFLOAD_REQUEST`, 1.772 octetos): los canales de 2,4 GHz que
+  valen, activo con el SSID comodín, la plantilla del «probe request» con
+  nuestra MAC y las velocidades. Cada baliza llega en dos paquetes: 0xC0 (el
+  PHY: el canal y la energía de las dos antenas; la señal es la mejor) y 0xC1
+  (la trama, con su estado: CRC bien). Van a `w80211.c` como las de las otras
+  tarjetas, con su canal de verdad (`barre_sola` en `struct radio`: es el
+  firmware quien salta de canal). La ventana del Wi-Fi y `REDWIFI /REDES`
+  las enseñan igual.
+- **El firmware de Intel no es libre** (su licencia deja repartirlo sin
+  cambios, pero no es software libre): **no está en el repositorio ni en las
+  imágenes ni en el paquete «wifi»**. `WIFI.BIN` lo busca, con el nombre de
+  linux-firmware, en **`\HISPA\FIRMWARE\`** (o `\FIRMWARE\` en la raíz de
+  la memoria USB; el sistema de archivos abre por nombre largo) y, si no está,
+  lo dice en `WIFI.LOG` con el nombre y de dónde bajarlo
+  (<https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/intel/iwlwifi>).
+  `tools/firmware_intel.sh CARPETA` lo baja con su licencia
+  (`LICENCE.iwlwifi_firmware`) a `CARPETA/FIRMWARE/`. **El plan para el
+  paquete**: un paquete aparte, «fw-intel», del tipo de los opcionales, que
+  no se hace en el repositorio sino al publicar (con ese guion, desde
+  linux-firmware, con la licencia dentro) y se ofrece en «Programas y
+  actualizaciones» con su licencia a la vista; el sistema no lo instala solo.
+- **Memoria**: el firmware (1 MB) se lee al montón de 2 MB de `WIFI.BIN`; las
+  colas, unos 420 K más.
+
+**Probarlo sin la tarjeta** (`castel/pruebas.sh`, parte 49, `SOLO=intel`):
+`build/iwl_analiza` prueba el lector con firmwares hechos a mano (cortados,
+sin magia, con largos que se salen, demasiadas secciones) y, con un archivo,
+dice lo que trae; `build/iwl_modelo` corre el controlador entero contra un
+**modelo de la 7265D** (`tests/wifi/iwl_modelo.c`: sus registros, HBUS, el
+canal de servicio, las colas por DMA y lo que haría el firmware: ALIVE, NVM,
+el PHY DB, las respuestas y un escaneo con tres redes), que comprueba el
+firmware octeto a octeto en su sitio, el «NIC access», las cabeceras, el
+orden de las órdenes y el puntero de recepción, y al final la lista de
+`w80211.c` (17 comprobaciones con el firmware de mentira; 31 si además va el de verdad,
+`IWL_FW=iwlwifi-7265D-29.ucode`, bajado aparte). En QEMU no hay ninguna
+Intel Wi-Fi: se prueba que con la e1000 (de Intel, pero de cable) `WIFI.BIN`
+no se pone en marcha. **Lo que solo se verá en el ASUS**: todo lo de la
+tarjeta de verdad. Lo que la especificación deja SIN CONFIRMAR, y es lo
+primero que mirar en `WIFI.LOG` si no salen redes: si el escaneo LMAC va sin
+un `MAC_CONTEXT` (Linux siempre tiene una interfaz antes de escanear), el
+tamaño del ALIVE (0x44 o 0x74) y si EBS a cero vale.
+
+**Etapa 2: conectarse (la 7265).** Lo que hace falta, con sus órdenes (todas
+del grupo 1): `MAC_CONTEXT_CMD` (28h, una estación, `FW_MAC_TYPE_BSS_STA`),
+`BINDING_CONTEXT_CMD` (2Bh), `TIME_QUOTA_CMD` (2Ch), `ADD_STA` del punto de
+acceso (la 0), las colas de gestión y datos con `SCD_QUEUE_CFG`,
+`TIME_EVENT_CMD` (29h) para que el firmware se quede en el canal durante la
+autenticación y la asociación, `TX_CMD` (1Ch, con la tabla del planificador
+de cada cola de datos al día) y `LQ_CMD` (4Eh, la tabla de velocidades: este
+firmware no la hace solo). Y **WPA2**: el acuerdo de 4 pasos es el de
+`wpa.c`, como hoy; el cifrado CCMP **lo hace la tarjeta** (`ADD_STA_KEY`,
+17h, y `sec_ctl` CCM en `TX_CMD`; el PN lo pone y lo comprueba el
+controlador), así que `wpa.c` solo da las claves. Con eso, `struct radio`
+`enviar` deja de ser «aún no».
+
+**Etapa 3: la 9560 del Monovate (CNVi, Tiger Lake).** Ojo: en Tiger Lake la
+CNVi es `8086:A0F0` y **no** es de la familia 9000 sino de la **22000
+(«QuZ»)**, con transporte **gen2**: la radio JF (la 9560) usa
+`iwlwifi-QuZ-a0-jf-b0-NN.ucode`, la HR (la AX201) `iwlwifi-QuZ-a0-hr-b0-NN`;
+lo dice `CSR_HW_RF_ID` (el Bluetooth `8087:0AAA` es USB y no lo dice). Gen2:
+TFD de 256 octetos con TB de 64 bits, colas que se piden al firmware, la
+recepción multicola (RFH) y el arranque por el **«context info»**: una
+estructura en la memoria con las colas y la lista de las secciones del
+firmware copiadas a la memoria (no por el canal de servicio), cuya dirección
+se escribe en `CSR_CTXT_INFO_BA` antes de `UREG_CPU_INIT_RUN`; firmware
+unificado (sin INIT aparte), escaneo **UMAC** (`SCAN_CFG_CMD` y
+`SCAN_REQ_UMAC` con la versión que dice el TLV 48) y la MAC de los registros
+`CSR` (no del NVM). Las 9560 de Cannon/Coffee Lake (`9DF0`, `A370`) sí son de
+la 9000: transmisión gen1 (lo de ahora), recepción RFH y carga «estilo 8000»
+(secciones seguras, CPU1 y CPU2, `FH_UCODE_LOAD_STATUS`, la memoria
+paginada).
+
+**Etapa 4: la AX201/AX211 del ThinkPad E14 Gen 5** (Raptor Lake: CNVi
+`8086:51F0`/`7A70`…, familia AX210, «So», **gen3**): el context info gen3
+con el IML (TLV 52) y el **PNVM** (`iwlwifi-so-a0-gf-a0.pnvm` /
+`…-hr-b0`), que se carga tras el ALIVE. Es el mismo trabajo que la etapa 3
+más el PNVM: primero la 3.
+
 ### Lo que falta
 
 - **Probarlo en el HP Mini** (y en el Toshiba, con la Atheros) y corregir con
@@ -5901,7 +6026,7 @@ icono, `PING` y Google en el Navegador; si falla, `X:\WIFI.LOG`.
   Hispa-486); con ella, `WIFI.BIN` no daría vueltas sin nada que hacer.
 - Lo que falta también en Hispa-486: 802.11n y 5 GHz, la clave de grupo TKIP
   (los routers en modo mixto), la BCM4313 (su PHY LCN), otras tarjetas
-  (Realtek `rtw88`, Intel `iwlwifi`).
+  (Realtek `rtw88`; las Intel, por etapas: arriba, «El Wi-Fi de Intel»).
 - Redes ocultas por su nombre; una IP puesta a mano por red.
 
 ## 14 nonies. Los accesorios: la Calculadora, el Reloj y el Mapa de caracteres

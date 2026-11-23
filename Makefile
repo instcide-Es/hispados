@@ -534,6 +534,13 @@ $(B)/HSPWSIM.BIN: $(B)/wifi/entrada.o $(WIFI_CL) $(WIFI_CP) $(WIFI_CA) wifi/nucl
 # la prueba del anfitrión (tests/run_wifi_tests.sh)
 $(B)/prueba_wifi: tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c wifi/nucleo/nucleo.h | $(B)
 	gcc -std=gnu11 -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/prueba_wifi.c wifi/nucleo/wpa.c wifi/nucleo/w80211.c wifi/nucleo/sim.c
+# (INTEL) el lector del firmware de las Wi-Fi de Intel (wifi/nucleo/iwl_fw.c)
+# y el controlador de la 7265 (radio_iwl.c) contra el modelo de la tarjeta
+# (tests/wifi/iwl_modelo.c), en el anfitrión: castel/pruebas.sh, parte 49
+$(B)/iwl_analiza: tests/wifi/iwl_analiza.c wifi/nucleo/iwl_fw.c wifi/nucleo/iwl_fw.h wifi/nucleo/nucleo.h | $(B)
+	gcc -std=gnu11 -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/iwl_analiza.c wifi/nucleo/iwl_fw.c
+$(B)/iwl_modelo: tests/wifi/iwl_modelo.c wifi/nucleo/radio_iwl.c wifi/nucleo/iwl_fw.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c wifi/nucleo/iwl.h wifi/nucleo/iwl_fw.h wifi/nucleo/nucleo.h | $(B)
+	gcc -std=gnu11 -O2 -Wall -Wno-unused -fno-builtin -DIWL_ANFITRION -Iwifi/nucleo -o $@ tests/wifi/iwl_modelo.c wifi/nucleo/radio_iwl.c wifi/nucleo/iwl_fw.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c
 # ACPI de Hispa-486 (docs/ACPI.md): la batería de los portátiles que no tienen
 # APM. HSPACPI.COM (residente: contesta INT 15h AX=530Ah como una BIOS con
 # APM) y su núcleo de 32 bits HSPACPI.BIN: ACPICA de Intel (acpi/acpica/, sin

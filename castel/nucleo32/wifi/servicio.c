@@ -51,6 +51,7 @@ int ath_monta(struct radio **r);
 int ath_enciende(void);
 void ath_cuentas(d32 *bien, d32 *mal, int *vel);
 void ath_resumen(void);
+#include "iwl.h"			/* (INTEL) wifi/nucleo/radio_iwl.c */
 int vsnprintf(char *buf, size_t tam, const char *f, va_list ap);
 int snprintf(char *b, size_t n, const char *f, ...);
 
@@ -66,6 +67,7 @@ struct conductor {
 static const struct conductor conductores[] = {
 	{ "Broadcom BCM43224/43225 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL },
 	{ "Atheros AR9285/AR9280/AR9287 (ath9k)", ath_busca, ath_monta, ath_enciende, ath_cuentas, ath_resumen },
+	{ "Intel Wireless-AC 7265/3165 (como iwlwifi/MVM; con su firmware en \\HISPA\\FIRMWARE)", iwl_busca, iwl_monta, iwl_enciende, iwl_cuentas, iwl_resumen },
 };
 static const struct conductor *cond;
 static const u16 ids_brcm[] = { 0x4353, 0x4357, 0x4727, 0x0576, 0xa8d8, 0 };
@@ -1137,6 +1139,8 @@ static void busca_aparato(void)
 				for (i = 0; ids_ath[i]; i++)
 					if ((id >> 16) == ids_ath[i])
 						goto hallado;
+			if (iwl_reconoce(id, NULL) >= 0)		/* (INTEL) */
+				goto hallado;
 			if ((hl_pci_lee(bus, df, 8) >> 24) == 0x02)
 				hl_log(2, "PCI %02x:%02x.%d: %04X:%04X (red; clase %06X)\n", bus, df >> 3, df & 7,
 				       id & 0xffff, id >> 16, hl_pci_lee(bus, df, 8) >> 8);
@@ -1203,6 +1207,52 @@ static int carga_fw(int i, const char *archivo, const char *nombre)
 	return 0;
 }
 
+/* (INTEL) el firmware de las Intel: no es libre y no va con el sistema (ni en
+ * el repositorio ni en la memoria USB). Se busca en \HISPA\FIRMWARE\ (o
+ * \FIRMWARE\ en la raíz de la memoria), con el nombre de linux-firmware, el
+ * primero que haya de los que dice radio_iwl.c para esta tarjeta. Se queda
+ * en el montón (es memoria de DMA: las secciones se cargan desde ahí). */
+static int carga_fw_intel(void)
+{
+	const char *const *nombres = iwl_nombres_fw();
+	char r[112];
+	u32 m, n, l;
+	u8 *b;
+	int i, k;
+	static const char *const donde[2] = { "%sFIRMWARE\\%s", "\\FIRMWARE\\%s" };
+
+	for (i = 0; nombres && nombres[i]; i++)
+		for (k = 0; k < 2; k++) {
+			if (k == 0)
+				snprintf(r, sizeof r, donde[0], carpeta, nombres[i]);
+			else
+				snprintf(r, sizeof r, donde[1], nombres[i]);
+			m = sc(SC_ABRIR, (u32)r, 0, 0);
+			if (ES_ERROR(m))
+				continue;
+			l = sc(SC_LARGO, m, 0, 0);
+			if (l < 1024 || l > 4u * 1024 * 1024) {
+				sc(SC_CERRAR, m, 0, 0);
+				hl_log(0, "%s: %u octetos no parece un firmware de Intel\n", r, l);
+				continue;
+			}
+			b = hl_malloc(l + 16);
+			n = b ? sc(SC_LEER, m, (u32)b, l) : 0;
+			sc(SC_CERRAR, m, 0, 0);
+			if (!b || n != l) {
+				hl_log(0, "No se puede leer %s (%u octetos; ¿cabe en la memoria de la tarjeta?)\n", r, l);
+				return -1;
+			}
+			hl_log(2, "Firmware de Intel: %s, %u octetos\n", r, l);
+			return iwl_pon_fw(b, l, nombres[i]);
+		}
+	hl_log(0, "FALTA EL FIRMWARE de la tarjeta Intel. Es de Intel (no es libre: no va con Hispa-DOS).\n");
+	for (i = 0; nombres && nombres[i]; i++)
+		hl_log(0, "  %s%sFIRMWARE\\%s\n", i ? "o en " : "Póngalo en ", carpeta, nombres[i]);
+	hl_log(0, "  Se baja de linux-firmware: https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/intel/iwlwifi\n");
+	return -1;
+}
+
 static int arranca(void)
 {
 	u32 r, t, u, pk;
@@ -1252,6 +1302,8 @@ static int arranca(void)
 		carga_fw(0, "BCM43XX.FW", "brcm/bcm43xx-0.fw");
 		carga_fw(1, "BCM43XXH.FW", "brcm/bcm43xx_hdr-0.fw");
 	}
+	if (cond->busca == iwl_busca && carga_fw_intel() < 0)		/* (INTEL) */
+		return -1;
 	e = cond->monta(&la_radio);
 	hl_monton_info(&t, &u, &pk);
 	if (e) {

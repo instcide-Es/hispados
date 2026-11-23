@@ -43,6 +43,9 @@ struct radio {
 	void (*bss)(const o8 *bssid, int asociado, int intervalo, int ranura_corta,
 		    const o8 *vels, int nvel);
 	void (*parar)(void);
+	/* (INTEL) 1: la tarjeta escanea ella sola (el firmware de las Intel):
+	 * las balizas llegan con su canal de verdad, no el del barrido */
+	int barre_sola;
 };
 extern struct radio *radio;
 

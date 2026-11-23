@@ -228,6 +228,9 @@
 #      contra el modelo de la tarjeta (WIFISIM.BIN) con el microcódigo del
 #      disco; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
 #      (la lista, la contraseña con asteriscos, conectar) y Configuración.
+#  49. (INTEL, SOLO=intel) El Wi-Fi de Intel (wifi/nucleo/radio_iwl.c): el lector del
+#      firmware (.ucode) y el controlador de la 7265 contra el modelo de la tarjeta
+#      (tests/wifi/iwl_modelo.c); en QEMU, la e1000 no pone en marcha WIFI.BIN.
 #  28. (ACCESORIOS, SOLO=accesorios) Los accesorios: la Calculadora (CALC.BIN,
 #      con las cuentas decimales de decimal.cas), el Reloj (RELOJ.BIN) y el
 #      Mapa de caracteres (CARACTER.BIN). Con corre32: las cuentas con lo que
@@ -371,6 +374,7 @@
 #   SOLO=protege ./pruebas.sh     la primera y la 25 (PROTEGE: la zona protegida, los secretos y los servicios por su sello)
 #   SOLO=escudo ./pruebas.sh      la primera y la 26 (Escudo, el antivirus)
 #   SOLO=wifi ./pruebas.sh        la primera y la 27 (el Wi-Fi: WIFI.BIN)
+#   SOLO=intel ./pruebas.sh       la primera y la 49 ((INTEL) el Wi-Fi de Intel: el firmware y la 7265 contra su modelo; IWL_FW=archivo.ucode)
 #   SOLO=accesorios ./pruebas.sh  la primera y la 28 (ACCESORIOS: la Calculadora, el Reloj y el Mapa de caracteres)
 #   SOLO=sonido ./pruebas.sh      la primera y la 29 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
@@ -474,7 +478,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5793,6 +5797,46 @@ else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(t
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi)"
 fi   # el Wi-Fi
+# ------------------------------------------ 49. (INTEL) el Wi-Fi de Intel
+# El controlador de las Intel 7265/3165/3168 (wifi/nucleo/radio_iwl.c, como
+# iwlwifi/MVM) y el lector de su firmware (iwl_fw.c). El firmware de Intel no
+# es libre y no está en el repositorio: en el anfitrión, el lector se prueba
+# con firmwares hechos a mano y el controlador entero contra el modelo de la
+# tarjeta (tests/wifi/iwl_modelo.c: ALIVE, NVM, PHY DB, DQA, LAR y un
+# escaneo con tres redes, hasta la lista de w80211.c). Con IWL_FW=archivo
+# (un iwlwifi-7265D-29.ucode bajado aparte), además con sus secciones de
+# verdad. En QEMU (sin la tarjeta): con la e1000, que también es de Intel
+# (clase 0200h), WIFI.BIN no se pone en marcha y la red va como siempre.
+if parte08 intel; then
+echo "== (INTEL) el Wi-Fi de Intel: el lector del firmware y el controlador de la 7265 contra su modelo =="
+Wi=$P/intel
+mkdir -p $Wi
+if make -s -C $AQUI/.. build/iwl_analiza build/iwl_modelo > $Wi/make.txt 2>&1; then
+  if $AQUI/../build/iwl_analiza > $Wi/analiza.txt 2>&1 && grep -q ", 0 fallos$" $Wi/analiza.txt; then ok "(INTEL) $(tail -1 $Wi/analiza.txt)"
+  else ko "(INTEL) el lector del firmware falla:"; tail -5 $Wi/analiza.txt | sed 's/^/        /'; fi
+  if $AQUI/../build/iwl_modelo ${IWL_FW:-} > $Wi/modelo.txt 2>&1 && grep -q ", 0 fallos$" $Wi/modelo.txt; then ok "(INTEL) $(tail -1 $Wi/modelo.txt)"
+  else ko "(INTEL) el controlador contra el modelo falla:"; grep "FALLO\|MODELO" $Wi/modelo.txt | head -8 | sed 's/^/        /'; fi
+  S=$Wi/modelo.txt
+  mira "(INTEL) lo que dice en WIFI.LOG: la 7265D, las dos imágenes, la MAC, la calibración, el país y las redes" \
+    "iwl: Intel Wireless-AC 7265, CSR_HW_REV 00000218 (tipo 021: 7265D, paso 2)$" "iwl: imagen INIT cargada: " "iwl: imagen RT cargada: " \
+    "iwl: MAC 34:e6:ad:12:34:56 (del NVM)$" "iwl: calibrada: 5 trozos del PHY DB" "iwl: país «ES» (estado 0, 51 canales)$" \
+    "iwl: escaneando 13 canales de 2,4 GHz$" "red: canal  6,  -47 dBm, «HispaPrueba», seguridad 3$"
+  if [ -n "${IWL_FW:-}" ]; then
+    $AQUI/../build/iwl_analiza "$IWL_FW" > $Wi/real.txt 2>&1
+    S=$Wi/real.txt
+    mira "(INTEL) el firmware de verdad ($(basename $IWL_FW)): sus imágenes, y escaneo LMAC" "^Imagen RT (la de trabajo): " "^Imagen INIT (la de calibrar): " "^Escaneo: LMAC"
+  else echo "  (sin IWL_FW=iwlwifi-7265D-29.ucode: solo con el firmware de mentira)"; fi
+else ko "(INTEL) no se hacen build/iwl_analiza y build/iwl_modelo: $(tail -3 $Wi/make.txt)"; fi
+if $AQUI/nucleo32/disco.sh $Wi/d.img 16 red > $Wi/disco.txt 2>&1; then
+  DISCO=$Wi/d.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 3" "apagar" > $Wi/e1000.sal 2>&1
+  tr -d '\r' < $Wi/e1000.sal > $Wi/e1000.txt
+  S=$Wi/e1000.txt
+  mira "(INTEL) en QEMU, con la e1000 (de Intel, pero de cable): la red como siempre" "^red: tarjeta 8086:100E en el bus PCI 00:03$" "^red: DHCP: IP 10.0.2.15"
+  if grep -q "Wi-Fi: tarjeta\|WIFI.BIN en marcha" $S; then ko "(INTEL) con la e1000 se pone en marcha WIFI.BIN"; else ok "(INTEL) y WIFI.BIN no se pone en marcha (la e1000 no es Wi-Fi)"; fi
+else ko "(INTEL) no se hace el disco: $(tail -2 $Wi/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi de Intel)"
+fi   # el Wi-Fi de Intel
 # ---------------------------------------- 30. (PDF) Hispa-PDF: PDF.BIN y su ventana
 # El núcleo en C de castel/nucleo32/pdf, en el anfitrión (con ASan y UBSan:
 # unir, separar, girar, quitar, comprimir con flujos de objetos, cifrar y

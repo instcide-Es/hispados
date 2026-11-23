@@ -469,6 +469,8 @@ static void conectado(void)
 	hl_log(2, "802.11: CONECTADO a «%s»\n", w.ap.ssid);
 }
 
+static int canal_oido;		/* (INTEL) el canal en que llegó la trama, si la radio lo sabe */
+
 static void gestion(const o8 *t, int n, int senal)
 {
 	int sub = t[0] & 0xf0;
@@ -476,7 +478,7 @@ static void gestion(const o8 *t, int n, int senal)
 
 	if (sub == 0x80 || sub == 0x50) {
 		if (w.barrido)
-			baliza(t, n, senal, w.barrido);
+			baliza(t, n, senal, w.r->barre_sola && canal_oido ? canal_oido : w.barrido);
 		if (nuestro_ap) {
 			w.t_oido = hl_jiffies();
 			w.senal = senal;
@@ -698,7 +700,7 @@ void w80211_rx(const o8 *trama, int n, int senal, int canal)
 {
 	static o8 t[2400];
 
-	(void)canal;
+	canal_oido = canal;
 	if (n < 24 || n > (int)sizeof(t))
 		return;
 	if ((trama[0] & 0x0c) == 0x00) {

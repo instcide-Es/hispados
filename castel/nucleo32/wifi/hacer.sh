@@ -56,7 +56,8 @@ for f in wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil
   # shellcheck disable=SC2086
   cc $(basename $f .c).o $f $WCF $LINUXF
 done
-PROPIOS="wifi/compat/base.c wifi/nucleo/radio_brcm.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c wifi/nucleo/sim.c castel/nucleo32/wifi/servicio.c"
+PROPIOS="wifi/compat/base.c wifi/nucleo/radio_brcm.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c wifi/nucleo/sim.c castel/nucleo32/wifi/servicio.c
+         wifi/nucleo/radio_iwl.c wifi/nucleo/radio_iwl_pc.c wifi/nucleo/iwl_fw.c"   # (INTEL) las Intel 7265
 [ -n "$CHIP" ] && PROPIOS="$PROPIOS tests/wifi/tarjeta_sim.c"
 for f in $PROPIOS; do
   # shellcheck disable=SC2086
