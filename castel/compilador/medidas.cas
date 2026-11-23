@@ -38,5 +38,7 @@ módulo Medidas
     público constante LARGO_LIN_ASM = 500       ; una línea de un bloque «ensamblador»
     público constante LARGO_ASM = 6000          ; un bloque «ensamblador» entero
     público constante VENTANA = 1024            ; piezas a la vista (una potencia de 2)
+    público constante PÁRRAFOS_PIEZA = 1        ; [HISPA-64] cada pieza, un párrafo: sin los 32 bits de
+                                                ;   arriba de los números (este CASTEL no saca 64 bits)
 
 fin Medidas.

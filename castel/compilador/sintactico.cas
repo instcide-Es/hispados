@@ -37,9 +37,11 @@ módulo Sintactico
     constante MAX_CARPETAS = 6
     constante NINGUNO = 0xFFFF
 
-    ; una pieza de la ventana (32 octetos, en seg_pz + 2 * número): 0 clase,
+    ; una pieza de la ventana (en seg_pz + PÁRRAFOS_PIEZA * número): 0 clase,
     ; 2 val (4), 6 val2, 8 línea, 10 columna, 12 dónde empieza en el archivo (4),
-    ; 16 [HISPA-64] los 32 bits de arriba de un número (4)
+    ; y, con dos párrafos por pieza (CASTEL32 y CASTEL64), 16 [HISPA-64] los 32
+    ; bits de arriba de un número (4). El de 16 bits no saca 64 bits: un párrafo
+    ; (en sus 640 K no caben 16 K más)
     variable seg_pz: Segmento
     variable pp: nat16                          ; la pieza por la que va el análisis
     variable prod: nat16                        ; cuántas ha dado ya el léxico
@@ -72,7 +74,7 @@ módulo Sintactico
             m("la lista de valores es demasiado larga para el compilador")
             falla(pz.lin, pz.col)
         fin
-        s := seg_pz + (prod yb (VENTANA - 1)) * 2
+        s := seg_pz + (prod yb (VENTANA - 1)) * PÁRRAFOS_PIEZA
         poner_palabra(s, 0, pz.clase)
         poner_palabra(s, 2, nat16(pz.val))
         poner_palabra(s, 4, nat16(pz.val >> 16))
@@ -81,8 +83,10 @@ módulo Sintactico
         poner_palabra(s, 10, pz.col)
         poner_palabra(s, 12, nat16(pieza_pos))
         poner_palabra(s, 14, nat16(pieza_pos >> 16))
-        poner_palabra(s, 16, nat16(pz.alto))
-        poner_palabra(s, 18, nat16(pz.alto >> 16))
+        si PÁRRAFOS_PIEZA = 2 entonces
+            poner_palabra(s, 16, nat16(pz.alto))
+            poner_palabra(s, 18, nat16(pz.alto >> 16))
+        fin
         prod := prod + 1
     fin
 
@@ -91,7 +95,7 @@ módulo Sintactico
         mientras prod - pp <= d hacer
             trae()
         fin
-        devolver seg_pz + ((pp + d) yb (VENTANA - 1)) * 2
+        devolver seg_pz + ((pp + d) yb (VENTANA - 1)) * PÁRRAFOS_PIEZA
     fin
 
     función vacía_ventana()
@@ -499,7 +503,10 @@ módulo Sintactico
             fin
             pp := pp + 1
             alin := 0
-            si es_cl(T_NUM, 0) y leer_palabra(ranura(0), 16) = 0 y leer_palabra(ranura(0), 18) = 0 entonces alin := nat32(leer_palabra(ranura(0), 4)) << 16 ob val(0) fin
+            si es_cl(T_NUM, 0) entonces alin := nat32(leer_palabra(ranura(0), 4)) << 16 ob val(0) fin
+            si es_cl(T_NUM, 0) y PÁRRAFOS_PIEZA = 2 entonces
+                si leer_palabra(ranura(0), 16) <> 0 o leer_palabra(ranura(0), 18) <> 0 entonces alin := 0 fin
+            fin
             si alin < 1 o alin > 4096 o alin yb (alin - 1) <> 0 entonces
                 m("«alineado» lleva una potencia de 2, de 1 a 4096")
                 aquí()
@@ -1025,7 +1032,7 @@ módulo Sintactico
             n := nudo_aquí(K_NUM)
             pon_a(n, leer_palabra(s, 2))
             pon_b(n, leer_palabra(s, 4))
-            si leer_palabra(s, 16) <> 0 o leer_palabra(s, 18) <> 0 entonces
+            si PÁRRAFOS_PIEZA = 2 y (leer_palabra(s, 16) <> 0 o leer_palabra(s, 18) <> 0) entonces
                 ; [HISPA-64] de más de 32 bits: los de arriba, en otro K_NUM
                 pon_c(n, nudo_num(nat32(leer_palabra(s, 18)) << 16 ob leer_palabra(s, 16), nlin(n), ncol(n)))
             fin
@@ -1354,7 +1361,7 @@ módulo Sintactico
     ; que importan estos): rellena la tabla de módulos de Base, cada uno
     ; detrás de los que importa; el programa, el último
     público función carga_programa(ruta: puntero a byte)
-        si seg_pz = 0 entonces seg_pz := Base.bloque(VENTANA * 2) fin
+        si seg_pz = 0 entonces seg_pz := Base.bloque(VENTANA * PÁRRAFOS_PIEZA) fin
         lex_num64 := falso
         n_modulos := 0
         n_en_curso := 0

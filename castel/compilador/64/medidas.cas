@@ -38,5 +38,6 @@ módulo Medidas
     público constante LARGO_LIN_ASM = 2000
     público constante LARGO_ASM = 60000
     público constante VENTANA = 4096
+    público constante PÁRRAFOS_PIEZA = 2        ; [HISPA-64] con los 32 bits de arriba de los números
 
 fin Medidas.

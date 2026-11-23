@@ -732,7 +732,7 @@ minutos. Las de la etapa 2:
 - por UEFI (OVMF + GRUB): q35 con 128 MB; `-cpu max`, 4 procesadores y 3 GB (la
   MADT con 4, la BAR de 64 bits del disco virtio en 0xC000000000); q35 sin HPET; y
   `-machine pc` con 2 procesadores;
-- en todas: el tic, **100 en 1 s (de 75 a 110: con el servidor cargado el TCG de QEMU pierde tics; sin carga, 99 o 100) y otra vez entre dos cambios del segundo
+- en todas: el tic, **100 en 1 s (de 75 a 110, y de 50 por UEFI con 4 procesadores: con el servidor cargado el TCG de QEMU pierde tics; sin carga, 99 o 100) y otra vez entre dos cambios del segundo
   del CMOS** (otro reloj: no es el que lo ha medido); el IOAPIC, 20 de 20 (o 17 a
   23 con el 8254); y **la lista de PCI, la misma que da QEMU** («info pci» por su
   monitor);

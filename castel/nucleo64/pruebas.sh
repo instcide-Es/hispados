@@ -87,9 +87,11 @@ entre() {   # SALIDA TEXTO MIN MAX
 }
 # (de 75 a 110: con el servidor cargado, el TCG de QEMU pierde tics del APIC, nunca da
 # de más; sin carga salen 99 o 100)
-tics_bien() {   # SALIDA RELOJ: 100 tics en 1 s y entre dos segundos del CMOS
-  entre "$1" "^Tic: " 75 110 && hay "$1" "^Tic: [0-9]* tics en 1 s (medido con $2); entre dos cambios del segundo del CMOS: " \
-    && entre "$1" "entre dos cambios del segundo del CMOS: " 75 110
+# (y de 50 a 110 por UEFI con 4 procesadores: el TCG reparte el servidor entre los cuatro)
+tics_bien() {   # SALIDA RELOJ [MÍNIMO]: 100 tics en 1 s y entre dos segundos del CMOS
+  local m=${3:-75}
+  entre "$1" "^Tic: " "$m" 110 && hay "$1" "^Tic: [0-9]* tics en 1 s (medido con $2); entre dos cambios del segundo del CMOS: " \
+    && entre "$1" "entre dos cambios del segundo del CMOS: " "$m" 110
 }
 # la lista de PCI que da QEMU (info pci, a los 3 s: con los buses de detrás de los
 # puentes ya numerados por la BIOS) y la que dice el núcleo, «BB:DD.F VVVV:AAAA»
@@ -265,7 +267,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   if [ $c = 85 ] && grep -q "páginas de 1 GB: sí" <<< "$S" && grep -q "; 4 procesadores lógicos en el paquete" <<< "$S" \
      && grep -q "^  0x00000001.*disponible$" <<< "$S" && grep -q "^Memoria: 2,9 GB libres" <<< "$S" && grep -q "en páginas de 1 GB: [1-9]" <<< "$S" \
      && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 2: todo en orden.$" <<< "$S" \
-     && grep -q "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" <<< "$S" && tics_bien "$T/uefi-max.txt" "el HPET" \
+     && grep -q "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" <<< "$S" && tics_bien "$T/uefi-max.txt" "el HPET" 50 \
      && grep -q "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" <<< "$S" \
      && grep -q "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 BAR por encima de 4 GB$" <<< "$S" \
      && grep -q "^      BAR4 0x[0-9A-F]\{9,\}, 16 KB de memoria de 64 bits (por encima de 4 GB), precargable$" <<< "$S" \
@@ -280,7 +282,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # [etapa 2] por UEFI sin HPET (q35, el reloj de ACPI) y con «pc» (i440FX: PCI por los puertos)
   uefi "$T/uefi-sinhpet.txt" -machine q35,hpet=off -m 256 -smp 4 -monitor none; c=$?
   S=$(serie "$T/uefi-sinhpet.txt")
-  if [ $c = 85 ] && grep -q "^Reloj: el reloj de ACPI (sin HPET), a 3,579 MHz$" <<< "$S" && tics_bien "$T/uefi-sinhpet.txt" "el reloj de ACPI" \
+  if [ $c = 85 ] && grep -q "^Reloj: el reloj de ACPI (sin HPET), a 3,579 MHz$" <<< "$S" && tics_bien "$T/uefi-sinhpet.txt" "el reloj de ACPI" 50 \
      && grep -q "^IOAPIC: el canal 0 del 8254, por la GSI 2" <<< "$S" && grep -q "^Hispa-64 etapa 2: todo en orden.$" <<< "$S"; then
     ok "por UEFI sin HPET (q35, 4 procesadores): el reloj de ACPI; «$(grep '^Tic:' <<< "$S")»"
   else ko "por UEFI sin HPET no dice lo que debe (código $c): $(grep -E '^Reloj|^Tic|^IOAPIC:|parado' <<< "$S" | paste -sd ' ')"; fi

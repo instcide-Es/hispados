@@ -402,8 +402,10 @@ CASTEL64, CASTEL32 y el de 16 bits) con la misma salida:
   constante de 64 bits (en las tablas de CASTEL, `S_NUM` con la marca `SM_64` y
   los 32 bits de arriba en `c` y `d`; en el árbol, un `K_NUM` con su parte alta en
   otro `K_NUM`, en `c`); `X + 1` en otra constante, no (no se calcula).
-  En CASTEL, la pieza del léxico guarda los 32 bits de arriba (`Pieza.alto`; la
-  ventana de piezas pasa de 16 a 32 octetos por pieza).
+  En CASTEL, la pieza del léxico guarda los 32 bits de arriba (`Pieza.alto`; en
+  CASTEL32 y CASTEL64 la ventana de piezas pasa de 16 a 32 octetos por pieza:
+  `PÁRRAFOS_PIEZA` de Medidas; el de 16 bits, que no saca 64 bits, sigue con 16:
+  en sus 640 K no caben 16 K más).
 - **`alineado N`** detrás del tipo de una variable del módulo, sin valor inicial
   (`variable tabla: arreglo [512] de nat64 alineado 4096`), N una potencia de 2
   de 1 a 4096, en los modelos de 64 bits: sale `alignb N` delante de su etiqueta
