@@ -9511,6 +9511,13 @@ QEMU, que no tiene touchpad.
    arriba lo suben 9 (la 022) y un toque encima de «Archivo» abre el menú; y el
    Panel de control › Ratón con la sección, cambiada y guardada en PANEL.INI.
 
+En el PC de Albinyana (23/11): `touchpad` 113/0, `panel` 108/0, `rueda` 70/0,
+`menu` 94/0, `programas` 92/0, `pantalla` 98/0, `dispositivos` 85/0, `castel32`
+67/0 y `06` sin fallos (lo de la 9 cuenta ahora 44 módulos, con RATON.BIN). De
+camino se arregló una carrera del Panel: tras elegir el tapiz (o el dock) se
+repintaba antes de que el escritorio lo pusiera y enseñaba el de antes; ahora
+la 174 da lo pedido mientras tanto (`preferencias.cas`).
+
 **Lo que no se ha podido probar aquí**: un Synaptics de verdad (QEMU no lo
 tiene). Lo probará Carlos en el HP Mini 5103 (y el Toshiba NB250):
 `/root/FTP/HispaDOS/Pruebas/Pendientes/HP-Mini-5103/Touchpad/`. Si algo va
