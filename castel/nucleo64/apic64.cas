@@ -1,0 +1,332 @@
+; =============================================================================
+;  apic64.cas - Hispa-64: las interrupciones (docs/64/HISPA-64.md, etapa 2), sin
+;  el 8259 (se le cambian los vectores y se tapa entero: así una interrupción
+;  suya «espuria» no parece una excepción) y sin el 8254:
+;    - el APIC local, en x2APIC si el procesador lo tiene (por los MSR; si no,
+;      por su memoria, sin caché), con su temporizador medido contra el reloj
+;      (el HPET, o el de ACPI, o, si no hay otro, el canal 2 del 8254) y puesto
+;      a dar el tic del núcleo (100 por segundo; el vector 0x40);
+;    - los IOAPIC de la MADT: todas sus entradas tapadas, y las que se piden
+;      (una IRQ de ISA, con los cambios de la MADT; o una GSI) a un vector,
+;      hacia el procesador que arranca;
+;    - lo que atiende: el tic, el teclado PS/2 (la IRQ 1: guarda los códigos),
+;      la SCI de ACPI (el botón de encendido), una prueba (el vector 0x32) y la
+;      espuria del APIC.
+;  Lo que es de cada procesador (su APIC, sus tics) va por PorCpu64 (etapa 3).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Apic64
+
+    importar Cifras64, Pagina64, Es64, Acpi64, Reloj64, Excep64, Cpu64, PorCpu64
+
+    público constante V_ISA = 0x30              ; las IRQ de ISA, desde aquí (0x31 el teclado)
+    público constante V_PRUEBA = 0x3E
+    público constante V_TIC = 0x40
+    público constante V_ERROR = 0xFE
+    público constante V_ESPURIA = 0xFF
+    público constante HZ = 100
+
+    público variable x2: bool                   ; ¿en x2APIC?
+    público variable lapic: nat64               ; (xAPIC) dónde se ven sus registros
+    público variable lapic_base: nat64          ; la física (del MSR)
+    público variable por_10ms: nat32            ; cuentas del temporizador en 10 ms (dividido entre 16)
+    público variable medido_con: puntero a byte
+    público variable tic_va: bool
+    público variable n_espurias, n_prueba, n_sci, n_botón, n_otras: nat64
+    ; el teclado: los códigos que llegan (una cola)
+    variable cola: arreglo [64] de byte
+    público variable cola_pon, cola_toma: nat32
+    público variable teclado_gsi: nat32
+    ; los IOAPIC, ya a la vista
+    variable io_v: arreglo [8] de nat64
+    variable io_n: arreglo [8] de nat32         ; cuántas entradas tiene cada uno
+    público variable sci_gsi: nat32
+    público variable botón: bool                ; se ha pulsado el botón de encendido
+
+    ; ---- el APIC local ----
+    público función apic_lee(r: nat32): nat32
+        si x2 entonces devolver nat32(lee_msr(0x800 + (r >> 4))) fin
+        devolver m32(lapic + r)
+    fin
+
+    público función apic_pon(r: nat32, v: nat32)
+        si x2 entonces
+            pon_msr(0x800 + (r >> 4), nat64(v))
+        sino
+            pon_m32(lapic + r, v)
+        fin
+    fin
+
+    público función eoi()
+        si x2 entonces pon_msr(0x80B, 0) sino pon_m32(lapic + 0xB0, 0) fin
+    fin
+
+    ; el número de APIC de este procesador
+    público función mi_id(): nat32
+        si x2 entonces devolver nat32(lee_msr(0x802)) fin
+        devolver m32(lapic + 0x20) >> 24
+    fin
+
+    ; el 8259: los vectores a 0x20-0x2F (lejos de las excepciones) y tapado
+    función tapa_8259()
+        sale8(0x20, 0x11)
+        sale8(0xA0, 0x11)
+        sale8(0x21, 0x20)
+        sale8(0xA1, 0x28)
+        sale8(0x21, 4)
+        sale8(0xA1, 2)
+        sale8(0x21, 1)
+        sale8(0xA1, 1)
+        sale8(0x21, 0xFF)
+        sale8(0xA1, 0xFF)
+    fin
+
+    ; pone el APIC local de este procesador (el BSP ahora; en la etapa 3, cada uno)
+    público función pon_lapic()
+        variable b: nat64
+        variable c: puntero a Cpu
+        b := lee_msr(0x1B)
+        si x2apic y b yb 0x400 = 0 entonces
+            b := b ob 0xC00                         ; encendido, en x2APIC
+            pon_msr(0x1B, b)
+        sino si b yb 0x800 = 0 entonces
+            b := b ob 0x800
+            pon_msr(0x1B, b)
+        fin
+        x2 := b yb 0x400 <> 0
+        lapic_base := b yb (nob nat64(0xFFF))
+        lapic_base := lapic_base yb ((nat64(1) << 52) - 1)
+        si no x2 y lapic = 0 entonces lapic := mapea_disp(lapic_base, 0x1000, sin_caché()) fin
+        apic_pon(0x80, 0)                                ; TPR: todas
+        apic_pon(0xF0, 0x100 ob V_ESPURIA)               ; encendido, con su vector espurio
+        apic_pon(0x350, 0x10000)                         ; LINT0 tapada (el 8259)
+        si nmi_lint = 0 entonces apic_pon(0x350, 0x400) sino apic_pon(0x360, 0x400) fin   ; el NMI
+        apic_pon(0x370, V_ERROR)                         ; los errores del APIC
+        apic_pon(0x320, 0x10000)                         ; el temporizador, tapado
+        apic_pon(0x280, 0)
+        apic_pon(0x280, 0)
+        eoi()
+        c := yo()
+        c.apic := mi_id()
+    fin
+
+    ; ---- los IOAPIC ----
+    función io_lee(i: nat32, r: nat32): nat32
+        pon_m32(io_v[i], r)
+        devolver m32(io_v[i] + 0x10)
+    fin
+
+    función io_pon(i: nat32, r: nat32, v: nat32)
+        pon_m32(io_v[i], r)
+        pon_m32(io_v[i] + 0x10, v)
+    fin
+
+    público función entradas(i: nat32): nat32
+        devolver io_n[i]
+    fin
+
+    público función versión_io(i: nat32): nat32
+        devolver io_lee(i, 1) yb 0xFF
+    fin
+
+    función pon_ioapics()
+        variable i, k: nat32
+        i := 0
+        mientras i < n_ioapic hacer
+            io_v[i] := mapea_disp(io_fís[i], 0x20, sin_caché())
+            io_n[i] := ((io_lee(i, 1) >> 16) yb 0xFF) + 1
+            k := 0
+            mientras k < io_n[i] hacer
+                io_pon(i, 0x10 + k * 2, 0x10000)    ; tapada
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; la GSI g al vector v (con las marcas de la MADT: polaridad y disparo, MPS
+    ; INTI; las de ISA, por flanco y altas si no dicen otra cosa), hacia este
+    ; procesador; falso si ningún IOAPIC la lleva
+    público función dirige(g: nat32, v: nat32, marcas: nat32, isa: bool): bool
+        variable i, k, bajo, pol, disp: nat32
+        variable c: puntero a Cpu
+        c := yo()
+        i := 0
+        mientras i < n_ioapic hacer
+            si g >= io_gsi[i] y g < io_gsi[i] + io_n[i] entonces
+                k := g - io_gsi[i]
+                pol := marcas yb 3
+                disp := (marcas >> 2) yb 3
+                bajo := v
+                ; activa en bajo: 3; por nivel: 3 (o, sin decir, lo de PCI si no es de ISA)
+                si pol = 3 o (pol = 0 y no isa) entonces bajo := bajo ob 0x2000 fin
+                si disp = 3 o (disp = 0 y no isa) entonces bajo := bajo ob 0x8000 fin
+                io_pon(i, 0x11 + k * 2, c.apic << 24)
+                io_pon(i, 0x10 + k * 2, bajo)
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    público función tapa(g: nat32)
+        variable i, k: nat32
+        i := 0
+        mientras i < n_ioapic hacer
+            si g >= io_gsi[i] y g < io_gsi[i] + io_n[i] entonces
+                k := g - io_gsi[i]
+                io_pon(i, 0x10 + k * 2, io_lee(i, 0x10 + k * 2) ob 0x10000)
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; una IRQ de ISA al vector v; devuelve su GSI
+    público función dirige_isa(irq: nat32, v: nat32): nat32
+        variable m, g: nat32
+        g := gsi_de(irq, m)
+        si dirige(g, v, m, cierto) entonces devolver g fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; ---- lo que se atiende ----
+    interrupción función tic()
+        variable c: puntero a Cpu
+        c := yo()
+        c.tics := c.tics + 1
+        eoi()
+    fin
+
+    interrupción función espuria()
+        n_espurias := n_espurias + 1
+    fin
+
+    interrupción función espuria_8259()
+        n_espurias := n_espurias + 1
+    fin
+
+    interrupción función error_apic()
+        apic_pon(0x280, 0)
+        eoi()
+    fin
+
+    interrupción función prueba()
+        n_prueba := n_prueba + 1
+        eoi()
+    fin
+
+    interrupción función teclado()
+        variable c: nat32
+        mientras entra8(0x64) yb 1 <> 0 hacer
+            c := entra8(0x60)
+            si cola_pon - cola_toma < 64 entonces
+                cola[cola_pon yb 63] := byte(c)
+                cola_pon := cola_pon + 1
+            fin
+        fin
+        eoi()
+    fin
+
+    interrupción función sci_acpi()
+        n_sci := n_sci + 1
+        si botón_pulsado() entonces
+            botón := cierto
+            n_botón := n_botón + 1
+        sino
+            ; algo que no se sabe atender (sin AML): si no para, se tapa la SCI
+            n_otras := n_otras + 1
+            si n_otras >= 1000 y sci_gsi <> 0xFFFFFFFF entonces tapa(sci_gsi) fin
+        fin
+        eoi()
+    fin
+
+    ; el siguiente código del teclado, o -1
+    público función tecla(): ent32
+        variable c: byte
+        si cola_toma = cola_pon entonces devolver -1 fin
+        c := cola[cola_toma yb 63]
+        cola_toma := cola_toma + 1
+        devolver ent32(c)
+    fin
+
+    ; ---- el temporizador del APIC local ----
+    ; cuántas cuentas da en 10 ms (dividido entre 16), con el reloj que haya
+    función mide(): nat32
+        variable t0: nat64
+        apic_pon(0x3E0, 3)                               ; entre 16
+        apic_pon(0x320, 0x10000 ob V_TIC)                ; tapado, de una vez
+        si fuente <> NINGUNO entonces
+            apic_pon(0x380, 0xFFFFFFFF)
+            t0 := ahora_ns()
+            mientras ahora_ns() - t0 < 10000000 hacer pausa() fin
+            si fuente = HPET entonces medido_con := "el HPET" sino medido_con := "el reloj de ACPI" fin
+        sino
+            apic_pon(0x380, 0xFFFFFFFF)
+            si no diez_ms_pit() entonces devolver 0 fin
+            medido_con := "el canal 2 del 8254"
+        fin
+        devolver 0xFFFFFFFF - apic_lee(0x390)
+    fin
+
+    ; pone el tic: el temporizador del APIC, periódico, HZ por segundo
+    público función pon_tic(): bool
+        si por_10ms = 0 entonces por_10ms := mide() fin
+        si por_10ms < 10 entonces devolver falso fin
+        apic_pon(0x3E0, 3)
+        apic_pon(0x320, 0x20000 ob V_TIC)                ; periódico
+        apic_pon(0x380, por_10ms * 100 div HZ)
+        tic_va := cierto
+        devolver cierto
+    fin
+
+    público función para_tic()
+        apic_pon(0x320, 0x10000 ob V_TIC)
+        tic_va := falso
+    fin
+
+    ; todo lo de las interrupciones del procesador que arranca
+    público función prepara_apic()
+        pon_vector(V_TIC, nat64(dirección(tic)))
+        pon_vector(V_ESPURIA, nat64(dirección(espuria)))
+        pon_vector(0x27, nat64(dirección(espuria_8259)))
+        pon_vector(0x2F, nat64(dirección(espuria_8259)))
+        pon_vector(V_ERROR, nat64(dirección(error_apic)))
+        pon_vector(V_PRUEBA, nat64(dirección(prueba)))
+        pon_vector(V_ISA + 1, nat64(dirección(teclado)))
+        pon_vector(V_ISA + 9, nat64(dirección(sci_acpi)))
+        tapa_8259()
+        pon_lapic()
+        pon_ioapics()
+        teclado_gsi := 0xFFFFFFFF
+        sci_gsi := 0xFFFFFFFF
+    fin
+
+    ; el teclado PS/2 (la IRQ 1), si hay 8042
+    público función pon_teclado(): bool
+        variable i: nat32
+        si entra8(0x64) = 0xFF entonces devolver falso fin
+        i := 0
+        mientras entra8(0x64) yb 1 <> 0 y i < 64 hacer
+            entra8(0x60)
+            i := i + 1
+        fin
+        teclado_gsi := dirige_isa(1, V_ISA + 1)
+        devolver teclado_gsi <> 0xFFFFFFFF
+    fin
+
+    ; la SCI de ACPI (su GSI la dice la FADT; si es de ISA, con su cambio)
+    público función pon_sci(): bool
+        variable m, g: nat32
+        si sci = 0 y no hay_fadt entonces devolver falso fin
+        g := sci
+        m := 0
+        si sci < 16 entonces g := gsi_de(sci, m) fin
+        ; la SCI es por nivel y activa en bajo si la MADT no dice otra cosa
+        si m = 0 entonces m := 0xF fin
+        si no dirige(g, V_ISA + 9, m, falso) entonces devolver falso fin
+        sci_gsi := g
+        devolver cierto
+    fin
+
+fin Apic64.

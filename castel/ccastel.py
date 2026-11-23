@@ -78,6 +78,12 @@ def es_letra(c):
 #  Cada pieza: (clase, valor, línea, columna). Clases: NL EOF NUM CAD ID PAL
 #  OP ASM (las líneas crudas de un bloque «ensamblador»).
 # =============================================================================
+# [HISPA-64] ¿se ha visto ya «modelo linux64», «núcleo64» o «hispa64»? Desde
+# ahí valen los números escritos de más de 32 bits y «alineado» (CASTEL64.md
+# §10 ter). El programa se lee antes que los módulos que importa.
+NUM64 = [False]
+
+
 class Lexico:
     def __init__(self, texto):
         self.t = texto
@@ -133,6 +139,11 @@ class Lexico:
         if clase == 'NL' and self.toks and self.toks[-1][0] == 'NL':
             return
         lin, col = self.pos(i)
+        # [HISPA-64] «modelo linux64», «núcleo64» o «hispa64»: desde aquí valen los
+        # números de más de 32 bits (en este archivo y en los que se lean después)
+        if clase == 'ID' and val in ('linux64', 'núcleo64', 'hispa64') and self.toks \
+                and self.toks[-1][:2] == ('ID', 'modelo'):
+            NUM64[0] = True
         self.toks.append((clase, val, lin, col))
 
     def comentario_bloque(self):
@@ -231,7 +242,9 @@ class Lexico:
             v = int(self.t[j:self.i])
         if self.i < self.n and (es_letra(self.t[self.i]) or self.t[self.i].isdigit()):
             self.error("número mal escrito", j)
-        if v > 0xFFFFFFFF:
+        if v > 0xFFFFFFFFFFFFFFFF:
+            self.error("el número no cabe en 64 bits", j)
+        if v > 0xFFFFFFFF and not NUM64[0]:     # [HISPA-64] solo en los modelos de 64 bits
             self.error("el número no cabe en 32 bits", j)
         self.emite('NUM', v, j)
 
@@ -523,11 +536,25 @@ class Sintactico:
             nombres.append(self.come('ID', que='el nombre de la variable')[1])
         self.come('OP', ':')
         t = self.tipo()
+        alin = 0
+        if self.es('ID', 'alineado'):           # [HISPA-64] «alineado N» (CASTEL64.md §10 ter)
+            if not NUM64[0]:
+                self.error("«alineado» es de los modelos de 64 bits", self.pos())
+            if not global_:
+                self.error("solo se alinean las variables del módulo", self.pos())
+            self.p += 1
+            n = self.tok()
+            if n[0] != 'NUM' or not 1 <= n[1] <= 4096 or n[1] & (n[1] - 1):
+                self.error("«alineado» lleva una potencia de 2, de 1 a 4096", self.pos())
+            alin = n[1]
+            self.p += 1
+            if self.es('OP', '='):
+                self.error("una variable alineada no lleva valor inicial", self.pos())
         ini = None
         if self.es('OP', '='):
             self.p += 1
             ini = self.inicial()
-        return N('var', pos, nombres=nombres, t=t, ini=ini, global_=global_)
+        return N('var', pos, nombres=nombres, t=t, ini=ini, global_=global_, alin=alin)
 
     def inicial(self):
         # una expresión, o una lista entre paréntesis para un arreglo
@@ -1418,6 +1445,9 @@ class Generador:
         if d.e.k == 'cad':
             self.consts[d.nombre] = ('cad', self.etiqueta_cadena(d.e.s))
             return
+        if d.e.k == 'num' and d.e.v > MAX32:
+            self.consts[d.nombre] = ('n64', d.e.v)     # [HISPA-64] un número de 64 bits
+            return
         v = self.const(d.e)
         if v is None:
             self.error("una constante es un número, un texto o una cuenta con constantes", d.e.pos)
@@ -1431,7 +1461,8 @@ class Generador:
             etq = self.mod.etiqueta('G', nm)
             self.globales[nm] = Var(t, ('', etq, 0))
             if d.ini is None:
-                self.bss.append(Trozo(etq, [f"{etq}: resb {t.tam}"], self.mod.principal))
+                al = [f"    alignb {d.alin}"] if d.alin else []
+                self.bss.append(Trozo(etq, al + [f"{etq}: resb {t.tam}"], self.mod.principal))
             else:
                 self.datos.append(Trozo(etq, [f"{etq}: " + self.dato_inicial(t, d.ini)], self.mod.principal))
 
@@ -1551,6 +1582,18 @@ class Generador:
     def es_var(self, nombre):
         return nombre in self.locales or nombre in self.globales
 
+    def num64(self, e):
+        """[HISPA-64] El valor de un número escrito de más de 32 bits (o de una
+        constante que lo es), o None. No se calcula con él al compilar: es un
+        nat64 que se pone con «mov rax, n» (CASTEL64.md §10 ter)."""
+        if e.k == 'num' and e.v > MAX32:
+            return e.v
+        if e.k == 'ref' and not self.es_var(e.nombre):
+            c = self.consts.get(e.nombre)
+            if c and c[0] == 'n64':
+                return c[1]
+        return None
+
     def es_lugar(self, e):
         if e.k == 'ref':
             return self.es_var(e.nombre)
@@ -1566,6 +1609,8 @@ class Generador:
 
     def _const(self, e):
         k = e.k
+        if k == 'num' and e.v > MAX32:
+            return None                         # [HISPA-64] de 64 bits: no se calcula al compilar
         if k in ('num', 'bool'):
             return e.v
         if k == 'ref':
@@ -1688,7 +1733,7 @@ class Generador:
     def _tipo(self, e):
         k = e.k
         if k == 'num':
-            return tipo_lit(e.v)
+            return T_NAT64 if e.v > MAX32 else tipo_lit(e.v)
         if k == 'bool':
             return T_BOOL
         if k == 'nulo':
@@ -1702,7 +1747,7 @@ class Generador:
             if c:
                 if c[0] == 'num':
                     return tipo_lit(c[1])
-                return {'bool': T_BOOL, 'cad': T_TEXTO}[c[0]]
+                return {'bool': T_BOOL, 'cad': T_TEXTO, 'n64': T_NAT64}[c[0]]
             if e.nombre in self.tipos:
                 self.error(f"«{e.nombre}» es un tipo, no un valor", e.pos)
             self.var(e.nombre, e.pos)
@@ -3488,6 +3533,9 @@ class Generador32(Generador):
             self.lineas.append(re.sub(r'\{([\w.]+)(?:\+(\d+))?\}', cambia, codigo) + punto + comentario)
 
     def valor_inicial(self, t, e):
+        if e.k != 'lista' and self.num64(e) is not None:
+            self.compatible(t, e, "el valor inicial")
+            return str(self.num64(e))           # [HISPA-64] de 64 bits
         v = Generador.valor_inicial(self, t, e)
         c = self.const(e)
         if c is not None:                       # recortado a lo que ocupa
@@ -4432,6 +4480,9 @@ class Generador64(Generador32):
                 return f'[{texto_lugar((v.lugar[0], v.lugar[1], v.lugar[2] + mas))}]'
             if nm in self.consts:
                 c = self.consts[nm]
+                if c[0] == 'n64':               # [HISPA-64] con su signo, como Gen64
+                    n = (c[1] + mas) & MAX64
+                    return str(n - (1 << 64) if n >> 63 else n)
                 return c[1] if c[0] == 'cad' else str(c[1] + mas)
             if nm in self.funcs:
                 return self.funcs[nm].etq
@@ -4841,6 +4892,10 @@ class Generador64(Generador32):
         im = self.inmediato(e)
         if im is not None:
             self.em('xor eax, eax' if im == '0' else f'mov eax, {im}')
+            return
+        n = self.num64(e)
+        if n is not None:                       # [HISPA-64] un número de 64 bits
+            self.em(f'mov rax, {n - (1 << 64) if n >> 63 else n}')
             return
         k = e.k
         if self.es_lugar(e):
@@ -6703,6 +6758,7 @@ class Cargador:
 def compila(ruta, rutas=(), todo=False):
     """Compila el programa de ese archivo (con sus módulos): da el ensamblador."""
     c = Cargador(list(rutas))
+    NUM64[0] = False
     try:
         c.carga(ruta).principal = True
         clase = Generador

@@ -42,7 +42,7 @@ módulo Fisica64
 
     ; el mapa directo: toda la memoria física, a partir de 0xFFFF800000000000
     público función dm(): nat64
-        devolver nat64(0xFFFF8000) << 32
+        devolver 0xFFFF800000000000
     fin
 
     público función virt(f: nat64): nat64

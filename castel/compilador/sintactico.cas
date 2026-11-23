@@ -37,8 +37,9 @@ módulo Sintactico
     constante MAX_CARPETAS = 6
     constante NINGUNO = 0xFFFF
 
-    ; una pieza de la ventana (16 octetos, en seg_pz + número): 0 clase,
-    ; 2 val (4), 6 val2, 8 línea, 10 columna, 12 dónde empieza en el archivo (4)
+    ; una pieza de la ventana (32 octetos, en seg_pz + 2 * número): 0 clase,
+    ; 2 val (4), 6 val2, 8 línea, 10 columna, 12 dónde empieza en el archivo (4),
+    ; 16 [HISPA-64] los 32 bits de arriba de un número (4)
     variable seg_pz: Segmento
     variable pp: nat16                          ; la pieza por la que va el análisis
     variable prod: nat16                        ; cuántas ha dado ya el léxico
@@ -71,7 +72,7 @@ módulo Sintactico
             m("la lista de valores es demasiado larga para el compilador")
             falla(pz.lin, pz.col)
         fin
-        s := seg_pz + (prod yb (VENTANA - 1))
+        s := seg_pz + (prod yb (VENTANA - 1)) * 2
         poner_palabra(s, 0, pz.clase)
         poner_palabra(s, 2, nat16(pz.val))
         poner_palabra(s, 4, nat16(pz.val >> 16))
@@ -80,6 +81,8 @@ módulo Sintactico
         poner_palabra(s, 10, pz.col)
         poner_palabra(s, 12, nat16(pieza_pos))
         poner_palabra(s, 14, nat16(pieza_pos >> 16))
+        poner_palabra(s, 16, nat16(pz.alto))
+        poner_palabra(s, 18, nat16(pz.alto >> 16))
         prod := prod + 1
     fin
 
@@ -88,7 +91,7 @@ módulo Sintactico
         mientras prod - pp <= d hacer
             trae()
         fin
-        devolver seg_pz + ((pp + d) yb (VENTANA - 1))
+        devolver seg_pz + ((pp + d) yb (VENTANA - 1)) * 2
     fin
 
     función vacía_ventana()
@@ -470,6 +473,7 @@ módulo Sintactico
 
     función variable_(global_: bool): nat16
         variable d, n, último: nat16
+        variable alin: nat32
         d := nudo_aquí(K_VAR)
         si global_ entonces pon_marca(d, M_GLOBAL) fin
         come_pal(P_VARIABLE)
@@ -484,6 +488,33 @@ módulo Sintactico
         fin
         come_op(O_DOSP)
         pon_b(d, tipo_())
+        si es_id(a_alineado, 0) entonces       ; [HISPA-64] «alineado N» (CASTEL64.md §10 ter)
+            si no lex_num64 entonces
+                m("«alineado» es de los modelos de 64 bits")
+                aquí()
+            fin
+            si no global_ entonces
+                m("solo se alinean las variables del módulo")
+                aquí()
+            fin
+            pp := pp + 1
+            alin := 0
+            si es_cl(T_NUM, 0) y leer_palabra(ranura(0), 16) = 0 y leer_palabra(ranura(0), 18) = 0 entonces alin := nat32(leer_palabra(ranura(0), 4)) << 16 ob val(0) fin
+            si alin < 1 o alin > 4096 o alin yb (alin - 1) <> 0 entonces
+                m("«alineado» lleva una potencia de 2, de 1 a 4096")
+                aquí()
+            fin
+            pp := pp + 1
+            si es_op(O_IGUAL, 0) entonces
+                m("una variable alineada no lleva valor inicial")
+                aquí()
+            fin
+            n := na(d)
+            mientras n <> 0 hacer
+                pon_b(n, nat16(alin))
+                n := nsig(n)
+            fin
+        fin
         si es_op(O_IGUAL, 0) entonces
             pp := pp + 1
             pon_c(d, inicial())
@@ -994,6 +1025,10 @@ módulo Sintactico
             n := nudo_aquí(K_NUM)
             pon_a(n, leer_palabra(s, 2))
             pon_b(n, leer_palabra(s, 4))
+            si leer_palabra(s, 16) <> 0 o leer_palabra(s, 18) <> 0 entonces
+                ; [HISPA-64] de más de 32 bits: los de arriba, en otro K_NUM
+                pon_c(n, nudo_num(nat32(leer_palabra(s, 18)) << 16 ob leer_palabra(s, 16), nlin(n), ncol(n)))
+            fin
             pp := pp + 1
             devolver n
         fin
@@ -1047,6 +1082,7 @@ módulo Sintactico
     función lee(ruta: puntero a byte): nat16
         variable estado: byte
         variable r: nat16
+        variable modelo_antes: bool
         copiar_hasta(archivo_error, ruta, MAX_RUTA)
         si no lex_abre(ruta) entonces
             m("no puedo leer ")
@@ -1058,6 +1094,7 @@ módulo Sintactico
         ; (estén donde estén): valen como Módulo.nombre
         n_importados := 0
         estado := 0
+        modelo_antes := falso
         mientras cierto hacer
             sig_pieza(pz)
             si pz.clase = T_EOF entonces romper fin
@@ -1079,6 +1116,10 @@ módulo Sintactico
                 estado := 0
             fin
             si pz.clase = T_PAL y pz.val = P_IMPORTAR entonces estado := 1 fin
+            ; [HISPA-64] «modelo linux64», «núcleo64» o «hispa64»: desde aquí valen los
+            ; números de más de 32 bits (en este archivo y en los que se lean después)
+            si pz.clase = T_ID y modelo_antes y (pz.val = a_linux64 o pz.val = a_núcleo64 o pz.val = a_hispa64) entonces lex_num64 := cierto fin
+            modelo_antes := pz.clase = T_ID y pz.val = a_modelo
         fin
         ; y la del análisis
         lex_situar(0, 1, 1)
@@ -1313,7 +1354,8 @@ módulo Sintactico
     ; que importan estos): rellena la tabla de módulos de Base, cada uno
     ; detrás de los que importa; el programa, el último
     público función carga_programa(ruta: puntero a byte)
-        si seg_pz = 0 entonces seg_pz := Base.bloque(VENTANA) fin
+        si seg_pz = 0 entonces seg_pz := Base.bloque(VENTANA * 2) fin
+        lex_num64 := falso
         n_modulos := 0
         n_en_curso := 0
         carga(ruta, 0)

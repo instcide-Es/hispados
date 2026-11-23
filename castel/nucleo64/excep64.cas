@@ -239,7 +239,7 @@ módulo Excep64
     ; ¿puede ser rbp un marco de una función del núcleo? (en su pila o en una de las IST)
     función marco_bueno(r: nat64): bool
         si r yb 7 <> 0 entonces devolver falso fin
-        devolver r >= (nat64(0xFFFFFFFF) << 32) + 0x80000000 y r < nob nat64(15)
+        devolver r >= 0xFFFFFFFF80000000 y r < nob nat64(15)
     fin
 
     ; quién ha llamado a quién, siguiendo los RBP desde r (con los nombres, si se saben)
@@ -252,7 +252,7 @@ módulo Excep64
         antes := 1
         mientras n < 40 y marco_bueno(r) hacer
             vuelta := lee64(r + 8)
-            si vuelta < (nat64(0xFFFFFFFF) << 32) + 0x80000000 entonces romper fin
+            si vuelta < 0xFFFFFFFF80000000 entonces romper fin
             si inicio(vuelta - 1) = antes entonces
                 ; (la misma función otra vez: una que se llama a sí misma)
                 otra := otra + 1
@@ -415,6 +415,11 @@ módulo Excep64
 
     interrupción función e31()
         explica(31, marco(), falso)
+    fin
+
+    ; [etapa 2] una interrupción más (del APIC, de un IOAPIC): el vector n a f
+    público función pon_vector(n: nat32, f: nat64)
+        pon_puerta(n, f, 0)
     fin
 
     ; monta la IDT con las 32 excepciones y la carga

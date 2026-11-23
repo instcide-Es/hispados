@@ -1,0 +1,9 @@
+; «alineado» es de los modelos de 64 bits.
+; ERROR: 5:38: error: «alineado» es de los modelos de 64 bits
+módulo Error
+    modelo núcleo
+    variable t: arreglo [16] de byte alineado 16
+    función principal()
+    fin
+fin Error.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

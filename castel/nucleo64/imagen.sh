@@ -48,7 +48,7 @@ menuentry "Hispa-64 (prueba)" {
 CFG
 else
   cat > "$S/grub.cfg" <<'CFG'
-# Hispa-64 0.1.0 (etapa 1). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Hispa-64 0.2.0 (etapa 2). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -57,8 +57,18 @@ terminal_output console serial
 # la pantalla, tal cual la deja el firmware (su resolución de siempre)
 set gfxpayload=keep
 if cpuid -l; then
-  menuentry "Hispa-64 0.1.0 (etapa 1: la memoria)" {
+  menuentry "Hispa-64 0.2.0 (etapa 2: ACPI, APIC, HPET y PCIe)" {
     multiboot2 /boot/HISPA64.BIN
+    module2 /boot/HISPA64.SIM HISPA64.SIM
+    boot
+  }
+  menuentry "Hispa-64: sin el temporizador del APIC (si se queda parado en el tic)" {
+    multiboot2 /boot/HISPA64.BIN prueba=sintic
+    module2 /boot/HISPA64.SIM HISPA64.SIM
+    boot
+  }
+  menuentry "Hispa-64: apagar el equipo por ACPI (prueba)" {
+    multiboot2 /boot/HISPA64.BIN prueba=acpiapagar
     module2 /boot/HISPA64.SIM HISPA64.SIM
     boot
   }

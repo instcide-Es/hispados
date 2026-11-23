@@ -11,7 +11,8 @@
 ;  una para una excepción que no puede fiarse de la pila que haya: el doble
 ;  fallo (IST 1: si se ha desbordado la pila del núcleo, sin ella el
 ;  procesador se reiniciaría), el NMI (IST 2) y el fallo de máquina (IST 3).
-;  La de cada procesador irá aparte en la etapa 3.
+;  La de cada procesador irá aparte en la etapa 3 (PorCpu64 ya guarda dónde
+;  están las del que arranca).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Gdt64
@@ -45,6 +46,15 @@ módulo Gdt64
         variable p: puntero a nat64
         p := puntero(nat64(dirección(tss[36 + (n - 1) * 8])))
         devolver valor(p)
+    fin
+
+    ; [etapa 2] dónde están (para PorCpu64: en la etapa 3, una de cada por procesador)
+    público función dir_gdt(): nat64
+        devolver nat64(dirección(gdt))
+    fin
+
+    público función dir_tss(): nat64
+        devolver nat64(dirección(tss))
     fin
 
     ; pone la GDT nueva y la TSS, y las carga (lgdt, ltr)

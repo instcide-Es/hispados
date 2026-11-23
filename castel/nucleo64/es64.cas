@@ -1,0 +1,182 @@
+; =============================================================================
+;  es64.cas - Hispa-64: la entrada y salida de bajo nivel (docs/64/HISPA-64.md,
+;  etapa 2): los puertos de 8, 16 y 32 bits, los MSR, el TSC, leer y escribir
+;  en la memoria de los dispositivos (con el ancho justo: los registros de un
+;  APIC o de un HPET no se pueden leer de octeto en octeto), las interrupciones
+;  (sti, cli, hlt) y una cuenta a * b / c con 128 bits por medio.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Es64
+
+    público función entra8(p: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            xor eax, eax
+            in al, dx
+        fin
+    fin
+
+    público función entra16(p: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            xor eax, eax
+            in ax, dx
+        fin
+    fin
+
+    público función entra32(p: nat32): nat32
+        ensamblador
+            mov edx, {p}
+            in eax, dx
+        fin
+    fin
+
+    público función sale8(p: nat32, v: nat32)
+        ensamblador
+            mov edx, {p}
+            mov eax, {v}
+            out dx, al
+        fin
+    fin
+
+    público función sale16(p: nat32, v: nat32)
+        ensamblador
+            mov edx, {p}
+            mov eax, {v}
+            out dx, ax
+        fin
+    fin
+
+    público función sale32(p: nat32, v: nat32)
+        ensamblador
+            mov edx, {p}
+            mov eax, {v}
+            out dx, eax
+        fin
+    fin
+
+    público función lee_msr(n: nat32): nat64
+        ensamblador
+            mov ecx, {n}
+            rdmsr
+            shl rdx, 32
+            or rax, rdx
+        fin
+    fin
+
+    público función pon_msr(n: nat32, v: nat64)
+        ensamblador
+            mov ecx, {n}
+            mov rax, {v}
+            mov rdx, rax
+            shr rdx, 32
+            wrmsr
+        fin
+    fin
+
+    público función tsc(): nat64
+        ensamblador
+            rdtsc
+            shl rdx, 32
+            or rax, rdx
+        fin
+    fin
+
+    ; la memoria de un dispositivo (ya en las tablas, sin caché), con el ancho justo
+    público función m32(d: nat64): nat32
+        variable p: puntero a nat32
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    público función pon_m32(d: nat64, v: nat32)
+        variable p: puntero a nat32
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    público función m64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    público función pon_m64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    público función m16(d: nat64): nat32
+        variable p: puntero a nat16
+        p := puntero(d)
+        devolver nat32(valor(p))
+    fin
+
+    público función m8(d: nat64): nat32
+        variable p: puntero a byte
+        p := puntero(d)
+        devolver nat32(valor(p))
+    fin
+
+    público función pon_m16(d: nat64, v: nat32)
+        variable p: puntero a nat16
+        p := puntero(d)
+        valor(p) := nat16(v)
+    fin
+
+    público función pon_m8(d: nat64, v: nat32)
+        variable p: puntero a byte
+        p := puntero(d)
+        valor(p) := byte(v)
+    fin
+
+    público función enciende()
+        ensamblador
+            sti
+        fin
+    fin
+
+    público función apaga()
+        ensamblador
+            cli
+        fin
+    fin
+
+    ; espera a la siguiente interrupción (con ellas encendidas)
+    público función espera_int()
+        ensamblador
+            sti
+            hlt
+        fin
+    fin
+
+    público función pausa()
+        ensamblador
+            db 0xF3, 0x90               ; pause
+        fin
+    fin
+
+    ; ¿están encendidas las interrupciones?
+    público función encendidas(): bool
+        variable f: nat64
+        ensamblador
+            db 0x9C                     ; pushfq
+            pop rax
+            mov {f}, rax
+        fin
+        devolver f yb 0x200 <> 0
+    fin
+
+    ; a * b / c, con el producto en 128 bits (el cociente tiene que caber en 64)
+    público función muldiv(a: nat64, b: nat64, c: nat64): nat64
+        ensamblador
+            mov rax, {a}
+            mov rcx, {b}
+            mul rcx
+            mov rcx, {c}
+            div rcx
+        fin
+    fin
+
+fin Es64.

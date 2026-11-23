@@ -1,0 +1,500 @@
+; =============================================================================
+;  acpi64.cas - Hispa-64: las tablas de ACPI (docs/64/HISPA-64.md, etapa 2),
+;  leídas por el núcleo, sin ACPICA (todavía: ver la sección 8 del plan). La
+;  RSDP (la que copia GRUB con multiboot2, o buscada en la memoria de la BIOS
+;  con multiboot), la XSDT (o la RSDT) y cada tabla, con sus sumas comprobadas;
+;  las que el firmware deja en memoria «reservada» (fuera del mapa directo) se
+;  ponen en las tablas de páginas con mapea_disp. De ellas:
+;    MADT («APIC»): los procesadores (APIC local y x2APIC), los IOAPIC, los
+;          cambios de las IRQ de ISA (overrides) y los NMI del APIC local;
+;    FADT («FACP»): el reloj de ACPI (PM timer), la SCI, los registros PM1
+;          (el botón de encendido, apagar), el reinicio, el siglo del CMOS, si
+;          hay 8042 y si es «hardware reducido»; y la DSDT, donde se busca
+;          \_S5 (cómo se apaga) sin intérprete de AML;
+;    HPET  la dirección del temporizador de alta precisión;
+;    MCFG  dónde está la configuración de PCIe (ECAM), por segmento y buses.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Acpi64
+
+    importar Cifras64, Fisica64, Pagina64, Es64
+
+    público constante MAX_CPU = 256
+    constante MAX_TABLAS = 48
+    constante MAX_ZONAS = 24
+    constante MAX_IOAPIC = 8
+    constante MAX_ISO = 24
+
+    ; la RSDP y la raíz
+    público variable hay_acpi: bool
+    público variable acpi_rev: nat32
+    público variable oem: arreglo [7] de byte
+    público variable con_xsdt: bool
+    público variable raíz_fís: nat64
+    ; las tablas: firma (4 letras en un nat32), física, virtual, largo, suma bien
+    público variable n_tablas: nat32
+    público variable t_firma: arreglo [MAX_TABLAS] de nat32
+    público variable t_fís, t_virt: arreglo [MAX_TABLAS] de nat64
+    público variable t_largo: arreglo [MAX_TABLAS] de nat32
+    público variable t_bien: arreglo [MAX_TABLAS] de bool
+    público variable mal_sumadas: nat32
+    ; MADT
+    público variable hay_madt: bool
+    público variable lapic_fís: nat64
+    público variable con_8259: bool
+    público variable n_cpu, n_cpu_más: nat32         ; los encendidos; y los que se pueden encender
+    público variable cpu_apic: arreglo [MAX_CPU] de nat32
+    público variable cpu_acpi: arreglo [MAX_CPU] de nat32
+    público variable n_ioapic: nat32
+    público variable io_id, io_gsi: arreglo [MAX_IOAPIC] de nat32
+    público variable io_fís: arreglo [MAX_IOAPIC] de nat64
+    público variable n_iso: nat32
+    público variable iso_irq, iso_gsi, iso_marcas: arreglo [MAX_ISO] de nat32
+    público variable nmi_lint: nat32                  ; por qué patilla (LINT0/1) llega el NMI: 0xFF si no se dice
+    público variable nmi_marcas: nat32
+    ; FADT
+    público variable hay_fadt: bool
+    público variable fadt: nat64                      ; (virtual)
+    público variable fadt_largo: nat32
+    público variable pm_tmr: nat32                    ; el puerto del reloj de ACPI, o 0
+    público variable pm_32: bool                      ; ¿de 32 bits? (si no, de 24)
+    público variable sci: nat32
+    público variable smi_cmd, acpi_on: nat32
+    público variable pm1a_evt, pm1b_evt, pm1a_cnt, pm1b_cnt: nat32
+    público variable pm1_evt_largo: nat32
+    público variable gpe0, gpe1, gpe0_largo, gpe1_largo: nat32
+    público variable siglo: nat32                     ; el registro del siglo en el CMOS, o 0
+    público variable arq: nat32                       ; IAPC_BOOT_ARCH
+    público variable fadt_banderas: nat32
+    público variable reinicio_esp, reinicio_val: nat32
+    público variable reinicio_dir: nat64
+    público variable dsdt_fís: nat64
+    público variable slp5a, slp5b: nat32
+    público variable hay_s5: bool
+    ; HPET
+    público variable hpet_fís: nat64                  ; 0 si no hay
+    ; MCFG
+    público variable n_mcfg: nat32
+    público variable mc_base: arreglo [8] de nat64
+    público variable mc_seg, mc_bus_ini, mc_bus_fin: arreglo [8] de nat32
+
+    ; lo que se ha puesto con mapea_disp: física de principio, fin y dónde se ve
+    variable n_zonas: nat32
+    variable z_ini, z_fin, z_virt: arreglo [MAX_ZONAS] de nat64
+
+    función l8(d: nat64): nat32
+        devolver m8(d)
+    fin
+
+    función l16(d: nat64): nat32
+        devolver m8(d) ob (m8(d + 1) << 8)    ; (sin alinear: de octeto en octeto)
+    fin
+
+    función l32(d: nat64): nat32
+        devolver m8(d) ob (m8(d + 1) << 8) ob (m8(d + 2) << 16) ob (m8(d + 3) << 24)
+    fin
+
+    función l64(d: nat64): nat64
+        devolver nat64(l32(d)) ob (nat64(l32(d + 4)) << 32)
+    fin
+
+    ; [f, f + largo) de memoria física, a la vista: por el mapa directo si está
+    ; (la RAM y lo de ACPI) o con mapea_disp (lo «reservado»: de 64 KB en 64 KB,
+    ; que se reutilizan). Devuelve dónde se ve f
+    público función ver(f: nat64, largo: nat64): nat64
+        variable i: nat32
+        variable a, b: nat64
+        si largo = 0 entonces largo := 1 fin
+        si traduce(virt(f)) = f y traduce(virt(f + largo - 1)) = f + largo - 1 entonces devolver virt(f) fin
+        i := 0
+        mientras i < n_zonas hacer
+            si f >= z_ini[i] y f + largo <= z_fin[i] entonces devolver z_virt[i] + (f - z_ini[i]) fin
+            i := i + 1
+        fin
+        a := f yb (nob nat64(0xFFFF))
+        b := (f + largo + 0xFFFF) yb (nob nat64(0xFFFF))
+        si n_zonas < MAX_ZONAS entonces
+            z_ini[n_zonas] := a
+            z_fin[n_zonas] := b
+            z_virt[n_zonas] := mapea_disp(a, b - a, datos())
+            n_zonas := n_zonas + 1
+            devolver z_virt[n_zonas - 1] + (f - a)
+        fin
+        devolver mapea_disp(f, largo, datos())
+    fin
+
+    público función zonas(): nat32
+        devolver n_zonas
+    fin
+
+    función suma(v: nat64, largo: nat32): nat32
+        variable s, i: nat32
+        s := 0
+        i := 0
+        mientras i < largo hacer
+            s := s + l8(v + i)
+            i := i + 1
+        fin
+        devolver s yb 0xFF
+    fin
+
+    ; las cuatro letras de una firma
+    público función escribe_firma(f: nat32)
+        escribir_car(f yb 0xFF)
+        escribir_car((f >> 8) yb 0xFF)
+        escribir_car((f >> 16) yb 0xFF)
+        escribir_car(f >> 24)
+    fin
+
+    ; busca «RSD PTR » en [f, f + largo) de física, de 16 en 16; virtual o 0
+    función busca_rsdp(f: nat64, largo: nat64): nat64
+        variable v, d: nat64
+        v := ver(f, largo)
+        d := 0
+        mientras d + 20 <= largo hacer
+            si l32(v + d) = 0x20445352 y l32(v + d + 4) = 0x20525450 y suma(v + d, 20) = 0 entonces devolver v + d fin
+            d := d + 16
+        fin
+        devolver 0
+    fin
+
+    ; una tabla más (con la física): la mira y la apunta; devuelve su virtual o 0
+    función apunta(f: nat64): nat64
+        variable v: nat64
+        variable largo: nat32
+        si f = 0 o n_tablas >= MAX_TABLAS entonces devolver 0 fin
+        v := ver(f, 36)
+        largo := l32(v + 4)
+        si largo < 36 o largo > 0x1000000 entonces devolver 0 fin
+        v := ver(f, largo)
+        t_firma[n_tablas] := l32(v)
+        t_fís[n_tablas] := f
+        t_virt[n_tablas] := v
+        t_largo[n_tablas] := largo
+        t_bien[n_tablas] := suma(v, largo) = 0
+        si no t_bien[n_tablas] entonces mal_sumadas := mal_sumadas + 1 fin
+        n_tablas := n_tablas + 1
+        devolver v
+    fin
+
+    ; la tabla número n con esa firma (0 la primera), virtual, o 0
+    público función tabla(firma: nat32, n: nat32): nat64
+        variable i: nat32
+        i := 0
+        mientras i < n_tablas hacer
+            si t_firma[i] = firma entonces
+                si n = 0 entonces devolver t_virt[i] fin
+                n := n - 1
+            fin
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    función largo_de(v: nat64): nat32
+        devolver l32(v + 4)
+    fin
+
+    ; una dirección genérica (GAS) de la FADT: en el espacio de E/S, el puerto
+    función gas_puerto(v: nat64): nat32
+        si l8(v) = 1 y l64(v + 4) <> 0 y l64(v + 4) <= 0xFFFF entonces devolver nat32(l64(v + 4)) fin
+        devolver 0
+    fin
+
+    función lee_madt(v: nat64)
+        variable fin_, d: nat64
+        variable t, n, fl, id: nat32
+        hay_madt := cierto
+        lapic_fís := nat64(l32(v + 36))
+        con_8259 := l32(v + 40) yb 1 <> 0
+        nmi_lint := 0xFF
+        fin_ := v + largo_de(v)
+        d := v + 44
+        mientras d + 2 <= fin_ hacer
+            t := l8(d)
+            n := l8(d + 1)
+            si n < 2 entonces romper fin
+            si t = 0 o t = 9 entonces
+                ; un procesador: con APIC local (0) o x2APIC (9)
+                si t = 0 entonces
+                    fl := l32(d + 4)
+                    id := l8(d + 3)
+                sino
+                    fl := l32(d + 8)
+                    id := l32(d + 4)
+                fin
+                si fl yb 1 <> 0 entonces
+                    si n_cpu < MAX_CPU entonces
+                        cpu_apic[n_cpu] := id
+                        si t = 0 entonces cpu_acpi[n_cpu] := l8(d + 2) sino cpu_acpi[n_cpu] := l32(d + 12) fin
+                        n_cpu := n_cpu + 1
+                    fin
+                sino si fl yb 2 <> 0 entonces
+                    n_cpu_más := n_cpu_más + 1
+                fin
+            sino si t = 1 y n_ioapic < MAX_IOAPIC entonces
+                io_id[n_ioapic] := l8(d + 2)
+                io_fís[n_ioapic] := nat64(l32(d + 4))
+                io_gsi[n_ioapic] := l32(d + 8)
+                n_ioapic := n_ioapic + 1
+            sino si t = 2 y n_iso < MAX_ISO entonces
+                iso_irq[n_iso] := l8(d + 3)
+                iso_gsi[n_iso] := l32(d + 4)
+                iso_marcas[n_iso] := l16(d + 8)
+                n_iso := n_iso + 1
+            sino si t = 4 entonces
+                nmi_marcas := l16(d + 3)
+                nmi_lint := l8(d + 5)
+            sino si t = 5 entonces
+                lapic_fís := l64(d + 4)
+            fin
+            d := d + n
+        fin
+    fin
+
+    ; \_S5 en la DSDT (o en una SSDT): «Name (_S5, Package () {a, b, ...})», sin
+    ; AML: lo que hay tras «_S5_» y el PackageOp (0x12)
+    función busca_s5(v: nat64)
+        variable fin_, d, p: nat64
+        variable b: nat32
+        si v = 0 entonces devolver fin
+        fin_ := v + largo_de(v)
+        d := v + 36
+        mientras d + 8 < fin_ y no hay_s5 hacer
+            si l32(d) = 0x5F35535F y l8(d + 4) = 0x12 entonces    ; «_S5_» y Package
+                p := d + 5
+                b := l8(p)
+                p := p + 1 + (b >> 6)             ; la longitud del paquete
+                p := p + 1                        ; el número de elementos
+                b := l8(p)
+                si b = 0x0A entonces
+                    slp5a := l8(p + 1)
+                    p := p + 2
+                sino
+                    slp5a := b
+                    p := p + 1
+                fin
+                b := l8(p)
+                si b = 0x0A entonces slp5b := l8(p + 1) sino slp5b := b fin
+                si slp5a <= 7 y slp5b <= 7 entonces hay_s5 := cierto fin
+            fin
+            d := d + 1
+        fin
+    fin
+
+    función lee_fadt(v: nat64)
+        variable x: nat32
+        hay_fadt := cierto
+        fadt := v
+        fadt_largo := largo_de(v)
+        sci := l16(v + 46)
+        smi_cmd := l32(v + 48)
+        acpi_on := l8(v + 52)
+        pm1a_evt := l32(v + 56)
+        pm1b_evt := l32(v + 60)
+        pm1a_cnt := l32(v + 64)
+        pm1b_cnt := l32(v + 68)
+        pm_tmr := l32(v + 76)
+        gpe0 := l32(v + 80)
+        gpe1 := l32(v + 84)
+        pm1_evt_largo := l8(v + 88)
+        gpe0_largo := l8(v + 92)
+        gpe1_largo := l8(v + 93)
+        siglo := l8(v + 108)
+        arq := 0
+        si fadt_largo >= 116 entonces
+            arq := l16(v + 109)
+            fadt_banderas := l32(v + 112)
+        fin
+        pm_32 := fadt_banderas yb 0x100 <> 0
+        si fadt_largo >= 129 y fadt_banderas yb 0x400 <> 0 entonces
+            reinicio_esp := l8(v + 116)
+            reinicio_dir := l64(v + 120)
+            reinicio_val := l8(v + 128)
+        fin
+        dsdt_fís := nat64(l32(v + 40))
+        si fadt_largo >= 148 y l64(v + 140) <> 0 entonces dsdt_fís := l64(v + 140) fin
+        ; las direcciones de 64 bits (X_...), si las hay y son de E/S
+        si fadt_largo >= 220 entonces
+            x := gas_puerto(v + 208)
+            si pm_tmr = 0 entonces pm_tmr := x fin
+            x := gas_puerto(v + 148)
+            si pm1a_evt = 0 entonces pm1a_evt := x fin
+            x := gas_puerto(v + 172)
+            si pm1a_cnt = 0 entonces pm1a_cnt := x fin
+            x := gas_puerto(v + 220)
+            si gpe0 = 0 entonces gpe0 := x fin
+        fin
+        si pm_tmr > 0xFFFF entonces pm_tmr := 0 fin
+    fin
+
+    ; todo: desde la RSDP (virtual; 0 si el cargador no la ha dado: se busca
+    ; en la memoria de la BIOS)
+    público función lee_acpi(rsdp: nat64)
+        variable v, r, d: nat64
+        variable n, i, salto, ebda: nat32
+        si rsdp = 0 entonces
+            v := ver(0x400, 0x100)
+            ebda := m16(v + 0x0E) << 4
+            si ebda >= 0x80000 y ebda < 0xA0000 entonces rsdp := busca_rsdp(nat64(ebda), 1024) fin
+            si rsdp = 0 entonces rsdp := busca_rsdp(0xE0000, 0x20000) fin
+        fin
+        si rsdp = 0 entonces devolver fin
+        si l32(rsdp) <> 0x20445352 o suma(rsdp, 20) <> 0 entonces devolver fin
+        acpi_rev := l8(rsdp + 15)
+        i := 0
+        mientras i < 6 hacer
+            oem[i] := byte(l8(rsdp + 9 + i))
+            si oem[i] < 32 o oem[i] > 126 entonces oem[i] := '?' fin
+            i := i + 1
+        fin
+        oem[6] := 0
+        raíz_fís := nat64(l32(rsdp + 16))
+        salto := 4
+        si acpi_rev >= 2 y l64(rsdp + 24) <> 0 y suma(rsdp, l32(rsdp + 20)) = 0 entonces
+            raíz_fís := l64(rsdp + 24)
+            salto := 8
+            con_xsdt := cierto
+        fin
+        hay_acpi := cierto
+        r := apunta(raíz_fís)
+        si r = 0 entonces devolver fin
+        n := (t_largo[0] - 36) div salto
+        i := 0
+        mientras i < n hacer
+            d := r + 36 + nat64(i) * salto
+            si salto = 8 entonces apunta(l64(d)) sino apunta(nat64(l32(d))) fin
+            i := i + 1
+        fin
+        v := tabla(0x50434146, 0)             ; «FACP»
+        si v <> 0 entonces
+            lee_fadt(v)
+            si dsdt_fís <> 0 entonces apunta(dsdt_fís) fin
+        fin
+        v := tabla(0x43495041, 0)             ; «APIC»
+        si v <> 0 entonces lee_madt(v) fin
+        v := tabla(0x54455048, 0)             ; «HPET»
+        si v <> 0 y largo_de(v) >= 56 y l8(v + 40) = 0 entonces hpet_fís := l64(v + 44) fin
+        v := tabla(0x4746434D, 0)             ; «MCFG»
+        si v <> 0 entonces
+            d := v + 44
+            mientras d + 16 <= v + largo_de(v) y n_mcfg < 8 hacer
+                mc_base[n_mcfg] := l64(d)
+                mc_seg[n_mcfg] := l16(d + 8)
+                mc_bus_ini[n_mcfg] := l8(d + 10)
+                mc_bus_fin[n_mcfg] := l8(d + 11)
+                n_mcfg := n_mcfg + 1
+                d := d + 16
+            fin
+        fin
+        busca_s5(tabla(0x54445344, 0))        ; «DSDT»
+        i := 0
+        mientras no hay_s5 y tabla(0x54445353, i) <> 0 hacer   ; «SSDT»
+            busca_s5(tabla(0x54445353, i))
+            i := i + 1
+        fin
+    fin
+
+    ; la GSI de una IRQ de ISA (con los cambios de la MADT) y sus marcas (MPS INTI)
+    público función gsi_de(irq: nat32, ref marcas: nat32): nat32
+        variable i: nat32
+        marcas := 0
+        i := 0
+        mientras i < n_iso hacer
+            si iso_irq[i] = irq entonces
+                marcas := iso_marcas[i]
+                devolver iso_gsi[i]
+            fin
+            i := i + 1
+        fin
+        devolver irq
+    fin
+
+    ; ¿es «hardware reducido» (sin PM1, sin reloj de ACPI, sin SCI de siempre)?
+    público función reducido(): bool
+        devolver fadt_banderas yb 0x100000 <> 0
+    fin
+
+    ; ¿el botón de encendido es de los «fijos» (PM1) y no un dispositivo del AML?
+    público función botón_fijo(): bool
+        devolver hay_fadt y pm1a_evt <> 0 y fadt_banderas yb 0x10 = 0 y no reducido()
+    fin
+
+    ; pasa al modo ACPI (si el firmware lo deja en el de antes): SCI_EN
+    público función modo_acpi(): bool
+        variable i: nat32
+        si pm1a_cnt = 0 entonces devolver falso fin
+        si entra16(pm1a_cnt) yb 1 <> 0 entonces devolver cierto fin
+        si smi_cmd = 0 o acpi_on = 0 entonces devolver falso fin
+        sale8(smi_cmd, acpi_on)
+        i := 0
+        mientras i < 3000000 y entra16(pm1a_cnt) yb 1 = 0 hacer
+            pausa()
+            i := i + 1
+        fin
+        devolver entra16(pm1a_cnt) yb 1 <> 0
+    fin
+
+    ; un bloque de GPE: todos apagados y sus avisos a cero (la mitad de abajo,
+    ; los avisos; la de arriba, los que están encendidos)
+    función calla_gpe(b: nat32, largo: nat32)
+        variable i: nat32
+        si b = 0 o largo < 2 entonces devolver fin
+        i := 0
+        mientras i < largo div 2 hacer
+            sale8(b + largo div 2 + i, 0)
+            sale8(b + i, 0xFF)
+            i := i + 1
+        fin
+    fin
+
+    ; antes de dejar pasar la SCI: ningún aviso encendido (sin el AML no se
+    ; sabría atender los de los GPE: el controlador del teclado, la batería...
+    ; y una SCI por nivel que nadie borra no dejaría hacer nada más), y solo el
+    ; botón de encendido (PWRBTN_EN) en PM1; los avisos, a cero (se borran
+    ; escribiendo unos)
+    público función pon_botón()
+        calla_gpe(gpe0, gpe0_largo)
+        calla_gpe(gpe1, gpe1_largo)
+        sale16(pm1a_evt + pm1_evt_largo div 2, 0x100)
+        sale16(pm1a_evt, 0xFFFF)
+        si pm1b_evt <> 0 entonces
+            sale16(pm1b_evt + pm1_evt_largo div 2, 0x100)
+            sale16(pm1b_evt, 0xFFFF)
+        fin
+    fin
+
+    ; ¿se ha pulsado el botón? (y lo borra)
+    público función botón_pulsado(): bool
+        variable s: nat32
+        si pm1a_evt = 0 entonces devolver falso fin
+        s := entra16(pm1a_evt)
+        si pm1b_evt <> 0 entonces s := s ob entra16(pm1b_evt) fin
+        si s yb 0x100 = 0 entonces devolver falso fin
+        sale16(pm1a_evt, 0x100)
+        si pm1b_evt <> 0 entonces sale16(pm1b_evt, 0x100) fin
+        devolver cierto
+    fin
+
+    ; apaga el equipo (S5); si no puede, vuelve
+    público función apaga_equipo()
+        variable t0: nat64
+        si no hay_s5 o pm1a_cnt = 0 entonces devolver fin
+        apaga()
+        sale16(pm1a_cnt, (entra16(pm1a_cnt) yb 0xC3FF) ob (slp5a << 10) ob 0x2000)
+        si pm1b_cnt <> 0 entonces sale16(pm1b_cnt, (entra16(pm1b_cnt) yb 0xC3FF) ob (slp5b << 10) ob 0x2000) fin
+        ; se apaga «enseguida», no en la misma instrucción (QEMU lo hace en su
+        ; bucle): unos 3.000 millones de ciclos antes de decir que no
+        t0 := tsc()
+        mientras tsc() - t0 < 3000000000 hacer pausa() fin
+    fin
+
+    ; reinicia por el registro de la FADT (en E/S), o por el 8042, o con 0xCF9
+    público función reinicia()
+        apaga()
+        si reinicio_esp = 1 y reinicio_dir <> 0 y reinicio_dir <= 0xFFFF entonces sale8(nat32(reinicio_dir), reinicio_val) fin
+        sale8(0x64, 0xFE)
+        sale8(0xCF9, 6)
+    fin
+
+fin Acpi64.

@@ -383,6 +383,43 @@ así que:
 
 Lo que sale para los demás modelos (16, 32 y 64 bits) no cambia ni un octeto.
 
+## 10 ter. Números de 64 bits y variables alineadas (etapa 2 de Hispa-64, 23/11/2026)
+
+Lo que pedía la etapa 2 de Hispa-64 (las direcciones de ACPI, de los BAR de PCIe y
+de la mitad alta), en los dos compiladores (ccastel.py y el escrito en Castel:
+CASTEL64, CASTEL32 y el de 16 bits) con la misma salida:
+
+- **Números escritos de hasta 64 bits** (`0xFFFF800000000000`,
+  `18446744073709551615`), solo en los modelos de 64 bits: desde que el léxico
+  ha visto `modelo linux64`, `núcleo64` o `hispa64` (en el programa, que se lee
+  antes que sus módulos). Antes, o en los demás modelos, siguen diciendo «el
+  número no cabe en 32 bits» donde siempre; de más de 64, «el número no cabe en
+  64 bits». Un número así **es un `nat64`** (se pone con `mov rax, n`, con su
+  signo: los que pasan de 2^63, en negativo) y **no se calcula con él al
+  compilar** (como `nat64(x)`): vale en las cuentas, las comparaciones, los
+  argumentos, `devolver`, el valor inicial de una global (`dq`) y `{X}` en un
+  bloque `ensamblador`. Una `constante X = 0x...` con uno de ellos es una
+  constante de 64 bits (en las tablas de CASTEL, `S_NUM` con la marca `SM_64` y
+  los 32 bits de arriba en `c` y `d`; en el árbol, un `K_NUM` con su parte alta en
+  otro `K_NUM`, en `c`); `X + 1` en otra constante, no (no se calcula).
+  En CASTEL, la pieza del léxico guarda los 32 bits de arriba (`Pieza.alto`; la
+  ventana de piezas pasa de 16 a 32 octetos por pieza).
+- **`alineado N`** detrás del tipo de una variable del módulo, sin valor inicial
+  (`variable tabla: arreglo [512] de nat64 alineado 4096`), N una potencia de 2
+  de 1 a 4096, en los modelos de 64 bits: sale `alignb N` delante de su etiqueta
+  en lo que empieza a cero, que ensambla.py y ENSAMB64 (Montador: la marca
+  `R_ALINEA_B` en su resumen) saben ya como NASM. Los errores: ««alineado» es de
+  los modelos de 64 bits», «solo se alinean las variables del módulo», ««alineado»
+  lleva una potencia de 2, de 1 a 4096» y «una variable alineada no lleva valor
+  inicial».
+
+Las pruebas: `ejemplos64/numeros64.cas` (con su salida esperada) y seis errores
+nuevos en `ejemplos64/errores/`; lo de los demás modelos no cambia ni un octeto.
+
+**Llamar a C** (System V AMD64) no se ha hecho aún: la etapa 2 de Hispa-64 lee las
+tablas de ACPI ella misma, sin ACPICA (docs/64/HISPA-64.md, sección 8). Hará falta
+para ACPICA (el AML: la batería, las tapas, dormir) y para musl.
+
 ## 11. Probar y comprobar
 
 `pruebas64.sh` es la parte 23 de `pruebas.sh` (`SOLO=castel64 ./pruebas.sh`, unos 4
@@ -414,11 +451,10 @@ mismo: lo que sale para Hispa-8086 e Hispa-Pentium no ha cambiado.
   vez de `nat16` en cada referencia (unas 400 de las 850 del compilador), y nudos,
   tipos y fichas de 32 octetos con campos de 32 bits en 64 (con `Ref = nat16`, el
   CASTEL de 16 y el de 32 saldrían iguales). Se hará cuando un programa lo pida.
-- **Números escritos de 64 bits** (y constantes de 64 que se calculen al compilar).
-  La etapa 1 de Hispa-64 se ha hecho sin ellos (`nat64(0xFFFF8000) << 32`); hará
-  falta sobre todo con ACPI y los BAR de PCIe (etapa 2).
-- **Variables alineadas** (`alineado 4096`): la etapa 1 no las ha necesitado (las
-  tablas de páginas y lo que va alineado se piden a la memoria física).
+- **Constantes de 64 bits que se calculen al compilar** (`X + 1` con una de 64): los
+  números escritos de 64 bits ya están (§10 ter), pero no se calcula con ellos.
+- **Variables alineadas con valor inicial**, o locales (§10 ter: solo las del módulo
+  sin él).
 - **Llamar a C** (System V AMD64): `externa función`, con su puente (§4).
 - **Los programas del anillo 3 de Hispa-64** (un `modelo usuario64`, con su llamada
   al sistema por `syscall`), y el núcleo de verdad: memoria, tareas, discos...

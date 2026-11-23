@@ -88,7 +88,7 @@ módulo Montador
     constante TABLA_3 = "jnge\x05\x0Djge\x05\x0Ejnl\x05\x0Ejle\x05\x0Fjng\x05\x0Fjg\x05\x10jnle\x05\x10loopne\x06\xE1loopnz\x06\xE1loope\x06\xE2loopz\x06\xE2loop\x06\xE3jcxz\x06\xE4rep\x07\xF4repe\x07\xF4repz\x07\xF4repne\x07\xF3repnz\x07\xF3cld\x01\xFDstd\x01\xFEcli\x01\xFBsti\x01\xFCclc\x01\xF9stc\x01\xFAcmc\x01\xF6cwd\x1D\x9Acbw\x1D\x99pushf\x01\x9Dpopf\x01\x9Elodsb\x01\xADlodsw\x1D\xAEstosb\x01\xABstosw\x1D\xACmovsb\x01\xA5movsw\x1D\xA6"
     constante TABLA_4 = "cmpsb\x01\xA7cmpsw\x1D\xA8scasb\x01\xAFscasw\x1D\xB0nop\x01\x91hlt\x01\xF5lahf\x01\xA0sahf\x01\x9Fxlatb\x01\xD8iret\x01\xD0into\x01\xCF"
     constante TABLA_5 = "movzx\x1F\xB7movsx\x1F\xBFsgdt\x1F\x01sidt\x1F\x02lgdt\x1F\x03lidt\x1F\x04ltr\x1F\x0Dcdq\x1E\x9Acwde\x1E\x99lodsd\x1E\xAEstosd\x1E\xACmovsd\x1E\xA6cmpsd\x1E\xA8scasd\x1E\xB0pushad\x1E\x61popad\x1E\x62pushfd\x1E\x9Dpopfd\x1E\x9Eiretd\x1E\xD0pusha\x01\x61popa\x01\x62int3\x01\xCDjecxz\x06\xE5"
-    constante TABLA_6 = "movsxd\x22\x01cdqe\x20\x99cqo\x20\x9Airetq\x20\xD0lodsq\x20\xAEstosq\x20\xACmovsq\x20\xA6cmpsq\x20\xA8scasq\x20\xB0syscall\x21\x06sysret\x21\x08rdmsr\x21\x33wrmsr\x21\x31cpuid\x21\xA3rdtsc\x21\x32dq\x15\x09resq\x16\x09"
+    constante TABLA_6 = "movsxd\x22\x01cdqe\x20\x99cqo\x20\x9Airetq\x20\xD0lodsq\x20\xAEstosq\x20\xACmovsq\x20\xA6cmpsq\x20\xA8scasq\x20\xB0syscall\x21\x06sysret\x21\x08rdmsr\x21\x33wrmsr\x21\x31cpuid\x21\xA3rdtsc\x21\x32dq\x15\x09resq\x16\x09alignb\x1B\x02"
     constante TABLAS = 6
 
     variable tablas: arreglo [TABLAS] de puntero a byte = (TABLA_1, TABLA_2, TABLA_3, TABLA_4, TABLA_5, TABLA_6)
@@ -141,6 +141,7 @@ módulo Montador
     constante R_ALINEA = 5              ; ceros hasta un múltiplo de n (2),
     constante R_ABSOLUTO = 6            ; lo que sigue va o no al archivo: sí (1),
     constante R_BITS = 7                ; el modo pasa a ser otro: 16, 32 o 64 (1),
+    constante R_ALINEA_B = 8            ; [HISPA-64] «alignb»: la dirección, a un múltiplo de n (2),
     constante R_ETIQUETA = 0x10         ; + clase (1 L_n, 2 T_n, 3 con nombre): una etiqueta: cuál (2),
     constante R_SALTO = 0x40            ; + forma * 4 + clase: un salto a esa etiqueta: cuál (2),
     constante R_FIJO_CORTO = 0x80       ; + n: un tramo fijo de menos de 128 octetos
@@ -531,6 +532,9 @@ módulo Montador
                     pc := pc + 1
                     pos := pos + 1
                 fin
+            sino si marca = R_ALINEA_B entonces
+                n := r_lee_palabra()
+                pc := pc + ((nat32(n) - (pc yb (nat32(n) - 1))) yb (nat32(n) - 1))
             sino si marca = R_ABSOLUTO entonces
                 absoluto := r_lee() <> 0
             sino si marca = R_BITS entonces
@@ -1924,6 +1928,18 @@ módulo Montador
                 i_section(p, fin_)
                 devolver
             caso C_ALIGN:
+                si cod = 1 entonces                 ; [HISPA-64] «alignb N», en «absolute»: la dirección
+                    veces := cuenta(p, fin_)
+                    si no absoluto entonces error("«alignb» va en lo que empieza a cero («absolute»)") fin
+                    si veces = 0 o veces > 0x8000 o veces yb (veces - 1) <> 0 entonces error("se alinea a una potencia de 2") fin
+                    si apuntando entonces
+                        vuelca_fijo()
+                        r_byte(R_ALINEA_B)
+                        r_palabra(nat16(veces))
+                    fin
+                    pc := pc + ((veces - (pc yb (veces - 1))) yb (veces - 1))
+                    devolver
+                fin
                 alinea(cuenta(p, c))                ; «align N, db 0»: ceros hasta el múltiplo de N
                 devolver
         fin

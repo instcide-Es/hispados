@@ -37,6 +37,7 @@ módulo Lexico
     constante TOCA_EOF = 3
 
     variable arch: ent16 = -1
+    público variable lex_num64: bool                ; [HISPA-64] ¿valen ya los números de más de 32 bits?
     variable lec: Lector
     variable pos_bruta: nat32                   ; cuántos octetos del archivo se han leído
     variable pend: ent16                        ; un octeto leído de más (o NADA)
@@ -224,6 +225,7 @@ módulo Lexico
         p.clase := clase
         p.val := val
         p.val2 := 0
+        p.alto := 0
         p.lin := línea
         p.col := columna
         ultima_nl := clase = T_NL
@@ -370,21 +372,26 @@ módulo Lexico
         pon(p, T_NUM, v, l0, c0)
     fin
 
+    ; un número de hasta 64 bits (en v y alto). De más de 32, solo en los
+    ; modelos de 64 bits: desde que se ha visto su «modelo» (lex_num64, que pone
+    ; Sintactico; CASTEL64.md §10 ter)
     función número(ref p: Pieza)
         variable l0, c0, n: nat16
-        variable v: nat32
+        variable v, alto, t1, t2, antes: nat32
         variable no_cabe: bool
         variable d: ent16
         l0 := lin
         c0 := col
         v := 0
+        alto := 0
         no_cabe := falso
         si mira(0) = '0' y (mira(1) = 'x' o mira(1) = 'X') entonces
             avanza()
             avanza()
             n := 0
             mientras hex(mira(0)) >= 0 hacer
-                si v >> 28 <> 0 entonces no_cabe := cierto fin
+                si alto >> 28 <> 0 entonces no_cabe := cierto fin
+                alto := alto << 4 ob (v >> 28)
                 v := v << 4 ob nat32(hex(mira(0)))
                 n := n + 1
                 avanza()
@@ -396,8 +403,20 @@ módulo Lexico
         sino
             mientras viene_cifra() hacer
                 d := mira(0) - '0'
-                si v > 429496729 o (v = 429496729 y d > 5) entonces no_cabe := cierto fin
-                v := v * 10 + nat32(d)
+                ; (alto, v) * 10 + d, a trozos de 16 bits
+                si alto > 429496729 entonces no_cabe := cierto fin
+                t1 := (v yb 0xFFFF) * 10
+                t2 := (v >> 16) * 10 + (t1 >> 16)
+                v := (t2 << 16) ob (t1 yb 0xFFFF)
+                antes := alto * 10
+                alto := antes + (t2 >> 16)
+                si alto < antes entonces no_cabe := cierto fin
+                antes := v
+                v := v + nat32(d)
+                si v < antes entonces
+                    alto := alto + 1
+                    si alto = 0 entonces no_cabe := cierto fin
+                fin
                 avanza()
             fin
         fin
@@ -406,10 +425,15 @@ módulo Lexico
             falla(l0, c0)
         fin
         si no_cabe entonces
+            m("el número no cabe en 64 bits")
+            falla(l0, c0)
+        fin
+        si alto <> 0 y no lex_num64 entonces
             m("el número no cabe en 32 bits")
             falla(l0, c0)
         fin
         pon(p, T_NUM, v, l0, c0)
+        p.alto := alto
     fin
 
     función identificador(ref p: Pieza)

@@ -297,6 +297,11 @@ módulo Programa
             falla(nlin(e), ncol(e))
         fin
         compatible(t, e, "el valor inicial", 0)
+        si en64 y num64(e, c) entonces          ; [HISPA-64] de 64 bits
+            l64_texto(c, falso, im)
+            dp(im)
+            devolver
+        fin
         si es32(t) entonces
             si no const(e, c) entonces
                 m("el valor inicial de una variable global tiene que ser constante")
@@ -1142,6 +1147,11 @@ módulo Programa
                     mientras nm <> 0 hacer
                         r := sim_propio(m_, na(nm))
                         si s_marcas(r) yb SM_VIVO <> 0 entonces
+                            si nb(nm) <> 0 entonces     ; [HISPA-64] «alineado N»
+                                s("    alignb ")
+                                s_nat(nb(nm))
+                                s("\n")
+                            fin
                             etq_nombre('G', m_, na(nm), t)
                             s(t)
                             s(": resb ")

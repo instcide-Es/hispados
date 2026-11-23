@@ -1,0 +1,9 @@
+; Los números de más de 32 bits, solo en los modelos de 64.
+; ERROR: 5:22: error: el número no cabe en 32 bits
+módulo Error
+    modelo núcleo
+    constante ALTO = 0x100000000
+    función principal()
+    fin
+fin Error.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

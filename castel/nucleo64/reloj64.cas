@@ -1,0 +1,191 @@
+; =============================================================================
+;  reloj64.cas - Hispa-64: los relojes (docs/64/HISPA-64.md, etapa 2), sin
+;  fiarse del 8254 (los Intel de ahora lo tienen parado, como el Monovate):
+;    - el HPET (de la tabla HPET de ACPI): un contador de 64 bits, de 10 a 100
+;      MHz; es el reloj del núcleo si lo hay;
+;    - si no, el reloj de ACPI (el «PM timer» de la FADT: 3,579545 MHz, de 24
+;      o 32 bits), que se va sumando en 64 bits (hay que leerlo antes de que dé
+;      la vuelta: 4,7 s con 24 bits);
+;    - y, si no hay ninguno, el canal 2 del 8254, solo para medir 10 ms;
+;    - el TSC (su frecuencia, medida con el reloj; si es invariante);
+;    - la hora del CMOS (el reloj de tiempo real, con el siglo de la FADT).
+;  ahora_ns() es el tiempo desde que se preparó, en nanosegundos.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Reloj64
+
+    importar Cifras64, Pagina64, Es64, Acpi64, Cpu64
+
+    público constante NINGUNO = 0
+    público constante HPET = 1
+    público constante PM = 2
+
+    público variable fuente: nat32
+    público variable hpet: nat64                ; dónde se ven sus registros (virtual), o 0
+    público variable hpet_periodo: nat64        ; femtosegundos por cuenta
+    público variable hpet_temps: nat32          ; cuántos temporizadores tiene
+    público variable hpet_64: bool              ; ¿su contador es de 64 bits?
+    público variable hpet_sustituye: bool       ; ¿sabe sustituir al 8254 (LegacyReplacement)?
+    público variable tsc_hz: nat64              ; la frecuencia del TSC (medida)
+    público variable tsc_invariante: bool
+    variable pm_antes: nat32
+    variable pm_suma: nat64
+    variable cuenta0: nat64
+
+    ; la frecuencia de la fuente, en Hz
+    público función hz(): nat64
+        si fuente = HPET entonces devolver muldiv(1000000000, 1000000, hpet_periodo) fin
+        si fuente = PM entonces devolver 3579545 fin
+        devolver 0
+    fin
+
+    función lee_pm(): nat32
+        variable v: nat32
+        v := entra32(pm_tmr)
+        si no pm_32 entonces v := v yb 0xFFFFFF fin
+        devolver v
+    fin
+
+    ; las cuentas de la fuente, sin dar la vuelta
+    público función cuenta(): nat64
+        variable v, d: nat32
+        si fuente = HPET entonces devolver m64(hpet + 0xF0) fin
+        si fuente = PM entonces
+            v := lee_pm()
+            d := v - pm_antes
+            si no pm_32 entonces d := d yb 0xFFFFFF fin
+            pm_suma := pm_suma + d
+            pm_antes := v
+            devolver pm_suma
+        fin
+        devolver 0
+    fin
+
+    público función ahora_ns(): nat64
+        variable c: nat64
+        c := cuenta() - cuenta0
+        si fuente = HPET entonces devolver muldiv(c, hpet_periodo, 1000000) fin
+        si fuente = PM entonces devolver muldiv(c, 1000000000, 3579545) fin
+        devolver 0
+    fin
+
+    público función espera_us(us: nat64)
+        variable fin_: nat64
+        fin_ := ahora_ns() + us * 1000
+        mientras ahora_ns() < fin_ hacer pausa() fin
+    fin
+
+    ; el HPET: lo pone a contar (sin sustituir al 8254: eso no hace falta)
+    función pon_hpet(): bool
+        variable cap: nat64
+        si hpet_fís = 0 entonces devolver falso fin
+        hpet := mapea_disp(hpet_fís, 0x400, sin_caché())
+        cap := m64(hpet)
+        hpet_periodo := cap >> 32
+        si hpet_periodo = 0 o hpet_periodo > 100000000 entonces
+            hpet := 0
+            devolver falso
+        fin
+        hpet_temps := nat32((cap >> 8) yb 31) + 1
+        hpet_64 := cap yb 0x2000 <> 0
+        hpet_sustituye := cap yb 0x8000 <> 0
+        pon_m64(hpet + 0x10, m64(hpet + 0x10) yb (nob nat64(3)))   ; parado y sin sustituir
+        pon_m64(hpet + 0xF0, 0)
+        pon_m64(hpet + 0x10, m64(hpet + 0x10) ob 1)                 ; a contar
+        devolver cierto
+    fin
+
+    ; mide 10 ms con el canal 2 del 8254 (sin interrupciones); falso si no anda
+    público función diez_ms_pit(): bool
+        variable i: nat32
+        sale8(0x61, (entra8(0x61) yb 0xFD) ob 1)      ; la puerta del canal 2, abierta; sin altavoz
+        sale8(0x43, 0xB0)                            ; canal 2, modo 0, los dos octetos
+        sale8(0x42, 11932 yb 0xFF)                   ; 1193182 Hz * 10 ms
+        sale8(0x42, 11932 >> 8)
+        i := 0
+        mientras entra8(0x61) yb 0x20 = 0 y i < 100000000 hacer i := i + 1 fin
+        devolver i < 100000000
+    fin
+
+    público función prepara_reloj()
+        variable t0, c0: nat64
+        si pon_hpet() entonces
+            fuente := HPET
+        sino si pm_tmr <> 0 entonces
+            fuente := PM
+            pm_antes := lee_pm()
+        fin
+        cuenta0 := cuenta()
+        cpuid(0x80000000, 0)
+        si ra >= 0x80000007 entonces
+            cpuid(0x80000007, 0)
+            tsc_invariante := rd yb 0x100 <> 0
+        fin
+        ; la frecuencia del TSC: 50 ms con el reloj
+        si fuente <> NINGUNO entonces
+            c0 := tsc()
+            t0 := ahora_ns()
+            mientras ahora_ns() - t0 < 50000000 hacer pausa() fin
+            tsc_hz := muldiv(tsc() - c0, 1000000000, ahora_ns() - t0)
+        fin
+    fin
+
+    ; ---- el reloj de tiempo real (CMOS) ----
+    función cmos(r: nat32): nat32
+        sale8(0x70, r)
+        devolver entra8(0x71)
+    fin
+
+    función bcd(v: nat32): nat32
+        devolver (v >> 4) * 10 + (v yb 15)
+    fin
+
+    ; ¿hay CMOS? (la FADT puede decir que no)
+    público función hay_cmos(): bool
+        si hay_fadt y arq yb 0x20 <> 0 entonces devolver falso fin
+        devolver cmos(0x0A) <> 0xFF
+    fin
+
+    ; los segundos, tal cual (para ver cuándo cambian)
+    público función segundo_cmos(): nat32
+        mientras cmos(0x0A) yb 0x80 <> 0 hacer pausa() fin
+        devolver cmos(0)
+    fin
+
+    ; la fecha y la hora: «23/11/2026 18:30:05»
+    público función escribe_hora()
+        variable s, mi, h, d, me, a, c, b, s2: nat32
+        variable pm: bool
+        mientras cierto hacer
+            mientras cmos(0x0A) yb 0x80 <> 0 hacer pausa() fin
+            s := cmos(0)
+            mi := cmos(2)
+            h := cmos(4)
+            d := cmos(7)
+            me := cmos(8)
+            a := cmos(9)
+            c := 0
+            si siglo <> 0 entonces c := cmos(siglo) fin
+            mientras cmos(0x0A) yb 0x80 <> 0 hacer pausa() fin
+            s2 := cmos(0)
+            si s2 = s entonces romper fin
+        fin
+        b := cmos(0x0B)
+        pm := h yb 0x80 <> 0
+        h := h yb 0x7F
+        si b yb 4 = 0 entonces
+            s := bcd(s)
+            mi := bcd(mi)
+            h := bcd(h)
+            d := bcd(d)
+            me := bcd(me)
+            a := bcd(a)
+            c := bcd(c)
+        fin
+        si b yb 2 = 0 y pm entonces h := (h mod 12) + 12 fin
+        si c = 0 entonces c := 20 fin
+        escribir(d div 10, d mod 10, "/", me div 10, me mod 10, "/", c, a div 10, a mod 10, " ")
+        escribir(h div 10, h mod 10, ":", mi div 10, mi mod 10, ":", s div 10, s mod 10)
+    fin
+
+fin Reloj64.

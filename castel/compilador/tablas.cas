@@ -80,6 +80,7 @@ módulo Tablas
     público constante SM_INICIAL = 4            ; variable global con valor inicial
     público constante SM_NEG = 8                ; constante negativa
     público constante SM_VISTO = 16             ; ya se ha mirado a quién nombra
+    público constante SM_64 = 32                ; [HISPA-64] S_NUM de 64 bits: c, d los 32 de arriba
     público constante FM_LEJOS = 1
     público constante FM_VIVO = 2
     público constante FM_PUBLICO = 4
@@ -430,6 +431,22 @@ módulo Tablas
 
     público función s_pon_b(r: nat16, v: nat16)
         poner_palabra(seg_sim + r, 10, v)
+    fin
+
+    público función s_c(r: nat16): nat16
+        devolver leer_palabra(seg_sim + r, 12)
+    fin
+
+    público función s_d(r: nat16): nat16
+        devolver leer_palabra(seg_sim + r, 14)
+    fin
+
+    público función s_pon_c(r: nat16, v: nat16)
+        poner_palabra(seg_sim + r, 12, v)
+    fin
+
+    público función s_pon_d(r: nat16, v: nat16)
+        poner_palabra(seg_sim + r, 14, v)
     fin
 
     ; si el nombre es «Módulo.nombre», parte sus dos átomos (si existen)

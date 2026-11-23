@@ -73,11 +73,11 @@ módulo Pagina64
 
     ; de virtual del núcleo a física
     público función base_núcleo(): nat64
-        devolver (nat64(0xFFFFFFFF) << 32) + 0x80000000
+        devolver 0xFFFFFFFF80000000
     fin
 
     función máscara(): nat64
-        devolver (nat64(0x000FFFFF) << 32) ob 0xFFFFF000
+        devolver 0x000FFFFFFFFFF000
     fin
 
     función tabla(f: nat64): puntero a nat64
@@ -368,10 +368,10 @@ módulo Pagina64
                 db 0x0F, 0x09           ; wbinvd
             fin
             ; WB, WC, UC-, UC, WB, WP, UC-, WT
-            pon_msr(0x277, (nat64(0x04070506) << 32) ob 0x00070106)
+            pon_msr(0x277, 0x0407050600070106)
         fin
         cr0_ob(0x10000)
-        próx_disp := nat64(0xFFFFC000) << 32
+        próx_disp := 0xFFFFC00000000000
     fin
 
     ; las tablas nuevas, con el núcleo (sin las tablas del arranque ni la página

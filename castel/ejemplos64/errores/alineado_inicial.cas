@@ -1,0 +1,9 @@
+; Una variable alineada no lleva valor inicial.
+; ERROR: 5:34: error: una variable alineada no lleva valor inicial
+módulo Error
+    modelo linux64
+    variable n: nat64 alineado 8 = 5
+    función principal()
+    fin
+fin Error.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

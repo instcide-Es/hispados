@@ -17,7 +17,8 @@
 #     «byte»/«word», el prefijo de segmento [es:...] y números o cuentas con
 #     etiquetas;
 #   - etiquetas «nombre:» y locales «.nombre:» (de la última no local);
-#   - db dw dd resb resw resd times, cpu, bits, org, absolute, section, align.
+#   - db dw dd resb resw resd times, cpu, bits, org, absolute, section, align (y
+#     alignb en «absolute»).
 #  Los saltos, como NASM: se pasa por el archivo las veces que haga falta. En
 #  cada pasada un salto va corto si llega (a 127 octetos) contando con dónde
 #  están ahora las etiquetas: las de atrás, donde han quedado en esta pasada;
@@ -991,6 +992,12 @@ class Ensamblador:
                     self.pc = self.fijo(p[7:], nem)
                 else:
                     self.error("de «section» solo entiendo «vstart=» y «align=»")
+        elif nem == 'alignb' and self.absoluto:
+            # [HISPA-64] «alignb N» en lo que empieza a cero: la dirección, al múltiplo de N
+            n = self.fijo(resto, nem)
+            if n < 1 or n & (n - 1):
+                self.error("se alinea a una potencia de 2")
+            self.reserva((-self.pc) % n)
         elif nem == 'align':
             # «align N, db 0»: ceros hasta que la posición en el archivo sea múltiplo de N
             dos = parte(resto, b',')

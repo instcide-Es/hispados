@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 y 1 están hechas** (secciones 6 y 7).
+**etapas 0, 1 y 2 están hechas** (secciones 6, 7 y 8).
 
 ---
 
@@ -54,9 +54,9 @@ pruebas en pruebas64.sh, sin cambiar lo que sale para 16 y 32 bits):
 | Falta | Para qué | Etapa |
 |---|---|---|
 | El **«modelo de núcleo» de direcciones** (el `-mcmodel=kernel` de gcc): el núcleo en los últimos 2 GB (`0xFFFFFFFF80000000`). Las direcciones de 32 bits con signo (`[G_x]` ya vale; `mov esi, T_3` pasa a `lea rsi, [T_3]`, en ccastel.py y Gen64; el `org` de 64 bits en ensambla.py y Montador) | el núcleo en la mitad alta | **hecho** (etapa 1; CASTEL64.md §10 bis) |
-| **Llamar a C y que C llame** (System V AMD64: argumentos en RDI, RSI, RDX, RCX, R8, R9, pila alineada a 16): `externa función` con su puente | enlazar con código en C (ACPICA, musl, la oficina) | 2–7 |
-| **Números escritos de 64 bits** y constantes de 64 al compilar | las direcciones altas sin `nat64(x) << 32` (la etapa 1 se ha hecho sin ellos) | 2 |
-| Variables **alineadas** (`alineado 4096`) | estructuras de los dispositivos (la etapa 1 no las ha necesitado: lo alineado se pide a la memoria física) | cuando haga falta |
+| **Llamar a C y que C llame** (System V AMD64: argumentos en RDI, RSI, RDX, RCX, R8, R9, pila alineada a 16): `externa función` con su puente | enlazar con código en C (ACPICA, musl, la oficina) | 4–7 (la etapa 2 lee ACPI sin ACPICA: sección 8) |
+| **Números escritos de 64 bits** y constantes de 64 al compilar | las direcciones altas sin `nat64(x) << 32` | **hecho** (etapa 2; CASTEL64.md §10 ter: son `nat64`, sin calcular al compilar) |
+| Variables **alineadas** (`alineado 4096`) | estructuras de los dispositivos | **hecho** (etapa 2, las del módulo sin valor inicial; CASTEL64.md §10 ter) |
 | `modelo usuario64`: programas del anillo 3 con `syscall` | los programas de Castel en Hispa-64 | 4 |
 
 ### 2.2 El arranque: multiboot2 de GRUB (recomendado), cargador UEFI propio más tarde
@@ -193,6 +193,10 @@ Por lo que hay en el taller y lo que pide una oficina:
 2. **ACPI** (tablas: MADT, HPET, MCFG, FADT; y AML para apagar, la batería, las
    tapas, los botones): **portar ACPICA** (doble licencia BSD/GPLv2: compatible). Un
    intérprete de AML propio que funcione en portátiles de verdad son meses.
+   **Desde la etapa 2**: las tablas las lee el núcleo él mismo (acpi64.cas, unas
+   500 líneas) y ACPICA se porta cuando haga falta el AML de verdad (la batería,
+   la tapa, dormir, el botón de los portátiles que lo llevan por el AML): con el
+   puente con C y musl (etapas 4–7), en la 11. Ver la sección 8.
 3. **APIC local, IOAPIC, HPET, temporizador de ACPI, TSC** (sin 8254 ni PIC).
 4. **PCIe** con ECAM (MCFG), MSI y MSI-X; BAR de 64 bits (en 64 bits no hay que
    moverlos: se mapean donde estén, aunque sea por encima de 4 GB).
@@ -255,7 +259,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 |---|---|---|---|
 | 0 | Arranque UEFI, modo largo, consola, mapa de memoria, excepciones | **hecha (23/11)** | — |
 | 1 | Núcleo en la mitad alta, memoria física y virtual, montón | **hecha (23/11)** | — |
-| 2 | ACPI (ACPICA), APIC, HPET, tiempo, PCIe, apagar | 4–6 sem. | 2,5 meses |
+| 2 | ACPI (tablas propias), APIC, HPET, tiempo, PCIe, apagar | **hecha (23/11)** | — |
 | 3 | SMP, planificador, hilos del núcleo | 4–6 sem. | 4 meses |
 | 4 | Anillo 3, syscall/sysret, ELF64, procesos | 4–5 sem. | 5 meses |
 | 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | 5–7 sem. | 6,5 meses |
@@ -286,9 +290,10 @@ QEMU, con 128 MB, 3 GB y 8 GB (y `-cpu qemu64`, sin páginas de 1 GB, y `-cpu ma
 se ha añadido lo que hace falta para que un fallo «se explique con el nombre de la
 función»: los nombres van en un módulo del cargador (`HISPA64.SIM`).
 
-### Etapa 2 — ACPI, interrupciones y tiempo
+### Etapa 2 — ACPI, interrupciones y tiempo (hecha: sección 8)
 
-- ACPICA portada (necesita el puente con C, 2.1); MADT, HPET, MCFG, FADT.
+- ~~ACPICA portada~~ las tablas leídas por el núcleo (sección 8: ACPICA, en la 11);
+  MADT, HPET, MCFG, FADT.
 - APIC local (x2APIC si lo hay), IOAPIC, MSI; el temporizador del APIC calibrado
   con el HPET o el de ACPI (no hay 8254); TSC invariante; la hora del CMOS.
 - PCIe por ECAM: la lista de dispositivos con sus BAR (también los de más de 4 GB).
@@ -418,7 +423,7 @@ con la imagen y un LEEME.TXT.
   órdenes). La pantalla se comprueba con un pantallazo (`screendump` por el monitor
   de QEMU). Ojo con lo que QEMU no tiene igual que el hardware: no hay GOP por
   encima de 4 GB, sí hay 8254 y COM1. Por eso cada etapa va también al taller.
-- `castel/nucleo64/pruebas.sh` (solo, unos 40 s) y `SOLO=castel64 ./pruebas.sh`
+- `castel/nucleo64/pruebas.sh` (solo, unos 3 minutos desde la etapa 2) y `SOLO=castel64 ./pruebas.sh`
   (CASTEL64 entero, que lo llama). **Los martes y jueves de 16:30 a 21:00, nada
   pesado en el servidor** (el bingo).
 
@@ -628,3 +633,126 @@ arranque, que se devuelven).
   hace falta por velocidad).
 - El fallo de máquina (#MC) va a su IST, pero no se lee aún lo que dicen los bancos
   (MCi_STATUS): etapa 2 o 3.
+
+---
+
+## 8. La etapa 2, hecha (23/11/2026): ACPI, las interrupciones, el tiempo y PCIe
+
+### Las decisiones
+
+- **Las tablas de ACPI, leídas por el núcleo; ACPICA, más tarde.** Lo que pide
+  esta etapa son tablas fijas (MADT, FADT, HPET, MCFG): unas 500 líneas de Castel
+  (acpi64.cas). ACPICA (unas 100.000 líneas de C) pide el puente con C, una capa de
+  servicios del sistema (`AcpiOs*`: memoria, cerrojos, semáforos, hilos, las
+  interrupciones) y, en la práctica, musl o algo parecido: lo de las etapas 3 a 7.
+  Lo que sí pide AML (la batería, la tapa, dormir, el botón de los portátiles que
+  lo llevan por el AML, el «_PRT» de las interrupciones de PCI) llega en la 11, con
+  ACPICA. Para apagar basta con `\_S5` (un `Name` con un paquete: se busca en la
+  DSDT y las SSDT sin intérprete, como hacen muchos sistemas pequeños).
+- **El compilador**: los números escritos de 64 bits y `alineado` (CASTEL64.md
+  §10 ter), en ccastel.py y en CASTEL (los de 16, 32 y 64 bits), con la misma
+  salida. El núcleo ya los usa (el mapa directo, la base del núcleo, la PAT, el
+  bloque del procesador alineado a 64). El puente con C, no: aún no hace falta.
+- **Sin el 8259 ni el 8254**: el 8259 se tapa entero (con sus vectores en 0x20-0x2F,
+  para que una espuria no parezca una excepción); el tic es el temporizador del
+  APIC local, medido contra el HPET o, si no hay, el reloj de ACPI (el 8254, su
+  canal 2, solo si no hay ninguno de los dos).
+- **El IOAPIC se prueba de verdad**: el temporizador 0 del HPET (o, sin HPET, el
+  8254) por una GSI, 20 veces.
+- **Preparado para la etapa 3**: lo de cada procesador va en un bloque (PorCpu64,
+  con GS apuntando a él: `yo()` es `mov rax, [gs:0]`): su APIC, sus tics, su GDT,
+  su TSS y sus IST; el APIC local se pone con una función que llamará cada uno.
+- **Con cuidado con el hardware de verdad**: antes de dejar pasar la SCI se
+  apagan todos los GPE y todo lo de PM1 menos el botón (sin AML no se sabe
+  atender lo demás; una SCI por nivel que nadie borra lo pararía todo), y si aun
+  así llegan mil que no son el botón, se tapa.
+
+### Qué hace
+
+Hispa-64 0.2.0. Los módulos nuevos:
+
+| Archivo | Qué |
+|---|---|
+| `acpi64.cas` | la RSDP (la de GRUB por multiboot2; por multiboot, buscada en la EBDA y en 0xE0000-0xFFFFF), la XSDT o la RSDT y cada tabla con su suma; lo «reservado» con `mapea_disp` (de 64 KB en 64 KB); la MADT (procesadores con APIC local y x2APIC, los que se pueden encender, IOAPIC, cambios de las IRQ de ISA, el NMI de LINT), la FADT (reloj de ACPI de 24 o 32 bits, SCI, SMI_CMD, PM1, GPE, el siglo del CMOS, IAPC_BOOT_ARCH, el reinicio, hardware reducido, la DSDT), HPET, MCFG; `\_S5`; pasar al modo ACPI, el botón, apagar (S5) y reiniciar |
+| `reloj64.cas` | el HPET (a contar, sin sustituir al 8254) o el reloj de ACPI sumado en 64 bits: `ahora_ns()`; el canal 2 del 8254 para medir 10 ms si no hay otro; la frecuencia del TSC y si es invariante; la fecha y la hora del CMOS (BCD o no, 12 o 24 h, el siglo) |
+| `apic64.cas` | el 8259 tapado; el APIC local (x2APIC si lo hay, por los MSR; si no, por su memoria sin caché): SVR, LINT0 tapada, el NMI por LINT según la MADT, los errores; su temporizador medido y a 100 por segundo (vector 0x40); los IOAPIC (todo tapado; una GSI o una IRQ de ISA a un vector, con su polaridad y su disparo); lo que se atiende: el tic, el teclado PS/2 (una cola de códigos), la SCI (el botón), la espuria, una prueba |
+| `pci64.cas` | la configuración por ECAM (MCFG) o por 0xCF8; todos los buses del segmento 0; quién es cada función, su clase en español, su IRQ y sus BAR con su tamaño (de E/S, de 32 o de 64 bits, precargables; las de más de 4 GB se dejan donde están) |
+| `porcpu64.cas` | el bloque de cada procesador (con GS); el del que arranca, en los datos; `nueva()` para los de la etapa 3 |
+| `es64.cas` | los puertos de 8, 16 y 32 bits, los MSR, el TSC, la memoria de los dispositivos con el ancho justo, `sti`/`hlt`, a·b/c con 128 bits |
+
+Lo que dice (QEMU con OVMF, q35, 4 procesadores; abreviado):
+
+```
+ACPI: 2.0 o más, de «BOCHS »; XSDT en 0x3F77D0E8, 7 tablas: FACP APIC HPET MCFG WAET BGRT DSDT (todas con la suma bien)
+  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)
+  APIC local en 0xFEE00000; con 8259 (se tapa)
+  IOAPIC 0 en 0xFEC00000, GSI 0 a 23 (24 entradas, versión 0x20)
+  IRQ de ISA cambiadas: 0 -> GSI 2; 5 -> GSI 5 por nivel, activa en alto; 9 -> GSI 9 por nivel, activa en alto; ...
+  FADT: reloj de ACPI en el puerto 0x608 (24 bits), la SCI en la IRQ 9, 8042: sí, botón de encendido fijo, apagar (\_S5): SLP_TYP 0
+  HPET en 0xFED00000
+  MCFG: PCIe por ECAM en 0xE0000000, segmento 0, buses 0 a 255
+Reloj: el HPET, a 100,0 MHz, 3 temporizadores, contador de 64 bits
+  TSC: 1998 MHz; invariante: no
+APIC local: en xAPIC, en 0xFEE00000, el de este procesador es el 0; versión 0x14; el 8259, tapado
+  su temporizador: 630929 cuentas cada 10 ms (entre 16), medido con el HPET; el tic, 100 por segundo, al vector 0x40
+Tic: 100 tics en 1 s (medido con el HPET); entre dos cambios del segundo del CMOS: 99 tics
+IOAPIC: el temporizador 0 del HPET, por la GSI 16, al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)
+Teclado PS/2: la IRQ 1, por la GSI 1, al vector 0x31
+Botón de encendido: en modo ACPI; la SCI por la GSI 9; pulsarlo apaga el equipo
+PCI (PCIe, por ECAM): 6 funciones en los buses 0 a 255, 1 BAR por encima de 4 GB
+  00:00.0 8086:29C0 puente: del anfitrión
+  00:01.0 1234:1111 pantalla: VGA
+      BAR0 0x80000000, 16,0 MB de memoria, precargable
+  00:02.0 1AF4:1001 almacenamiento: SCSI, IRQ 11
+      BAR4 0xC000000000, 16 KB de memoria de 64 bits (por encima de 4 GB), precargable
+  00:1F.2 8086:2922 almacenamiento: SATA (AHCI), IRQ 10
+  ...
+Hora (CMOS): 23/11/2026 17:43:04
+...
+Hispa-64 etapa 2: todo en orden.
+(Pulse teclas para ver sus códigos; el botón de encendido apaga el equipo.)
+Reloj: 23/11/2026 17:43:10 (tics: 1234)
+```
+
+En el equipo de verdad no se para: enseña la hora cada segundo y el código de cada
+tecla que se pulse, y el botón de encendido apaga el equipo por ACPI. Las entradas
+nuevas del menú: «sin el temporizador del APIC» (`prueba=sintic`, por si se queda
+en el tic) y «apagar el equipo por ACPI» (`prueba=acpiapagar`).
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: 33 pruebas (34 con CASTEL64 y ENSAMB64), unos 3
+minutos. Las de la etapa 2:
+
+- por multiboot con `-machine pc` (la RSDP buscada en la BIOS, ACPI 1.0, RSDT, sin
+  MCFG: PCI por los puertos) y con `q35` y 4 procesadores (MCFG, ECAM, un puerto
+  PCIe con un xHCI detrás: el bus 1 y su BAR de 64 bits);
+- sin HPET (`-machine pc,hpet=off` y `q35,hpet=off`, con 4 procesadores): el reloj
+  de ACPI, y el IOAPIC con el 8254;
+- por UEFI (OVMF + GRUB): q35 con 128 MB; `-cpu max`, 4 procesadores y 3 GB (la
+  MADT con 4, la BAR de 64 bits del disco virtio en 0xC000000000); q35 sin HPET; y
+  `-machine pc` con 2 procesadores;
+- en todas: el tic, **100 en 1 s (de 75 a 110: con el servidor cargado el TCG de QEMU pierde tics; sin carga, 99 o 100) y otra vez entre dos cambios del segundo
+  del CMOS** (otro reloj: no es el que lo ha medido); el IOAPIC, 20 de 20 (o 17 a
+  23 con el 8254); y **la lista de PCI, la misma que da QEMU** («info pci» por su
+  monitor);
+- el teclado (`sendkey a`, `sendkey b` por el monitor de QEMU: 0x1E 0x9E 0x30 0xB0),
+  el botón de encendido (`system_powerdown`: llega por la SCI y apaga por S5; QEMU
+  acaba con 0) y `prueba=acpiapagar`.
+
+Lo que QEMU no prueba: **x2APIC** (el TCG de QEMU 8.2 no lo tiene; el camino por
+los MSR solo se probará en el taller: el ThinkPad y el Monovate lo tienen) y los
+procesadores híbridos.
+
+### Lo que queda para la etapa 3 (y más adelante)
+
+- Arrancar los demás procesadores (INIT-SIPI-SIPI con el trampolín bajo 1 MB):
+  cada uno con su bloque (`PorCpu64.nueva`), su GDT, su TSS y sus pilas IST (hoy
+  las de gdt64.cas son del que arranca), su `pon_lapic()` y su tic; la PAT, NX y
+  WP en cada uno; vaciar la TLB de los demás (IPI); qué núcleos son P y cuáles E
+  (CPUID 0x1A en cada uno).
+- El tic en modo TSC-deadline (si lo hay) y sin tic cuando no hay nada que hacer.
+- MSI y MSI-X (para NVMe y xHCI, etapas 5 y 6); el `_PRT` de las interrupciones de
+  PCI, con ACPICA (etapa 11); las BAR de más de 4 GB, mapeadas al usarlas.
+- ACPICA (el puente con C): la batería, la tapa, dormir, el botón por el AML.
+- Leer los bancos del fallo de máquina (MCi_STATUS).

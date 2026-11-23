@@ -1,0 +1,311 @@
+; =============================================================================
+;  pci64.cas - Hispa-64: PCI y PCIe (docs/64/HISPA-64.md, etapa 2). La
+;  configuración, por ECAM (la memoria que dice la tabla MCFG de ACPI: 4 KB por
+;  función, con los registros de PCIe) o, si no hay MCFG (QEMU «pc», equipos
+;  viejos), por los puertos 0xCF8/0xCFC. Se recorren todos los buses del
+;  segmento 0 (los que dice la MCFG, o los 256), y de cada aparato se guarda
+;  quién es (fabricante, aparato, clase), su IRQ de siempre y sus BAR, con su
+;  tamaño (medido como siempre: escribiendo unos con la decodificación quitada
+;  y dejándolo como estaba). Las BAR de 64 bits se dejan donde estén, aunque
+;  sea por encima de 4 GB: en Hispa-64 no hay que moverlas. Y la clase se dice
+;  en español.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Pci64
+
+    importar Cifras64, Pagina64, Es64, Acpi64
+
+    público constante MAX = 160
+
+    público variable ecam: nat64                ; dónde se ve el bus 0 (virtual), o 0 (puertos)
+    público variable bus_ini, bus_fin: nat32
+    público variable pci_n: nat32
+    variable bus, disp, fun: arreglo [MAX] de byte
+    variable fab, apa: arreglo [MAX] de nat16
+    variable clase, sub, prog, rev, cab: arreglo [MAX] de byte
+    variable irq, patilla: arreglo [MAX] de byte
+    variable bar_dir, bar_tam: arreglo [MAX] de arreglo [6] de nat64
+    variable bar_marcas: arreglo [MAX] de arreglo [6] de byte   ; 1 E/S, 2 de 64 bits, 4 prefetch, 8 hay
+    público variable n_puentes, n_altas: nat32
+
+    función dir(b: nat32, d: nat32, f: nat32): nat64
+        devolver ecam + (nat64(b) << 20) + (nat64(d) << 15) + (nat64(f) << 12)
+    fin
+
+    público función lee32(b: nat32, d: nat32, f: nat32, r: nat32): nat32
+        si ecam <> 0 entonces devolver m32(dir(b, d, f) + (r yb 0xFFC)) fin
+        sale32(0xCF8, 0x80000000 ob (b << 16) ob (d << 11) ob (f << 8) ob (r yb 0xFC))
+        devolver entra32(0xCFC)
+    fin
+
+    público función pon32(b: nat32, d: nat32, f: nat32, r: nat32, v: nat32)
+        si ecam <> 0 entonces
+            pon_m32(dir(b, d, f) + (r yb 0xFFC), v)
+            devolver
+        fin
+        sale32(0xCF8, 0x80000000 ob (b << 16) ob (d << 11) ob (f << 8) ob (r yb 0xFC))
+        sale32(0xCFC, v)
+    fin
+
+    ; las BAR del aparato i (6 en uno normal, 2 en un puente)
+    función mide_bars(i: nat32)
+        variable b, d, f, k, nb, orden, v, w, alto, alto_w: nat32
+        variable t: nat64
+        b := bus[i]
+        d := disp[i]
+        f := fun[i]
+        nb := 6
+        si cab[i] yb 0x7F = 1 entonces nb := 2 fin
+        si cab[i] yb 0x7F = 2 entonces nb := 0 fin
+        orden := lee32(b, d, f, 4)
+        pon32(b, d, f, 4, orden yb 0xFFFFFFFC)        ; sin decodificar mientras se mide
+        k := 0
+        mientras k < nb hacer
+            v := lee32(b, d, f, 0x10 + k * 4)
+            pon32(b, d, f, 0x10 + k * 4, 0xFFFFFFFF)
+            w := lee32(b, d, f, 0x10 + k * 4)
+            pon32(b, d, f, 0x10 + k * 4, v)
+            si w <> 0 y w <> 0xFFFFFFFF entonces
+                si w yb 1 <> 0 entonces
+                    bar_marcas[i][k] := 9
+                    bar_dir[i][k] := nat64(v yb 0xFFFFFFFC)
+                    bar_tam[i][k] := nat64(((nob (w yb 0xFFFFFFFC)) + 1) yb 0xFFFF)
+                sino si (w >> 1) yb 3 = 2 y k + 1 < nb entonces
+                    alto := lee32(b, d, f, 0x14 + k * 4)
+                    pon32(b, d, f, 0x14 + k * 4, 0xFFFFFFFF)
+                    alto_w := lee32(b, d, f, 0x14 + k * 4)
+                    pon32(b, d, f, 0x14 + k * 4, alto)
+                    bar_marcas[i][k] := 10
+                    si w yb 8 <> 0 entonces bar_marcas[i][k] := 14 fin
+                    bar_dir[i][k] := (nat64(alto) << 32) ob (v yb 0xFFFFFFF0)
+                    t := (nat64(alto_w) << 32) ob (w yb 0xFFFFFFF0)
+                    bar_tam[i][k] := (nob t) + 1
+                    si bar_dir[i][k] >= 0x100000000 entonces n_altas := n_altas + 1 fin
+                    k := k + 1
+                sino
+                    bar_marcas[i][k] := 8
+                    si w yb 8 <> 0 entonces bar_marcas[i][k] := 12 fin
+                    bar_dir[i][k] := nat64(v yb 0xFFFFFFF0)
+                    bar_tam[i][k] := nat64((nob (w yb 0xFFFFFFF0)) + 1)
+                fin
+            fin
+            k := k + 1
+        fin
+        pon32(b, d, f, 4, orden)
+    fin
+
+    función apunta_aparato(b: nat32, d: nat32, f: nat32, v: nat32)
+        variable c: nat32
+        si pci_n >= MAX entonces devolver fin
+        bus[pci_n] := byte(b)
+        disp[pci_n] := byte(d)
+        fun[pci_n] := byte(f)
+        fab[pci_n] := nat16(v)
+        apa[pci_n] := nat16(v >> 16)
+        c := lee32(b, d, f, 8)
+        rev[pci_n] := byte(c)
+        prog[pci_n] := byte(c >> 8)
+        sub[pci_n] := byte(c >> 16)
+        clase[pci_n] := byte(c >> 24)
+        cab[pci_n] := byte(lee32(b, d, f, 0x0C) >> 16)
+        c := lee32(b, d, f, 0x3C)
+        irq[pci_n] := byte(c)
+        patilla[pci_n] := byte(c >> 8)
+        si cab[pci_n] yb 0x7F = 1 entonces n_puentes := n_puentes + 1 fin
+        mide_bars(pci_n)
+        pci_n := pci_n + 1
+    fin
+
+    ; los recorre todos
+    público función busca()
+        variable b, d, f, v, nf: nat32
+        variable i: nat32
+        bus_ini := 0
+        bus_fin := 255
+        i := 0
+        mientras i < n_mcfg hacer
+            si mc_seg[i] = 0 y ecam = 0 entonces
+                bus_ini := mc_bus_ini[i]
+                bus_fin := mc_bus_fin[i]
+                ecam := mapea_disp(mc_base[i] + (nat64(bus_ini) << 20), nat64(bus_fin - bus_ini + 1) << 20, sin_caché())
+                ecam := ecam - (nat64(bus_ini) << 20)
+            fin
+            i := i + 1
+        fin
+        b := bus_ini
+        mientras b <= bus_fin hacer
+            d := 0
+            mientras d < 32 hacer
+                v := lee32(b, d, 0, 0)
+                si v yb 0xFFFF <> 0xFFFF y v <> 0 entonces
+                    nf := 1
+                    si (lee32(b, d, 0, 0x0C) >> 16) yb 0x80 <> 0 entonces nf := 8 fin
+                    f := 0
+                    mientras f < nf hacer
+                        si f > 0 entonces v := lee32(b, d, f, 0) fin
+                        si v yb 0xFFFF <> 0xFFFF entonces apunta_aparato(b, d, f, v) fin
+                        f := f + 1
+                    fin
+                fin
+                d := d + 1
+            fin
+            b := b + 1
+        fin
+    fin
+
+    función hex2(v: nat32)
+        variable d: nat32
+        d := (v >> 4) yb 15
+        si d < 10 entonces escribir_car('0' + d) sino escribir_car('A' + d - 10) fin
+        d := v yb 15
+        si d < 10 entonces escribir_car('0' + d) sino escribir_car('A' + d - 10) fin
+    fin
+
+    público función hex4(v: nat32)
+        hex2(v >> 8)
+        hex2(v yb 0xFF)
+    fin
+
+    ; la clase, en español
+    público función escribe_clase(c: nat32, s: nat32, p: nat32)
+        según nat16(c)
+            caso 0: si s = 1 entonces escribir("pantalla VGA (antigua)") sino escribir("sin clase") fin
+            caso 1:
+                escribir("almacenamiento: ")
+                según nat16(s)
+                    caso 0: escribir("SCSI")
+                    caso 1: escribir("IDE")
+                    caso 4: escribir("RAID")
+                    caso 5: escribir("ATA")
+                    caso 6: si p = 1 entonces escribir("SATA (AHCI)") sino escribir("SATA") fin
+                    caso 7: escribir("SAS")
+                    caso 8: si p = 2 entonces escribir("NVMe") sino escribir("memoria no volátil") fin
+                    caso 9: escribir("UFS")
+                    si no: escribir("otro")
+                fin
+            caso 2:
+                escribir("red: ")
+                según nat16(s)
+                    caso 0: escribir("Ethernet")
+                    caso 0x80: escribir("otra (a menudo, Wi-Fi)")
+                    si no: escribir("otra")
+                fin
+            caso 3:
+                escribir("pantalla: ")
+                según nat16(s)
+                    caso 0: escribir("VGA")
+                    caso 1: escribir("XGA")
+                    caso 2: escribir("3D")
+                    si no: escribir("otra")
+                fin
+            caso 4:
+                escribir("multimedia: ")
+                según nat16(s)
+                    caso 0: escribir("vídeo")
+                    caso 1: escribir("sonido")
+                    caso 3: escribir("sonido de alta definición (HDA)")
+                    si no: escribir("otro")
+                fin
+            caso 5: escribir("memoria")
+            caso 6:
+                escribir("puente: ")
+                según nat16(s)
+                    caso 0: escribir("del anfitrión")
+                    caso 1: escribir("a ISA (LPC)")
+                    caso 4: escribir("a PCI (PCIe)")
+                    caso 7: escribir("a CardBus")
+                    caso 0x80: escribir("otro")
+                    si no: escribir("otro")
+                fin
+            caso 7:
+                escribir("comunicaciones: ")
+                según nat16(s)
+                    caso 0: escribir("puerto serie")
+                    caso 1: escribir("puerto paralelo")
+                    caso 3: escribir("módem")
+                    si no: escribir("otra (a menudo, el motor de gestión de Intel)")
+                fin
+            caso 8:
+                escribir("del sistema: ")
+                según nat16(s)
+                    caso 0: escribir("PIC")
+                    caso 1: escribir("DMA")
+                    caso 2: escribir("temporizador")
+                    caso 3: escribir("reloj")
+                    caso 5: escribir("tarjetas SD")
+                    caso 6: escribir("IOMMU")
+                    si no: escribir("otro")
+                fin
+            caso 9: escribir("entrada (teclado, ratón...)")
+            caso 0x0A: escribir("base de conexión")
+            caso 0x0B: escribir("procesador")
+            caso 0x0C:
+                escribir("bus serie: ")
+                según nat16(s)
+                    caso 0: escribir("FireWire")
+                    caso 3:
+                        según nat16(p)
+                            caso 0: escribir("USB 1 (UHCI)")
+                            caso 0x10: escribir("USB 1 (OHCI)")
+                            caso 0x20: escribir("USB 2 (EHCI)")
+                            caso 0x30: escribir("USB 3 (xHCI)")
+                            caso 0x40: escribir("USB 4")
+                            si no: escribir("USB")
+                        fin
+                    caso 5: escribir("SMBus")
+                    caso 0x80: escribir("otro (a menudo, I2C o SPI)")
+                    si no: escribir("otro")
+                fin
+            caso 0x0D: escribir("inalámbrico (Bluetooth...)")
+            caso 0x0E: escribir("E/S inteligente")
+            caso 0x0F: escribir("satélite")
+            caso 0x10: escribir("cifrado")
+            caso 0x11: escribir("adquisición de señales (sensores, temperatura)")
+            caso 0x12: escribir("acelerador")
+            caso 0x13: escribir("instrumentación")
+            si no: escribir("de clase ", c)
+        fin
+    fin
+
+    ; la lista, como se ve en el arranque
+    público función escribe_pci()
+        variable i, k: nat32
+        i := 0
+        mientras i < pci_n hacer
+            escribir("  ")
+            hex2(bus[i])
+            escribir(":")
+            hex2(disp[i])
+            escribir(".", fun[i], " ")
+            hex4(fab[i])
+            escribir(":")
+            hex4(apa[i])
+            escribir(" ")
+            escribe_clase(clase[i], sub[i], prog[i])
+            si patilla[i] <> 0 y irq[i] <> 0xFF y irq[i] <> 0 entonces escribir(", IRQ ", irq[i]) fin
+            escribir("\n")
+            k := 0
+            mientras k < 6 hacer
+                si bar_marcas[i][k] yb 8 <> 0 entonces
+                    escribir("      BAR", k, " ")
+                    hex(bar_dir[i][k])
+                    escribir(", ")
+                    si bar_tam[i][k] < 1024 entonces escribir(bar_tam[i][k], " octetos") sino tamaño_legible(bar_tam[i][k]) fin
+                    si bar_marcas[i][k] yb 1 <> 0 entonces
+                        escribir(" de E/S")
+                    sino si bar_marcas[i][k] yb 2 <> 0 entonces
+                        escribir(" de memoria de 64 bits")
+                        si bar_dir[i][k] >= 0x100000000 entonces escribir(" (por encima de 4 GB)") fin
+                    sino
+                        escribir(" de memoria")
+                    fin
+                    si bar_marcas[i][k] yb 4 <> 0 entonces escribir(", precargable") fin
+                    escribir("\n")
+                fin
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+fin Pci64.

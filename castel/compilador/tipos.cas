@@ -123,6 +123,27 @@ módulo Tipos
         v.bajo := nat32(s_b(r)) << 16 ob s_a(r)
         v.alto := 0
         si s_marcas(r) yb SM_NEG <> 0 entonces v.alto := 0xFFFFFFFF fin
+        si s_marcas(r) yb SM_64 <> 0 entonces v.alto := nat32(s_d(r)) << 16 ob s_c(r) fin
+    fin
+
+    ; [HISPA-64] ¿es e un número escrito de más de 32 bits (o una constante que
+    ; lo es)? Su valor, en v. No se calcula con él al compilar: es un nat64
+    ; que se pone con «mov rax, n» (CASTEL64.md §10 ter)
+    público función num64(e: nat16, ref v: N64): bool
+        variable r: nat16
+        si nk(e) = K_NUM y nc(e) <> 0 entonces
+            v.bajo := nv(e)
+            v.alto := nv(nc(e))
+            devolver cierto
+        fin
+        si nk(e) = K_REF y no es_var(na(e)) entonces
+            r := busca(na(e))
+            si r <> 0 y s_clase(r) = S_NUM y s_marcas(r) yb SM_64 <> 0 entonces
+                s_valor(r, v)
+                devolver cierto
+            fin
+        fin
+        devolver falso
     fin
 
     ; -------------------------------------------------------------------------
@@ -358,6 +379,7 @@ módulo Tipos
         variable uno: N64
         k := nk(e)
         si k = K_NUM entonces
+            si nc(e) <> 0 entonces devolver falso fin       ; [HISPA-64] de 64 bits
             n_nat(v, nv(e))
             devolver cierto
         fin
@@ -367,7 +389,7 @@ módulo Tipos
         fin
         si k = K_REF entonces
             r := busca(na(e))
-            si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL) y no es_var(na(e)) entonces
+            si r <> 0 y (s_clase(r) = S_NUM o s_clase(r) = S_BOOL) y no es_var(na(e)) y s_marcas(r) yb SM_64 = 0 entonces
                 s_valor(r, v)
                 devolver cierto
             fin
@@ -510,6 +532,7 @@ módulo Tipos
         k := nk(e)
         según k
             caso K_NUM:
+                si nc(e) <> 0 entonces devolver T_NAT64 fin     ; [HISPA-64]
                 n_nat(v, nv(e))
                 devolver tipo_lit(v)
             caso K_BOOL: devolver T_BOOL
@@ -523,6 +546,7 @@ módulo Tipos
                 r := busca(na(e))
                 si r <> 0 entonces
                     si s_clase(r) = S_NUM entonces
+                        si s_marcas(r) yb SM_64 <> 0 entonces devolver T_NAT64 fin
                         s_valor(r, v)
                         devolver tipo_lit(v)
                     fin
@@ -1161,6 +1185,16 @@ módulo Tipos
             etiqueta_cadena(na(e))
             s_pon_a(r, na(e))
             s_pon_clase(r, S_CAD)
+            devolver
+        fin
+        si nk(e) = K_NUM y nc(e) <> 0 entonces          ; [HISPA-64] un número de 64 bits
+            num64(e, v)
+            s_pon_a(r, nat16(v.bajo))
+            s_pon_b(r, nat16(v.bajo >> 16))
+            s_pon_c(r, nat16(v.alto))
+            s_pon_d(r, nat16(v.alto >> 16))
+            s_marca(r, SM_64)
+            s_pon_clase(r, S_NUM)
             devolver
         fin
         si no const(e, v) entonces

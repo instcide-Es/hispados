@@ -1,5 +1,6 @@
 ; =============================================================================
-;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 1 (la memoria).
+;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 2 (ACPI, las
+;  interrupciones, el tiempo y PCIe).
 ;  Lo carga GRUB por multiboot2 (con UEFI de 64 bits: \EFI\BOOT\BOOTX64.EFI; o
 ;  con la BIOS) o QEMU con -kernel (multiboot), en 1 MB; corre en la mitad alta
 ;  (0xFFFFFFFF80100000: «modelo hispa64», que también pasa al modo largo con
@@ -12,14 +13,21 @@
 ;   - la memoria física (fisica64.cas), las tablas de páginas de verdad
 ;     (pagina64.cas: el núcleo, el mapa directo solo de la RAM, la pantalla con
 ;     escritura combinada, sin la identidad de abajo) y el montón (monton64.cas),
-;     con sus pruebas (prmem64.cas).
+;     con sus pruebas (prmem64.cas);
+;   - [etapa 2] las tablas de ACPI (acpi64.cas), los relojes (reloj64.cas: el
+;     HPET o el de ACPI, el TSC, el CMOS), el APIC local y los IOAPIC
+;     (apic64.cas: el tic del núcleo, el teclado PS/2, la SCI y el botón de
+;     encendido), PCI y PCIe (pci64.cas) y lo de cada procesador (porcpu64.cas).
 ;  Línea de órdenes: «apagar» (acaba en QEMU por el puerto 0xF4: las pruebas) y
 ;  «prueba=X», que provoca algo para ver lo que dice: pagina, division, gp, ud
 ;  (las excepciones de siempre), doble (un doble fallo: desbordar la pila del
 ;  núcleo), identidad (leer de 1 MB, que ya no está), nx (ejecutar en los
 ;  datos), codigo (escribir en el código), nmi (esperar un NMI), monton (la
 ;  prueba larga del montón), corrupcion (escribir más allá de un bloque),
-;  dosveces (liberar un bloque dos veces).
+;  dosveces (liberar un bloque dos veces); y de la etapa 2: teclado (esperar
+;  teclas), boton (esperar el botón de encendido: apaga por ACPI), acpiapagar
+;  (apagar por ACPI, ya), sintic (sin el temporizador del APIC); y «sinmedir»
+;  (no se cuentan los tics de un segundo: las pruebas de las excepciones).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Hispa64
@@ -27,8 +35,9 @@ módulo Hispa64
     modelo hispa64
 
     importar Cifras64, Cpu64, Pant64, Excep64, Gdt64, Fisica64, Pagina64, Monton64, Nombre64, PrMem64
+    importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64
 
-    constante VERSIÓN = "0.1.0"
+    constante VERSIÓN = "0.2.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 8
@@ -437,6 +446,404 @@ módulo Hispa64
         fin
     fin
 
+    ; ---- [etapa 2] ACPI, los relojes, las interrupciones y PCI ----
+    variable tics_1s, tics_cmos: nat64
+    variable prueba_io: nat64
+    variable prueba_io_gsi: nat32
+    variable prueba_io_de: puntero a byte
+
+    función mis_tics(): nat64
+        variable c: puntero a Cpu
+        c := yo()
+        devolver c.tics
+    fin
+
+    función marcas_mps(m: nat32)
+        variable p, d: nat32
+        p := m yb 3
+        d := (m >> 2) yb 3
+        si d = 3 entonces escribir(" por nivel") sino si d = 1 entonces escribir(" por flanco") fin
+        si p = 3 entonces escribir(", activa en bajo") sino si p = 1 entonces escribir(", activa en alto") fin
+    fin
+
+    función cuenta_acpi()
+        variable i: nat32
+        escribir("ACPI: ")
+        si no hay_acpi entonces
+            escribir("no se encuentra la RSDP (ni la da el cargador ni está en la memoria de la BIOS)\n")
+            devolver
+        fin
+        si acpi_rev >= 2 entonces escribir("2.0 o más") sino escribir("1.0") fin
+        escribir(", de «", oem, "»")
+        si rsdp = 0 entonces escribir(" (la RSDP, buscada en la memoria de la BIOS)") fin
+        si con_xsdt entonces escribir("; XSDT en ") sino escribir("; RSDT en ") fin
+        hex(raíz_fís)
+        escribir(", ", n_tablas - 1, " tablas:")
+        i := 1
+        mientras i < n_tablas hacer
+            escribir(" ")
+            escribe_firma(t_firma[i])
+            i := i + 1
+        fin
+        si mal_sumadas = 0 entonces escribir(" (todas con la suma bien)\n") sino escribir(" (", mal_sumadas, " con la suma mal: se usan igual)\n") fin
+        si zonas() > 0 entonces escribir("  (", zonas(), " trozos de memoria reservada puestos en las tablas de páginas para leerlas)\n") fin
+        si hay_madt entonces
+            escribir("  procesadores (MADT): ", n_cpu)
+            si n_cpu = 1 entonces escribir(" encendido (APIC") sino escribir(" encendidos (APIC") fin
+            i := 0
+            mientras i < n_cpu y i < 16 hacer
+                si i > 0 entonces escribir(",") fin
+                escribir(" ", cpu_apic[i])
+                i := i + 1
+            fin
+            si n_cpu > 16 entonces escribir("...") fin
+            escribir(")")
+            si n_cpu_más > 0 entonces escribir(", y ", n_cpu_más, " que se pueden encender") fin
+            si híbrido entonces escribir("; híbrido: cuáles son P y cuáles E se sabrá al arrancarlos (etapa 3)") fin
+            escribir("\n  APIC local en ")
+            hex(lapic_fís)
+            si con_8259 entonces escribir("; con 8259 (se tapa)") fin
+            escribir("\n")
+            i := 0
+            mientras i < n_ioapic hacer
+                escribir("  IOAPIC ", io_id[i], " en ")
+                hex(io_fís[i])
+                escribir(", GSI ", io_gsi[i], " a ", io_gsi[i] + entradas(i) - 1, " (", entradas(i), " entradas, versión ")
+                hex(nat64(versión_io(i)))
+                escribir(")\n")
+                i := i + 1
+            fin
+            si n_iso > 0 entonces
+                escribir("  IRQ de ISA cambiadas:")
+                i := 0
+                mientras i < n_iso hacer
+                    si i > 0 entonces escribir(";") fin
+                    escribir(" ", iso_irq[i], " -> GSI ", iso_gsi[i])
+                    marcas_mps(iso_marcas[i])
+                    i := i + 1
+                fin
+                escribir("\n")
+            fin
+        sino
+            escribir("  sin MADT: un solo procesador, sin IOAPIC\n")
+        fin
+        si hay_fadt entonces
+            escribir("  FADT: ")
+            si reducido() entonces escribir("hardware reducido; ") fin
+            si pm_tmr <> 0 entonces
+                escribir("reloj de ACPI en el puerto ")
+                hex(nat64(pm_tmr))
+                si pm_32 entonces escribir(" (32 bits)") sino escribir(" (24 bits)") fin
+            sino
+                escribir("sin reloj de ACPI")
+            fin
+            escribir(", la SCI en la IRQ ", sci)
+            escribir(", 8042: ")
+            si arq yb 2 <> 0 entonces escribir("sí") sino escribir("no lo dice") fin
+            si botón_fijo() entonces escribir(", botón de encendido fijo") sino escribir(", el botón de encendido lo lleva el AML") fin
+            si hay_s5 entonces escribir(", apagar (\\_S5): SLP_TYP ", slp5a) sino escribir(", sin \\_S5") fin
+            escribir("\n")
+        fin
+        si hpet_fís <> 0 entonces
+            escribir("  HPET en ")
+            hex(hpet_fís)
+            escribir("\n")
+        sino
+            escribir("  sin HPET\n")
+        fin
+        si n_mcfg > 0 entonces
+            escribir("  MCFG: PCIe por ECAM en ")
+            hex(mc_base[0])
+            escribir(", segmento ", mc_seg[0], ", buses ", mc_bus_ini[0], " a ", mc_bus_fin[0])
+            si n_mcfg > 1 entonces escribir(" (y ", n_mcfg - 1, " segmentos más)") fin
+            escribir("\n")
+        sino
+            escribir("  sin MCFG: la configuración de PCI, por los puertos 0xCF8 y 0xCFC\n")
+        fin
+    fin
+
+    función cuenta_reloj()
+        variable h: nat64
+        escribir("Reloj: ")
+        si fuente = HPET entonces
+            h := hz()
+            escribir("el HPET, a ", h div 1000000, ",", (h mod 1000000) div 1000, " MHz, ", hpet_temps, " temporizadores, contador de ")
+            si hpet_64 entonces escribir("64 bits") sino escribir("32 bits") fin
+        sino si fuente = PM entonces
+            escribir("el reloj de ACPI (sin HPET), a 3,579 MHz")
+        sino
+            escribir("ninguno (sin HPET ni reloj de ACPI): se mide con el 8254")
+        fin
+        escribir("\n  TSC: ", tsc_hz div 1000000, " MHz; invariante: ")
+        si tsc_invariante entonces escribir("sí") sino escribir("no") fin
+        escribir("\n")
+    fin
+
+    ; espera hasta que pasen esos nanosegundos (con las interrupciones encendidas)
+    función espera_ns(ns: nat64)
+        variable t0: nat64
+        t0 := ahora_ns()
+        mientras ahora_ns() - t0 < ns hacer pausa() fin
+    fin
+
+    ; el IOAPIC, de verdad: el temporizador 0 del HPET (de una vez, 20 veces,
+    ; a 10 ms) o, si no hay HPET, el 8254 (100 por segundo, durante 200 ms),
+    ; por una GSI a V_PRUEBA
+    función prueba_ioapic()
+        variable conf, rutas, cada, t0: nat64
+        variable g, k: nat32
+        variable bien: bool
+        ; el 8254 (si lo hay), callado: su IRQ 0 va también a la GSI 2
+        sale8(0x43, 0x30)
+        sale8(0x40, 1)
+        sale8(0x40, 0)
+        espera_ns(1000000)
+        n_prueba := 0
+        prueba_io_gsi := 0xFFFFFFFF
+        si fuente = HPET entonces
+            conf := m64(hpet + 0x100)
+            rutas := conf >> 32
+            g := 0xFFFFFFFF
+            k := 31
+            mientras cierto hacer
+                si (rutas >> k) yb 1 <> 0 y (g = 0xFFFFFFFF o k >= 16 o g < 16) entonces
+                    si g = 0xFFFFFFFF o k >= 16 entonces g := k fin
+                fin
+                si k = 0 entonces romper fin
+                k := k - 1
+            fin
+            si g = 0xFFFFFFFF entonces
+                prueba_io_de := "el temporizador 0 del HPET (no dice por qué GSI puede ir)"
+                devolver
+            fin
+            bien := dirige(g, V_PRUEBA, 5, falso)
+            si no bien entonces
+                prueba_io_de := "el temporizador 0 del HPET (su GSI no es de ningún IOAPIC)"
+                devolver
+            fin
+            ; de una vez (no periódico), 10 ms cada vez, 20 veces: cada una
+            ; tiene que llegar antes de 50 ms
+            cada := muldiv(10000000, 1000000, hpet_periodo)       ; 10 ms
+            conf := conf yb (nob nat64(0x7F4E))                   ; sin FSB, por flanco, de una vez, apagado
+            conf := conf ob (nat64(g) << 9)
+            pon_m64(hpet + 0x100, conf ob 4)                       ; encendido
+            k := 0
+            mientras k < 20 hacer
+                pon_m64(hpet + 0x108, m64(hpet + 0xF0) + cada)
+                t0 := ahora_ns()
+                mientras n_prueba = k y ahora_ns() - t0 < 50000000 hacer pausa() fin
+                si n_prueba = k entonces romper fin
+                k := k + 1
+            fin
+            pon_m64(hpet + 0x100, conf)
+            prueba_io_de := "el temporizador 0 del HPET"
+        sino
+            g := dirige_isa(0, V_PRUEBA)
+            si g = 0xFFFFFFFF entonces
+                prueba_io_de := "el 8254 (su IRQ no es de ningún IOAPIC)"
+                devolver
+            fin
+            sale8(0x43, 0x34)                                      ; canal 0, modo 2, 100 por segundo
+            sale8(0x40, 11932 yb 0xFF)
+            sale8(0x40, 11932 >> 8)
+            espera_ns(205000000)
+            sale8(0x43, 0x30)
+            sale8(0x40, 1)
+            sale8(0x40, 0)
+            prueba_io_de := "el canal 0 del 8254"
+        fin
+        espera_ns(1000000)
+        tapa(g)
+        prueba_io_gsi := g
+        prueba_io := n_prueba
+    fin
+
+    función etapa2()
+        variable t0, k0, k1, t1: nat64
+        variable s0, s1, i: nat32
+        variable c: puntero a Cpu
+        prepara_bsp(k_pila_fin)
+        lee_acpi(rsdp)
+        prepara_apic()
+        cuenta_acpi()
+        prepara_reloj()
+        cuenta_reloj()
+        c := yo()
+        escribir("APIC local: ")
+        si x2 entonces
+            escribir("en x2APIC")
+        sino
+            escribir("en xAPIC, en ")
+            hex(lapic_base)
+        fin
+        escribir(", el de este procesador es el ", c.apic, "; versión ")
+        hex(nat64(apic_lee(0x30) yb 0xFF))
+        escribir("; el 8259, tapado\n")
+        si tiene("prueba=sintic") entonces
+            escribir("Tic: sin el temporizador del APIC (prueba=sintic)\n")
+        sino si pon_tic() entonces
+            escribir("  su temporizador: ", por_10ms, " cuentas cada 10 ms (entre 16), medido con ", medido_con, "; el tic, ", HZ, " por segundo, al vector ")
+            hex(nat64(V_TIC))
+            escribir("\n")
+        sino
+            escribir("  su temporizador no se puede medir: sin tic\n")
+        fin
+        enciende()
+        si tic_va y fuente <> NINGUNO y no tiene("sinmedir") entonces
+            ; 1 s con el reloj
+            k0 := mis_tics()
+            t0 := ahora_ns()
+            mientras ahora_ns() - t0 < 1000000000 hacer espera_int() fin
+            tics_1s := mis_tics() - k0
+            escribir("Tic: ", tics_1s, " tics en 1 s (")
+            si fuente = HPET entonces escribir("medido con el HPET") sino escribir("medido con el reloj de ACPI") fin
+            escribir(")")
+            ; y entre dos cambios del segundo del CMOS (otro reloj, que no es el que ha medido)
+            si hay_cmos() entonces
+                t0 := ahora_ns()
+                s0 := segundo_cmos()
+                s1 := s0
+                mientras s1 = s0 y ahora_ns() - t0 < 1500000000 hacer
+                    espera_int()
+                    s1 := segundo_cmos()
+                fin
+                k0 := mis_tics()
+                s0 := s1
+                t1 := ahora_ns()
+                mientras s1 = s0 y ahora_ns() - t1 < 1500000000 hacer
+                    espera_int()
+                    s1 := segundo_cmos()
+                fin
+                k1 := mis_tics()
+                si s1 <> s0 entonces
+                    tics_cmos := k1 - k0
+                    escribir("; entre dos cambios del segundo del CMOS: ", tics_cmos, " tics")
+                fin
+            fin
+            escribir("\n")
+        fin
+        prueba_ioapic()
+        escribir("IOAPIC: ", prueba_io_de)
+        si prueba_io_gsi <> 0xFFFFFFFF entonces
+            escribir(", por la GSI ", prueba_io_gsi, ", al vector ")
+            hex(nat64(V_PRUEBA))
+            si fuente = HPET entonces escribir(": ", prueba_io, " de 20 interrupciones (cada 10 ms)") sino escribir(": ", prueba_io, " interrupciones en 200 ms (100 por segundo)") fin
+            si prueba_io = 0 entonces escribir(" (no llega)") fin
+        fin
+        escribir("\n")
+        escribir("Teclado PS/2: ")
+        si pon_teclado() entonces
+            escribir("la IRQ 1, por la GSI ", teclado_gsi, ", al vector ")
+            hex(nat64(V_ISA + 1))
+            escribir("\n")
+        sino
+            escribir("no hay 8042\n")
+        fin
+        escribir("Botón de encendido: ")
+        si no botón_fijo() entonces
+            escribir("no es de los fijos de ACPI (lo lleva el AML: más adelante, con ACPICA)\n")
+        sino si no modo_acpi() entonces
+            escribir("el firmware no pasa al modo ACPI\n")
+        sino si no pon_sci_con_botón() entonces
+            escribir("la SCI no es de ningún IOAPIC\n")
+        sino
+            escribir("en modo ACPI; la SCI por la GSI ", sci_gsi)
+            si hay_s5 entonces escribir("; pulsarlo apaga el equipo\n") sino escribir("; sin \\_S5 no se sabe apagar\n") fin
+        fin
+        ; PCI
+        busca()
+        escribir("PCI")
+        si ecam <> 0 entonces escribir(" (PCIe, por ECAM)") sino escribir(" (por los puertos 0xCF8)") fin
+        escribir(": ", pci_n, " funciones en los buses ", bus_ini, " a ", bus_fin)
+        si n_puentes > 0 entonces escribir(", ", n_puentes, " puentes") fin
+        si n_altas > 0 entonces escribir(", ", n_altas, " BAR por encima de 4 GB") fin
+        escribir("\n")
+        escribe_pci()
+        si hay_cmos() entonces
+            escribir("Hora (CMOS): ")
+            escribe_hora()
+            escribir("\n")
+        fin
+        i := 0
+    fin
+
+    ; lo que se pide a mano en la línea de órdenes, de la etapa 2
+    función pruebas2()
+        variable t0: nat64
+        variable k, n: ent32
+        si tiene("prueba=teclado") entonces
+            escribir("Prueba: esperando teclas (15 s como mucho)...\n")
+            t0 := ahora_ns()
+            n := 0
+            mientras n < 4 y ahora_ns() - t0 < 15000000000 hacer
+                k := tecla()
+                si k >= 0 entonces
+                    escribir("Tecla: código ")
+                    hex(nat64(k))
+                    si k yb 0x80 <> 0 entonces escribir(" (soltada)\n") sino escribir(" (pulsada)\n") fin
+                    n := n + 1
+                sino
+                    espera_int()
+                fin
+            fin
+        fin
+        si tiene("prueba=boton") entonces
+            escribir("Prueba: esperando el botón de encendido...\n")
+            t0 := ahora_ns()
+            mientras no botón y ahora_ns() - t0 < 30000000000 hacer espera_int() fin
+            si botón entonces
+                escribir("Botón de encendido pulsado: se apaga el equipo (ACPI, S5).\n")
+                apaga_equipo()
+            fin
+            escribir("No se ha podido apagar.\n")
+        fin
+        si tiene("prueba=acpiapagar") entonces
+            escribir("Prueba: apagar por ACPI (S5, SLP_TYP ", slp5a, ")...\n")
+            apaga_equipo()
+            escribir("No se ha podido apagar.\n")
+        fin
+    fin
+
+    ; en el equipo de verdad (sin «apagar»): la hora y las teclas, hasta el botón
+    función en_marcha()
+        variable s, s0: nat32
+        variable k: ent32
+        pon_color(14, 0)
+        escribir("(Pulse teclas para ver sus códigos; el botón de encendido apaga el equipo.)\n")
+        pon_color(7, 0)
+        s0 := 99
+        mientras cierto hacer
+            si botón entonces
+                escribir("\nBotón de encendido pulsado: se apaga el equipo.\n")
+                apaga_equipo()
+                escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
+                apaga()
+                mientras cierto hacer espera_int() fin
+            fin
+            k := tecla()
+            si k >= 0 entonces
+                escribir("\rTecla: código ")
+                hex(nat64(k))
+                escribir("                    \n")
+            fin
+            si hay_cmos() entonces
+                s := segundo_cmos()
+                si s <> s0 entonces
+                    s0 := s
+                    escribir("\rReloj: ")
+                    escribe_hora()
+                    escribir(" (tics: ", mis_tics(), ")")
+                fin
+            fin
+            si tic_va entonces espera_int() sino pausa() fin
+        fin
+    fin
+
+    función pon_sci_con_botón(): bool
+        pon_botón()
+        devolver pon_sci()
+    fin
+
     función principal(): byte
         variable temprana: bool
         ensamblador
@@ -459,7 +866,7 @@ módulo Hispa64
         pon_color(14, 0)
         escribir("Hispa-64 ", VERSIÓN, " \xC4 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n")
         pon_color(7, 0)
-        escribir("Etapa 1: la memoria (física, virtual y el montón), en Castel de 64 bits.\n\n")
+        escribir("Etapa 2: ACPI, las interrupciones (APIC), el tiempo (HPET) y PCIe, en Castel de 64 bits.\n\n")
         ; el cargador
         escribir("Cargador: ")
         si cargador[0] <> 0 entonces escribir(cargador, ", ") fin
@@ -524,17 +931,8 @@ módulo Hispa64
         sino
             escribir("ninguna gráfica (solo el puerto serie)\n")
         fin
-        ; ACPI
-        escribir("ACPI: ")
-        si rsdp <> 0 entonces
-            escribir("la RSDP (")
-            si rsdp_v2 entonces escribir("2.0 o más") sino escribir("1.0") fin
-            escribir(") la ha copiado el cargador; la XSDT/RSDT en ")
-            si rsdp_v2 entonces hex(l64(rsdp + 24)) sino hex(nat64(l32(rsdp + 16))) fin
-            escribir("\n")
-        sino
-            escribir("el cargador no da la RSDP\n")
-        fin
+        ; [etapa 2] ACPI, los relojes, las interrupciones, PCI
+        etapa2()
         ; las pruebas de la memoria de cada arranque (cortas)
         prueba_páginas()
         prueba_montón(2000, 64)
@@ -545,17 +943,12 @@ módulo Hispa64
             int3
         fin
         provoca()
+        pruebas2()
         pon_color(10, 0)
-        escribir("Hispa-64 etapa 1: todo en orden.\n")
+        escribir("Hispa-64 etapa 2: todo en orden.\n")
         pon_color(7, 0)
         si apagar_al_fallar entonces devolver 42 fin
-        escribir("(Ya puede apagar el equipo: mantenga pulsado el botón de encendido.)\n")
-        ensamblador
-            cli
-        .para:
-            hlt
-            jmp .para
-        fin
+        en_marcha()
         devolver 0
     fin
 

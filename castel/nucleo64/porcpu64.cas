@@ -1,0 +1,69 @@
+; =============================================================================
+;  porcpu64.cas - Hispa-64: lo de cada procesador (docs/64/HISPA-64.md, 2.4;
+;  etapa 2, para la 3). Cada procesador tendrá su bloque (Cpu) y GS apuntando
+;  a él (el MSR IA32_GS_BASE; y KERNEL_GS_BASE, para el «swapgs» de cuando
+;  haya programas): yo() lo lee de gs:[0] sin cerrojos. En la etapa 2 solo
+;  está el del procesador que arranca (el BSP), en los datos del núcleo, con
+;  su número de APIC, sus tics y dónde están su GDT, su TSS y sus pilas IST
+;  (las de gdt64.cas); en la etapa 3, los demás se piden al montón (nueva).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PorCpu64
+
+    importar Es64, Gdt64, Monton64
+
+    público tipo Cpu = estructura
+        mismo: nat64                ; su propia dirección (gs:[0])
+        número: nat32               ; 0 el que arranca, y los demás por orden de la MADT
+        apic: nat32                 ; su número de APIC (x2APIC: de 32 bits)
+        tics: nat64                 ; los del temporizador de su APIC
+        gdt, tss: nat64             ; su GDT y su TSS
+        ist1, ist2, ist3: nat64     ; lo alto de sus pilas IST (doble fallo, NMI, #MC)
+        pila: nat64                 ; lo alto de su pila del núcleo
+        nada: nat64
+    fin
+
+    variable bsp: Cpu alineado 64           ; (en su línea de la caché)
+    público variable n_cpus: nat32              ; cuántos bloques hay (en marcha o no)
+
+    ; GS a ese bloque
+    función pon_gs(c: puntero a Cpu)
+        pon_msr(0xC0000101, nat64(c))
+        pon_msr(0xC0000102, nat64(c))
+    fin
+
+    ; el bloque de este procesador
+    público función yo(): puntero a Cpu
+        ensamblador
+            db 0x65, 0x48, 0x8B, 0x04, 0x25, 0, 0, 0, 0     ; mov rax, [gs:0]
+        fin
+    fin
+
+    ; el del que arranca, con lo que ya tiene (la GDT, la TSS y sus IST)
+    público función prepara_bsp(pila: nat64)
+        bsp.mismo := nat64(dirección(bsp))
+        bsp.número := 0
+        bsp.gdt := dir_gdt()
+        bsp.tss := dir_tss()
+        bsp.ist1 := ist(1)
+        bsp.ist2 := ist(2)
+        bsp.ist3 := ist(3)
+        bsp.pila := pila
+        pon_gs(dirección(bsp))
+        n_cpus := 1
+    fin
+
+    ; [etapa 3] un bloque nuevo, del montón, para otro procesador (sin ponerlo:
+    ; lo pondrá él mismo, con pon_gs, al arrancar)
+    público función nueva(apic: nat32): puntero a Cpu
+        variable c: puntero a Cpu
+        c := puntero(nat64(reserva(tamaño(Cpu))))
+        c.mismo := nat64(c)
+        c.número := n_cpus
+        c.apic := apic
+        c.tics := 0
+        n_cpus := n_cpus + 1
+        devolver c
+    fin
+
+fin PorCpu64.

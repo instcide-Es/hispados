@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
-# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0 y 1:
+# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0, 1 y 2:
 #   - el núcleo (hispa64.cas) se compila igual con ccastel.py y NASM que con
 #     ensambla.py (y, si se da CASTEL64=ruta y ENSAMB64=ruta, con ellos);
 #   - arranca en QEMU por multiboot (-kernel, con HISPA64.SIM de módulo) con
@@ -20,8 +20,18 @@
 #     la pantalla del GOP con escritura combinada;
 #   - la consola se ve en la pantalla (un pantallazo de QEMU: la letra amarilla
 #     de «Memoria:», la gris del texto y la verde del final), que queda en
-#     $T/pantalla.png.
-# Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 40 segundos)
+#     $T/pantalla.png;
+#   - [etapa 2] ACPI (la RSDP de GRUB o buscada en la BIOS, la XSDT o la RSDT,
+#     las sumas, la MADT, la FADT, el HPET, la MCFG), con «-machine pc» y
+#     «q35», 1 y 4 procesadores, con y sin HPET («hpet=off»), por multiboot y
+#     por UEFI: el reloj (el HPET o el de ACPI), el tic del APIC local (100 en
+#     1 s, de 75 a 110, y entre dos cambios del segundo del CMOS, que es otro reloj),
+#     el IOAPIC de verdad (el temporizador 0 del HPET, o el 8254, por una GSI),
+#     el teclado PS/2 (teclas mandadas por el monitor de QEMU), el botón de
+#     encendido (system_powerdown: apaga por ACPI, S5), apagar por ACPI, y la
+#     lista de PCI frente a la que da QEMU («info pci»), con un puente PCIe y
+#     un xHCI detrás, y una BAR de 64 bits por encima de 4 GB por UEFI.
+# Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 2 minutos y medio)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
 T=${1:-/tmp/hispa64-pruebas}
@@ -34,7 +44,7 @@ OVMF_C=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_V=/usr/share/OVMF/OVMF_VARS_4M.fd
 DBG="-device isa-debug-exit,iobase=0xf4,iosize=0x04"
 
-echo "== Hispa-64, etapas 0 y 1 =="
+echo "== Hispa-64, etapas 0, 1 y 2 =="
 # ---- compilar ----
 if python3 -I "$C/ccastel.py" "$AQUI/hispa64.cas" -o "$T/hispa64.asm" -I "$C/nucleo32" > "$T/comp.txt" 2>&1 \
    && nasm -f bin "$T/hispa64.asm" -o "$T/HISPA64.BIN" 2>> "$T/comp.txt" \
@@ -69,31 +79,115 @@ mb1() {   # LÍNEA SALIDA MEMORIA [más opciones de QEMU]
     -monitor none $DBG -no-reboot -nic none -m "$m" "$@" > /dev/null 2>&1
 }
 hay() { serie "$1" | grep -q -- "$2"; }
+# [etapa 2] lo que tiene que decir de ACPI, los relojes y las interrupciones;
+# entre: ¿está el número que sigue a ese texto entre MIN y MAX?
+entre() {   # SALIDA TEXTO MIN MAX
+  local v; v=$(serie "$1" | grep -o -- "$2[0-9]*" | head -1 | grep -o '[0-9]*$')
+  [ -n "$v" ] && [ "$v" -ge "$3" ] && [ "$v" -le "$4" ]
+}
+# (de 75 a 110: con el servidor cargado, el TCG de QEMU pierde tics del APIC, nunca da
+# de más; sin carga salen 99 o 100)
+tics_bien() {   # SALIDA RELOJ: 100 tics en 1 s y entre dos segundos del CMOS
+  entre "$1" "^Tic: " 75 110 && hay "$1" "^Tic: [0-9]* tics en 1 s (medido con $2); entre dos cambios del segundo del CMOS: " \
+    && entre "$1" "entre dos cambios del segundo del CMOS: " 75 110
+}
+# la lista de PCI que da QEMU (info pci, a los 3 s: con los buses de detrás de los
+# puentes ya numerados por la BIOS) y la que dice el núcleo, «BB:DD.F VVVV:AAAA»
+pci_qemu() {   # opciones de QEMU
+  { sleep 3; printf 'info pci\nquit\n'; } | timeout 30 qemu-system-x86_64 -display none -monitor stdio -serial none -nic none "$@" 2> /dev/null | tr -d '\r' \
+    | awk '/Bus .*device .*function/ { gsub(/[,:]/, " "); b = $2; d = $4; f = $6 }
+           /PCI device/ { split($NF, x, ":"); printf "%02X:%02X.%d %s:%s\n", b, d, f, toupper(x[1]), toupper(x[2]) }' | sort
+}
+pci_nucleo() { serie "$1" | grep -E '^  [0-9A-F]{2}:[0-9A-F]{2}\.[0-7] [0-9A-F]{4}:[0-9A-F]{4} ' | cut -d' ' -f3,4 | sort; }
+pci_igual() {   # SALIDA opciones de QEMU
+  local s=$1; shift
+  [ -n "$(pci_nucleo "$s")" ] && [ "$(pci_nucleo "$s")" = "$(pci_qemu "$@")" ]
+}
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.1.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.2.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 12[0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9]* KB usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
    && hay $S "^Páginas: de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día); de 2 MB, también; de 1 GB, no (el procesador no las tiene)$" \
    && hay $S "^  el código del núcleo, sin escribir: sí; los datos, sin ejecutar: sí; la guarda de la pila, sin poner: sí$" \
    && hay $S "^Montón: 2000 reservas y liberaciones al azar .*, comprobadas; al acabar, 0 en uso y la memoria física, la de antes" \
-   && hay $S "Punto de parada (int3) número 1 .*: atendido, sigue." && hay $S "^Hispa-64 etapa 1: todo en orden.$"; then
+   && hay $S "Punto de parada (int3) número 1 .*: atendido, sigue." && hay $S "^Hispa-64 etapa 2: todo en orden.$"; then
   ok "por multiboot con 128 MB: en la mitad alta, «$(serie $S | grep '^Memoria:')», sin la identidad, las páginas de 4 KB y 2 MB, el montón y «todo en orden» (código 42)"
 else ko "por multiboot con 128 MB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|Páginas|Montón|parado' | paste -sd ' ')"; fi
+# [etapa 2] lo mismo, con «-machine pc» (i440FX y PIIX4: sin MCFG, PCI por los puertos)
+if [ $c = 85 ] && hay $S "^ACPI: 1.0, de «BOCHS » (la RSDP, buscada en la memoria de la BIOS); RSDT en 0x[0-9A-F]*, [0-9]* tablas: FACP APIC HPET .*DSDT (todas con la suma bien)$" \
+   && hay $S "^  procesadores (MADT): 1 encendido (APIC 0)$" && hay $S "^  IOAPIC 0 en 0xFEC00000, GSI 0 a 23 (24 entradas, versión 0x20)$" \
+   && hay $S "^  IRQ de ISA cambiadas: 0 -> GSI 2;" && hay $S "^  FADT: reloj de ACPI en el puerto 0x608 (24 bits), la SCI en la IRQ 9, .*botón de encendido fijo, apagar (._S5): SLP_TYP 0$" \
+   && hay $S "^  HPET en 0xFED00000$" && hay $S "^  sin MCFG: la configuración de PCI, por los puertos 0xCF8 y 0xCFC$" \
+   && hay $S "^Reloj: el HPET, a 100,0 MHz, 3 temporizadores, contador de 64 bits$" \
+   && hay $S "^  su temporizador: [0-9]* cuentas cada 10 ms (entre 16), medido con el HPET; el tic, 100 por segundo, al vector 0x40$" \
+   && tics_bien $S "el HPET" && hay $S "^IOAPIC: el temporizador 0 del HPET, por la GSI 2, al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" \
+   && hay $S "^Teclado PS/2: la IRQ 1, por la GSI 1, al vector 0x31$" && hay $S "^Botón de encendido: en modo ACPI; la SCI por la GSI 9; pulsarlo apaga el equipo$" \
+   && hay $S "^PCI (por los puertos 0xCF8): [0-9]* funciones en los buses 0 a 255$" && hay $S "^Hora (CMOS): [0-3][0-9]/[01][0-9]/20[0-9][0-9] [0-2][0-9]:[0-5][0-9]:[0-5][0-9]$" \
+   && pci_igual $S -m 128; then
+  ok "etapa 2, por multiboot, «pc»: ACPI 1.0 (la RSDP buscada en la BIOS), la MADT, la FADT, el HPET; «$(serie $S | grep '^Tic:')»; el IOAPIC (el HPET por la GSI 2, 20 de 20), el teclado, el botón; $(pci_nucleo $S | wc -l) funciones de PCI, las mismas que dice QEMU"
+else ko "etapa 2 por multiboot («pc») no dice lo que debe: $(serie $S | grep -E '^ACPI|^Tic|^IOAPIC:|^PCI|parado' | paste -sd ' ')"; fi
+# con «q35», 4 procesadores y un puerto PCIe con un xHCI detrás (el bus 1)
+PCIQ="-machine q35 -smp 4 -device pcie-root-port,id=rp1,bus=pcie.0,chassis=1 -device qemu-xhci,bus=rp1"
+# shellcheck disable=SC2086
+mb1 apagar "$T/q35.txt" 256 $PCIQ; c=$?
+S=$T/q35.txt
+# shellcheck disable=SC2086
+if [ $c = 85 ] && hay $S "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" && hay $S "^  MCFG: PCIe por ECAM en 0xB0000000, segmento 0, buses 0 a 255$" \
+   && hay $S "^  FADT: .*8042: sí" && tics_bien $S "el HPET" && hay $S "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" \
+   && hay $S "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 puentes$" && hay $S "^  01:00.0 1B36:000D bus serie: USB 3 (xHCI)" \
+   && hay $S "^      BAR0 0x[0-9A-F]*, 16 KB de memoria de 64 bits$" && pci_igual $S -m 256 $PCIQ && hay $S "^Hispa-64 etapa 2: todo en orden.$"; then
+  ok "etapa 2, por multiboot, «q35» con 4 procesadores: la MADT con 4, PCIe por ECAM, $(pci_nucleo $S | wc -l) funciones (el puente y el xHCI del bus 1, con su BAR de 64 bits), las mismas que dice QEMU; «$(serie $S | grep '^Tic:')»"
+else ko "etapa 2 con «q35» y 4 procesadores no dice lo que debe (código $c): $(serie $S | grep -E 'MADT|^Tic|^IOAPIC:|^PCI|parado' | paste -sd ' ')"; diff <(pci_nucleo $S) <(pci_qemu -m 256 $PCIQ) | head -5 | sed 's/^/        /'; fi
+# sin HPET: el reloj de ACPI y, para el IOAPIC, el 8254
+for m in pc q35; do
+  mb1 apagar "$T/sinhpet-$m.txt" 256 -machine $m,hpet=off -smp 4; c=$?
+  S=$T/sinhpet-$m.txt
+  if [ $c = 85 ] && hay $S "^  sin HPET$" && hay $S "^Reloj: el reloj de ACPI (sin HPET), a 3,579 MHz$" \
+     && hay $S "^  su temporizador: [0-9]* cuentas cada 10 ms (entre 16), medido con el reloj de ACPI; el tic, 100 por segundo, al vector 0x40$" \
+     && tics_bien $S "el reloj de ACPI" && entre $S "^IOAPIC: el canal 0 del 8254, por la GSI 2, al vector 0x3E: " 17 23 \
+     && hay $S "^  procesadores (MADT): 4 encendidos" && hay $S "^Hispa-64 etapa 2: todo en orden.$"; then
+    ok "etapa 2 sin HPET («$m,hpet=off», 4 procesadores): el reloj de ACPI; «$(serie $S | grep '^Tic:')»; «$(serie $S | grep '^IOAPIC:' | cut -d: -f2-)»"
+  else ko "etapa 2 sin HPET («$m») no dice lo que debe (código $c): $(serie $S | grep -E '^Reloj|^Tic|^IOAPIC:|parado' | paste -sd ' ')"; fi
+done
+# el teclado (las teclas, desde el monitor de QEMU), el botón de encendido y apagar por ACPI
+con_monitor() {   # PRUEBA SALIDA ESPERA ORDEN... (las órdenes, al ver ESPERA por el puerto serie)
+  local p=$1 s=$2 e=$3 q c; shift 3
+  rm -f "$s" "$T/mon2.sock"
+  timeout 60 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$T/HISPA64.SIM" -append "apagar sinmedir prueba=$p" -display none -serial file:"$s" \
+    -monitor unix:"$T/mon2.sock",server,nowait $DBG -no-reboot -nic none -m 128 -machine q35 > /dev/null 2>&1 &
+  q=$!
+  for _ in $(seq 1 150); do grep -q "$e" "$s" 2> /dev/null && break; sleep 0.2; done
+  for o in "$@"; do python3 -I "$AQUI/pantallazo.py" orden "$T/mon2.sock" "$o" 2> /dev/null; done
+  wait $q; c=$?
+  return $c
+}
+con_monitor teclado "$T/teclado.txt" "esperando teclas" "sendkey a" "sendkey b"; c=$?
+if [ $c = 85 ] && [ "$(serie "$T/teclado.txt" | grep '^Tecla: ' | paste -sd ' ')" = "Tecla: código 0x1E (pulsada) Tecla: código 0x9E (soltada) Tecla: código 0x30 (pulsada) Tecla: código 0xB0 (soltada)" ]; then
+  ok "prueba=teclado: las teclas «a» y «b» del monitor de QEMU llegan por el IOAPIC (la IRQ 1): 0x1E, 0x9E, 0x30, 0xB0"
+else ko "prueba=teclado no recibe las teclas (código $c): $(serie "$T/teclado.txt" | grep -E 'Tecla|Teclado' | paste -sd ' ')"; fi
+con_monitor boton "$T/boton.txt" "esperando el bot" system_powerdown; c=$?
+if [ $c = 0 ] && hay "$T/boton.txt" "^Botón de encendido pulsado: se apaga el equipo (ACPI, S5).$" && ! hay "$T/boton.txt" "No se ha podido apagar"; then
+  ok "prueba=boton: el botón de encendido (system_powerdown) llega por la SCI y apaga el equipo por ACPI (QEMU acaba con 0)"
+else ko "prueba=boton no apaga (código $c): $(serie "$T/boton.txt" | tail -3 | paste -sd ' ')"; fi
+mb1 "apagar sinmedir prueba=acpiapagar" "$T/acpiapagar.txt" 128; c=$?
+if [ $c = 0 ] && hay "$T/acpiapagar.txt" "^Prueba: apagar por ACPI (S5, SLP_TYP 0)...$" && ! hay "$T/acpiapagar.txt" "No se ha podido apagar"; then
+  ok "prueba=acpiapagar: apaga por ACPI (\\_S5 de la DSDT, PM1a_CNT)"
+else ko "prueba=acpiapagar no apaga (código $c): $(serie "$T/acpiapagar.txt" | tail -3 | paste -sd ' ')"; fi
 mb1 apagar "$T/mb3g.txt" 3G -cpu max; c=$?
 S=$T/mb3g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 2,9 GB libres" && hay $S "en páginas de 1 GB: [1-9]" && hay $S "; de 1 GB, también$" \
-   && hay $S "^Hispa-64 etapa 1: todo en orden.$"; then
+   && hay $S "^Hispa-64 etapa 2: todo en orden.$"; then
   ok "por multiboot con 3 GB y -cpu max: «$(serie $S | grep '^Memoria:' | cut -d';' -f1)»; el mapa directo con páginas de 1 GB; una de 1 GB puesta, leída y quitada"
 else ko "por multiboot con 3 GB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|Páginas|parado' | paste -sd ' ')"; fi
 mb1 apagar "$T/mb8g.txt" 8G; c=$?
 S=$T/mb8g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 7,9 GB libres en [0-9]* trozos (de 7,9 GB" && hay $S "en páginas de 1 GB: 0; de 2 MB: 4[0-9][0-9][0-9];" \
-   && hay $S "^Hispa-64 etapa 1: todo en orden.$"; then
+   && hay $S "^Hispa-64 etapa 2: todo en orden.$"; then
   ok "por multiboot con 8 GB (qemu64, sin páginas de 1 GB): «$(serie $S | grep '^Memoria:' | cut -d';' -f1)»; el mapa directo, con páginas de 2 MB"
 else ko "por multiboot con 8 GB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|directo|parado' | paste -sd ' ')"; fi
-mb1 "apagar prueba=monton" "$T/monton.txt" 256; c=$?
+mb1 "apagar sinmedir prueba=monton" "$T/monton.txt" 256; c=$?
 if [ $c = 85 ] && hay $T/monton.txt "^Montón: 100000 reservas y liberaciones al azar (de 1 a 20025 octetos, [0-9]* grandes; 1000 a la vez), comprobadas; al acabar, 0 en uso y la memoria física, la de antes"; then
   ok "prueba=monton: $(serie $T/monton.txt | grep '^Montón: 100000' | cut -d'(' -f1)con 1000 a la vez y $(serie $T/monton.txt | grep '^Montón: 100000' | sed 's/.*octetos, \([0-9]*\) grandes.*/\1/') grandes; comprobadas, y sin perder memoria"
 else ko "prueba=monton no sale (código $c): $(serie $T/monton.txt | grep -E 'Montón|parado' | paste -sd ' ')"; fi
@@ -107,7 +201,7 @@ for x in "pagina|14|Fallo de página (#PF)|Al leer de 0x0000500000000000: la pá
          "codigo|14|Fallo de página (#PF)|Al escribir en 0xFFFFFFFF80100040: la página está, pero sin permiso (desde el núcleo).|En la función Hispa64.provoca+" \
          "nx|14|Fallo de página (#PF)|Al ejecutar en 0xFFFF8000|Número de error: 0x11"; do
   IFS="|" read -r p n nom det det2 <<< "$x"
-  mb1 "apagar prueba=$p" "$T/exc-$p.txt" 128; c=$?
+  mb1 "apagar sinmedir prueba=$p" "$T/exc-$p.txt" 128; c=$?
   if [ $c = 199 ] && serie "$T/exc-$p.txt" | grep -q "^\*\*\* Hispa-64 se ha parado: excepción $n \*\*\*$" \
      && serie "$T/exc-$p.txt" | grep -qF "$nom" && serie "$T/exc-$p.txt" | grep -qF "$det" && serie "$T/exc-$p.txt" | grep -qF "$det2" \
      && serie "$T/exc-$p.txt" | grep -q "^R13=0x"; then
@@ -120,7 +214,7 @@ else ko "el doble fallo no dice quién ha llamado: $(serie "$T/exc-doble.txt" | 
 # las paradas del montón: el código 98 (197 en QEMU)
 for x in "corrupcion|se ha escrito más allá de su final (la guarda está pisada)" "dosveces|se libera dos veces"; do
   IFS="|" read -r p det <<< "$x"
-  mb1 "apagar prueba=$p" "$T/par-$p.txt" 128; c=$?
+  mb1 "apagar sinmedir prueba=$p" "$T/par-$p.txt" 128; c=$?
   if [ $c = 197 ] && hay "$T/par-$p.txt" "^\*\*\* Hispa-64 se ha parado: el montón del núcleo está estropeado \*\*\*$" \
      && hay "$T/par-$p.txt" ": $det$" && hay "$T/par-$p.txt" "^Llamada desde: Monton64.estropeado+0x[0-9A-F]* <- Monton64.libera+0x[0-9A-F]* <- Hispa64.provoca+"; then
     ok "prueba=$p: el núcleo se para y lo dice («$det»), con quién ha llamado"
@@ -128,7 +222,7 @@ for x in "corrupcion|se ha escrito más allá de su final (la guarda está pisad
 done
 # el NMI: se lo manda el monitor de QEMU
 rm -f "$T/nmi.txt" "$T/nmi.sock"
-timeout 60 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$T/HISPA64.SIM" -append "apagar prueba=nmi" -display none -serial file:"$T/nmi.txt" \
+timeout 60 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$T/HISPA64.SIM" -append "apagar sinmedir prueba=nmi" -display none -serial file:"$T/nmi.txt" \
   -monitor unix:"$T/nmi.sock",server,nowait $DBG -no-reboot -nic none -m 128 > /dev/null 2>&1 &
 q=$!
 for _ in $(seq 1 100); do grep -q "esperando un NMI" "$T/nmi.txt" 2> /dev/null && break; sleep 0.2; done
@@ -157,26 +251,46 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   }
   uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.1.0 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.2.0 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
      && grep -q "^Memoria: 1[0-9][0-9],[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
-     && grep -q "^ACPI: la RSDP (2.0 o más)" <<< "$S" && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 1: todo en orden.$" <<< "$S"; then
+     && grep -q "^ACPI: 2.0 o más, de «BOCHS »; XSDT en 0x[0-9A-F]*, [0-9]* tablas: FACP APIC HPET MCFG .*DSDT (todas con la suma bien)$" <<< "$S" \
+     && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 2: todo en orden.$" <<< "$S"; then
     ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 128 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
   else ko "por UEFI con 128 MB no dice lo que debe (código $c): $(grep -E 'Memoria:|pantalla, en|parado' <<< "$S" | paste -sd ' ')"; fi
   uefi "$T/uefi-max.txt" -m 3G -cpu max -smp 4,cores=4 -monitor none; c=$?
   S=$(serie "$T/uefi-max.txt")
   if [ $c = 85 ] && grep -q "páginas de 1 GB: sí" <<< "$S" && grep -q "; 4 procesadores lógicos en el paquete" <<< "$S" \
      && grep -q "^  0x00000001.*disponible$" <<< "$S" && grep -q "^Memoria: 2,9 GB libres" <<< "$S" && grep -q "en páginas de 1 GB: [1-9]" <<< "$S" \
-     && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 1: todo en orden.$" <<< "$S"; then
-    ok "por UEFI con -cpu max, 4 núcleos y 3 GB (1 por encima de 4 GB): «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; el mapa directo y la prueba con páginas de 1 GB"
+     && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 2: todo en orden.$" <<< "$S" \
+     && grep -q "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" <<< "$S" && tics_bien "$T/uefi-max.txt" "el HPET" \
+     && grep -q "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" <<< "$S" \
+     && grep -q "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 BAR por encima de 4 GB$" <<< "$S" \
+     && grep -q "^      BAR4 0x[0-9A-F]\{9,\}, 16 KB de memoria de 64 bits (por encima de 4 GB), precargable$" <<< "$S" \
+     && pci_igual "$T/uefi-max.txt" -machine q35 -m 3G -cpu max -smp 4,cores=4 -drive file="$T/uefi/hispa64.img",format=raw,if=virtio; then
+    ok "por UEFI con -cpu max, 4 núcleos y 3 GB (1 por encima de 4 GB): «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; el mapa directo y la prueba con páginas de 1 GB; la MADT con 4; «$(grep '^Tic:' <<< "$S")»; PCIe con la BAR del disco virtio por encima de 4 GB, la misma lista que QEMU"
   else ko "por UEFI con -cpu max y 3 GB no dice lo que debe (código $c): $(grep -E 'lógicos|Memoria:|parado' <<< "$S" | paste -sd ' ')"; fi
   uefi "$T/uefi-8g.txt" -m 8G -cpu max -monitor none; c=$?
   S=$(serie "$T/uefi-8g.txt")
-  if [ $c = 85 ] && grep -q "^Memoria: 7,9 GB libres" <<< "$S" && grep -q "^Hispa-64 etapa 1: todo en orden.$" <<< "$S"; then
+  if [ $c = 85 ] && grep -q "^Memoria: 7,9 GB libres" <<< "$S" && grep -q "^Hispa-64 etapa 2: todo en orden.$" <<< "$S"; then
     ok "por UEFI con 8 GB: «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»"
   else ko "por UEFI con 8 GB no dice lo que debe (código $c): $(grep -E 'Memoria:|parado' <<< "$S" | paste -sd ' ')"; fi
+  # [etapa 2] por UEFI sin HPET (q35, el reloj de ACPI) y con «pc» (i440FX: PCI por los puertos)
+  uefi "$T/uefi-sinhpet.txt" -machine q35,hpet=off -m 256 -smp 4 -monitor none; c=$?
+  S=$(serie "$T/uefi-sinhpet.txt")
+  if [ $c = 85 ] && grep -q "^Reloj: el reloj de ACPI (sin HPET), a 3,579 MHz$" <<< "$S" && tics_bien "$T/uefi-sinhpet.txt" "el reloj de ACPI" \
+     && grep -q "^IOAPIC: el canal 0 del 8254, por la GSI 2" <<< "$S" && grep -q "^Hispa-64 etapa 2: todo en orden.$" <<< "$S"; then
+    ok "por UEFI sin HPET (q35, 4 procesadores): el reloj de ACPI; «$(grep '^Tic:' <<< "$S")»"
+  else ko "por UEFI sin HPET no dice lo que debe (código $c): $(grep -E '^Reloj|^Tic|^IOAPIC:|parado' <<< "$S" | paste -sd ' ')"; fi
+  uefi "$T/uefi-pc.txt" -machine pc -m 256 -smp 2 -monitor none; c=$?
+  S=$(serie "$T/uefi-pc.txt")
+  if [ $c = 85 ] && grep -q "^  procesadores (MADT): 2 encendidos (APIC 0, 1)$" <<< "$S" && grep -q "^PCI (por los puertos 0xCF8): " <<< "$S" \
+     && tics_bien "$T/uefi-pc.txt" "el HPET" && pci_igual "$T/uefi-pc.txt" -machine pc -m 256 -smp 2 -drive file="$T/uefi/hispa64.img",format=raw,if=virtio \
+     && grep -q "^Hispa-64 etapa 2: todo en orden.$" <<< "$S"; then
+    ok "por UEFI con «-machine pc» (i440FX, 2 procesadores): la MADT con 2, PCI por los puertos, la misma lista que QEMU; «$(grep '^Tic:' <<< "$S")»"
+  else ko "por UEFI con «pc» no dice lo que debe (código $c): $(grep -E 'MADT|^Tic|^PCI|parado' <<< "$S" | paste -sd ' ')"; fi
   # la pantalla: sin «apagar» se queda parado con todo escrito; un pantallazo
   "$AQUI/imagen.sh" "$T/uefi-p" prueba "" > "$T/img2.txt" 2>&1
   rm -f "$T/pant.txt" "$T/mon.sock" "$T/pantalla.ppm"; cp $OVMF_V "$T/vars2.fd"
@@ -184,7 +298,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
     -drive if=pflash,format=raw,file="$T/vars2.fd" -drive file="$T/uefi-p/hispa64.img",format=raw,if=virtio \
     -display none -serial file:"$T/pant.txt" -monitor unix:"$T/mon.sock",server,nowait -no-reboot -nic none > /dev/null 2>&1 &
   q=$!
-  for _ in $(seq 1 90); do grep -q "Ya puede apagar" "$T/pant.txt" 2> /dev/null && break; sleep 1; done
+  for _ in $(seq 1 90); do grep -q "Pulse teclas para ver" "$T/pant.txt" 2> /dev/null && break; sleep 1; done
   sleep 1
   python3 -I "$AQUI/pantallazo.py" captura "$T/mon.sock" "$T/pantalla.ppm" 2> /dev/null
   wait $q 2> /dev/null

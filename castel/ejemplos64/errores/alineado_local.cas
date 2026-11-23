@@ -1,0 +1,9 @@
+; Solo se alinean las variables del módulo.
+; ERROR: 6:27: error: solo se alinean las variables del módulo
+módulo Error
+    modelo linux64
+    función principal()
+        variable t: nat64 alineado 16
+    fin
+fin Error.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

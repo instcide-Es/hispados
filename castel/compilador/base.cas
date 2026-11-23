@@ -47,6 +47,7 @@ módulo Base
         val2: nat16
         lin: nat16
         col: nat16
+        alto: nat32                             ; [HISPA-64] T_NUM: los 32 bits de arriba
     fin
 
     ; ---- las palabras del lenguaje (en el orden de PALABRAS_TXT) ----
@@ -166,7 +167,8 @@ módulo Base
 
     ; ---- las clases de nudo del árbol (campo k) ----
     ; expresiones (todas: t = su tipo, cuando se ha mirado; marcas, ver M_...)
-    público constante K_NUM = 1                 ; a, b: el número (a la palabra baja)
+    público constante K_NUM = 1                 ; a, b: el número (a la palabra baja); c: [HISPA-64]
+                                                ;   si pasa de 32 bits, un K_NUM con los 32 de arriba
     público constante K_BOOL = 2                ; a: 0 o 1
     público constante K_NULO = 3
     público constante K_CAD = 4                 ; a: el texto
@@ -208,7 +210,8 @@ módulo Base
     público constante K_TIPO = 44               ; a: el átomo; b: el tipo escrito
     público constante K_IMPORTAR = 45           ; a: el primer K_NOMBRE
     público constante K_MODELO = 46             ; «modelo grande», «modelo núcleo»...; a: el átomo
-    público constante K_NOMBRE = 47             ; a: el átomo (y su posición)
+    público constante K_NOMBRE = 47             ; a: el átomo (y su posición); b: [HISPA-64] de una
+                                                ;   variable del módulo, «alineado b» (o 0)
     ; tipos escritos
     público constante K_TARR = 50               ; a: el tamaño (expresión); b: el tipo de los elementos
     público constante K_TPUNT = 51              ; a: el tipo apuntado
@@ -238,6 +241,7 @@ módulo Base
     público variable a_de, a_a, a_ref, a_modelo, a_grande, a_principal: nat16
     público variable a_núcleo, a_hispa32, a_usuario, a_interrupción: nat16
     público variable a_linux64, a_núcleo64, a_hispa64: nat16   ; [CASTEL64]
+    público variable a_alineado: nat16          ; [HISPA-64]
 
     ; ---- los módulos: el programa (el último) y los que importa, cada uno detrás de los suyos ----
     público constante MAX_MODULOS = MÓDULOS      ; (de Medidas)
@@ -810,6 +814,7 @@ módulo Base
         a_linux64 := átomo_de("linux64")
         a_núcleo64 := átomo_de("n\xC3\xBAcleo64")
         a_hispa64 := átomo_de("hispa64")
+        a_alineado := átomo_de("alineado")
         a_interrupción := átomo_de("interrupci\xC3\xB3n")
         a_principal := átomo_de("principal")
     fin

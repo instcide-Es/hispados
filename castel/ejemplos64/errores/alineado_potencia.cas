@@ -1,0 +1,9 @@
+; «alineado» lleva una potencia de 2.
+; ERROR: 5:46: error: «alineado» lleva una potencia de 2, de 1 a 4096
+módulo Error
+    modelo linux64
+    variable t: arreglo [8] de byte alineado 24
+    función principal()
+    fin
+fin Error.
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

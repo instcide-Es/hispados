@@ -872,9 +872,15 @@ módulo Gen64
         variable t, l_no, l_fin: nat16
         variable k, op: byte
         variable im, lug: arreglo [TXT] de byte
+        variable c: N64
         t := valor_tipo(e)
         si l64_inmediato(e, im) entonces
             si iguales(im, "0") entonces em("xor eax, eax") sino em2("mov eax, ", im) fin
+            devolver
+        fin
+        si num64(e, c) entonces                 ; [HISPA-64] un número de 64 bits
+            l64_texto(c, cierto, im)
+            em2("mov rax, ", im)
             devolver
         fin
         k := nk(e)
