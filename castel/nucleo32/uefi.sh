@@ -51,6 +51,28 @@ menu_efi() {
   printf '  boot\n}\n'
 }
 
+# (SDHCI) el arranque por UEFI del disco instalado (o de la tarjeta SD: las
+# tabletas Bay Trail solo arrancan por UEFI): pone en CARPETA (la $W/i, lo de
+# \INSTALA) EFI/BOOTX64.EFI y EFI/BOOTIA32.EFI, un GRUB EFI que va derecho a
+# /HISPA/GRUB.CFG (lo lleva escrito dentro: -c), los añade a $INSTALA y le
+# dice a CARPETAS.TXT que van a \EFI\BOOT. INSTALAR, al verlos, escribe el
+# GRUB.CFG con las entradas de las dos maneras (multiboot y multiboot2).
+instala_efi() {
+  local p n
+  [ -n "$EFI_PLAT" ] || return 0
+  mkdir -p "$1/EFI"
+  printf 'configfile /HISPA/GRUB.CFG\n' > "$1/EFI/inicio.cfg"
+  for p in $EFI_PLAT; do
+    case $p in x86_64-efi) n=BOOTX64.EFI ;; i386-efi) n=BOOTIA32.EFI ;; esac
+    # shellcheck disable=SC2086
+    grub-mkimage -O $p -o "$1/EFI/$n" -p /HISPA -c "$1/EFI/inicio.cfg" $EFI_MODULOS || return 1
+    INSTALA="$INSTALA  module /INSTALA/EFI/$n $n
+"
+    printf '%s=EFI\\BOOT\r\n' $n >> "$1/CARPETAS.TXT"
+  done
+  rm -f "$1/EFI/inicio.cfg"
+}
+
 leeme_uefi() {
   sed 's/$/\r/' "$AQUI/uefi/LEEME-UEFI.TXT" > "$1/LEEME-UEFI.TXT"
 }

@@ -158,7 +158,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, Termo, Apuntero
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, Termo, Apuntero, Sdacpi
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -426,6 +426,7 @@ módulo Usuario
         dueño, cuál, pos: nat32
     fin
     variable mod_abiertos: arreglo [MOD_ABIERTOS] de Abierto_mod
+    variable ficha_sd: Ficha_sdhci              ; (SDHCI) la de la llamada 160
 
     ; ¿es la unidad del sistema la que está en memoria?
     público función unidad_en_memoria(): bool
@@ -966,6 +967,14 @@ módulo Usuario
                 devolver atender_dispositivos(n, a, b, c)
             caso 157:
                 devolver pide_admin(a)                  ; (PROTEGE) el modo administrador
+            caso 160:
+                ; (SDHCI) el servicio de ACPI da una controladora SD/eMMC de
+                ; «modo ACPI» (0: ya están todas): sdacpi.cas
+                si no actual.servicio entonces devolver NO_VALE fin
+                si a = 0 entonces devolver de_servicio(nulo) fin
+                si no puede(a, tamaño(Ficha_sdhci), falso) entonces devolver NO_VALE fin
+                copiar_memoria(puntero(nat32(dirección(ficha_sd))), puntero(a), tamaño(Ficha_sdhci))
+                devolver de_servicio(dirección(ficha_sd))
             caso 200..202, 209, 210:
                 devolver atender_usuarios(n, a, b, c)   ; (USUARIOS) los usuarios y el azar
             caso 158:

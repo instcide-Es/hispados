@@ -1,0 +1,242 @@
+; =============================================================================
+;  sdacpi.cas - (SDHCI) las controladoras SD/eMMC de «modo ACPI»: las que no
+;  salen en el PCI y solo dice ACPI (las tabletas Bay Trail pueden llevar
+;  así el eMMC y la ranura microSD: dispositivos 80860F14, 80860F16,
+;  INT33BB...). Las halla ACPI.BIN (acpi/pentium/sdhci.c: su _CRS, con la
+;  dirección de sus registros y su IRQ) y se las da al núcleo con la
+;  llamada 160, una ficha cada una y una vacía al final: entonces se
+;  arrancan (sdhci.cas), sus tarjetas pasan a ser discos (con su letra) y el
+;  registro del arranque (ARRANQUE.TXT) se guarda otra vez.
+;
+;  Y se APRENDEN: lo hallado se apunta en \SDHCI.TXT, en la unidad del
+;  sistema (si se puede escribir en ella: la memoria USB), con el equipo
+;  (el puente principal del PCI y su subsistema). En el arranque siguiente,
+;  en ese mismo equipo, el núcleo las usa desde el principio, aunque no
+;  haya ACPI.BIN («sinacpi»: el Acer One 10 se congela con él) o se esté
+;  instalando (INSTALAR, sin servicio de ACPI): recuerda().
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sdacpi
+
+    importar Sdhci, Discos, Unidades, Fat, Registro, Pci, Multiboot, Formato, Textos32, Mem32
+
+    ; la ficha de acpi/pentium/pentium.h (struct pe_sdhci, 108 octetos): si
+    ; cambia una, la otra
+    público constante VERSIÓN_FICHA = 1
+    público constante S_NOSE = 0
+    público constante S_EMMC = 1
+    público constante S_SDIO = 2
+    público constante S_SD = 3
+    público tipo Ficha_sdhci = estructura
+        versión, sta, base, largo, irq, clase, ps0: nat32
+        ruta: arreglo [48] de byte
+        hid: arreglo [16] de byte
+        uid: arreglo [16] de byte
+    fin
+
+    constante MAX_SABIDAS = 6
+    variable sabidas_base: arreglo [MAX_SABIDAS] de nat32
+    variable sabidas_irq: arreglo [MAX_SABIDAS] de nat32
+    variable sabidas_emmc: arreglo [MAX_SABIDAS] de bool
+    variable n_sabidas: nat32
+    variable nuevas: nat32                      ; discos nuevos desde ACPI
+    variable texto: arreglo [600] de byte
+    variable dd: arreglo [6] de nat32
+
+    función clase_texto(c: nat32): puntero a byte
+        según c
+            caso S_EMMC: devolver "eMMC"
+            caso S_SDIO: devolver "SDIO"
+            caso S_SD: devolver "SD"
+        fin
+        devolver "?"
+    fin
+
+    ; el equipo: el puente principal del PCI (00:00.0) y su subsistema
+    función equipo(ref a: nat32, ref b: nat32)
+        a := pci_leer(0, 0)
+        b := pci_leer(0, 0x2C)
+    fin
+
+    ; el disco d (nuevo): sus unidades y la línea que lo dice
+    función monta_y_di(d: nat32)
+        variable u, n: nat32
+        si d >= MAX_DISCOS entonces devolver fin
+        n := monta_disco(d)
+        dd[0] := d
+        dd[1] := nat32(dirección(discos[d].modelo[0]))
+        dd[2] := discos[d].sectores div 2048
+        apunta("disco %u: %s, %u MB", dd)
+        si n = 0 entonces apunta0(", sin FAT") fin
+        para u desde 0 hasta MAX_UNIDADES - 1 hacer
+            si unidades[u].hay y unidades[u].clase = U_FAT y unidades[u].disco = d entonces
+                apunta2(", %c: (FAT%u)", unidades[u].letra, volúmenes[u].clase)
+            fin
+        fin
+        apunta1(" (%s; de ACPI).\n", nat32(nombre_de_clase(discos[d].clase)))
+    fin
+
+    ; arranca la controladora de «base» y, si tiene tarjeta, un disco más
+    función usa(base: nat32, irq: nat32, emmc: bool): bool
+        variable s, d: nat32
+        s := de_acpi(base, irq, emmc)
+        si s = 0xFFFFFFFF entonces devolver falso fin
+        d := añade_sdhci(s)
+        si d = 0xFFFFFFFF entonces devolver falso fin
+        monta_y_di(d)
+        devolver cierto
+    fin
+
+    ; apunta lo que hay que recordar (sin repetir)
+    función sabe(base: nat32, irq: nat32, emmc: bool)
+        variable i: nat32
+        para i desde 1 hasta n_sabidas hacer
+            si sabidas_base[i - 1] = base entonces devolver fin
+        fin
+        si n_sabidas >= MAX_SABIDAS entonces devolver fin
+        sabidas_base[n_sabidas] := base
+        sabidas_irq[n_sabidas] := irq
+        sabidas_emmc[n_sabidas] := emmc
+        n_sabidas := n_sabidas + 1
+    fin
+
+    ; guarda ARRANQUE.TXT otra vez (con lo de ACPI) y \SDHCI.TXT, si se puede
+    función guarda()
+        variable m, a, b, i, k: nat32
+        si del_sistema = NINGUNA entonces devolver fin
+        si no escribible(del_sistema) entonces devolver fin
+        si buscar(línea_del_cargador(), "registro") <> nulo entonces
+            m := abrir_archivo(del_sistema, "\\ARRANQUE.TXT", PARA_CREAR)
+            si m < PRIMER_ERROR entonces
+                escribir_archivo(m, registro, registro_largo)
+                cerrar_archivo(m)
+            fin
+        fin
+        si n_sabidas = 0 entonces devolver fin
+        equipo(a, b)
+        dd[0] := a
+        dd[1] := b
+        formatear(texto, 600, "; Hispa-Pentium: las controladoras SD/eMMC que ha dicho ACPI en este equipo (sdacpi.cas)\r\nequipo=%08X %08X\r\n", dd)
+        para i desde 1 hasta n_sabidas hacer
+            k := longitud(texto)
+            dd[0] := sabidas_base[i - 1]
+            dd[1] := sabidas_irq[i - 1]
+            dd[2] := nat32("sd")
+            si sabidas_emmc[i - 1] entonces dd[2] := nat32("emmc") fin
+            formatear(dirección(texto[k]), 600 - k, "%08X %u %s\r\n", dd)
+        fin
+        m := abrir_archivo(del_sistema, "\\SDHCI.TXT", PARA_CREAR)
+        si m < PRIMER_ERROR entonces
+            escribir_archivo(m, texto, longitud(texto))
+            cerrar_archivo(m)
+            apunta0("sdhci: lo que ha dicho ACPI queda apuntado en \\SDHCI.TXT (para arrancar sin ACPI en este equipo)\n")
+        fin
+    fin
+
+    ; la llamada 160 (solo el servicio de ACPI): una ficha, o nulo al acabar
+    público función de_servicio(f: puntero a Ficha_sdhci): nat32
+        variable emmc: bool
+        si f = nulo entonces
+            si nuevas <> 0 o n_sabidas <> 0 entonces guarda() fin
+            devolver 0
+        fin
+        si f.versión <> VERSIÓN_FICHA entonces devolver 0xFFFFFFF9 fin
+        f.ruta[47] := 0
+        f.hid[15] := 0
+        f.uid[15] := 0
+        dd[0] := nat32(dirección(f.ruta[0]))
+        dd[1] := nat32(dirección(f.hid[0]))
+        dd[2] := nat32(clase_texto(f.clase))
+        dd[3] := f.sta
+        dd[4] := f.base
+        dd[5] := f.irq
+        apunta("sdhci: ACPI dice %s (%s, %s), _STA %Xh, en %08X", dd)
+        si f.irq <> 0xFFFFFFFF entonces apunta1(", IRQ %u", f.irq) fin
+        apunta0("\n")
+        si f.clase = S_SDIO entonces devolver 0 fin       ; (la del Wi-Fi)
+        si f.base = 0 entonces
+            apunta0("sdhci: sin dirección en su _CRS: no se puede usar\n")
+            devolver 0
+        fin
+        emmc := f.clase = S_EMMC
+        si conocida(f.base) entonces
+            apunta0("sdhci: ya estaba (por el PCI, o dada a mano)\n")
+            devolver 0
+        fin
+        sabe(f.base, f.irq, emmc)
+        si usa(f.base, f.irq, emmc) entonces nuevas := nuevas + 1 fin
+        devolver 0
+    fin
+
+    ; lee un número en hexadecimal (o en decimal, con «decimal») desde p;
+    ; deja p detrás
+    función número(ref p: puntero a byte, base: nat32): nat32
+        variable n, c: nat32
+        n := 0
+        mientras cierto hacer
+            c := p[0]
+            si c >= '0' y c <= '9' entonces
+                n := n * base + c - '0'
+            sino si base = 16 y c >= 'A' y c <= 'F' entonces
+                n := n * 16 + c - 'A' + 10
+            sino si base = 16 y c >= 'a' y c <= 'f' entonces
+                n := n * 16 + c - 'a' + 10
+            sino
+                devolver n
+            fin
+            p := p + 1
+        fin
+        devolver n
+    fin
+
+    ; (al arrancar, con las unidades ya montadas) lo aprendido en un arranque
+    ; anterior con ACPI: \SDHCI.TXT de la unidad del sistema (o de la X:),
+    ; si es de este mismo equipo. Da cuántos discos nuevos.
+    público función recuerda(): nat32
+        variable u, m, n, a, b, base, irq, hechas: nat32
+        variable p: puntero a byte
+        variable emmc: bool
+        si buscar(línea_del_cargador(), "sinsdhci") <> nulo o buscar(línea_del_cargador(), "sdhciolvida") <> nulo entonces devolver 0 fin
+        u := del_sistema
+        si u = NINGUNA o unidades[u].clase <> U_FAT entonces u := por_letra('X') fin
+        si u = NINGUNA entonces devolver 0 fin
+        si unidades[u].clase <> U_FAT entonces devolver 0 fin
+        m := abrir_archivo(u, "\\SDHCI.TXT", PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver 0 fin
+        n := leer_archivo(m, texto, 599)
+        cerrar_archivo(m)
+        si n >= PRIMER_ERROR entonces devolver 0 fin
+        texto[n] := 0
+        p := buscar(texto, "equipo=")
+        si p = nulo entonces devolver 0 fin
+        p := p + 7
+        a := número(p, 16)
+        mientras p[0] = ' ' hacer p := p + 1 fin
+        b := número(p, 16)
+        equipo(m, n)
+        si a <> m o b <> n entonces
+            apunta0("sdhci: \\SDHCI.TXT es de otro equipo: no se usa\n")
+            devolver 0
+        fin
+        hechas := 0
+        ; las líneas siguientes: «DIRECCIÓN IRQ sd|emmc»
+        mientras cierto hacer
+            p := buscar_car(p, '\n')
+            si p = nulo entonces romper fin
+            p := p + 1
+            base := número(p, 16)
+            si base <> 0 y p[0] = ' ' entonces
+                p := p + 1
+                irq := número(p, 10)
+                emmc := p[0] = ' ' y p[1] = 'e'
+                si no conocida(base) entonces
+                    apunta1("sdhci: la de %08X, aprendida de ACPI en otro arranque (\\SDHCI.TXT)\n", base)
+                    sabe(base, irq, emmc)
+                    si usa(base, irq, emmc) entonces hechas := hechas + 1 fin
+                fin
+            fin
+        fin
+        devolver hechas
+    fin
+
+fin Sdacpi.

@@ -52,6 +52,8 @@
 # entradas son las de multiboot2 y la pantalla es la del firmware (GOP). Y
 # LEEME-UEFI.TXT (Secure Boot apagado). Sin grub-efi-amd64-bin ni
 # grub-efi-ia32-bin, solo BIOS, como antes; SIN_UEFI=1, también.
+# (SDHCI) Con PRUEBA_SDHCI=1, la memoria de prueba del eMMC y la tarjeta SD: sus
+# cuatro entradas primero (sin ACPI, con ACPI, la consola y por PIO).
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc); (UEFI) y grub-efi-amd64-bin
 # y grub-efi-ia32-bin (grub-mkimage).
@@ -66,6 +68,7 @@ mkdir $W/f $W/m $W/i
 MEDIO=usb
 . $AQUI/sistema.sh
 . $AQUI/uefi.sh                 # (UEFI)
+instala_efi $W/i                # (SDHCI) y el del disco instalado
 IMG=$W/usb.img
 truncate -s ${USB_MB:-64}M $IMG   # (USB_MB=256: con sitio para las firmas de Escudo)
 parted -s $IMG mklabel msdos mkpart primary fat16 1MiB 100% set 1 boot on
@@ -191,6 +194,15 @@ G
       menu_efi "Termometro (UEFI, 800 x 600)" ESCRIT8.BIN "escritorio $N termo" "$M2" "800x600x32,800x600,auto"
       menu_efi "Termometro SIN ACPI (UEFI)" ESCRIT8.BIN "escritorio $N sinacpi termo" "$M2" auto
     fi
+    # (SDHCI) con PRUEBA_SDHCI=1, la memoria de prueba del eMMC y la tarjeta SD
+    # (las tabletas Bay Trail: Acer One 10, Medion S2217), primero: sin ACPI
+    # (el Acer se congela con ACPI.BIN), con ACPI, la consola y por PIO
+    if [ -n "${PRUEBA_SDHCI:-}" ]; then
+      menu_efi "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi" "$M2" auto
+      menu_efi "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N" "$M2" auto
+      menu_efi "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi" "$M2" auto
+      menu_efi "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento" "$M2" auto
+    fi
     menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (la medida de la pantalla, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "$M2" auto '  if [ "$modo" = auto ]; then
     set gfxpayload=auto
   elif [ -n "$modo" ]; then
@@ -214,9 +226,7 @@ menuentry "Ver los modos de video que da el firmware (GOP) de este equipo" {
 G
     menu_efi "Hispa-Pentium 0.8 (UEFI): el interprete de ordenes (texto, en la pantalla del firmware)" SEMILLA.BIN "ordenes $N" "$M2" auto
     menu_efi "Hispa-Pentium 0.8 (UEFI): la consola del nucleo: dice los discos y el USB que encuentra" SEMILLA.BIN "$N" "$M2" auto
-    menu_efi "Instalar Hispa-Pentium 0.8 en el disco duro (arrancara por la BIOS: Legacy/CSM)" SEMILLA.BIN "instalar unidad=M" "$I2" auto '  echo "Ojo: el disco instalado arranca por la BIOS de siempre (Legacy/CSM);"
-  echo "por UEFI, todavia no. Sin Legacy/CSM, siga usando la memoria USB."
-  sleep 5'
+    menu_efi "Instalar Hispa-Pentium 0.8 en el disco duro (o en una tarjeta SD)" SEMILLA.BIN "instalar unidad=M" "$I2" auto
     cat <<'G'
 menuentry "Diagnostico (UEFI): la pantalla, la memoria, el PCI y ACPI (para hacer una foto)" {
   set pager=1
@@ -251,6 +261,13 @@ G
     entrada "Termometro (1024 x 600)" ESCRIT6.BIN "escritorio $N termo"
     entrada "Termometro (800 x 600)" ESCRIT8.BIN "escritorio $N termo"
     entrada "Termometro SIN ACPI (si se queda colgado al arrancar: sin zonas ni bateria)" ESCRIT8.BIN "escritorio $N sinacpi termo"
+  fi
+  # (SDHCI) la memoria de prueba del eMMC y la SD, por la BIOS (el Medion con la HispaBIOS)
+  if [ -n "${PRUEBA_SDHCI:-}" ]; then
+    entrada "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi"
+    entrada "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N"
+    entrada "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi"
+    entrada "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento"
   fi
   # [EDID] la primera, con la medida de PANTALLA.ENV si la hay (y lo dice
   # antes de arrancar); «a la medida», con «amedida» (el núcleo sabe así

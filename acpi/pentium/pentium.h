@@ -22,6 +22,7 @@
 #define SC_PCI 152		/* EBX dirección (como en CF8h; bits 0-1: el octeto), ECX valor, EDX octetos | ES_ESCRIBE */
 #define SC_SERVICIO 153		/* EBX struct pe_energia (o 0), ECX tics que esperar como mucho -> la orden */
 #define SC_DISPOSITIVO 156	/* (dispositivos) EBX struct pe_dispositivo, ECX 0 apuntar / 1 olvidar los suyos */
+#define SC_SDHCI 160		/* (SDHCI) EBX struct pe_sdhci; 0: ya están todas */
 #define ES_ESCRIBE 0x100
 #define ES_ERROR(r) ((r) >= 0xFFFFFFF0u)
 
@@ -98,5 +99,26 @@ struct pe_dispositivo {
 	struct pe_recurso recursos[6];
 	char pnp[16], controlador[16], nombre[48], marca[32], detalle[80];
 };
+
+/* (SDHCI) una controladora SD/eMMC de «modo ACPI» que ha hallado el
+ * servicio (acpi/pentium/sdhci.c), para el núcleo (la llamada 160). La misma
+ * ficha que Ficha_sdhci de castel/nucleo32/usuario.cas (108 octetos): si
+ * cambia una, la otra. */
+#define PE_SDHCI_VERSION 1
+#define SDHCI_MAX 6
+#define SDHCI_NOSE 0
+#define SDHCI_EMMC 1
+#define SDHCI_SDIO 2
+#define SDHCI_SD 3
+struct pe_sdhci {
+	u32 version;		/* PE_SDHCI_VERSION */
+	u32 sta;		/* su _STA (0x0F si no lo tiene) */
+	u32 base, largo;	/* la memoria de su _CRS (0: no la dice) */
+	u32 irq;		/* la de su _CRS (FFFFFFFFh: no la dice) */
+	u32 clase;		/* SDHCI_... (por el _HID y el _UID) */
+	u32 ps0;		/* 0 sin _PS0; 1 ejecutado; 2 falla */
+	char ruta[48], hid[16], uid[16];
+};
+int sdhci_busca(struct pe_sdhci *f, int cabe);
 
 #endif

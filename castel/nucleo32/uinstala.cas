@@ -94,6 +94,9 @@ módulo Instala
     variable destinos: arreglo [MAX_ARCHIVOS] de byte
     variable otras: arreglo [MAX_OTRAS] de arreglo [16] de byte   ; sus nombres («OFICINA», o «HISPA\PAQUETES»)
     variable otras_en_hispa: arreglo [MAX_OTRAS] de bool         ; va dentro de \HISPA (no en la raíz)
+    ; (SDHCI, UEFI) o dentro de otra de ellas (\EFI\BOOT: en \EFI): su número; EN_RAÍZ si no
+    constante EN_RAÍZ = 0xFFFFFFFF
+    variable otras_padre: arreglo [MAX_OTRAS] de nat32
     variable hispa_cluster: nat32               ; el primer cluster de la carpeta HISPA
     variable otras_dir: arreglo [MAX_OTRAS] de puntero a byte    ; lo que llevan dentro (memoria pedida al núcleo)
     variable otras_n: arreglo [MAX_OTRAS] de nat32
@@ -112,7 +115,7 @@ módulo Instala
     variable trozo: puntero a byte              ; TROZO octetos (memoria pedida al núcleo)
     variable fecha, hora: nat32
     variable hecho, por_hacer: nat32            ; (la barra) los sectores escritos y los que hay que escribir
-    variable cfg: arreglo [4096] de byte        ; GRUB.CFG
+    variable cfg: arreglo [8192] de byte        ; GRUB.CFG ((UEFI) con las entradas de las dos maneras)
     variable es_cd: bool                        ; se instala desde el CD (MEDIO.TXT), no de la memoria USB
     variable ln: arreglo [200] de byte
     variable dd: arreglo [6] de nat32
@@ -222,7 +225,7 @@ módulo Instala
         pantalla("Ayuda")
         pon(3, 6, AZUL, "Este programa instala Hispa-Pentium en un disco duro de este equipo,")
         si es_cd entonces pon(3, 7, AZUL, "para arrancarlo luego sin el CD.") sino pon(3, 7, AZUL, "para arrancarlo luego sin la memoria USB.") fin
-        pon(3, 9, AZUL, "\x07 Solo se ofrecen los discos de dentro del equipo (IDE y SATA). La")
+        pon(3, 9, AZUL, "\x07 Solo se ofrecen los discos de dentro (IDE, SATA, eMMC) y las SD. La")
         si es_cd entonces pon(3, 10, AZUL, "  memorias USB no se tocan nunca.") sino pon(3, 10, AZUL, "  memoria USB de arranque no se toca nunca.") fin
         pon(3, 11, AZUL, "\x07 Si el disco tiene espacio sin usar (sin partición), Hispa-Pentium se")
         pon(3, 12, AZUL, "  puede instalar ahí, en una partición nueva, sin tocar lo que hay.")
@@ -425,6 +428,8 @@ módulo Instala
             caso MEDIO_IDE: devolver "IDE"
             caso MEDIO_SATA: devolver "SATA"
             caso MEDIO_USB: devolver "USB"
+            caso MEDIO_SD: devolver "SD"                ; (SDHCI)
+            caso MEDIO_EMMC: devolver "eMMC"
         fin
         devolver "?"
     fin
@@ -482,7 +487,7 @@ módulo Instala
         si n_candidatos = 0 entonces
             recuadro(8, 8, ROJO)
             pon(11, 10, ROJO, "No se ha encontrado ningún disco duro en este equipo")
-            pon(11, 11, ROJO, "(IDE o SATA) en el que se pueda instalar.")
+            pon(11, 11, ROJO, "(IDE, SATA o eMMC) ni tarjeta SD en el que se pueda instalar.")
             si es_cd entonces pon(11, 13, ROJO, "(Solo se instala arrancando del CD con su") sino pon(11, 13, ROJO, "(Solo se instala arrancando de la memoria USB con su") fin
             pon(11, 14, ROJO, "entrada «Instalar Hispa-Pentium en el disco duro».)")
         fin
@@ -500,6 +505,14 @@ módulo Instala
                 letras_en(3, f, color, ' ', 74)
                 ponf(4, f, color, "Disco %u   %-4s  %-40s %10s")
                 f := f + 1
+                ; (SDHCI) lo que es cada uno, en las tabletas
+                si f < 21 y info[d].clase = MEDIO_SD entonces
+                    pon(8, f, AZUL, "(tarjeta SD: se puede instalar aquí sin tocar el eMMC)")
+                    f := f + 1
+                sino si f < 21 y info[d].clase = MEDIO_EMMC entonces
+                    pon(8, f, AMARILLO, "(eMMC: el disco de dentro de la tableta; suele llevar Windows)")
+                    f := f + 1
+                fin
             fin
             hasta_ := n_partes
             si hasta_ > 5 entonces hasta_ := 5 fin
@@ -558,8 +571,13 @@ módulo Instala
 
     ; elegir el disco. Da su número.
     función elige_disco(): nat32
-        variable c, elegido: nat32
+        variable c, elegido, k: nat32
         elegido := 0
+        ; (SDHCI) si hay una tarjeta SD, la primera elegida: en las tabletas
+        ; es donde se instala sin tocar el eMMC (con Windows)
+        para k desde 1 hasta n_candidatos hacer
+            si info[candidatos[k - 1]].clase = MEDIO_SD y elegido = 0 y info[candidatos[0]].clase <> MEDIO_SD entonces elegido := k - 1 fin
+        fin
         mientras cierto hacer
             pinta_discos(elegido)
             al_serie("instalar: elegir disco\n")
@@ -605,6 +623,10 @@ módulo Instala
             pon(11, 12, ROJO, "Lo que tenga, sea lo que sea, se pierde")
         fin
         pon(11, 13, ROJO, "para siempre. No se puede deshacer.")
+        si info[disco].clase = MEDIO_EMMC entonces
+            pon(11, 15, ROJO, "Es el eMMC de la tableta: si lleva Windows, Windows")
+            pon(11, 16, ROJO, "se borra y no vuelve a arrancar.")
+        fin
         pon(3, 18, AZUL, "Si está seguro, pulse S. Para volver sin tocar nada, pulse ESC.")
         pie("S=Sí, borrar el disco   ESC=Volver (no se toca nada)   F3=Salir")
         al_serie("instalar: confirmar borrar (1)\n")
@@ -650,12 +672,46 @@ módulo Instala
         devolver iguales(palabra_, "BORRAR")
     fin
 
+    ; (SDHCI) se ha elegido el eMMC (el disco de dentro de una tableta, el
+    ; de Windows): se avisa y se pide una S. Cierto si se confirma.
+    función confirma_emmc(): bool
+        variable c: nat32
+        variable t: arreglo [16] de byte
+        tamaño_de(info[disco].sectores, t)
+        pantalla("Instalar en el eMMC de la tableta")
+        recuadro(6, 11, ROJO)
+        pon(11, 8, ROJO, "ATENCION: ha elegido el eMMC, el disco de dentro de la")
+        pon(11, 9, ROJO, "tableta, donde suele estar Windows:")
+        dd[0] := nat32(dirección(info[disco].modelo[0]))
+        dd[1] := nat32(dirección(t[0]))
+        ponf(13, 11, ROJO, "eMMC  %-34s %s")
+        pon(11, 13, ROJO, "Si lo que quiere es no tocar Windows, vuelva con ESC")
+        pon(11, 14, ROJO, "y elija la tarjeta SD.")
+        pon(3, 19, AZUL, "Para seguir con el eMMC, pulse S (aún no se escribe nada).")
+        pie("S=Sí, seguir con el eMMC   ESC=Volver (no se toca nada)   F3=Salir")
+        al_serie("instalar: confirmar eMMC\n")
+        mientras cierto hacer
+            c := tecla()
+            si c = 27 o c = 'n' o c = 'N' entonces devolver falso fin
+            si c = TECLA_F3 entonces
+                quiere_salir()
+                devolver falso
+            fin
+            si c = 's' o c = 'S' entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
     ; qué hacer con el disco elegido. Cierto si se sigue (queda dicho en
     ; borrar_todo, p_inicio y p_sectores); falso para volver a elegir disco.
     función elige_sitio(): bool
         variable c, elegida, opciones, f, total: nat32
         variable t: arreglo [16] de byte
         variable libre_vale, arranque_cabe: bool
+        ; (SDHCI) el eMMC de una tableta: antes de nada, que se confirme
+        si info[disco].clase = MEDIO_EMMC entonces
+            si no confirma_emmc() entonces devolver falso fin
+        fin
         mientras cierto hacer
             analiza(disco)
             total := info[disco].sectores
@@ -781,6 +837,7 @@ módulo Instala
             sino
                 pon(3, 14, AZUL, "Arranque:   el de Hispa-Pentium (GRUB), en este disco")
             fin
+            si con_uefi() entonces pon(3, 16, AZUL, "            (arranca por la BIOS y por UEFI: \\EFI\\BOOT)") fin
             pon(3, 18, BLANCO, "Al pulsar INTRO se empieza a escribir en el disco.")
             pie("INTRO=Instalar   ESC=Volver   F3=Salir")
             al_serie("instalar: todo listo\n")
@@ -1038,7 +1095,33 @@ módulo Instala
     ;  El arranque: GRUB.CFG
     ; -------------------------------------------------------------------------
     función cfg_más(t: puntero a byte)
-        si longitud(cfg) + longitud(t) + 1 < 4096 entonces concatenar(cfg, t) fin
+        si longitud(cfg) + longitud(t) + 1 < 8192 entonces concatenar(cfg, t) fin
+    fin
+
+    ; ¿se instala también el arranque por UEFI? (si vienen BOOTX64.EFI o
+    ; BOOTIA32.EFI, que van a \EFI\BOOT)
+    función con_uefi(): bool
+        variable i: nat32
+        para i desde 1 hasta n_archivos hacer
+            si iguales(nombres[i - 1], "BOOTX64.EFI") o iguales(nombres[i - 1], "BOOTIA32.EFI") entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; los «module» del sistema (los programas y LEEME.TXT), con «module» o
+    ; (UEFI) «module2»
+    función cfg_módulos(orden: puntero a byte)
+        variable i: nat32
+        para i desde 1 hasta n_archivos hacer
+            si destinos[i - 1] = A_HISPA y ((acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT")) entonces
+                cfg_más(orden)
+                cfg_más(" /HISPA/")
+                cfg_más(nombres[i - 1])
+                cfg_más(" ")
+                cfg_más(nombres[i - 1])
+                cfg_más("\n")
+            fin
+        fin
     fin
 
     función acaba_en(t: puntero a byte, ext: puntero a byte): bool
@@ -1058,19 +1141,26 @@ módulo Instala
         cfg_más("set modo=800x600x32,800x600,auto\n")
         si otra <> 0 entonces cfg_más("set timeout=8\n") sino cfg_más("set timeout=3\n") fin
         cfg_más("set default=0\n")
-        cfg_más("menuentry \"Hispa-Pentium\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\n")
-        cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
-        cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
-        para i desde 1 hasta n_archivos hacer
-            si destinos[i - 1] = A_HISPA y ((acaba_en(nombres[i - 1], "BIN") y no iguales(nombres[i - 1], "NUCLEO.BIN") y no iguales(nombres[i - 1], "INSTALAR.BIN") y no iguales(nombres[i - 1], "ASISTE.BIN")) o iguales(nombres[i - 1], "LEEME.TXT")) entonces
-                cfg_más("  module /HISPA/")
-                cfg_más(nombres[i - 1])
-                cfg_más(" ")
-                cfg_más(nombres[i - 1])
-                cfg_más("\n")
-            fin
+        si con_uefi() entonces
+            ; (UEFI) el mismo menú arrancado por UEFI (\EFI\BOOT\BOOTIA32.EFI o
+            ; BOOTX64.EFI: las tabletas Bay Trail, desde la tarjeta SD): el
+            ; núcleo, por multiboot2, y la pantalla del firmware (GOP)
+            cfg_más("# (UEFI) arrancado por UEFI (\\EFI\\BOOT): multiboot2 y la pantalla del firmware (GOP)\n")
+            cfg_más("if [ \"$grub_platform\" = efi ]; then\n  insmod efi_gop\n  insmod efi_uga\nfi\n")
+            cfg_más("menuentry \"Hispa-Pentium\" {\n  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN escritorio escritura\n  else\n    multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  fi\n  set gfxpayload=$modo\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN ordenes escritura\n    set gfxpayload=auto\n  else\n    multiboot /HISPA/NUCLEO.BIN ordenes escritura\n    set gfxpayload=text\n  fi\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
+            cfg_módulos("    module2")
+            cfg_más("    set gfxpayload=auto\n  else\n    multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
+            cfg_módulos("    module")
+            cfg_más("  fi\n  boot\n}\n")
+        sino
+            cfg_más("menuentry \"Hispa-Pentium\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
+            cfg_módulos("  module")
+            cfg_más("  boot\n}\n")
         fin
-        cfg_más("  boot\n}\n")
         si otra <> 0 entonces
             dd[0] := otra
             dd[1] := otra
@@ -1086,8 +1176,26 @@ módulo Instala
     ; (una línea «ARCHIVO.EXT=CARPETA»; la carpeta, de hasta 8 letras, en la
     ; raíz; o «HISPA\CARPETA», dentro de \HISPA: los registros de lo
     ; instalado, que van a \HISPA\PAQUETES)
+    ; (SDHCI, UEFI) la otra carpeta de ese nombre (con su padre: EN_RAÍZ, o
+    ; el número de otra), apuntada si no lo estaba. Da su número (EN_RAÍZ:
+    ; no caben más)
+    función otra_de(cuál: puntero a byte, padre: nat32): nat32
+        variable k: nat32
+        para k desde 1 hasta n_otras hacer
+            si iguales(otras[k - 1], cuál) entonces devolver k - 1 fin
+        fin
+        si n_otras >= MAX_OTRAS entonces devolver EN_RAÍZ fin
+        otras_dir[n_otras] := más_memoria(32768)
+        si otras_dir[n_otras] = nulo entonces devolver EN_RAÍZ fin
+        Textos32.copiar(otras[n_otras], cuál)
+        otras_en_hispa[n_otras] := empieza_por(cuál, "HISPA\\")
+        otras_padre[n_otras] := padre
+        n_otras := n_otras + 1
+        devolver n_otras - 1
+    fin
+
     función destino_de(nombre: puntero a byte): nat32
-        variable i, j, k: nat32
+        variable i, j, k, padre: nat32
         variable cuál: arreglo [16] de byte
         i := 0
         mientras mapa[i] <> 0 hacer
@@ -1103,22 +1211,24 @@ módulo Instala
                 fin
                 cuál[j] := 0
                 si j = 0 o iguales(cuál, "HISPA") entonces devolver A_HISPA fin
-                ; (de más de 8 letras, solo «HISPA\CARPETA»)
+                ; (de más de 8 letras, solo «HISPA\CARPETA» o (UEFI) «CARPETA\OTRA»,
+                ; de hasta 8 cada una: \EFI\BOOT)
+                padre := EN_RAÍZ
                 si empieza_por(cuál, "HISPA\\") entonces
                     si j = 6 o j > 14 entonces devolver A_HISPA fin
+                sino si buscar_car(cuál, '\\') <> nulo entonces
+                    k := nat32(buscar_car(cuál, '\\')) - nat32(dirección(cuál[0]))
+                    si k = 0 o k > 8 o j - k - 1 = 0 o j - k - 1 > 8 entonces devolver A_HISPA fin
+                    cuál[k] := 0
+                    padre := otra_de(cuál, EN_RAÍZ)
+                    cuál[k] := '\\'
+                    si padre = EN_RAÍZ entonces devolver A_HISPA fin
                 sino si j > 8 entonces
                     devolver A_HISPA
                 fin
-                para k desde 1 hasta n_otras hacer
-                    si iguales(otras[k - 1], cuál) entonces devolver A_OTRA + k - 1 fin
-                fin
-                si n_otras >= MAX_OTRAS entonces devolver A_HISPA fin
-                otras_dir[n_otras] := más_memoria(32768)
-                si otras_dir[n_otras] = nulo entonces devolver A_HISPA fin
-                Textos32.copiar(otras[n_otras], cuál)
-                otras_en_hispa[n_otras] := empieza_por(cuál, "HISPA\\")
-                n_otras := n_otras + 1
-                devolver A_OTRA + n_otras - 1
+                k := otra_de(cuál, padre)
+                si k = EN_RAÍZ entonces devolver A_HISPA fin
+                devolver A_OTRA + k
             fin
             mientras mapa[i] <> 0 y mapa[i] <> '\n' hacer i := i + 1 fin
             si mapa[i] = '\n' entonces i := i + 1 fin
@@ -1195,7 +1305,7 @@ módulo Instala
     ;  Instalar
     ; -------------------------------------------------------------------------
     función instala()
-        variable i, k, n, f, m: nat32
+        variable i, j, k, n, f, m: nat32
         variable e: puntero a byte
         variable t: arreglo [16] de byte
         pantalla("Instalando Hispa-Pentium")
@@ -1285,6 +1395,12 @@ módulo Instala
                 pon_entrada(dirección(carpeta[carpeta_n * 32]), dirección(otras[i - 1][6]), falso, 0x10, k, 0)
                 carpeta_n := carpeta_n + 1
                 pon_entrada(otras_dir[i - 1] + 32, "..         ", cierto, 0x10, hispa_cluster, 0)
+            sino si otras_padre[i - 1] <> EN_RAÍZ entonces
+                ; (UEFI) dentro de otra (\EFI\BOOT, en \EFI: ya hecha, va antes)
+                j := otras_padre[i - 1]
+                pon_entrada(otras_dir[j] + otras_n[j] * 32, dirección(otras[i - 1][longitud(otras[j]) + 1]), falso, 0x10, k, 0)
+                otras_n[j] := otras_n[j] + 1
+                pon_entrada(otras_dir[i - 1] + 32, "..         ", cierto, 0x10, otras_cluster[j], 0)
             sino
                 pon_entrada(dirección(raíz[raíz_n * 32]), otras[i - 1], falso, 0x10, k, 0)
                 raíz_n := raíz_n + 1

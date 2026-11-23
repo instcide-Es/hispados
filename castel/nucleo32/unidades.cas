@@ -388,7 +388,7 @@ módulo Unidades
         l := letra_interna
         si l = 'C' entonces
             para d desde 0 hasta MAX_DISCOS - 1 hacer
-                si discos[d].hay y (discos[d].clase = DE_ATA o discos[d].clase = DE_AHCI) entonces l := 'D' fin
+                si discos[d].hay y (discos[d].clase = DE_ATA o discos[d].clase = DE_AHCI o discos[d].clase = DE_EMMC) entonces l := 'D' fin
             fin
         fin
         mientras l < 'M' y (por_letra(l) <> NINGUNA o letra_de_lector(l)) hacer l := l + 1 fin

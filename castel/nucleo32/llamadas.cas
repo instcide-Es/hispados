@@ -85,6 +85,8 @@ módulo Llamadas
     público constante MEDIO_USB = 3
     público constante MEDIO_CD = 4              ; (CD) un lector de CD o DVD (clase 9: ISO 9660)
     público constante MEDIO_IMAGEN = 5          ; (CD) una imagen de disco montada (.ISO, .IMG...)
+    público constante MEDIO_SD = 6              ; (SDHCI) una tarjeta SD (sdhci.cas)
+    público constante MEDIO_EMMC = 7            ; (SDHCI) un eMMC (el disco de dentro de las tabletas)
     público tipo Info_unidad = estructura
         letra: byte                             ; 0: un disco sin ningún volumen que se pueda leer
         clase: byte                             ; 12, 16 o 32 (FAT); 1: en memoria; 0: nada

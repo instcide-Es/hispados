@@ -17,7 +17,7 @@
 ; =============================================================================
 módulo Discos
 
-    importar Ata, Ahci, Usbalm, Cdrom, Tareas, Textos32, Mem32, Pozo
+    importar Ata, Ahci, Usbalm, Cdrom, Tareas, Textos32, Mem32, Pozo, Sdhci
 
     público constante SECTOR = 512
     público constante MAX_DISCOS = 8
@@ -28,6 +28,8 @@ módulo Discos
     público constante DE_USB = 3                ; una memoria (o un disco) USB
     público constante DE_CD = 4                 ; (CD) un lector de CD o DVD (de los tres: cdrom.cas); sus sectores, de 2048
     público constante DE_IMAGEN = 5             ; (CD) una imagen de disco (.ISO, .IMG, .BIN) montada: un archivo de otro disco
+    público constante DE_SD = 6                 ; (SDHCI) una tarjeta SD, por una controladora SDHCI (sdhci.cas)
+    público constante DE_EMMC = 7               ; (SDHCI) un eMMC, por una controladora SDHCI
 
     ; ---- los permisos de escritura ----
     público constante SIN_PERMISO = 0           ; no se escribe en ningún disco
@@ -72,6 +74,7 @@ módulo Discos
         variable d: nat32
         Ata.escritura := el_permiso = PERMISO_TODOS o el_permiso = PERMISO_INTERNOS
         Ahci.escritura := Ata.escritura
+        Sdhci.escritura := Ata.escritura                ; (SDHCI) las tarjetas SD y el eMMC, como los de dentro
         Usbalm.escritura := el_permiso = PERMISO_USB o el_permiso = PERMISO_TODOS
         para d desde 0 hasta MAX_DISCOS - 1 hacer
             discos[d].escribible := discos[d].hay y discos[d].clase <> DE_CD y discos[d].clase <> DE_IMAGEN y (el_permiso = PERMISO_TODOS o (el_permiso = PERMISO_USB y discos[d].clase = DE_USB) o (el_permiso = PERMISO_INTERNOS y discos[d].clase <> DE_USB))
@@ -102,8 +105,35 @@ módulo Discos
         para u desde 0 hasta MAX_SATA - 1 hacer
             si satas[u].hay entonces añade(DE_AHCI, u, satas[u].sectores, dirección(satas[u].modelo[0])) fin
         fin
+        ; (SDHCI) el eMMC y las tarjetas SD (las del PCI y las dadas a mano)
+        Sdhci.identificar()
+        para u desde 0 hasta MAX_TARJETAS - 1 hacer
+            si Sdhci.tarjetas[u].hay entonces añade_sdhci(u) fin
+        fin
         reparte_permiso()
         devolver cuántos_discos - n
+    fin
+
+    ; (SDHCI) la ranura s de sdhci.cas tiene una tarjeta lista: un disco más
+    ; (de dentro). Da su número, o 0xFFFFFFFF.
+    público función añade_sdhci(s: nat32): nat32
+        variable d, c: nat32
+        si s >= MAX_TARJETAS entonces devolver 0xFFFFFFFF fin
+        si no Sdhci.tarjetas[s].hay entonces devolver 0xFFFFFFFF fin
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si discos[d].hay y (discos[d].clase = DE_SD o discos[d].clase = DE_EMMC) y discos[d].cuál = s entonces devolver d fin
+        fin
+        c := DE_SD
+        si Sdhci.es_emmc(s) entonces c := DE_EMMC fin
+        d := añade(c, s, Sdhci.tarjetas[s].sectores, dirección(Sdhci.tarjetas[s].modelo[0]))
+        reparte_permiso()
+        devolver d
+    fin
+
+    ; (SDHCI) ¿es el disco d una tarjeta SD o un eMMC?
+    público función es_sdhci(d: nat32): bool
+        si d >= MAX_DISCOS entonces devolver falso fin
+        devolver discos[d].hay y (discos[d].clase = DE_SD o discos[d].clase = DE_EMMC)
     fin
 
     ; apunta las memorias USB que ha encontrado usbalm.cas (después de
@@ -326,6 +356,7 @@ módulo Discos
             caso DE_ATA: devolver Ata.leer_sectores(discos[d].cuál, lba, n, destino)
             caso DE_AHCI: devolver Ahci.leer_sectores(discos[d].cuál, lba, n, destino)
             caso DE_USB: devolver Usbalm.leer_sectores(discos[d].cuál, lba, n, destino)
+            caso DE_SD, DE_EMMC: devolver Sdhci.leer_sectores(discos[d].cuál, lba, n, destino)    ; (SDHCI)
             caso DE_CD: devolver leer_bloques(discos[d].cuál, lba, n, destino)     ; (CD) de 2048
             caso DE_IMAGEN: devolver leer_imagen(discos[d].cuál, lba, n, destino)  ; (CD)
         fin
@@ -341,6 +372,7 @@ módulo Discos
             caso DE_ATA: devolver Ata.escribir_sectores(discos[d].cuál, lba, n, origen)
             caso DE_AHCI: devolver Ahci.escribir_sectores(discos[d].cuál, lba, n, origen)
             caso DE_USB: devolver Usbalm.escribir_sectores(discos[d].cuál, lba, n, origen)
+            caso DE_SD, DE_EMMC: devolver Sdhci.escribir_sectores(discos[d].cuál, lba, n, origen)  ; (SDHCI)
         fin
         devolver falso
     fin
@@ -353,16 +385,17 @@ módulo Discos
             caso DE_ATA: devolver Ata.asentar(discos[d].cuál)
             caso DE_AHCI: devolver Ahci.asentar(discos[d].cuál)
             caso DE_USB: devolver Usbalm.asentar(discos[d].cuál)
+            caso DE_SD, DE_EMMC: devolver Sdhci.asentar(discos[d].cuál)                           ; (SDHCI)
         fin
         devolver falso
     fin
 
     público función sectores_leídos(): nat32
-        devolver Ata.sectores_leídos + Ahci.sectores_leídos + Usbalm.sectores_leídos
+        devolver Ata.sectores_leídos + Ahci.sectores_leídos + Usbalm.sectores_leídos + Sdhci.sectores_leídos
     fin
 
     público función sectores_escritos(): nat32
-        devolver Ata.sectores_escritos + Ahci.sectores_escritos + Usbalm.sectores_escritos
+        devolver Ata.sectores_escritos + Ahci.sectores_escritos + Usbalm.sectores_escritos + Sdhci.sectores_escritos
     fin
 
     público función se_puede_escribir(d: nat32): bool
@@ -375,6 +408,11 @@ módulo Discos
         devolver dirección(Ahci.informe[0])
     fin
 
+    ; (SDHCI) lo que ha visto sdhci.cas
+    público función informe_sdhci(): puntero a byte
+        devolver Sdhci.texto_informe()
+    fin
+
     ; cómo se llama la clase de un disco, para enseñarla
     público función nombre_de_clase(clase: nat32): puntero a byte
         según clase
@@ -383,6 +421,8 @@ módulo Discos
             caso DE_USB: devolver "USB"
             caso DE_CD: devolver "CD"
             caso DE_IMAGEN: devolver "imagen"
+            caso DE_SD: devolver "SD"
+            caso DE_EMMC: devolver "eMMC"
         fin
         devolver "?"
     fin

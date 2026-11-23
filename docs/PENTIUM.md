@@ -221,6 +221,8 @@ cuarta parte, los discos y el USB).
 | `usbbase.cas`, `xhci.cas`, `ehci.cas`, `uhci.cas`, `usb.cas` | **El USB** (sección 11): las controladoras **xHCI** (USB 3), **EHCI** (USB 2.0) y **UHCI** (USB 1.1), quitárselas a la BIOS, y **enumerar** lo que hay enchufado, también detrás de **concentradores**. |
 | `usbhid.cas` (Usbhid) | Los **teclados y ratones USB** (y los paneles táctiles que se presentan como ratón): le dan a `consola.cas` y a `raton.cas` lo mismo que los PS/2. |
 | `usbalm.cas` (Usbalm) | Las **memorias USB** (almacenamiento «solo a granel», órdenes SCSI): un disco más para `discos.cas`. |
+| `sdhci.cas` (Sdhci) | (SDHCI) Las **tarjetas SD** y el **eMMC** por una controladora **SDHCI** (la de las tabletas Bay Trail): la del PCI, la dada a mano o la de «modo ACPI»; SD y eMMC, ADMA2 o PIO (sección 7, «Las tarjetas SD y el eMMC»). |
+| `sdacpi.cas` (Sdacpi) | (SDHCI) Las controladoras SD/eMMC que solo dice ACPI (`ACPI.BIN`, la llamada 160), y lo aprendido de ellas en `\SDHCI.TXT`. |
 | `usbcal.cas` (Usbcal) | **El USB en caliente** (desde la 0.8, sección 11): la tarea que mira los puertos y atiende lo que se enchufa y se desenchufa en marcha, y «quitar con seguridad». |
 | `registro.cas` (Registro) | El **registro del arranque**: lo que el núcleo dice de los discos y del USB, apuntado para guardarlo en `ARRANQUE.TXT`. |
 | `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT; y **ponerlo en hora**. |
@@ -492,6 +494,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 175 | (PANEL, NTP) **la hora exacta**: EBX = 0, el reloj del PC en segundos desde el 1/1/2000; EBX = 1, ponerlo a ECX (como la 67, y HORARED.BIN sin atrasarlo más de 2 horas) | `hora_exacta`, `poner_hora_exacta` | el reloj, o 0 / `DENEGADO` |
 | 177 | (PUNTEROS) **el puntero del ratón**: EBX = 0, la forma sobre la ventana ECX (EDX); 1, la de una zona (EDX, una `Zona`); 2, leer los ajustes (a ECX); 3, cambiarlos (el Panel o el modo administrador); 4, pintar uno en un mapa del programa; 5, la forma de ahora (sección 14 septemvicies) | `puntero_de_ventana`, `zona_de_puntero`... (`ppuntero.cas`) | 0, `NO_VALE` o `DENEGADO` |
 | 158 | (PROTEGE; **solo los servicios**) el sello de la tarea EBX (los de `permisos.cas`; con el bit 31, es un servicio) | `sello_de_tarea` | el sello, o `NO_VALE` |
+| 160 | (SDHCI; **solo el servicio de ACPI**) una controladora SD/eMMC de «modo ACPI»: EBX, una `Ficha_sdhci` (108 octetos: la `struct pe_sdhci` de `acpi/pentium/pentium.h`); 0, ya están todas (se guardan `ARRANQUE.TXT` y `\SDHCI.TXT`) | — | 0 |
 | 100 | (WIFI) **pedir al servicio Wi-Fi** (`WIFI.BIN`), como la 90 (sección 14 octies) | — | la primera palabra de la respuesta (`SIN_WIFI` si no hay servicio) |
 
 Desde la 0.8.4 (PROTEGE), **lo que toca archivos del sistema pasa por
@@ -794,6 +797,139 @@ pasan de Unicode a la página 437 (lo que no está en ella sale como `_`). `DIR`
 enseña a la derecha, y un archivo o una carpeta se puede **abrir por su nombre
 largo** (sin distinguir mayúsculas) igual que por el corto. Al borrar o cambiar de
 nombre, los trozos se tachan con la entrada (que no queden sueltos).
+
+### Las tarjetas SD y el eMMC (SDHCI, 23/11; marcado «(SDHCI)»)
+
+Para las **tabletas Bay Trail** de Carlos (el **Acer One 10 S1002** y el
+**Medion S2217**, Atom Z3735F con UEFI de 32 bits): no tienen controladora
+SATA («ahci: en el PCI no hay controladoras de discos (clase 01)»); su disco
+es un **eMMC** y llevan una ranura **microSD**, las dos en controladoras
+**SDHCI** de Intel (clase 08 05): 8086:**0F14** (el eMMC 4.5), **0F50** (el
+eMMC 4.5.1: el del Medion, en 00:17.0), **0F16** (la SD: el Medion, en
+00:12.0) y 0F15 (la SDIO del Wi-Fi, que no se toca). Según la norma pública
+«SD Host Controller Simplified Specification 3.00», la «Physical Layer
+Simplified Specification» y JEDEC JESD84 (eMMC).
+
+**`sdhci.cas`** (el controlador):
+
+- **Dónde está la controladora**, de tres maneras: en el **PCI** (clase 08 05;
+  cada función, con las ranuras que dice su registro 40h; puesta en D0 si
+  estaba apagada, y atendiendo en la memoria con DMA); **dada a mano** en la
+  línea del cargador (**`sdhci=XXXXXXXX`**, en hexadecimal, varias con
+  comas); y en **«modo ACPI»** (abajo).
+- **La controladora**: reinicio entero (Software Reset), los avisos
+  apuntados pero sin interrupción (se mira el estado), la **tensión** más alta
+  que diga (3,3, 3,0 o 1,8 V) y el **reloj**: el divisor de **10 bits** de la
+  norma 3.00 (o las potencias de 2 de la 1.00 y la 2.00), a 400 kHz para
+  empezar.
+- **¿Hay tarjeta?** En los Bay Trail la ranura SD la detecta una patilla
+  aparte (GPIO) y la controladora puede decir que no hay nada: se le dice que
+  sí («Card Detect Test Level») y se prueba igual. Sin tarjeta, no contesta
+  y se dice en un momento (2,7 s el arranque entero en QEMU).
+- **SD**: CMD0, CMD8 (2.00 o más), ACMD41 con HCS (SDHC y SDXC, direcciones
+  por bloques), CMD2 (el CID: el nombre de la tarjeta), CMD3 (su RCA), CMD9 (el
+  CSD: lo que mide; las CSD 1.0 y 2.0), CMD7, el SCR (ACMD51), **ancho de 4
+  bits** (ACMD6) y **alta velocidad** (CMD6, 50 MHz) si la tarjeta y la
+  controladora la saben. Se dice si es SDSC, SDHC o **SDXC** (más de 32 GB:
+  la microSD de 256 GB del Acer).
+- **eMMC**: CMD1 con el **modo por sectores**, CMD2, CMD3 (RCA 1), CMD9,
+  CMD7 y el **EXT_CSD** (CMD8): lo que mide de verdad (SEC_COUNT), y si se ve
+  una partición de arranque, se pasa a la **«user area»** (PARTITION_CONFIG:
+  las de arranque no se usan); **alta velocidad** (52 MHz, HS_TIMING) y
+  **ancho de 8 bits** (o 4), **comprobado** leyendo otra vez el EXT_CSD y
+  comparándolo con el leído a 1 bit (como Linux): si no sale igual, con menos.
+  Las orden SWITCH (CMD6) se miran con CMD13 (SWITCH_ERROR).
+- **Leer y escribir**: CMD17/18 y CMD24/25 (con el CMD12 que manda la
+  controladora sola), hasta 64 sectores por orden, por **ADMA2 de 32 bits**
+  (una lista de trozos de 4 K) o, si la controladora no lo sabe (o con
+  `sdhcipio`), por **PIO** (el puerto de datos). Si el ADMA2 da error (en
+  modo ACPI, quizá sin permiso de mandar en el bus), se sigue por PIO solo.
+  Tras un error a mitad de unos datos, CMD12 (que la tarjeta vuelva a
+  «transferencia») y otra vez, hasta dos.
+- **Bay Trail**: como Linux (`byt_ocp_setting`), se quita el «OCP timeout»
+  del puerto SCC del IOSF (por el MCR/MDR del puente 00:00.0, si es el
+  8086:0F00), que corta las órdenes largas del eMMC (`sdhcisinocp`: no).
+- **En la tabla de discos** (`discos.cas`) son dos clases nuevas, **`DE_SD`**
+  («SD») y **`DE_EMMC`** («eMMC»), de las de dentro (como IDE y SATA): sus
+  letras, `C:`, `D:`...; de fábrica de solo lectura, y con `escritura` (o
+  `instalar`) se escribe. Sus particiones, como las de cualquier disco: el
+  MBR o la **GPT** (la de un eMMC con Windows: se monta su FAT32, la
+  partición EFI; las NTFS no).
+
+Lo que dice al arrancar (y queda en `ARRANQUE.TXT`; la orden `sdhci` de la
+consola del núcleo lo repite):
+
+```
+sdhci: en el PCI, 00:03.0: 1B36:0007, clase 080501
+sdhci: controladora en FEBF1000 (PCI), versión 2.00, CAP 057834B4 00000000, reloj de 52 MHz, ADMA2; estado 01FF0000
+sdhci: SCR 02 25 00 00 (la norma SD 2)
+sdhci: tarjeta SD QEMU! (SDSC), 64 MB; ancho 4 bits; 26 MHz; ADMA2
+disco 0: tarjeta SD QEMU! (SDSC), 64 MB, FAT32 (SD).
+```
+
+(En un eMMC: «sdhci: EXT_CSD: revisión ..., CARD_TYPE ..., PARTITION_CONFIG
+..., SEC_COUNT ...» y «sdhci: eMMC NOMBRE, 29824 MB; ancho 8 bits; 52 MHz;
+ADMA2».) En la línea del cargador: `sinsdhci` (no se mira), `sdhcipio`,
+`sdhcilento` (sin alta velocidad), `sdhci1bit`, `sdhcisinpci` (solo las de
+ACPI o las dadas a mano: así se prueba el modo ACPI en QEMU) y `sdhciolvida`
+(sin lo aprendido).
+
+**El «modo ACPI».** En muchos Bay Trail el firmware esconde las
+controladoras del PCI y solo las dice ACPI: los dispositivos **80860F14**
+(por su _UID: 1 el eMMC, 2 la SDIO, 3 la SD), **80860F16** (la SD),
+**INT33BB** (2 la SDIO, 3 la SD), 80865ACC/80865ACA (Cherry Trail) y
+**PNP0D40**, con un _CRS que da la dirección de sus registros (Memory32Fixed)
+y su IRQ. Eso solo lo sabe leer **ACPI.BIN** (`acpi/pentium/sdhci.c`, como
+Linux en `sdhci-acpi.c`): los busca, ejecuta su `_PS0` (encendida) y se los
+da al núcleo con la **llamada 160**, una ficha cada uno y una vacía al final
+(`ACPI.TXT`: «ACPI: SDHCI: \_SB_.SDHA 80860F14 _UID 1 (eMMC), _STA Fh: memoria
+en ...h (4096 octetos), IRQ 45, _PS0 hecho»). El núcleo (`sdacpi.cas`)
+arranca cada una (la SDIO, no), sus tarjetas pasan a ser discos nuevos, con
+su letra (Mi equipo se pone al día solo), y guarda otra vez `ARRANQUE.TXT`
+con ello. Con `instalar`, sin servicio de ACPI, no se verían; y el Acer One
+10 se congela al poco con ACPI.BIN. Por eso **se aprende** (Carlos, 13/11:
+lo que el sistema ve, lo guarda y lo usa solo): lo que dice ACPI queda en
+**`\SDHCI.TXT`** de la unidad del sistema (la memoria USB), con el equipo (el
+puente 00:00.0 y su subsistema), y en el arranque siguiente, **en ese mismo
+equipo**, el núcleo usa esas direcciones desde el principio, con ACPI.BIN o
+sin él (`sinacpi`, `instalar`). En otro equipo no se usa («es de otro
+equipo»): no se tocan direcciones que allí serán otra cosa.
+
+**INSTALAR** ofrece las tarjetas SD y el eMMC como cualquier disco de dentro,
+con lo que son debajo de su nombre: «(tarjeta SD: se puede instalar aquí sin
+tocar el eMMC)» y, en amarillo, «(eMMC: el disco de dentro de la tableta;
+suele llevar Windows)». Si hay una SD, **es la elegida de entrada**. Elegir el
+eMMC pide antes una **confirmación aparte** (en rojo: «ha elegido el eMMC,
+donde suele estar Windows... para no tocar Windows, vuelva con ESC y elija la
+tarjeta SD»; una S), y borrarlo, además, las dos de siempre (la S y la
+palabra BORRAR), con el aviso de que Windows deja de arrancar.
+
+**Probado** (parte 53, `SOLO=sdhci`, `pruebas_sdhci.sh`; la `sdhci-pci` de
+QEMU con su `sd-card`): leer y escribir por ADMA2 (el intérprete crea, copia y
+borra; fsck.fat y mtools lo ven bien), una SDHC de 4 GB con GPT por PIO y con
+la norma 3.00, la ranura vacía, sin permiso (la imagen, idéntica), el modo
+ACPI con una SSDT de prueba (`tests/acpi/hazsdhci.py`: una 80860F16 con su
+_CRS hecho en un método, como las de verdad, y una SDIO INT33BB que no se
+toca), la dada a mano, la aprendida (y no en otro equipo) e INSTALAR en la
+tarjeta SD con un disco SATA al lado (que no se toca).
+
+**Lo que no se ha podido probar aquí**: el **eMMC** (`-device emmc` es de
+QEMU 9.2; en el VPS está la 8.2), las controladoras de **Intel** (Bay Trail:
+la patilla de la tarjeta, la tensión de 1,8 V del eMMC, el OCP) y el **modo
+ACPI de verdad** (con las DSDT de Intel, que rellenan el _CRS de la GNVS):
+eso, en el Acer y en el Medion (memoria de prueba en
+`Pruebas/Pendientes/Acer-One-10/eMMC-y-SD/`).
+
+**El arranque por UEFI de lo instalado.** Las tabletas Bay Trail no tienen
+BIOS (ni CSM): lo instalado en la tarjeta SD tiene que arrancar por UEFI.
+Desde aquí, **INSTALAR pone también el arranque por UEFI** (sección 12, «El
+arranque por UEFI del disco instalado»).
+
+**Lo que falta:** la tarjeta que se saca y se mete en marcha (se mira al
+arrancar), UHS-I (1,8 V: 104 MHz) y HS200 en el eMMC, las interrupciones
+(se mira el estado), y saber si el firmware del Acer arranca de la microSD
+(muchos Bay Trail sí; si no, se arranca de la memoria USB y el sistema
+está en la SD).
 
 ### Los CD y los DVD, y las imágenes de disco (21/11)
 
@@ -2911,12 +3047,11 @@ RSDP). GRUB sale de los servicios de arranque del firmware antes de entrar.
 
 **Lo que no se ha hecho:**
 
-- **El disco instalado arranca solo por la BIOS.** INSTALAR se puede lanzar
-  arrancado por UEFI (su pantalla azul se pinta en la del firmware), pero lo
-  que pone en el disco es el GRUB de la BIOS (MBR + hueco); la entrada del menú
-  lo avisa antes. Para UEFI haría falta una partición EFI (o `\EFI\BOOT` en la
-  FAT32), el GRUB EFI que busque `\HISPA\GRUB.CFG` y un `GRUB.CFG` con las dos
-  maneras, y tocar lo que lo cambia (el asistente, PAQUETES, ACTUALIZ).
+- ~~El disco instalado arranca solo por la BIOS.~~ Desde la rama
+  `pentium-sdhci` (23/11), INSTALAR pone también el arranque por UEFI
+  (sección 12); y la entrada de «el núcleo de antes» que añade PAQUETES al
+  cambiar el núcleo sale también de las dos maneras si el `GRUB.CFG` ya las
+  tiene.
 - No firmado (sin shim): hay que apagar el Secure Boot.
 
 **Probado** (parte 48, `SOLO=uefi`, `pruebas_uefi.sh`, 77 bien): con OVMF de 64 bits
@@ -3064,6 +3199,25 @@ la lee (sección 10, «La medida de la pantalla»).
 
 **Sin GRUB**, otro camino para más adelante: un cargador propio (MBR y sector de
 arranque de la partición) que lea el núcleo de la FAT32 y pida el modo a la VBE.
+
+### El arranque por UEFI del disco instalado (SDHCI, 23/11)
+
+Para las tabletas Bay Trail (sin BIOS), que llevan lo instalado en la tarjeta
+SD. `usb.sh` y `cd.sh` (`instala_efi`, en `uefi.sh`) hacen para INSTALAR otros
+dos GRUB EFI, **`BOOTIA32.EFI`** y **`BOOTX64.EFI`** (en `\INSTALA\EFI` de la
+memoria), que llevan escrito dentro (`grub-mkimage -c`) «`configfile
+/HISPA/GRUB.CFG`»: el menú del disco, el mismo que usa el GRUB de la BIOS.
+Van entre lo que se instala, y `CARPETAS.TXT` los manda a **`\EFI\BOOT`**
+(INSTALAR sabe ahora de carpetas de dos niveles fuera de `\HISPA`: `\EFI` y,
+dentro, `BOOT`): ahí los busca el firmware en cualquier partición FAT (la
+nuestra es de la clase 0C, en la tabla del MBR). Y si vienen, INSTALAR
+escribe `GRUB.CFG` con las entradas **de las dos maneras**: con
+`$grub_platform` = `efi`, `multiboot2` y `module2` (y la pantalla del
+firmware, GOP); si no, `multiboot` y `module`, como siempre. La línea `set
+modo=` (la del asistente) y lo de `PANTALLA.ENV` valen para las dos. La
+pantalla «Todo listo» lo dice: «(arranca por la BIOS y por UEFI: \EFI\BOOT)».
+Probado (parte 53): instalado en la tarjeta SD y arrancado por **UEFI de 32
+bits** (OVMF ia32, como el Acer One 10) hasta el escritorio.
 
 ### El núcleo, instalado
 
