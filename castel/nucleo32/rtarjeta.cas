@@ -8,6 +8,8 @@
 ;      VirtualBox; y la 82574L, «e1000e», con los mismos descriptores)
 ;    - Realtek RTL8139 (la de QEMU con «-device rtl8139»)
 ;    - Marvell Yukon 2 «Optima» 88E8059 (la del HP Mini 5103): ryukon.cas
+;    - (RTL8168) Realtek RTL8111/8168 y su familia (8101/8102/8105/8106, 8169,
+;      8411, 8117: la del ASUS GL553VD y la del Toshiba NB250): rrtl.cas
 ;  Cada una con sus anillos de descriptores y sus búferes en memoria física
 ;  seguida (la llamada 94), los registros a la vista (la 95) o por los
 ;  puertos, y su interrupción (la 98: si llega, despierta al servicio).
@@ -15,13 +17,14 @@
 ; =============================================================================
 módulo Rtarjeta
 
-    importar Rbase, Ryukon, Rwifi, Mem32, Textos32, Formato, Llamadas
+    importar Rbase, Ryukon, Rrtl, Rwifi, Mem32, Textos32, Formato, Llamadas
 
     público constante T_NINGUNA = 0
     público constante T_E1000 = 1
     público constante T_RTL8139 = 2
     público constante T_YUKON = 3
     público constante T_WIFI = 4                ; (WIFI) el servicio Wi-Fi (WIFI.BIN): rwifi.cas
+    público constante T_RTL8168 = 5             ; (RTL8168) rrtl.cas
     público constante MAX_TRAMA = 1518
 
     público variable tarjeta: nat32
@@ -356,6 +359,10 @@ módulo Rtarjeta
                     devolver T_E1000
             fin
         fin
+        ; (RTL8168) con «RealtekEnsayo=SI» (las pruebas), la RTL8139 de QEMU, en modo C+
+        si v = 0x10EC y d = 0x8139 y Rwifi.ensayo_realtek entonces devolver T_RTL8168 fin
+        si v = 0x10EC y (d = 0x8168 o d = 0x8169 o d = 0x8136 o d = 0x8167 o d = 0x8161 o d = 0x2502 o d = 0x2600) entonces devolver T_RTL8168 fin
+        si v = 0x1186 y d = 0x4300 entonces devolver T_RTL8168 fin      ; (D-Link DGE-528T)
         si v = 0x10EC y (d = 0x8139 o d = 0x8138) entonces devolver T_RTL8139 fin
         si v = 0x1186 y d = 0x1300 entonces devolver T_RTL8139 fin      ; (D-Link DFE-538TX)
         si v = 0x11AB y (d = 0x4381 o d = 0x4382) entonces devolver T_YUKON fin
@@ -429,6 +436,10 @@ módulo Rtarjeta
                                 copiar(nombre_tarjeta, "Marvell Yukon 88E8059")
                                 si id >> 16 = 0x4382 entonces copiar(nombre_tarjeta, "Marvell Yukon 88E8079") fin
                                 ok := yk_iniciar(a, mac)
+                            caso T_RTL8168:                 ; (RTL8168)
+                                ok := rtl_iniciar(a, mac, Rwifi.ensayo_realtek, Rwifi.puertos_realtek)
+                                copiar(nombre_tarjeta, "Realtek ")
+                                concatenar(nombre_tarjeta, Rrtl.familia)
                         fin
                         si ok entonces
                             tarjeta := c
@@ -461,6 +472,7 @@ módulo Rtarjeta
             caso T_E1000: ok := e_enviar(p, n)
             caso T_RTL8139: ok := r_enviar(p, n)
             caso T_YUKON: ok := yk_enviar(p, n)
+            caso T_RTL8168: ok := rtl_enviar(p, n)      ; (RTL8168)
             caso T_WIFI: ok := Rwifi.enviar(p, n)       ; (WIFI)
         fin
         si ok entonces enviadas := enviadas + 1 fin
@@ -482,6 +494,7 @@ módulo Rtarjeta
                 caso T_E1000: n := e_recibir(destino)
                 caso T_RTL8139: n := r_recibir(destino)
                 caso T_YUKON: n := yk_recibir(destino)
+                caso T_RTL8168: n := rtl_recibir(destino)
             fin
             si n <> 0xFFFFFFFF entonces romper fin
         fin
@@ -511,6 +524,7 @@ módulo Rtarjeta
             caso T_E1000: e_lee(E_ICR)
             caso T_RTL8139: sale16(r_io + R_ISR, entra16(r_io + R_ISR))
             caso T_YUKON: yk_atender()
+            caso T_RTL8168: rtl_atender()
         fin
     fin
 
@@ -525,6 +539,7 @@ módulo Rtarjeta
             caso T_E1000: devolver e_lee(E_STATUS) yb 2 <> 0
             caso T_RTL8139: devolver entra8(r_io + R_MSR) yb 4 = 0
             caso T_YUKON: devolver yk_enlace()
+            caso T_RTL8168: devolver rtl_enlace()
         fin
         devolver falso
     fin
@@ -542,6 +557,7 @@ módulo Rtarjeta
                 si entra8(r_io + R_MSR) yb 8 <> 0 entonces devolver 10 fin
                 devolver 100
             caso T_YUKON: devolver yk_velocidad()
+            caso T_RTL8168: devolver rtl_velocidad()
             caso T_WIFI: devolver 54                    ; (WIFI) 802.11g
         fin
         devolver 0
@@ -582,6 +598,7 @@ módulo Rtarjeta
                 sale16(r_io + R_IMR, 0)
                 sale8(r_io + R_CR, 0)
             caso T_YUKON: yk_parar()
+            caso T_RTL8168: rtl_parar()
         fin
         pon_irq(0)
         tarjeta := T_NINGUNA

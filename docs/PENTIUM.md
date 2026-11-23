@@ -3577,6 +3577,7 @@ núcleo) y un fallo de la red acaba con el servicio, no con el sistema.
      rpila.cas   Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS
      rtarjeta.cas  las tarjetas (e1000, RTL8139) y lo común
      ryukon.cas  la Marvell Yukon 88E8059 (HP Mini 5103)
+     rrtl.cas    la Realtek RTL8111/8168 (ASUS GL553VD, Toshiba NB250)
      rbase.cas   puertos, PCI, el registro, orden de red, sumas
         │  puertos de E/S (IOPL 3), registros (llamada 95), DMA (94), IRQ (98)
         ▼
@@ -3622,6 +3623,7 @@ no hay tarjeta, sigue en marcha para contestarlo (y no se relanza).
 | Intel PRO/1000 (la familia 8254x, «e1000»: la 82540EM de QEMU y VirtualBox; y la 82574L) | `8086:100E` y otras 30 | registros en memoria (BAR0, 128 K); 32 descriptores de recepción con búferes de 2 K y 8 de envío; la MAC de `RAL`/`RAH` (o de la EEPROM). **Probada en QEMU.** |
 | Realtek RTL8139 (y la D-Link DFE-538TX) | `10EC:8139`, `1186:1300` | por los puertos; anillo de recepción de 8 K (con WRAP) y cuatro búferes de envío. **Probada en QEMU.** |
 | Marvell Yukon 2 «Optima» 88E8059 (la del HP Mini 5103; y la 88E8079) | `11AB:4381`, `11AB:4382` | pasada de la de Hispa-DOS (`drivers/hspred.asm`, docs/RED.md «Marvell Yukon 88E8059»): el mismo orden de registros y los mismos valores, por memoria; tres anillos (estado, recepción, envío) en páginas propias. **Sin probar en el equipo**: QEMU no la emula (y la de Hispa-DOS tampoco se ha probado aún allí). Cada paso de su puesta en marcha se apunta. |
+| Realtek RTL8111/8168 y su familia, «r8169» (la RTL8111H del ASUS GL553VD, 10EC:8168 rev. 15h; la RTL810xE del Toshiba NB250, 10EC:8136; 8169, 8101/8102/8105/8106, 8411, 8117; y la D-Link DGE-528T) | `10EC:8168`, `8169`, `8136`, `8167`, `8161`, `2502`, `2600`; `1186:4300` | `rrtl.cas` (23/11, marcado «(RTL8168)»): pasada de la de Hispa-DOS (`r68_*` de `drivers/hspred.asm`, la que va en el Toshiba) con lo que docs/RED.md, «RTL8168: lo que falta para las revisiones modernas», dice que hace r8169 en las 8111E-VL/F/G/H/EP. Registros por la memoria (el BAR de memoria por debajo de 4 GB: el BAR2 de 64 bits en la 8168) o por los puertos (BAR0; `RealtekPuertos=SI` en `RED.INI` lo obliga); 16 descriptores de recepción con búferes de 2 K y 8 de envío. **Probada en QEMU** contra la RTL8139 en modo C+ (abajo); **sin probar en la 8168 de verdad** (el ASUS). |
 
 Antes de nada, la tarjeta pasa a **D0** (el estado de energía de trabajar) por
 su capacidad PCI de gestión de energía, por si otro sistema la dejó dormida
@@ -3648,6 +3650,53 @@ cerrada, un octeto de vez en cuando para preguntar; lo desordenado se tira (se
 repite el ACK); FIN en los dos sentidos, RST a lo que no es de ninguna
 conexión. Sin escuchar en un puerto (de momento solo se conecta), sin
 reensamblar desordenado ni retransmisión rápida.
+
+### La RTL8111/8168 (rrtl.cas, 23/11)
+
+La tarjeta de cable del **ASUS GL553VD** de Carlos (una RTL8111H, `10EC:8168`
+revisión 15h, en 03:00.0, con el BAR2 de memoria de 64 bits) y la del
+**Toshiba NB250** (`10EC:8136`). Es la de Hispa-DOS pasada a Castel (la
+misma puesta en marcha, que en el Toshiba funciona desde el 15/11) y, solo
+para las familias modernas, lo que hace distinto `r8169` de Linux 6.6 (la
+tabla de docs/RED.md): nada copiado, los números de los registros escritos
+de nuevo.
+
+- **La familia**, por el «XID» (bits 20-31 de `TxConfig` sin el 4 y el 5, la
+  tabla de `HSPRED /INFO`, en el orden en que la mira r8169), en tres grupos:
+  **las de antes** (8169, 810x, 8168B/C/D/DP/E): exactamente lo de Hispa-DOS;
+  **8168E-VL/F y 8411**: además `TXCFG_AUTO_FIFO` (bit 7 de `TxConfig`),
+  `MaxTxPacketSize` 27h, `RxConfig` C70Eh, sin ASPM ni CLKREQ (`Config2`
+  bit 7, `Config5` bit 0), `IntrMitigate` a cero y el PLL encendido (`PMCH`);
+  **8168G/GU/EP/H/M, 8117 y 8411B** (la del ASUS): además `RX_EARLY_OFF`
+  (`RxConfig` CF0Eh) y, antes del reinicio, lo de `rtl_hw_init_8168g`: la
+  puerta de recepción cerrada (`MISC` bit 19, `RXDV_GATED_EN`), esperar a que
+  se vacíen los FIFO, `NOW_IS_OOB` (`MCU` bit 7) quitado y el FIFO
+  compartido rehecho por los registros OCP del MAC (E8DEh, esperando el bit
+  13 de E00Eh); la puerta se **abre** al arrancar (si se queda cerrada no
+  llega nada). El PHY se lee por OCP (`GPHY_OCP`, B8h, el MII en A400h) y no
+  por `PHYAR`: si otro sistema lo dejó apagado (BMCR bit 11) o sin negociar,
+  se enciende y negocia (BMCR 1200h).
+- Todo lo que hace lo **apunta** (`IPCONFIG /TODO`, y el puerto serie):
+  `realtek: revisión PCI 15, TxConfig ..., XID 541: RTL8168H/8111H`, si la
+  encontró en `NOW_IS_OOB`, si el PLL o el PHY estaban apagados, el
+  `PHYstatus` cada vez que cambia y si la tarjeta no suelta un descriptor de
+  envío. Con eso se sabe qué ha pasado en el ASUS.
+- La interrupción, si su línea está entre la 3 y la 11 (con el APIC de los
+  equipos de ahora suele ser 16 o más: entonces se mira en cada vuelta).
+
+**Probarlo sin la tarjeta**: QEMU no emula la 8168, pero su RTL8139 tiene el
+**modo C+** (el de la RTL8139C+), con **los mismos descriptores** (OWN, EOR,
+FS, LS y el largo; la dirección en las palabras 2 y 3) y los mismos registros
+de los anillos (20h y E4h). Con **`RealtekEnsayo=SI`** en `RED.INI`, la
+RTL8139 de QEMU se lleva con este controlador: el aviso de envío va a D9h (en
+la 8168, 38h), se enciende el C+ en `CPlusCmd` y el enlace se mira en 58h.
+Así se prueban de verdad los anillos, el envío, la recepción, DHCP, PING y
+DESCARGAR (por la memoria y, con `RealtekPuertos=SI`, por los puertos): la
+parte 13 de `castel/pruebas.sh` (`SOLO=red`), con GRANDE.BIN y TROZOS.BIN
+(unas 400 tramas recibidas y 470 enviadas: muchas vueltas a los dos anillos,
+ninguna con error, lo bajado igual octeto a octeto). **Lo que solo se verá en
+el ASUS**: el XID y su grupo, el PHY por OCP, `RXDV_GATED_EN`, `NOW_IS_OOB`,
+el FIFO compartido, ASPM y la velocidad de 1000 Mbit/s.
 
 ### Los programas
 
@@ -3895,8 +3944,8 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
 puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez (con el Wi-Fi, una u otra: sección 14 octies); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
-hora por NTP (hecho: la 0.8.7, sección 14 quattuordecies); más tarjetas (la RTL8168 del Toshiba NB250,
-la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
+hora por NTP (hecho: la 0.8.7, sección 14 quattuordecies); más tarjetas (la PCnet, NE2000: Hispa-DOS ya las lleva; la RTL8168 ya está:
+«La RTL8111/8168», arriba). (El navegador, encima de esto, ya
 está: sección 14 ter.)
 (Las **actualizaciones** por la red ya van: sección 13.)
 

@@ -3226,6 +3226,34 @@ S=$R/rtl.txt
 mira "la Realtek RTL8139: IPCONFIG y DESCARGAR" "^  Tarjeta . . . . . . . : Realtek RTL8139 (10EC:8139, IRQ [0-9]*)$" "^  Enlace  . . . . . . . : sí, a 100 Mbit/s$" \
   "^  Dirección IP  . . . . : 10.0.2.15$" "^Hecho: GRANDE.BIN, 409600 octetos"
 if saca $R/r.img GRANDE.BIN $R/x.bin && cmp -s $R/x.bin $R/srv/grande.bin; then ok "con la RTL8139, lo descargado es igual octeto a octeto"; else ko "con la RTL8139, lo descargado no es igual"; fi
+# (RTL8168) el controlador de la RTL8111/8168 (rrtl.cas) contra la RTL8139 de
+# QEMU en modo C+ (los mismos descriptores y los mismos registros de los
+# anillos: RealtekEnsayo=SI en RED.INI): por la memoria (BAR1) y por los
+# puertos (RealtekPuertos=SI). Los 400 K de GRANDE.BIN dan muchas vueltas a
+# los dos anillos (16 de recepción, 8 de envío). Lo propio de la 8168 (el XID,
+# el PHY por OCP, RXDV, ASPM) solo se ve en el equipo (el ASUS GL553VD).
+for modo in memoria puertos; do
+  cp $R/d.img $R/k.img
+  if [ $modo = memoria ]; then printf 'RealtekEnsayo=SI\r\n' > $R/red.ini; else printf 'RealtekEnsayo=SI\r\nRealtekPuertos=SI\r\n' > $R/red.ini; fi
+  mcopy -o -i $R/k.img $R/red.ini ::RED.INI
+  ESCRIBE=1 DISCO=$R/k.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0 -device rtl8139,netdev=n0" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" \
+    "ping -n 4 10.0.2.2" ":pausa 4" "descargar $U/grande.bin" ":pausa 5" "descargar $U/trozos.bin" ":pausa 4" "ipconfig" "apagar" > $R/r68$modo.sal 2>&1
+  tr -d '\r' < $R/r68$modo.sal > $R/r68$modo.txt
+  S=$R/r68$modo.txt
+  if [ $modo = memoria ]; then m1="^red: realtek: registros en la memoria, [0-9A-F]* (BAR1)$"; else m1="^red: realtek: registros por los puertos, [0-9A-F]*$"; fi
+  mira "(RTL8168) la RTL8111/8168 (rrtl.cas) en ensayo, por $modo: la encuentra, se pone en marcha, DHCP, PING sin perder ninguno y DESCARGAR" \
+    "^red: RED.INI: RealtekEnsayo=SI: la RTL8139 de QEMU, con el controlador de la RTL8168 (modo C+)$" "$m1" \
+    "^red: realtek: revisión PCI 20, TxConfig [0-9A-F]*, XID [0-9A-F]*: RTL8139C+ en modo C+ (ENSAYO)$" "^red: realtek: en marcha (RxConfig 0000E70E, TxConfig [0-9A-F]*, CPlusCmd 0003)$" \
+    "^red: enlace: sí (100 Mbit/s)$" "^red: DHCP: IP 10.0.2.15, máscara 255.255.255.0, puerta 10.0.2.2, DNS 10.0.2.3$" \
+    "^  Tarjeta . . . . . . . : Realtek RTL8139C+ en modo C+ (ENSAYO) (10EC:8139, IRQ [0-9]*)$" "^  MAC . . . . . . . . . : 52:54:00:12:34:56$" \
+    "^    Paquetes: enviados = 4, recibidos = 4, perdidos = 0 (0% perdidos)$" "^Hecho: GRANDE.BIN, 409600 octetos" "^Hecho: TROZOS.BIN, 150001 octetos"
+  if grep -q "^  Tramas  . . . . . . . : [0-9]* recibidas, [0-9]* enviadas, 0 con error$" $S && [ "$(grep "^  Tramas" $S | tail -1 | sed 's/^.*: \([0-9]*\) recibidas.*$/\1/')" -gt 300 ]; then
+    ok "(RTL8168) por $modo: $(grep "^  Tramas" $S | tail -1 | sed 's/^  Tramas[ .]*: //') (los anillos, muchas vueltas)"
+  else ko "(RTL8168) por $modo: las cuentas de tramas no son las que deben:"; grep "^  Tramas" $S | sed 's/^/        /'; fi
+  iguales=1
+  for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin; do saca $R/k.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || iguales=0; done
+  if [ $iguales = 1 ]; then ok "(RTL8168) por $modo: lo descargado es igual octeto a octeto"; else ko "(RTL8168) por $modo: lo descargado no es igual"; fi
+done
 # (el DNS de QEMU le pregunta al de esta máquina: si esta no sale a la red, no se prueba)
 if getent hosts actualiza.hispados.es > /dev/null 2>&1; then
   mira "el DNS (el de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice; uno que sí, se resuelve" \

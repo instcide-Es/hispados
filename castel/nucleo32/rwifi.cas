@@ -18,6 +18,9 @@
 ;                      ABIERTA que se llama como la WPA2 (una falsa)
 ;    WifiSimulada=CHIP (las pruebas) WIFI.BIN aunque no haya tarjeta en el PCI
 ;                      (es WIFISIM.BIN, con el modelo de la tarjeta dentro)
+;    RealtekEnsayo=SI  (las pruebas; RTL8168) la RTL8139 de QEMU, en modo C+, con
+;                      el controlador de la RTL8168 (rrtl.cas)
+;    RealtekPuertos=SI (RTL8168) los registros de la Realtek, por los puertos
 ;  Lo cambian Configuración (el escritorio: un aviso del núcleo) y la
 ;  ventana del Wi-Fi (REDWIFI.BIN: la orden O_WIFI_PREFERIR); se guarda aquí.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -44,6 +47,10 @@ módulo Rwifi
     variable simulada: bool
     variable chip: bool                         ; (WifiSimulada=CHIP)
     variable gemela: bool                       ; (WifiSimulada=GEMELA)
+    ; (RTL8168) RealtekEnsayo=SI (las pruebas: la RTL8139 de QEMU, en modo
+    ; C+, con el controlador de la 8168) y RealtekPuertos=SI (sus registros,
+    ; por los puertos aunque estén en la memoria): rtarjeta.cas y rrtl.cas
+    público variable ensayo_realtek, puertos_realtek: bool
     variable lanzado: bool
     variable hay_tarjeta: bool                  ; una de las que lleva WIFI.BIN, en el PCI
     variable cola: arreglo [COLA] de arreglo [TRAMA] de byte
@@ -74,7 +81,10 @@ módulo Rwifi
                         si fu = 0 entonces romper fin
                         seguir
                     fin
-                    si de_wifi(id) entonces
+                    ; (INTEL) las Wi-Fi de Intel: todas son de la clase 0280h (red,
+                    ; otra); WIFI.BIN dice cuáles sabe llevar (radio_iwl.c) y, de
+                    ; las demás, lo que son en WIFI.LOG
+                    si de_wifi(id) o (id yb 0xFFFF = 0x8086 y (pci_leer(a, 8) >> 16) = 0x0280) entonces
                         apunta4("Wi-Fi: tarjeta %04X:%04X en el bus PCI %02X:%02X", id yb 0xFFFF, id >> 16, bus, ap)
                         devolver cierto
                     fin
@@ -205,6 +215,17 @@ módulo Rwifi
             chip := empieza_por(v, "CHIP")
             gemela := empieza_por(v, "GEMELA")
             si gemela entonces simulada := cierto fin
+        fin
+        ensayo_realtek := falso
+        puertos_realtek := falso
+        si valor_de("RealtekEnsayo", v, 16) entonces
+            a_mayúsculas(v)
+            ensayo_realtek := empieza_por(v, "SI") o empieza_por(v, "1")
+            si ensayo_realtek entonces apunta("RED.INI: RealtekEnsayo=SI: la RTL8139 de QEMU, con el controlador de la RTL8168 (modo C+)") fin
+        fin
+        si valor_de("RealtekPuertos", v, 16) entonces
+            a_mayúsculas(v)
+            puertos_realtek := empieza_por(v, "SI") o empieza_por(v, "1")
         fin
         hay_tarjeta := busca_tarjeta()
         si preferir = PREFIERE_CABLE entonces

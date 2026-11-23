@@ -1,0 +1,509 @@
+; =============================================================================
+;  rrtl.cas - la Realtek RTL8111/8168 (y su familia: 8101/8102/8105/8106,
+;  8169, 8411, 8117: el «r8169» de Linux) para el servicio de red de
+;  Hispa-Pentium (RED.BIN, rtarjeta.cas). Es la tarjeta de cable del ASUS
+;  GL553VD (10EC:8168, revisión 15h: una RTL8111H) y del Toshiba NB250
+;  (10EC:8136).
+;
+;  Pasada de la de Hispa-DOS (drivers/hspred.asm, r68_*: la que va en el
+;  Toshiba desde el 15/11/2026; los mismos registros y valores) y con lo que
+;  docs/RED.md, «RTL8168: lo que falta para las revisiones modernas», dice que
+;  hace distinto el controlador r8169 de Linux en las 8111E-VL/F/G/H/EP: aquí
+;  sí está, pero SOLO para esas familias (las que reconoce por el XID de
+;  TxConfig); la 810x del Toshiba y las viejas siguen exactamente el camino
+;  de Hispa-DOS, que funciona. Nada de r8169 está copiado: son los números de
+;  los registros y lo que hay que hacer con ellos, escrito aquí de nuevo.
+;
+;  Registros por la memoria (el BAR de memoria que haya por debajo de los
+;  4 GB: el BAR2 de 64 bits en la 8168) o, si no hay, por los puertos (el
+;  BAR0, como Hispa-DOS; «RealtekPuertos=SI» en RED.INI lo obliga). Dos
+;  anillos de descriptores de 16 octetos (OWN, EOR, FS, LS y el largo; la
+;  dirección del búfer en las palabras 2 y 3), en una página: 16 de
+;  recepción con búferes de 2 K y 8 de envío, también de 2 K.
+;
+;  QEMU no emula la 8168, pero su RTL8139 tiene el «modo C+» (el de la
+;  RTL8139C+), que usa los mismos descriptores y los mismos registros de los
+;  anillos (20h y E4h): con «RealtekEnsayo=SI» en RED.INI, la RTL8139 de QEMU
+;  se lleva con este controlador (ENSAYO: el aviso de envío va en D9h en vez
+;  de 38h, se enciende el C+ en E0h y el enlace se mira en 58h). Así se
+;  prueban de verdad los anillos, el envío, la recepción, DHCP y PING; lo que
+;  es solo de la 8168 (el XID, el PHY por OCP, RXDV, ASPM) se ve en el ASUS.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rrtl
+
+    importar Rbase, Mem32, Textos32, Llamadas
+
+    ; los grupos (lo que se hace distinto en cada uno)
+    constante G_VIEJA = 0                       ; 8169, 810x, 8168B/C/D/DP/E: lo de Hispa-DOS tal cual
+    constante G_EVL = 1                         ; 8168E-VL y F (y la 8411): TXCFG_AUTO_FIFO, EarlySize, RxConfig C a F, sin ASPM
+    constante G_G = 2                           ; 8168G, GU, EP, H, 8117, 8411B: además RX_EARLY_OFF, RXDV, OCP, el PHY por OCP
+
+    ; registros (los nombres de la hoja de datos de la familia)
+    constante R_IDR0 = 0x00                     ; la MAC
+    constante R_MAR0 = 0x08                     ; el filtro de multidifusión (8 octetos)
+    constante R_TNPDS = 0x20                    ; el anillo de envío (normal)
+    constante R_CR = 0x37                       ; ChipCmd: 10h reinicio, 08h RE, 04h TE
+    constante R_TPPOLL = 0x38                   ; TxPoll: 40h, hay que enviar (8168)
+    constante R_IMR = 0x3C
+    constante R_ISR = 0x3E
+    constante R_TCR = 0x40                      ; TxConfig (y el XID, arriba)
+    constante R_RCR = 0x44                      ; RxConfig
+    constante R_9346 = 0x50                     ; Cfg9346: C0h desbloquea
+    constante R_CFG2 = 0x53
+    constante R_CFG5 = 0x56
+    constante R_MSR8139 = 0x58                  ; (ENSAYO) el estado del enlace de la 8139
+    constante R_PHYAR = 0x60                    ; el PHY (las de antes de la G)
+    constante R_PHYST = 0x6C                    ; PHYstatus
+    constante R_PMCH = 0x6F
+    constante R_MACOCP = 0xB0                   ; los registros OCP del MAC (G en adelante)
+    constante R_GPHYOCP = 0xB8                  ; los del PHY por OCP (G en adelante)
+    constante R_MCU = 0xD3
+    constante R_TPPOLL8139 = 0xD9               ; (ENSAYO) TxPoll de la 8139C+
+    constante R_RMS = 0xDA                      ; RxMaxSize
+    constante R_CPCR = 0xE0                     ; CPlusCmd
+    constante R_IMIT = 0xE2                     ; IntrMitigate
+    constante R_RDSAR = 0xE4                    ; el anillo de recepción
+    constante R_MTPS = 0xEC                     ; MaxTxPacketSize (en 128 octetos)
+    constante R_MISC = 0xF0
+
+    constante NRX = 16
+    constante NTX = 8
+    constante BUF = 2048
+    constante RXTAM = 1536                      ; lo que se le dice a la tarjeta de cada búfer
+    constante OWN = 0x80000000
+    constante EOR = 0x40000000
+    constante FS = 0x20000000
+    constante LS = 0x10000000
+
+    variable io, base: nat32                    ; los puertos, o dónde se ven los registros (uno de los dos)
+    variable ensayo: bool
+    variable grupo, xid: nat32
+    variable desc: puntero a byte               ; recepción en 0, envío en 2 K
+    variable desc_f: nat32
+    variable rx: puntero a byte
+    variable rx_f: nat32
+    variable tx: puntero a byte
+    variable tx_f: nat32
+    variable rx_i, tx_i: nat32
+    variable lnk_visto: nat32
+    variable phys_visto: nat32
+    variable malas, sin_envío: nat32
+    público variable familia: arreglo [40] de byte
+
+    ; ---- los registros, por donde vayan ----
+    función r8(d: nat32): nat32
+        variable p: puntero a byte
+        si base = 0 entonces devolver entra8(io + d) fin
+        p := puntero(base + d)
+        devolver valor(p)
+    fin
+    función r16(d: nat32): nat32
+        variable p: puntero a nat16
+        si base = 0 entonces devolver entra16(io + d) fin
+        p := puntero(base + d)
+        devolver valor(p)
+    fin
+    función r32(d: nat32): nat32
+        variable p: puntero a nat32
+        si base = 0 entonces devolver entra32(io + d) fin
+        p := puntero(base + d)
+        devolver valor(p)
+    fin
+    función w8(d: nat32, v: nat32)
+        variable p: puntero a byte
+        si base = 0 entonces
+            sale8(io + d, v)
+            devolver
+        fin
+        p := puntero(base + d)
+        valor(p) := byte(v)
+    fin
+    función w16(d: nat32, v: nat32)
+        variable p: puntero a nat16
+        si base = 0 entonces
+            sale16(io + d, v)
+            devolver
+        fin
+        p := puntero(base + d)
+        valor(p) := nat16(v)
+    fin
+    función w32(d: nat32, v: nat32)
+        variable p: puntero a nat32
+        si base = 0 entonces
+            sale32(io + d, v)
+            devolver
+        fin
+        p := puntero(base + d)
+        valor(p) := v
+    fin
+
+    ; ---- la familia, por el XID (TxConfig, bits 20 a 31 sin el 4 y el 5):
+    ;      la misma tabla que HSPRED /INFO (drivers/hspred.asm, r68_fam), en
+    ;      el orden en que la mira r8169 ----
+    función es(x: nat32, máscara: nat32, v: nat32): bool
+        devolver x yb máscara = v
+    fin
+
+    público función familia_de(x: nat32, ref g: nat32): puntero a byte
+        g := G_G
+        si es(x, 0x7CF, 0x6C0) entonces devolver "RTL8168M/8111M" fin
+        si es(x, 0x7CF, 0x541) entonces devolver "RTL8168H/8111H" fin
+        si es(x, 0x7C8, 0x548) entonces devolver "RTL8117" fin
+        si es(x, 0x7CF, 0x502) o es(x, 0x7CF, 0x501) o es(x, 0x7CF, 0x500) entonces devolver "RTL8168EP/8111EP" fin
+        si es(x, 0x7CF, 0x5C8) entonces devolver "RTL8411B" fin
+        si es(x, 0x7CF, 0x509) entonces devolver "RTL8168GU/8111GU" fin
+        si es(x, 0x7CF, 0x4C0) entonces devolver "RTL8168G/8111G" fin
+        g := G_EVL
+        si es(x, 0x7C8, 0x488) entonces devolver "RTL8411" fin
+        si es(x, 0x7C8, 0x480) entonces devolver "RTL8168F/8111F" fin
+        si es(x, 0x7C8, 0x2C8) entonces devolver "RTL8168E-VL/8111E-VL" fin
+        g := G_VIEJA
+        si es(x, 0x7C8, 0x2C0) entonces devolver "RTL8168E/8111E" fin
+        si es(x, 0x7C8, 0x288) entonces devolver "RTL8168DP/8111DP" fin
+        si es(x, 0x7C8, 0x280) entonces devolver "RTL8168D/8111D" fin
+        si es(x, 0x7C0, 0x3C0) entonces devolver "RTL8168C/8111C" fin
+        si es(x, 0x7C8, 0x380) o es(x, 0x7C8, 0x300) entonces devolver "RTL8168B/8111B" fin
+        si es(x, 0x7C8, 0x448) entonces devolver "RTL8106E" fin
+        si es(x, 0x7C8, 0x440) entonces devolver "RTL8402" fin
+        si es(x, 0x7C8, 0x408) entonces devolver "RTL8105E" fin
+        si es(x, 0x7C8, 0x348) o es(x, 0x7C8, 0x248) entonces devolver "RTL8102E/8103E" fin
+        si es(x, 0x7CF, 0x240) entonces devolver "RTL8401" fin
+        si es(x, 0x7C8, 0x340) entonces devolver "RTL8101E" fin
+        si es(x, 0xFC8, 0x980) o es(x, 0xFC8, 0x180) o es(x, 0xFC8, 0x100) o es(x, 0xFC8, 0x040) o es(x, 0xFC8, 0x008) entonces devolver "RTL8169/8110" fin
+        ; (una que no está en la tabla: si es de las 8168 nuevas, por su
+        ; número, se lleva como las G; si no, como las de antes)
+        si x >= 0x4C0 y x yb 0x00F <> 0x00F entonces
+            g := G_G
+            devolver "familia sin identificar (de las nuevas)"
+        fin
+        devolver "familia sin identificar"
+    fin
+
+    ; ---- los OCP (las G en adelante) ----
+    función ocp_lee(r: nat32): nat32
+        w32(R_MACOCP, r << 15)
+        devolver r32(R_MACOCP) yb 0xFFFF
+    fin
+    función ocp_pon(r: nat32, v: nat32)
+        w32(R_MACOCP, 0x80000000 ob (r << 15) ob (v yb 0xFFFF))
+    fin
+    ; el FIFO compartido, listo (el bit 13 del OCP E00Eh)
+    función espera_fifo(): bool
+        variable i: nat32
+        para i desde 1 hasta 420 hacer
+            si ocp_lee(0xE00E) yb 0x2000 <> 0 entonces devolver cierto fin
+            espera_us(100)
+        fin
+        devolver falso
+    fin
+
+    ; ---- el PHY: los registros MII de siempre (0: BMCR, 1: BMSR) ----
+    función phy_lee(r: nat32): nat32
+        variable i, v: nat32
+        si grupo = G_G entonces
+            w32(R_GPHYOCP, (0xA400 + r * 2) << 15)
+            para i desde 1 hasta 100 hacer
+                espera_us(25)
+                v := r32(R_GPHYOCP)
+                si v yb 0x80000000 <> 0 entonces devolver v yb 0xFFFF fin
+            fin
+            devolver 0xFFFF
+        fin
+        w32(R_PHYAR, (r yb 0x1F) << 16)
+        para i desde 1 hasta 100 hacer
+            espera_us(25)
+            v := r32(R_PHYAR)
+            si v yb 0x80000000 <> 0 entonces devolver v yb 0xFFFF fin
+        fin
+        devolver 0xFFFF
+    fin
+    función phy_pon(r: nat32, v: nat32)
+        variable i: nat32
+        si grupo = G_G entonces
+            w32(R_GPHYOCP, 0x80000000 ob ((0xA400 + r * 2) << 15) ob (v yb 0xFFFF))
+            para i desde 1 hasta 100 hacer
+                espera_us(25)
+                si r32(R_GPHYOCP) yb 0x80000000 = 0 entonces devolver fin
+            fin
+            devolver
+        fin
+        w32(R_PHYAR, 0x80000000 ob ((r yb 0x1F) << 16) ob (v yb 0xFFFF))
+        para i desde 1 hasta 100 hacer
+            espera_us(25)
+            si r32(R_PHYAR) yb 0x80000000 = 0 entonces devolver fin
+        fin
+    fin
+
+    ; ---- dónde están los registros ----
+    función elige_bar(a: nat32, puertos: bool): bool
+        variable i, b, alto: nat32
+        io := 0
+        base := 0
+        i := 0
+        mientras i < 6 hacer
+            b := pci_leer(a, 0x10 + i * 4)
+            si b yb 1 <> 0 entonces
+                si io = 0 y b yb 0xFFFC <> 0 entonces io := b yb 0xFFFC fin
+                i := i + 1
+            sino
+                alto := 0
+                si b yb 6 = 4 y i < 5 entonces alto := pci_leer(a, 0x14 + i * 4) fin
+                si base = 0 y alto = 0 y b yb 0xFFFFFFF0 <> 0 y no puertos entonces
+                    base := nat32(registros(b yb 0xFFFFFFF0, 0x1000))
+                    si base <> 0 entonces apunta4("realtek: registros en la memoria, %08X (BAR%u)", b yb 0xFFFFFFF0, i, 0, 0) fin
+                fin
+                si b yb 6 = 4 entonces i := i + 2 sino i := i + 1 fin
+            fin
+        fin
+        si base = 0 y io <> 0 entonces apunta4("realtek: registros por los puertos, %04X", io, 0, 0, 0) fin
+        devolver base <> 0 o io <> 0
+    fin
+
+    ; la pone en marcha: falso si no puede (lo dice en el registro)
+    ; ens: la RTL8139 de QEMU en modo C+ (las pruebas); puertos: no usar la memoria
+    público función rtl_iniciar(a: nat32, mac: puntero a byte, ens: bool, puertos: bool): bool
+        variable i, v, rev: nat32
+        variable d: puntero a nat32
+        variable n: puntero a byte
+        ensayo := ens
+        malas := 0
+        sin_envío := 0
+        lnk_visto := 0xFFFFFFFF
+        phys_visto := 0xFFFFFFFF
+        rev := pci_leer(a, 8) yb 0xFF
+        si no elige_bar(a, puertos) entonces
+            apunta("realtek: no tiene ni registros en la memoria ni puertos")
+            devolver falso
+        fin
+        si r32(R_TCR) = 0xFFFFFFFF entonces
+            apunta("realtek: no contesta (sus registros dan FF)")
+            devolver falso
+        fin
+        ; la familia
+        xid := (r32(R_TCR) >> 20) yb 0xFCF
+        si ensayo entonces
+            grupo := G_VIEJA
+            copiar(familia, "RTL8139C+ en modo C+ (ENSAYO)")
+        sino
+            n := familia_de(xid, grupo)
+            copiar_hasta(familia, n, 40)
+        fin
+        apunta4("realtek: revisión PCI %02X, TxConfig %08X, XID %03X: %s", rev, r32(R_TCR), xid, nat32(dirección(familia[0])))
+        si grupo = G_G entonces apunta("realtek: de la 8168G en adelante: RXDV, OCP y el PHY por OCP") fin
+        si grupo = G_EVL entonces apunta("realtek: 8168E-VL/F: TXCFG_AUTO_FIFO y EarlySize") fin
+        ; lo de la G en adelante antes del reinicio (rtl_hw_init_8168g de
+        ; r8169): cerrar la puerta de recepción, esperar a que se vacíen
+        ; los FIFO, parar, quitar NOW_IS_OOB y rehacer el FIFO compartido
+        si grupo = G_G entonces
+            w32(R_MISC, r32(R_MISC) ob 0x00080000)            ; RXDV_GATED_EN
+            para i desde 1 hasta 420 hacer
+                si r32(R_TCR) yb 0x800 <> 0 entonces romper fin   ; TXCFG_EMPTY
+                espera_us(100)
+            fin
+            para i desde 1 hasta 420 hacer
+                si r8(R_MCU) yb 0x30 = 0x30 entonces romper fin   ; RXTX_EMPTY
+                espera_us(100)
+            fin
+            w8(R_CR, r8(R_CR) yb 0xF3)
+            si r8(R_MCU) yb 0x80 <> 0 entonces apunta("realtek: estaba en NOW_IS_OOB (el firmware la llevaba): se quita") fin
+            w8(R_MCU, r8(R_MCU) yb 0x7F)
+            ocp_pon(0xE8DE, ocp_lee(0xE8DE) yb 0xBFFF)
+            si no espera_fifo() entonces apunta("realtek: (!) el FIFO compartido no dice que esté listo (1)") fin
+            ocp_pon(0xE8DE, ocp_lee(0xE8DE) ob 0x8000)
+            si no espera_fifo() entonces apunta("realtek: (!) el FIFO compartido no dice que esté listo (2)") fin
+        fin
+        ; reinicio
+        w8(R_CR, 0x10)
+        para i desde 1 hasta 1000 hacer
+            si r8(R_CR) yb 0x10 = 0 entonces romper fin
+            dormir(1)
+        fin
+        si r8(R_CR) yb 0x10 <> 0 entonces
+            apunta("realtek: no acaba de reiniciarse")
+            devolver falso
+        fin
+        para i desde 0 hasta 5 hacer mac[i] := byte(r8(R_IDR0 + i)) fin
+        ; la memoria
+        desc := memoria_dma(1, desc_f)
+        rx := memoria_dma(NRX * BUF div 4096, rx_f)
+        tx := memoria_dma(NTX * BUF div 4096, tx_f)
+        si desc = nulo o rx = nulo o tx = nulo entonces
+            apunta("realtek: no hay memoria para los anillos")
+            devolver falso
+        fin
+        para i desde 0 hasta NRX - 1 hacer
+            d := puntero(desc + i * 16)
+            d[1] := 0
+            d[2] := rx_f + i * BUF
+            d[3] := 0
+            v := OWN ob RXTAM
+            si i = NRX - 1 entonces v := v ob EOR fin
+            d[0] := v
+        fin
+        para i desde 0 hasta NTX - 1 hacer
+            d := puntero(desc + 2048 + i * 16)
+            d[0] := 0
+            si i = NTX - 1 entonces d[0] := EOR fin
+            d[1] := 0
+            d[2] := tx_f + i * BUF
+            d[3] := 0
+        fin
+        rx_i := 0
+        tx_i := 0
+        ; ---- la puesta en marcha (r68_start de Hispa-DOS, y lo de cada grupo) ----
+        w8(R_9346, 0xC0)
+        si grupo <> G_VIEJA entonces
+            ; sin ASPM ni CLKREQ (portátiles: cortes y latencia)
+            w8(R_CFG2, r8(R_CFG2) yb 0x7F)
+            w8(R_CFG5, r8(R_CFG5) yb 0xFE)
+            w16(R_IMIT, 0)
+            w16(R_CPCR, r16(R_CPCR) yb 0xFFBF)                 ; sin quitar las etiquetas VLAN
+            ; el PLL encendido
+            v := r8(R_PMCH)
+            si v yb 0x80 = 0 entonces
+                apunta4("realtek: el PLL estaba apagado (PMCH %02X): se enciende", v, 0, 0, 0)
+                si grupo = G_G entonces w8(R_PMCH, v ob 0xC0) sino w8(R_PMCH, v ob 0x80) fin
+            fin
+        fin
+        w16(R_RMS, RXTAM)
+        si grupo = G_VIEJA entonces w8(R_MTPS, 0x3F) sino w8(R_MTPS, 0x27) fin
+        w32(R_TNPDS, desc_f + 2048)
+        w32(R_TNPDS + 4, 0)
+        w32(R_RDSAR, desc_f)
+        w32(R_RDSAR + 4, 0)
+        si ensayo entonces w16(R_CPCR, r16(R_CPCR) ob 0x03) fin   ; (ENSAYO) C+: envío y recepción por los descriptores
+        si grupo = G_G entonces w32(R_MISC, r32(R_MISC) yb 0xFFF7FFFF) fin    ; la puerta de recepción, abierta
+        w8(R_CR, 0x0C)                                         ; RE y TE
+        ; TxConfig: el hueco entre tramas y el DMA (y AUTO_FIFO de la E-VL en adelante)
+        v := 0x03000700
+        si grupo <> G_VIEJA entonces v := v ob 0x80 fin
+        w32(R_TCR, v)
+        ; RxConfig: de difusión, multidifusión y a nosotros; el DMA, y el resto según el grupo
+        según nat16(grupo)
+            caso G_VIEJA: v := 0x0000E70E
+            caso G_EVL: v := 0x0000C70E
+            caso G_G: v := 0x0000CF0E
+        fin
+        w32(R_RCR, v)
+        w32(R_MAR0, 0xFFFFFFFF)
+        w32(R_MAR0 + 4, 0xFFFFFFFF)
+        w8(R_9346, 0)
+        w16(R_ISR, 0xFFFF)
+        w16(R_IMR, 0x0073)                                     ; ROK, RER, RDU, LinkChg, FOVW
+        ; el PHY: si otro sistema lo dejó apagado o sin negociar, encenderlo y negociar
+        si no ensayo entonces
+            v := phy_lee(0)
+            apunta4("realtek: PHY: BMCR %04X, BMSR %04X, PHYstatus %02X", v, phy_lee(1), r8(R_PHYST), 0)
+            si v <> 0xFFFF y (v yb 0x0800 <> 0 o v yb 0x1000 = 0) entonces
+                apunta("realtek: el PHY estaba apagado o sin negociación: se enciende y negocia")
+                phy_pon(0, 0x1200)
+            fin
+        fin
+        apunta4("realtek: en marcha (RxConfig %08X, TxConfig %08X, CPlusCmd %04X)", r32(R_RCR), r32(R_TCR), r16(R_CPCR), 0)
+        devolver cierto
+    fin
+
+    público función rtl_enviar(p: puntero a byte, n: nat32): bool
+        variable d: puntero a nat32
+        variable i, v: nat32
+        d := puntero(desc + 2048 + tx_i * 16)
+        i := 0
+        mientras d[0] yb OWN <> 0 hacer
+            i := i + 1
+            si i > 20000 entonces
+                sin_envío := sin_envío + 1
+                si sin_envío < 4 entonces apunta4("realtek: (!) la tarjeta no suelta el descriptor de envío %u (ISR %04X)", tx_i, r16(R_ISR), 0, 0) fin
+                devolver falso
+            fin
+            espera_us(5)
+        fin
+        copiar_memoria(tx + tx_i * BUF, p, n)
+        si n < 60 entonces
+            llenar(tx + tx_i * BUF + n, 60 - n, 0)
+            n := 60
+        fin
+        d[1] := 0
+        d[2] := tx_f + tx_i * BUF
+        d[3] := 0
+        v := OWN ob FS ob LS ob n
+        si tx_i = NTX - 1 entonces v := v ob EOR fin
+        d[0] := v
+        tx_i := (tx_i + 1) mod NTX
+        si ensayo entonces w8(R_TPPOLL8139, 0x40) sino w8(R_TPPOLL, 0x40) fin
+        devolver cierto
+    fin
+
+    ; la trama siguiente: su largo; 0 si no hay; 0xFFFFFFFF si había una mala
+    público función rtl_recibir(destino: puntero a byte): nat32
+        variable d: puntero a nat32
+        variable s, n, v: nat32
+        d := puntero(desc + rx_i * 16)
+        s := d[0]
+        si s yb OWN <> 0 entonces devolver 0 fin
+        n := 0xFFFFFFFF
+        si s yb (FS ob LS ob 0x00200000) <> (FS ob LS) entonces
+            malas := malas + 1                  ; partida en varios búferes, o con error (RES)
+        sino
+            v := (s yb 0x3FFF)
+            si v >= 18 y v <= 1522 entonces
+                v := v - 4                      ; sin el CRC
+                copiar_memoria(destino, rx + rx_i * BUF, v)
+                n := v
+            sino
+                malas := malas + 1
+            fin
+        fin
+        d[1] := 0
+        d[2] := rx_f + rx_i * BUF
+        v := OWN ob RXTAM
+        si rx_i = NRX - 1 entonces v := v ob EOR fin
+        d[0] := v
+        rx_i := (rx_i + 1) mod NRX
+        devolver n
+    fin
+
+    ; las causas de interrupción, vistas (así deja de pedirla)
+    público función rtl_atender()
+        variable v: nat32
+        v := r16(R_ISR)
+        si v = 0 o v = 0xFFFF entonces devolver fin
+        w16(R_ISR, v)
+        si v yb 0x10 <> 0 entonces
+            ; sin descriptores libres (RDU): que vuelva a mirar el anillo
+            si ensayo entonces devolver fin
+            w8(R_CR, 0x0C)
+        fin
+    fin
+
+    público función rtl_enlace(): bool
+        variable v: nat32
+        si ensayo entonces devolver r8(R_MSR8139) yb 4 = 0 fin
+        v := r8(R_PHYST)
+        si v <> phys_visto entonces
+            phys_visto := v
+            apunta4("realtek: PHYstatus %02X (enlace %u)", v, (v >> 1) yb 1, 0, 0)
+        fin
+        devolver v yb 2 <> 0
+    fin
+
+    público función rtl_velocidad(): nat32
+        variable v: nat32
+        si ensayo entonces devolver 100 fin
+        v := r8(R_PHYST)
+        si v yb 2 = 0 entonces devolver 0 fin
+        si v yb 0x10 <> 0 entonces devolver 1000 fin
+        si v yb 0x08 <> 0 entonces devolver 100 fin
+        si v yb 0x04 <> 0 entonces devolver 10 fin
+        devolver 0
+    fin
+
+    público función rtl_parar()
+        si base = 0 y io = 0 entonces devolver fin
+        w16(R_IMR, 0)
+        w8(R_CR, 0)
+        si grupo = G_G entonces w32(R_MISC, r32(R_MISC) ob 0x00080000) fin
+        w8(R_CR, 0x10)
+    fin
+
+fin Rrtl.
