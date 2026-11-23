@@ -102,6 +102,15 @@ Se puede volver a encender el Secure Boot cuando se quiera (para arrancar
 Windows, por ejemplo): a Windows no le pasa nada por apagarlo un rato, y
 con él encendido simplemente no arranca esta memoria.
 
+  SI POR UEFI SE QUEDA LA PANTALLA NEGRA (o no va el teclado o el ratón
+  táctil): apague (botón 5 s), arranque otra vez de la memoria y elija en el
+  menú «Diagnostico (UEFI)». Haga fotos con el móvil de lo que salga en la
+  pantalla y, al acabar, mándeme el archivo ARRANQUE.TXT de la memoria (con
+  «Enviar a Carlos» si llega a abrirse, o copiándolo desde otro PC): lo que
+  importa son las líneas que empiezan por «arranque:», «reloj:», «ps2:» y
+  «usb:» (las del código xHCI). Mientras tanto, por la BIOS de siempre
+  (Legacy/CSM) suele ir.
+
 3. QUÉ SE VE
 ------------
   Arriba: el procesador, su frecuencia y el modelo del portátil.

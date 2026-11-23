@@ -48,7 +48,7 @@ termo_qemu() {
   local img=$1 n=$2 seg=$3 cpu=$4 t=0 o w q; shift 4
   rm -f $Y/$n.mon
   # shellcheck disable=SC2086
-  qemu-system-x86_64 $cpu ${TQ_FIRM:-} ${TQ_RED:--nic none} -m 512 -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
+  ${TQ_QEMU:-qemu-system-x86_64} $cpu ${TQ_FIRM:-} ${TQ_RED:--nic none} -m 512 -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
     -acpitable file=$Y/termo.aml -device qemu-xhci -drive file=$img,format=raw,if=none,id=u -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
   q=$!
   QPID=$q
@@ -425,4 +425,12 @@ termo_uefi() {
   mira "por UEFI, la carga en los 2 procesadores (el trampolín en la memoria baja libre del mapa de UEFI) y la parada de seguridad" \
     "termo: suceso: la carga, en 2 procesadores (este y 1 más" "termo: fin de la carga a los [0-9]* s (PARADA DE SEGURIDAD)"
   if ! grep -q "excepción\|\*\*\*" $S; then ok "por UEFI, ni una excepción ni una queja del núcleo"; else ko "por UEFI, el núcleo se queja: $(grep "excepción\|\*\*\*" $S | head -n 2)"; fi
+  # y por UEFI de 32 bits (OVMF ia32, BOOTIA32.EFI: el Medion, el Acer One 10)
+  if [ -f $OV/OVMF32_CODE_4M.fd ] && mdir -i $Y/termo.img@@1M ::EFI/BOOT/BOOTIA32.EFI > /dev/null 2>&1; then
+    cp $OV/OVMF32_VARS_4M.fd $Y/vars32.fd
+    TQ_QEMU=qemu-system-i386 TQ_FIRM="-machine q35 -drive if=pflash,format=raw,readonly=on,file=$OV/OVMF32_CODE_4M.fd -drive if=pflash,format=raw,file=$Y/vars32.fd" \
+      termo_qemu $Y/termo.img t11 110 ""
+    mira "por UEFI de 32 bits (OVMF ia32, BOOTIA32.EFI): el Termómetro se abre solo y lee la zona de la SSDT de prueba" \
+      "escritorio: lanzo .TERMO.BIN" "termo: suceso: sensor «Zona ACPI ._TZ_.TZ01»: 45,0 °C (límite 100,0 °C)"
+  else echo "  (sin OVMF de 32 bits o sin BOOTIA32.EFI en la memoria: sin el Termómetro por UEFI de 32 bits)"; fi
 }
