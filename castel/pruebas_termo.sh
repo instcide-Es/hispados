@@ -220,7 +220,7 @@ else ko "el apagón: $(tail -n 2 $Y/fsck.txt | tr '\n' ' ')"; fi
 # 3. la vez siguiente
 local cpu="-cpu phenom"
 [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host"
-termo_qemu $Y/termo.img t3 50 "$cpu"
+termo_qemu $Y/termo.img t3 70 "$cpu"
 mira "al arrancar otra vez: «la última vez se apagó durante la prueba, a 80 °C»; el MSR que no está, recogido ($cpu)" \
   "termo: aviso: La última vez .*durante la PRUEBA DE ESFUERZO (calentando), a las [0-9:]*, con el más caliente a 80,0 °C" \
   "termo: MSR 19Ch sin sensor: "

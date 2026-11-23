@@ -1105,7 +1105,8 @@ static void mira_anterior(void)
 /* la pantalla (F12), en .BMP de 24 bits */
 static void captura_en(const char *nombre);
 static u8 *bmp_pend;		/* (PARPADEO/TERMO) la pantalla que se está guardando */
-static u32 bmp_total, bmp_hecho, bmp_m;
+static u32 bmp_total, bmp_hecho;
+static char bmp_ruta[120];
 
 /* cada pulso: otro trozo de la pantalla que se está guardando */
 static void bmp_trozo(void)
@@ -1114,13 +1115,14 @@ static void bmp_trozo(void)
 
 	if (!bmp_pend)
 		return;
+	/* (abriendo, añadiendo y cerrando cada trozo, como el .LOG: si se va la
+	 * luz a medias, la FAT queda sana y la imagen, cortada) */
 	k = bmp_total - bmp_hecho > 32768 ? 32768 : bmp_total - bmp_hecho;
-	if (sc(SC_ESCRIBIR_ARCHIVO, bmp_m, (u32)(bmp_pend + bmp_hecho), k) != k)
+	if (!escribe(bmp_ruta, bmp_pend + bmp_hecho, k, 0))
 		bmp_hecho = bmp_total;
 	else
 		bmp_hecho += k;
 	if (bmp_hecho >= bmp_total) {
-		sc(SC_CERRAR, bmp_m, 0, 0);
 		free(bmp_pend);
 		bmp_pend = 0;
 		snprintf(aviso_archivo, sizeof aviso_archivo, "Pantalla guardada.");
@@ -1161,9 +1163,9 @@ static void captura_en(const char *nombre)
 	cab[28] = 24;
 	if (bmp_pend)
 		return;		/* (ya se está escribiendo otra) */
-	m = sc(SC_ABRIR, (u32)ruta, PARA_CREAR, 0);
-	if (ES_ERROR(m))
-		return;
+	if (!escribe(ruta, cab, 54, 1))
+		return;		/* (la cabecera: el archivo, hecho; lo demás, poco a poco) */
+	m = 0;
 	/* (TERMO) entero en la memoria y de una vez (a trozos de 256 K): fila a
 	 * fila, en el Toshiba NB250, INFORME.BMP tardaba 9 s y paraba las lecturas */
 	fila = (u8 *)malloc(total);
@@ -1188,14 +1190,14 @@ static void captura_en(const char *nombre)
 		(void)hecho;
 		bmp_pend = fila;
 		bmp_total = total;
-		bmp_hecho = 0;
-		bmp_m = m;
+		bmp_hecho = 54;		/* (la cabecera ya está) */
+		snprintf(bmp_ruta, sizeof bmp_ruta, "%s", ruta);
 		snprintf(aviso_archivo, sizeof aviso_archivo, "Guardando la pantalla en %s...", ruta);
 		serie("termo: captura en %s (poco a poco)\n", ruta);
 		return;
 	}
-	sc(SC_CERRAR, m, 0, 0);
-	snprintf(aviso_archivo, sizeof aviso_archivo, "Pantalla guardada en %s.", ruta);
+	(void)m;
+	snprintf(aviso_archivo, sizeof aviso_archivo, "Pantalla guardada en %s (solo la cabecera: sin memoria).", ruta);
 	serie("termo: captura en %s\n", ruta);
 }
 
