@@ -151,6 +151,41 @@ void mq_pon_rsdp(u32 d)
 	rsdp_dada = d;
 }
 
+/* (UEFI) el punto de entrada del SMBIOS («_SM3_», «_SM_» o «_DMI_»): el
+ * que dice el núcleo («smbios=», sacado de la tabla del sistema de EFI) o,
+ * si no lo dice (la BIOS de siempre), el que haya entre F0000h y FFFFFh, de
+ * 16 en 16. Da su dirección física (0: no hay) */
+static u32 smbios_dado;
+
+static int es(const u8 *p, const char *t)
+{
+	for (; *t; p++, t++)
+		if (*p != (u8)*t)
+			return 0;
+	return 1;
+}
+
+void mq_pon_smbios(u32 d)
+{
+	smbios_dado = d;
+}
+
+u32 mq_smbios(void)
+{
+	const u8 *b;
+	u32 i;
+
+	if (smbios_dado)
+		return smbios_dado;
+	b = mq_mapa(0xF0000, 0x10000);
+	if (!b)
+		return 0;
+	for (i = 0; i + 32 <= 0x10000; i += 16)
+		if (es(b + i, "_SM3_") || es(b + i, "_SM_") || es(b + i, "_DMI_"))
+			return 0xF0000 + i;
+	return 0;
+}
+
 u32 mq_rsdp(void)
 {
 	static u32 hallada = 1;

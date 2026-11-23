@@ -638,31 +638,27 @@ static void ta_texto_smbios(char *d, u32 cabe, const u8 *f, u32 k)
 
 static void ta_smbios(void)
 {
-	const u8 *b = mq_mapa(0xF0000, 0x10000), *e = 0, *f, *fin;
-	u32 i, dir = 0, largo = 0;
+	/* (UEFI) el punto de entrada: el que dice el núcleo («smbios=», por UEFI)
+	 * o el de F0000h-FFFFFh (mq_smbios, maquina.c) */
+	u32 pe = mq_smbios(), dir = 0, largo = 0;
+	const u8 *e = pe ? mq_mapa(pe, 32) : 0, *f, *fin;
 
 	ta.smbios = 2;		/* (mirado; 1 si se ha encontrado) */
-	if (!b)
+	if (!e)
 		return;
-	for (i = 0; i + 32 <= 0x10000; i += 16)
-		if (!memcmp((void *)(b + i), "_SM3_", 5)) {
-			e = b + i;
-			if (*(const u32 *)(e + 0x14) == 0) {
-				dir = *(const u32 *)(e + 0x10);
-				largo = *(const u32 *)(e + 0x0C);
-			}
-			break;
-		} else if (!memcmp((void *)(b + i), "_SM_", 4)) {
-			e = b + i;
-			largo = *(const u16 *)(e + 0x16);
-			dir = *(const u32 *)(e + 0x18);
-			break;
-		} else if (!memcmp((void *)(b + i), "_DMI_", 5)) {
-			e = b + i;
-			largo = *(const u16 *)(e + 6);
-			dir = *(const u32 *)(e + 8);
-			break;
+	if (!memcmp((void *)e, "_SM3_", 5)) {
+		if (*(const u32 *)(e + 0x14) == 0) {
+			dir = *(const u32 *)(e + 0x10);
+			largo = *(const u32 *)(e + 0x0C);
 		}
+	} else if (!memcmp((void *)e, "_SM_", 4)) {
+		largo = *(const u16 *)(e + 0x16);
+		dir = *(const u32 *)(e + 0x18);
+	} else if (!memcmp((void *)e, "_DMI_", 5)) {
+		largo = *(const u16 *)(e + 6);
+		dir = *(const u32 *)(e + 8);
+	} else
+		e = 0;
 	if (!e || !dir || !largo || largo > 0x10000) {
 		reg("ACPI: (TERMO) no se encuentra el SMBIOS\n");
 		return;
@@ -825,6 +821,14 @@ int servicio_principal(void)
 			d = d * 16 + (u32)(*p <= '9' ? *p - '0' : *p - 'A' + 10);
 		mq_pon_rsdp(d);
 	}
+	/* (UEFI) y el SMBIOS (mq_smbios) */
+	if ((p = tiene(args, "smbios=")) != 0) {
+		u32 d = 0;
+
+		for (; (*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'); p++)
+			d = d * 16 + (u32)(*p <= '9' ? *p - '0' : *p - 'A' + 10);
+		mq_pon_smbios(d);
+	}
 	fin = sc(SC_MAS_MEMORIA, MONTON, 0, 0);
 	if (ES_ERROR(fin)) {
 		static const char m[] = "ACPI: no hay memoria para el servicio\n";
@@ -857,6 +861,7 @@ int servicio_principal(void)
 			preparado = 1;
 			if (apm.fase != FASE_ERROR || mq_rsdp())
 				prepara_energia();
+			reg("ACPI: SMBIOS en %08Xh\n", mq_smbios());	/* (UEFI) */
 			reg("ACPI: el núcleo ha puesto a la vista %u KB de memoria física\n", mq_puestos >> 10);
 		}
 		/* (dispositivos) una vez, con la tarea quieta y ya leída la batería */

@@ -10,8 +10,8 @@
 #include "red.h"
 #include "mime.h"
 
-#define CORREO_VERSION "1.0.1"
-#define CORREO_PROGRAMA "Correo 1.0.1 (Hispa-Pentium)"
+#define CORREO_VERSION "1.0.2"
+#define CORREO_PROGRAMA "Correo 1.0.2 (Hispa-Pentium)"
 
 /* =============================================================================
  *  Las cuentas (cuentas.c)

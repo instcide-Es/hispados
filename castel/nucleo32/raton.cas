@@ -14,7 +14,7 @@
 ; =============================================================================
 módulo Raton
 
-    importar Cpu, Pozo
+    importar Cpu, Pozo, Registro           ; (PS2) Registro: la línea del 8042 en el registro del arranque
 
     constante DATOS = 0x60
     constante ESTADO = 0x64
@@ -64,6 +64,27 @@ módulo Raton
         variable i: nat32
         para i desde 1 hasta 200000 hacer
             si meter_puerto(ESTADO) yb 1 <> 0 entonces devolver meter_puerto(DATOS) fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; (PS2) tira lo que haya esperando en el 8042 (un octeto del teclado, o lo
+    ; que dejó el firmware: si no, se toma por la respuesta del ratón)
+    función vacía_8042()
+        variable i, tirado: nat32
+        i := 0
+        mientras i < 32 y meter_puerto(ESTADO) yb 1 <> 0 hacer
+            tirado := meter_puerto(DATOS)
+            i := i + 1
+        fin
+    fin
+
+    ; (PS2) espera más (un reinicio del ratón tarda hasta 500 ms o más en los touchpad)
+    función espera_leer_largo(): nat32
+        variable i, v: nat32
+        para i desde 1 hasta 8 hacer
+            v := espera_leer()
+            si v <> 0xFFFFFFFF entonces devolver v fin
         fin
         devolver 0xFFFFFFFF
     fin
@@ -234,7 +255,8 @@ módulo Raton
     ; enciende el ratón, con la flecha en el centro de una pantalla de ese
     ; ancho y ese alto. Falso si no contesta (no hay ratón PS/2).
     público función prepara_ratón(an: ent32, al: ent32): bool
-        variable b, c, r: nat32
+        variable b, c, r, prueba1, prueba2, id, aa: nat32
+        variable d: arreglo [6] de nat32
         ancho := an
         alto := al
         ; (PANEL) cada punto, en octavos, por la velocidad (de 1 a 10; el 5, uno a uno)
@@ -253,10 +275,21 @@ módulo Raton
         ; sin controlador de teclado y ratón PS/2 (un Mac, un PC «sin
         ; legado»: su puerto lee 0xFF): solo puede haber ratón USB
         si meter_puerto(ESTADO) = 0xFF entonces
+            apunta0("ps2: no hay controlador 8042 (el puerto 64h lee FFh): ni teclado ni ratón PS/2\n")    ; (PS2)
             hay_ratón := hay_ratón_usb
             devolver hay_ratón
         fin
         b := sin_interrupciones()
+        vacía_8042()                            ; (PS2)
+        ; (PS2) las pruebas de las dos bocas (AB: la del teclado; A9: la del
+        ; ratón; 00 es que está bien), para el registro
+        espera_escribir()
+        sacar_puerto(ESTADO, 0xAB)
+        prueba1 := espera_leer()
+        espera_escribir()
+        sacar_puerto(ESTADO, 0xA9)
+        prueba2 := espera_leer()
+        vacía_8042()
         ; la segunda boca del 8042, encendida, y con su interrupción
         espera_escribir()
         sacar_puerto(ESTADO, 0xA8)
@@ -270,14 +303,31 @@ módulo Raton
             espera_escribir()
             sacar_puerto(DATOS, c)
         fin
+        vacía_8042()                            ; (PS2)
         r := al_ratón(0xF6)                     ; como de fábrica
+        aa := 0
+        si r <> 0xFA entonces
+            ; (PS2) no contesta: reiniciarlo (FF: dice FA, luego AA y su id);
+            ; hay touchpad (los de los ThinkPad) que el firmware deja a medias
+            vacía_8042()
+            si al_ratón(0xFF) = 0xFA entonces
+                aa := espera_leer_largo()
+                espera_leer()
+                vacía_8042()
+                r := al_ratón(0xF6)
+            fin
+        fin
+        id := 0xFFFFFFFF
         ; (NAVEGADOR) ¿tiene rueda? La llamada del IntelliMouse: la frecuencia
         ; a 200, a 100 y a 80; si luego dice que es el 3, manda cuatro octetos
         si r = 0xFA entonces
             si frecuencia(200) y frecuencia(100) y frecuencia(80) entonces
-                si al_ratón(0xF2) = 0xFA y espera_leer() = 3 entonces
-                    hay_rueda := cierto
-                    largo_paquete := 4
+                si al_ratón(0xF2) = 0xFA entonces
+                    id := espera_leer()         ; (PS2) 00 normal, 03 con rueda, 04 con 5 botones
+                    si id = 3 entonces
+                        hay_rueda := cierto
+                        largo_paquete := 4
+                    fin
                 fin
             fin
             r := al_ratón(0xF4)                 ; y que cuente lo que se mueve
@@ -292,6 +342,16 @@ módulo Raton
             sacar_puerto(PIC1 + 1, meter_puerto(PIC1 + 1) yb 0xFB)
         fin
         reponer(b)
+        ; (PS2) la línea del registro: el 8042, sus dos bocas y el ratón
+        d[0] := prueba1
+        d[1] := prueba2
+        d[2] := r
+        d[3] := aa
+        d[4] := id
+        apunta("ps2: controlador 8042 sí; prueba de la boca 1 (teclado) %02X, de la 2 (ratón) %02X (00: bien); el ratón contesta %02X", d)
+        si aa <> 0 entonces apunta1(" (después de reiniciarlo: %02X)", aa) fin
+        si r = 0xFA entonces apunta1(", id %02X (00 normal, 03 con rueda, 04 cinco botones)", id) sino apunta0(": no hay ratón PS/2 (o no contesta)") fin
+        apunta0("\n")
         devolver hay_ratón
     fin
 

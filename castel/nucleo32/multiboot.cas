@@ -30,6 +30,10 @@ módulo Multiboot
     constante E_ACPI1 = 14
     constante E_ACPI2 = 15
 
+    ; (UEFI) la pantalla del GOP está por encima de los 4 GB (los PC de ahora:
+    ; 0x4000000000...) y Video ya la ha puesto a la vista (con páginas de 4
+    ; MB, PSE-36): entonces vale, y su dirección alta, en pantalla_alta()
+    público variable alta_vale: bool
     variable mods2: arreglo [MAX_MÓDULOS2] de nat32  ; (UEFI) dónde está la etiqueta de cada módulo
     variable n_mods2: nat32
     variable mods2_mirados: bool
@@ -101,6 +105,23 @@ módulo Multiboot
     ; sistema de EFI: entonces no hay BIOS, ni modo de texto, ni VBE)
     público función arrancado_por_uefi(): bool
         devolver etiqueta(E_EFI32) <> 0 o etiqueta(E_EFI64) <> 0
+    fin
+
+    ; (UEFI) la tabla del sistema de EFI (su dirección física; 0 si no la hay o
+    ; está por encima de los 4 GB) y si es la de 64 bits (etiqueta 12) o la de
+    ; 32 (11). De ella sale el SMBIOS (semilla.cas, smbios_uefi)
+    público función tabla_efi(ref de64: bool): nat32
+        variable e: puntero a nat32
+        e := puntero(etiqueta(E_EFI64))
+        si e <> nulo entonces
+            de64 := cierto
+            si e[3] <> 0 entonces devolver 0 fin
+            devolver e[2]
+        fin
+        e := puntero(etiqueta(E_EFI32))
+        de64 := falso
+        si e = nulo entonces devolver 0 fin
+        devolver e[2]
     fin
 
     ; (UEFI) la RSDP de ACPI que ha copiado GRUB (la de ACPI 2 si la hay; si
@@ -239,13 +260,26 @@ módulo Multiboot
             p := puntero(nat32(info()) + 88)
             q := puntero(nat32(info()) + 108)
         fin
-        si p[1] <> 0 o q[1] <> 1 entonces devolver falso fin      ; por encima de 4 GB, o no es de color directo
+        si (p[1] <> 0 y no alta_vale) o q[1] <> 1 entonces devolver falso fin      ; por encima de 4 GB ((UEFI) salvo si ya se ve), o no es de color directo
         base := p[0]
         octetos_fila := p[2]
         ancho := p[3]
         alto := p[4]
         bits := q[0]
         devolver cierto
+    fin
+
+    ; (UEFI) la parte alta de la dirección de la pantalla (0: por debajo de 4 GB)
+    público función pantalla_alta(): nat32
+        variable p: puntero a nat32
+        si mb2() entonces
+            p := puntero(etiqueta(E_PANTALLA))
+            si p = nulo entonces devolver 0 fin
+            devolver p[3]
+        fin
+        si no hay_multiboot() o info().banderas yb 0x1000 = 0 entonces devolver 0 fin
+        p := puntero(nat32(info()) + 88)
+        devolver p[1]
     fin
 
     ; (UEFI) ¿es de colores al revés? (rojo en el octeto bajo y azul en el

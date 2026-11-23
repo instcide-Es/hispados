@@ -35,6 +35,7 @@ módulo UredWifi
     constante WO_DESCONECTAR = 5
     constante WO_OLVIDAR = 6
     constante WO_REGISTRO = 7
+    constante WO_SIMCORTE = 9                   ; (CORTES) solo con la radio simulada (las pruebas)
     constante WO_AUTO = 8
     constante O_WIFI_PREFERIR = 43              ; (a RED.BIN)
     constante SIN_WIFI = 0xFFFFFFE1
@@ -574,6 +575,23 @@ módulo UredWifi
                 buf[resp_largo] := 0
                 escribir(dirección(buf[0]))
             fin
+        sino si iguales(p, "/SIMCORTE") entonces
+            ; (CORTES) las pruebas: REDWIFI /SIMCORTE segundos [IP11|IP10]: el
+            ; punto de acceso simulado desaparece esos segundos; y DHCP da la
+            ; 192.168.77.11 (o, otra vez, la .10)
+            r := 0
+            si argumento(args, 1, nom, 40) entonces texto_a_natural(nom, r) fin
+            nom[0] := 0
+            argumento(args, 2, nom, 40)
+            a_mayúsculas(nom)
+            si iguales(nom, "IP11") entonces
+                r := pide(WO_SIMCORTE, r, 1, 0, 0)
+            sino si iguales(nom, "IP10") entonces
+                r := pide(WO_SIMCORTE, r, 2, 0, 0)
+            sino
+                r := pide(WO_SIMCORTE, r, 0, 0, 0)
+            fin
+            si r >= 0xFFFFFFE0 entonces escribir("Wi-Fi: no está en marcha.\n") sino si r <> 0 entonces escribir("REDWIFI /SIMCORTE: solo con la radio simulada (WifiSimulada=SI).\n") sino escribir("Hecho (la radio simulada).\n") fin
         sino si iguales(p, "/USAR") entonces
             argumento(args, 1, nom, 40)
             a_mayúsculas(nom)

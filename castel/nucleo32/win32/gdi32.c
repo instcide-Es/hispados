@@ -2348,3 +2348,15 @@ void relleno_3d(HDC h, RECT r, int hundido)
 {
 	DrawEdge(h, &r, hundido ? 0x0A : 0x05, 0x80F);
 }
+
+/* ---- (HL) lo que pide un juego de 1998-2000 ---- */
+/* las escalas de MM_TEXT, que es el único modo (como en Windows: en
+ * MM_TEXT, cambiar las medidas no hace nada); dan las de antes, 1 x 1 */
+API(BOOL) ScaleWindowExtEx(HDC h, i32 xn, i32 xd, i32 yn, i32 yd, SIZE *s) { (void)xn; (void)xd; (void)yn; (void)yd; if (!dc(h)) return FALSE; if (s) s->cx = s->cy = 1; return TRUE; }
+API(BOOL) ScaleViewportExtEx(HDC h, i32 xn, i32 xd, i32 yn, i32 yd, SIZE *s) { (void)xn; (void)xd; (void)yn; (void)yd; if (!dc(h)) return FALSE; if (s) s->cx = s->cy = 1; return TRUE; }
+/* Escape: ninguna (QUERYESCSUPPORT dice que no a todas; no hay impresoras) */
+API(i32) Escape(HDC h, i32 esc, i32 n, const void *e, void *s) { (void)h; (void)esc; (void)n; (void)e; (void)s; return 0; }
+API(i32) ExtEscape(HDC h, i32 esc, i32 n, const void *e, i32 ns, void *s) { (void)h; (void)esc; (void)n; (void)e; (void)ns; (void)s; return 0; }
+/* el recuadro de lo pintado: no se lleva la cuenta (DCB_RESET | DCB_DISABLE) */
+API(u32) GetBoundsRect(HDC h, RECT *r, u32 f) { (void)f; if (!dc(h)) return 0; if (r) r->left = r->top = r->right = r->bottom = 0; return 9; }
+API(u32) SetBoundsRect(HDC h, const RECT *r, u32 f) { (void)r; (void)f; return dc(h) ? 9 : 0; }

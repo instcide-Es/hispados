@@ -1,0 +1,1059 @@
+; =============================================================================
+;  agnucleo.cas - (AGENDA) el corazón de la Agenda, sin pintar nada: las
+;  citas, las tareas y los cumpleaños en la memoria; las repeticiones (las
+;  reglas RRULE de iCalendar, RFC 5545: diaria, semanal con sus días,
+;  mensual por el día o por «el segundo martes», anual; cada N; hasta una
+;  fecha o N veces; con sus excepciones); la hora de Madrid (Europe/Madrid:
+;  la de verano, del último domingo de marzo al último de octubre) y las
+;  zonas de los .ICS; y cuándo salta cada aviso.
+;
+;  Las horas de las citas son las de aquí (las de la pared, Europe/Madrid):
+;  una cita de los lunes a las 10:00 sigue a las 10:00 después del cambio de
+;  hora. Para los avisos (y para escribir el .ICS en UTC) se pasa al instante
+;  de verdad: minutos desde el 1/1/1970 en UTC (cabe en nat32 hasta 10136).
+;  Una hora que no existe (las 2:30 del último domingo de marzo) es la de
+;  antes del salto (= las 3:30 de verano); una que pasa dos veces (las 2:30
+;  del último de octubre), la primera (la de verano): RFC 5545, 3.3.5.
+;
+;  Lo usan AGENDA.BIN (uagenda.cas: la ventana, el vigilante de los avisos y
+;  las órdenes) y agics.cas (leer y escribir .ICS y vCard).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo AgNucleo
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32, Festivos
+
+    ; ---- las clases ----
+    público constante CLASE_CITA = 0
+    público constante CLASE_TAREA = 1
+    público constante CLASE_CUMPLE = 2
+
+    ; ---- las repeticiones ----
+    público constante F_NO = 0
+    público constante F_DIARIA = 1
+    público constante F_SEMANAL = 2
+    público constante F_MENSUAL = 3
+    público constante F_ANUAL = 4
+    público constante MAX_BY = 16
+    público constante MAX_EXCEP = 32
+    público constante SIN_FIN = 0xFFFFFFFF
+    público constante SIN_AVISO = -1
+
+    público tipo Regla = estructura
+        frec: byte
+        wkst: byte                      ; el día en que empieza la semana (0 el lunes)
+        rara: bool                      ; lleva algo que no se sabe hacer (BYHOUR, HOURLY...)
+        cada: nat32                     ; INTERVAL
+        veces: nat32                    ; COUNT (0: sin)
+        hasta_día: nat32                ; UNTIL (SIN_FIN: sin), en la hora de aquí
+        hasta_min: nat32
+        n_dsem: nat32                   ; BYDAY: el día de la semana y su ordinal (0: todos)
+        dsem: arreglo [MAX_BY] de byte
+        dord: arreglo [MAX_BY] de ent16
+        n_mdía: nat32                   ; BYMONTHDAY (con signo: -1 el último)
+        mdía: arreglo [MAX_BY] de ent16
+        meses: nat32                    ; BYMONTH: el bit m (1..12)
+        n_pos: nat32                    ; BYSETPOS
+        pos: arreglo [MAX_BY] de ent16
+        n_adía: nat32                   ; BYYEARDAY
+        adía: arreglo [MAX_BY] de ent16
+    fin
+
+    público tipo Cita = estructura
+        usada: bool
+        clase: byte
+        todo_día: bool
+        hecha: bool                     ; (tarea) hecha
+        con_fecha: bool                 ; (tarea) tiene fecha límite
+        categoría: byte                 ; 0: ninguna; 1..N_CATEGORÍAS
+        día: nat32                      ; el número del día (Festivos.número_de_día)
+        minuto: nat32                   ; el minuto del día en que empieza
+        dura: nat32                     ; lo que dura, en minutos (todo el día: 1440 por día)
+        aviso: ent32                    ; los minutos antes del aviso (SIN_AVISO: ninguno)
+        año_nac: nat32                  ; (cumpleaños) el año en que nació (0: no se sabe)
+        regla: Regla
+        n_excep: nat32
+        excep: arreglo [MAX_EXCEP] de nat32
+        uid: arreglo [80] de byte
+        título: arreglo [100] de byte
+        lugar: arreglo [80] de byte
+        cats: arreglo [60] de byte      ; CATEGORIES tal cual (para el .ICS)
+        notas: arreglo [480] de byte
+    fin
+
+    público constante MAX_CITAS = 3000
+    público variable citas: puntero a Cita
+    público variable n_citas: nat32             ; las que hay (algunas, sin usar)
+
+    ; ---- las categorías: el nombre y su símbolo (lo pinta la ventana) ----
+    público constante N_CATEGORÍAS = 8
+    público variable nombres_cat: arreglo [N_CATEGORÍAS + 1] de arreglo [24] de byte
+
+    ; ---- la hora de ahora (las pruebas la fuerzan: /AHORA=) ----
+    público variable ahora_forzada: bool
+    público variable ahora_día_f, ahora_min_f: nat32
+    variable azar: nat32 = 0x9E3779B9
+
+    ; =========================================================================
+    ;  La memoria
+    ; =========================================================================
+    público función prepara(): bool
+        variable i: nat32
+        si citas = nulo entonces
+            citas := puntero(más_memoria(MAX_CITAS * tamaño(Cita)))
+            si citas = nulo entonces devolver falso fin
+        fin
+        n_citas := 0
+        para i desde 1 hasta N_CATEGORÍAS hacer nombres_cat[i][0] := 0 fin
+        copiar(nombres_cat[0], "Sin categor\xA1a")
+        copiar(nombres_cat[1], "Personal")
+        copiar(nombres_cat[2], "Trabajo")
+        copiar(nombres_cat[3], "Asociaci\xA2n")
+        copiar(nombres_cat[4], "M\x82dico")
+        copiar(nombres_cat[5], "Familia")
+        copiar(nombres_cat[6], "Cumplea\xA4os")
+        copiar(nombres_cat[7], "Viaje")
+        copiar(nombres_cat[8], "Otros")
+        devolver cierto
+    fin
+
+    ; una cita nueva, en blanco (con su UID): nulo si no caben más
+    público función nueva(clase: nat32): puntero a Cita
+        variable i: nat32
+        variable c: puntero a Cita
+        c := nulo
+        i := 0
+        mientras i < n_citas hacer
+            si no citas[i].usada entonces
+                c := dirección(citas[i])
+                romper
+            fin
+            i := i + 1
+        fin
+        si c = nulo entonces
+            si n_citas >= MAX_CITAS entonces devolver nulo fin
+            c := dirección(citas[n_citas])
+            n_citas := n_citas + 1
+        fin
+        llenar(puntero(c), tamaño(Cita), 0)
+        c.usada := cierto
+        c.clase := byte(clase)
+        c.dura := 60
+        c.aviso := SIN_AVISO
+        c.regla.cada := 1
+        c.regla.hasta_día := SIN_FIN
+        pon_uid(valor(c))
+        devolver c
+    fin
+
+    público función quita(c: puntero a Cita)
+        c.usada := falso
+    fin
+
+    ; un UID nuevo: «aaaammddThhmm-xxxxxxxx@hispa-pentium»
+    público función pon_uid(ref c: Cita)
+        variable d, m, a, dd, mi: nat32
+        variable x: arreglo [6] de nat32
+        ahora(dd, mi)
+        de_número(dd, d, m, a)
+        azar := azar * 1103515245 + 12345 + tics() + n_citas * 7919
+        x[0] := a
+        x[1] := m
+        x[2] := d
+        x[3] := mi div 60
+        x[4] := mi mod 60
+        x[5] := azar xob (azar >> 13)
+        formatear(c.uid, 80, "%04u%02u%02uT%02u%02u-%08x@hispa-pentium", x)
+    fin
+
+    ; =========================================================================
+    ;  La hora de ahora
+    ; =========================================================================
+    ; el día y el minuto de ahora (la hora de aquí, la del reloj del PC)
+    público función ahora(ref día: nat32, ref minuto: nat32)
+        variable f, d, m, a: nat32
+        si ahora_forzada entonces
+            día := ahora_día_f
+            minuto := ahora_min_f
+            devolver
+        fin
+        f := dato(DATO_FECHA)
+        a := 1980 + (f >> 25)
+        m := (f >> 21) yb 15
+        d := (f >> 16) yb 31
+        si m < 1 o m > 12 o d < 1 entonces
+            m := 1
+            d := 1
+        fin
+        día := número_de_día(d, m, a)
+        minuto := ((f >> 11) yb 31) * 60 + ((f >> 5) yb 63)
+    fin
+
+    ; el instante de ahora (UTC)
+    público función instante_ahora(): nat32
+        variable d, mi: nat32
+        ahora(d, mi)
+        devolver utc_de_madrid(d, mi)
+    fin
+
+    ; =========================================================================
+    ;  Las zonas horarias
+    ; =========================================================================
+    ; Una zona: sus dos desfases (minutos al este de UTC) y, si tiene hora de
+    ; verano, cuándo se pasa a cada una (el mes, el ordinal del día de la
+    ; semana: -1 el último, y la hora de la pared en que se cambia: la de
+    ; antes del cambio). Así son las VTIMEZONE de los .ICS.
+    público tipo Zona = estructura
+        nombre: arreglo [48] de byte
+        normal: ent32                   ; (TZOFFSETTO de STANDARD)
+        verano: ent32                   ; (TZOFFSETTO de DAYLIGHT)
+        con_verano: bool
+        v_mes, v_dsem: nat32            ; a la de verano
+        v_ord: ent32
+        v_min: nat32
+        n_mes, n_dsem: nat32            ; a la normal
+        n_ord: ent32
+        n_min: nat32
+    fin
+
+    público variable madrid: Zona
+    variable madrid_hecha: bool
+
+    función haz_madrid()
+        copiar(madrid.nombre, "Europe/Madrid")
+        madrid.normal := 60
+        madrid.verano := 120
+        madrid.con_verano := cierto
+        madrid.v_mes := 3
+        madrid.v_dsem := 6
+        madrid.v_ord := -1
+        madrid.v_min := 120             ; a las 2:00 (las de invierno) son las 3:00
+        madrid.n_mes := 10
+        madrid.n_dsem := 6
+        madrid.n_ord := -1
+        madrid.n_min := 180             ; a las 3:00 (las de verano) son las 2:00
+        madrid_hecha := cierto
+    fin
+
+    público función zona_madrid(): puntero a Zona
+        si no madrid_hecha entonces haz_madrid() fin
+        devolver dirección(madrid)
+    fin
+
+    ; el día del mes en que cae «el n-ésimo dsem» (n < 0: desde el final)
+    público función n_ésimo(a: nat32, m: nat32, dsem: nat32, n: ent32): nat32
+        variable p, u, k: nat32
+        si n >= 0 entonces
+            si n = 0 entonces n := 1 fin
+            p := número_de_día(1, m, a)
+            k := (dsem + 7 - dsem_de(p)) mod 7
+            devolver p + k + nat32(n - 1) * 7
+        fin
+        u := número_de_día(días_del_mes(m, a), m, a)
+        k := (dsem_de(u) + 7 - dsem) mod 7
+        devolver u - k - nat32(-n - 1) * 7
+    fin
+
+    ; el desfase de la zona para esa hora de la pared (con la regla de RFC 5545)
+    público función desfase_local(ref z: Zona, día: nat32, minuto: nat32): ent32
+        variable d, m, a, tv, tn, t: nat32
+        si no z.con_verano entonces devolver z.normal fin
+        de_número(día, d, m, a)
+        tv := n_ésimo(a, z.v_mes, z.v_dsem, z.v_ord) * 1440 + z.v_min
+        tn := n_ésimo(a, z.n_mes, z.n_dsem, z.n_ord) * 1440 + z.n_min
+        t := día * 1440 + minuto
+        si tv < tn entonces
+            ; (el norte: el verano dentro del año)
+            ; el hueco [tv, tv + salto): no existe; se toma el desfase de antes
+            si t < tv + nat32(z.verano - z.normal) entonces devolver z.normal fin
+            si t < tn entonces devolver z.verano fin
+            devolver z.normal
+        fin
+        ; (el sur: el verano cruza el año)
+        si t < tn entonces devolver z.verano fin
+        si t < tv + nat32(z.verano - z.normal) entonces devolver z.normal fin
+        devolver z.verano
+    fin
+
+    ; la hora de la pared de la zona -> el instante (minutos UTC)
+    público función utc_de(ref z: Zona, día: nat32, minuto: nat32): nat32
+        devolver nat32(ent32(día * 1440 + minuto) - desfase_local(z, día, minuto))
+    fin
+
+    ; el instante -> la hora de la pared de la zona
+    público función de_utc(ref z: Zona, u: nat32, ref día: nat32, ref minuto: nat32)
+        variable d, m, a, uv, un, l: nat32
+        variable oo: ent32
+        oo := z.normal
+        si z.con_verano entonces
+            de_número(u div 1440, d, m, a)
+            uv := nat32(ent32(n_ésimo(a, z.v_mes, z.v_dsem, z.v_ord) * 1440 + z.v_min) - z.normal)
+            un := nat32(ent32(n_ésimo(a, z.n_mes, z.n_dsem, z.n_ord) * 1440 + z.n_min) - z.verano)
+            si uv < un entonces
+                si u >= uv y u < un entonces oo := z.verano fin
+            sino
+                si u < un o u >= uv entonces oo := z.verano fin
+            fin
+        fin
+        l := nat32(ent32(u) + oo)
+        día := l div 1440
+        minuto := l mod 1440
+    fin
+
+    público función utc_de_madrid(día: nat32, minuto: nat32): nat32
+        devolver utc_de(valor(zona_madrid()), día, minuto)
+    fin
+
+    público función madrid_de_utc(u: nat32, ref día: nat32, ref minuto: nat32)
+        de_utc(valor(zona_madrid()), u, día, minuto)
+    fin
+
+    ; =========================================================================
+    ;  Las reglas (RRULE): leerlas y escribirlas
+    ; =========================================================================
+    constante NOMBRES_DSEM = "MO|TU|WE|TH|FR|SA|SU"
+
+    función dsem_de_nombre(p: puntero a byte): ent32
+        variable i: nat32
+        variable oo: arreglo [4] de byte
+        para i desde 0 hasta 6 hacer
+            opción_de_(NOMBRES_DSEM, i, oo)
+            si mayúscula(p[0]) = oo[0] y mayúscula(p[1]) = oo[1] entonces devolver ent32(i) fin
+        fin
+        devolver -1
+    fin
+
+    ; la opción k de «a|b|c» (de dos o tres letras)
+    función opción_de_(t: puntero a byte, k: nat32, destino: puntero a byte)
+        variable i: nat32
+        mientras k > 0 y valor(t) <> 0 hacer
+            si valor(t) = '|' entonces k := k - 1 fin
+            t := t + 1
+        fin
+        i := 0
+        mientras valor(t) <> 0 y valor(t) <> '|' y i < 3 hacer
+            destino[i] := valor(t)
+            i := i + 1
+            t := t + 1
+        fin
+        destino[i] := 0
+    fin
+
+    ; un número con signo en p (avanza): cierto si había cifras
+    función número_con_signo(ref p: puntero a byte, ref n: ent32): bool
+        variable menos: bool
+        variable k: nat32
+        variable v: ent32
+        menos := falso
+        si valor(p) = '+' entonces p := p + 1 fin
+        si valor(p) = '-' entonces
+            menos := cierto
+            p := p + 1
+        fin
+        k := 0
+        v := 0
+        mientras valor(p) >= '0' y valor(p) <= '9' y k < 9 hacer
+            v := v * 10 + ent32(valor(p) - '0')
+            p := p + 1
+            k := k + 1
+        fin
+        si menos entonces v := -v fin
+        n := v
+        devolver k > 0
+    fin
+
+    ; una lista de números («1,15,-1») a un arreglo
+    función lista_números(ref p: puntero a byte, l: puntero a ent16, ref n: nat32, mín: ent32, máx: ent32): bool
+        variable v: ent32
+        n := 0
+        mientras cierto hacer
+            si no número_con_signo(p, v) entonces devolver falso fin
+            si v < mín o v > máx o v = 0 entonces devolver falso fin
+            si n < MAX_BY entonces
+                l[n] := ent16(v)
+                n := n + 1
+            fin
+            si valor(p) <> ',' entonces romper fin
+            p := p + 1
+        fin
+        devolver cierto
+    fin
+
+    ; una fecha de iCalendar («aaaammdd» o «aaaammddThhmmss», con «Z» o sin
+    ; ella) a sus partes: cierto si vale. «con_hora» dice si la llevaba.
+    público función lee_fecha_ics(p: puntero a byte, ref día: nat32, ref minuto: nat32, ref con_hora: bool, ref utc: bool): bool
+        variable a, m, d, h, mi, i: nat32
+        para i desde 0 hasta 7 hacer
+            si p[i] < '0' o p[i] > '9' entonces devolver falso fin
+        fin
+        a := (p[0] - '0') * 1000 + (p[1] - '0') * 100 + (p[2] - '0') * 10 + p[3] - '0'
+        m := (p[4] - '0') * 10 + p[5] - '0'
+        d := (p[6] - '0') * 10 + p[7] - '0'
+        si a < 1970 o a > 2200 o m < 1 o m > 12 o d < 1 o d > días_del_mes(m, a) entonces devolver falso fin
+        día := número_de_día(d, m, a)
+        minuto := 0
+        con_hora := falso
+        utc := falso
+        si p[8] = 'T' o p[8] = 't' entonces
+            para i desde 9 hasta 14 hacer
+                si p[i] < '0' o p[i] > '9' entonces devolver falso fin
+            fin
+            h := (p[9] - '0') * 10 + p[10] - '0'
+            mi := (p[11] - '0') * 10 + p[12] - '0'
+            si h > 23 o mi > 59 entonces devolver falso fin
+            minuto := h * 60 + mi
+            con_hora := cierto
+            utc := p[15] = 'Z' o p[15] = 'z'
+        fin
+        devolver cierto
+    fin
+
+    ; lee una RRULE («FREQ=WEEKLY;BYDAY=MO,WE;UNTIL=...»): cierto si se ha
+    ; entendido lo principal (con «rara» si llevaba algo que no se sabe)
+    público función lee_regla(t: puntero a byte, ref r: Regla): bool
+        variable p, q: puntero a byte
+        variable clave: arreglo [16] de byte
+        variable k, d, mi: nat32
+        variable v: ent32
+        variable ds: ent32
+        variable ch, u: bool
+        llenar(puntero(dirección(r)), tamaño(Regla), 0)
+        r.cada := 1
+        r.hasta_día := SIN_FIN
+        p := t
+        mientras valor(p) <> 0 hacer
+            k := 0
+            mientras valor(p) <> 0 y valor(p) <> '=' y valor(p) <> ';' y k < 15 hacer
+                clave[k] := mayúscula(valor(p))
+                k := k + 1
+                p := p + 1
+            fin
+            clave[k] := 0
+            si valor(p) <> '=' entonces
+                ; (algo sin «=»: se salta)
+                mientras valor(p) <> 0 y valor(p) <> ';' hacer p := p + 1 fin
+                si valor(p) = ';' entonces p := p + 1 fin
+                seguir
+            fin
+            p := p + 1
+            q := p
+            si iguales(clave, "FREQ") entonces
+                si empieza_sin_caja(p, "DAILY") entonces r.frec := F_DIARIA
+                sino si empieza_sin_caja(p, "WEEKLY") entonces r.frec := F_SEMANAL
+                sino si empieza_sin_caja(p, "MONTHLY") entonces r.frec := F_MENSUAL
+                sino si empieza_sin_caja(p, "YEARLY") entonces r.frec := F_ANUAL
+                sino r.rara := cierto fin
+            sino si iguales(clave, "INTERVAL") entonces
+                si número_con_signo(p, v) y v > 0 y v < 10000 entonces r.cada := nat32(v) fin
+            sino si iguales(clave, "COUNT") entonces
+                si número_con_signo(p, v) y v > 0 entonces r.veces := nat32(v) fin
+            sino si iguales(clave, "UNTIL") entonces
+                si lee_fecha_ics(p, d, mi, ch, u) entonces
+                    si ch y u entonces madrid_de_utc(d * 1440 + mi, d, mi) fin
+                    si no ch entonces mi := 1439 fin
+                    r.hasta_día := d
+                    r.hasta_min := mi
+                fin
+            sino si iguales(clave, "WKST") entonces
+                ds := dsem_de_nombre(p)
+                si ds >= 0 entonces r.wkst := byte(ds) fin
+            sino si iguales(clave, "BYDAY") entonces
+                r.n_dsem := 0
+                mientras cierto hacer
+                    v := 0
+                    si valor(p) = '+' o valor(p) = '-' o (valor(p) >= '0' y valor(p) <= '9') entonces
+                        si no número_con_signo(p, v) o v < -53 o v > 53 entonces
+                            r.rara := cierto
+                            romper
+                        fin
+                    fin
+                    ds := dsem_de_nombre(p)
+                    si ds < 0 entonces
+                        r.rara := cierto
+                        romper
+                    fin
+                    p := p + 2
+                    si r.n_dsem < MAX_BY entonces
+                        r.dsem[r.n_dsem] := byte(ds)
+                        r.dord[r.n_dsem] := ent16(v)
+                        r.n_dsem := r.n_dsem + 1
+                    fin
+                    si valor(p) <> ',' entonces romper fin
+                    p := p + 1
+                fin
+            sino si iguales(clave, "BYMONTHDAY") entonces
+                si no lista_números(p, dirección(r.mdía[0]), r.n_mdía, -31, 31) entonces r.rara := cierto fin
+            sino si iguales(clave, "BYYEARDAY") entonces
+                si no lista_números(p, dirección(r.adía[0]), r.n_adía, -366, 366) entonces r.rara := cierto fin
+            sino si iguales(clave, "BYSETPOS") entonces
+                si no lista_números(p, dirección(r.pos[0]), r.n_pos, -366, 366) entonces r.rara := cierto fin
+            sino si iguales(clave, "BYMONTH") entonces
+                mientras cierto hacer
+                    si no número_con_signo(p, v) o v < 1 o v > 12 entonces
+                        r.rara := cierto
+                        romper
+                    fin
+                    r.meses := r.meses ob (1 << nat32(v))
+                    si valor(p) <> ',' entonces romper fin
+                    p := p + 1
+                fin
+            sino
+                ; BYHOUR, BYMINUTE, BYSECOND, BYWEEKNO, RSCALE...: no se saben
+                r.rara := cierto
+            fin
+            p := q
+            mientras valor(p) <> 0 y valor(p) <> ';' hacer p := p + 1 fin
+            si valor(p) = ';' entonces p := p + 1 fin
+        fin
+        devolver r.frec <> F_NO
+    fin
+
+    función empieza_sin_caja(t: puntero a byte, q: puntero a byte): bool
+        mientras valor(q) <> 0 hacer
+            si mayúscula(valor(t)) <> valor(q) entonces devolver falso fin
+            t := t + 1
+            q := q + 1
+        fin
+        devolver cierto
+    fin
+
+    función pon_lista(destino: puntero a byte, l: puntero a ent16, n: nat32)
+        variable i: nat32
+        variable t: arreglo [12] de byte
+        para i desde 1 hasta n hacer
+            si i > 1 entonces concatenar(destino, ",") fin
+            número_a_texto(ent32(l[i - 1]), t)
+            concatenar(destino, t)
+        fin
+    fin
+
+    ; la fecha «aaaammdd» (o con la hora en UTC, «aaaammddThhmm00Z»)
+    público función texto_fecha_ics(día: nat32, minuto: nat32, con_hora: bool, en_utc: bool, destino: puntero a byte)
+        variable x: arreglo [5] de nat32
+        variable d, m, a, dd, mi: nat32
+        dd := día
+        mi := minuto
+        si con_hora y en_utc entonces
+            dd := utc_de_madrid(día, minuto)
+            mi := dd mod 1440
+            dd := dd div 1440
+        fin
+        de_número(dd, d, m, a)
+        x[0] := a
+        x[1] := m
+        x[2] := d
+        x[3] := mi div 60
+        x[4] := mi mod 60
+        si con_hora entonces
+            si en_utc entonces formatear(destino, 20, "%04u%02u%02uT%02u%02u00Z", x) sino formatear(destino, 20, "%04u%02u%02uT%02u%02u00", x) fin
+        sino
+            formatear(destino, 20, "%04u%02u%02u", x)
+        fin
+    fin
+
+    ; la regla en el texto de una RRULE (sin «RRULE:»); «todo_día»: el UNTIL, sin hora
+    público función escribe_regla(ref r: Regla, todo_día: bool, destino: puntero a byte)
+        variable t: arreglo [24] de byte
+        variable oo: arreglo [4] de byte
+        variable i, n: nat32
+        destino[0] := 0
+        según nat32(r.frec)
+            caso F_DIARIA: copiar(destino, "FREQ=DAILY")
+            caso F_SEMANAL: copiar(destino, "FREQ=WEEKLY")
+            caso F_MENSUAL: copiar(destino, "FREQ=MONTHLY")
+            caso F_ANUAL: copiar(destino, "FREQ=YEARLY")
+            si no: devolver
+        fin
+        si r.cada > 1 entonces
+            concatenar(destino, ";INTERVAL=")
+            natural_a_texto(r.cada, t)
+            concatenar(destino, t)
+        fin
+        si r.veces > 0 entonces
+            concatenar(destino, ";COUNT=")
+            natural_a_texto(r.veces, t)
+            concatenar(destino, t)
+        sino si r.hasta_día <> SIN_FIN entonces
+            concatenar(destino, ";UNTIL=")
+            si todo_día entonces texto_fecha_ics(r.hasta_día, 0, falso, falso, t) sino texto_fecha_ics(r.hasta_día, r.hasta_min, cierto, cierto, t) fin
+            concatenar(destino, t)
+        fin
+        si r.meses <> 0 entonces
+            concatenar(destino, ";BYMONTH=")
+            n := 0
+            para i desde 1 hasta 12 hacer
+                si r.meses yb (1 << i) <> 0 entonces
+                    si n > 0 entonces concatenar(destino, ",") fin
+                    natural_a_texto(i, t)
+                    concatenar(destino, t)
+                    n := n + 1
+                fin
+            fin
+        fin
+        si r.n_mdía > 0 entonces
+            concatenar(destino, ";BYMONTHDAY=")
+            pon_lista(destino, dirección(r.mdía[0]), r.n_mdía)
+        fin
+        si r.n_adía > 0 entonces
+            concatenar(destino, ";BYYEARDAY=")
+            pon_lista(destino, dirección(r.adía[0]), r.n_adía)
+        fin
+        si r.n_dsem > 0 entonces
+            concatenar(destino, ";BYDAY=")
+            para i desde 1 hasta r.n_dsem hacer
+                si i > 1 entonces concatenar(destino, ",") fin
+                si r.dord[i - 1] <> 0 entonces
+                    número_a_texto(ent32(r.dord[i - 1]), t)
+                    concatenar(destino, t)
+                fin
+                opción_de_(NOMBRES_DSEM, r.dsem[i - 1], oo)
+                concatenar(destino, oo)
+            fin
+        fin
+        si r.n_pos > 0 entonces
+            concatenar(destino, ";BYSETPOS=")
+            pon_lista(destino, dirección(r.pos[0]), r.n_pos)
+        fin
+        si r.wkst <> 0 entonces
+            concatenar(destino, ";WKST=")
+            opción_de_(NOMBRES_DSEM, r.wkst, oo)
+            concatenar(destino, oo)
+        fin
+    fin
+
+    ; =========================================================================
+    ;  Las repeticiones: las veces de una cita, de una en una
+    ; =========================================================================
+    constante MAX_CAND = 370
+    público tipo Vuelta = estructura
+        c: puntero a Cita
+        per: nat32                      ; el período (0 el de la cita, 1 el siguiente con su «cada»...)
+        cand: arreglo [MAX_CAND] de nat32
+        n, i: nat32
+        cuenta: nat32                   ; las que van (para COUNT)
+        primera: bool                   ; aún no se ha dado la de DTSTART
+        acabada: bool
+        vacíos: nat32                   ; períodos seguidos sin ninguna (para no dar vueltas sin fin)
+        dsd: nat32                      ; desde qué día interesan
+    fin
+
+    ; el lunes (o el día wkst) de la semana del día n
+    función empieza_semana(n: nat32, wkst: nat32): nat32
+        devolver n - (dsem_de(n) + 7 - wkst) mod 7
+    fin
+
+    ; ¿es ese día del mes uno de la lista (con los negativos, desde el final)?
+    función casa_mdía(ref r: Regla, d: nat32, dm: nat32): bool
+        variable i: nat32
+        variable v: ent32
+        para i desde 1 hasta r.n_mdía hacer
+            v := r.mdía[i - 1]
+            si v > 0 y nat32(v) = d entonces devolver cierto fin
+            si v < 0 y ent32(dm) + v + 1 = ent32(d) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función casa_adía(ref r: Regla, d: nat32, da: nat32): bool
+        variable i: nat32
+        variable v: ent32
+        para i desde 1 hasta r.n_adía hacer
+            v := r.adía[i - 1]
+            si v > 0 y nat32(v) = d entonces devolver cierto fin
+            si v < 0 y ent32(da) + v + 1 = ent32(d) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; ¿casa el día n con BYDAY? Con ordinales, dentro de [ini, fin] (el mes o
+    ; el año); sin ordinal, cualquiera de ese día de la semana
+    función casa_dsem(ref r: Regla, n: nat32, ini: nat32, fin_: nat32, con_ord: bool): bool
+        variable i, ds, k: nat32
+        variable oo: ent32
+        ds := dsem_de(n)
+        para i desde 1 hasta r.n_dsem hacer
+            si r.dsem[i - 1] = ds entonces
+                oo := r.dord[i - 1]
+                si oo = 0 o no con_ord entonces devolver cierto fin
+                si oo > 0 entonces
+                    k := (n - ini) div 7 + 1
+                    si ent32(k) = oo entonces devolver cierto fin
+                sino
+                    k := (fin_ - n) div 7 + 1
+                    si -ent32(k) = oo entonces devolver cierto fin
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    función pon_cand(ref vu: Vuelta, n: nat32)
+        si vu.n < MAX_CAND entonces
+            vu.cand[vu.n] := n
+            vu.n := vu.n + 1
+        fin
+    fin
+
+    ; los días de un mes que casan con BYMONTHDAY y BYDAY (ordinal en el mes,
+    ; o en el año si «año_ini» no es SIN_FIN)
+    función días_del_mes_que_casan(ref vu: Vuelta, ref r: Regla, m: nat32, a: nat32, año_ini: nat32, año_fin: nat32)
+        variable dm, d, n, ini, fin_: nat32
+        dm := días_del_mes(m, a)
+        ini := número_de_día(1, m, a)
+        fin_ := ini + dm - 1
+        para d desde 1 hasta dm hacer
+            n := ini + d - 1
+            si r.n_mdía > 0 y no casa_mdía(r, d, dm) entonces seguir fin
+            si r.n_dsem > 0 entonces
+                si año_ini <> SIN_FIN entonces
+                    si no casa_dsem(r, n, año_ini, año_fin, cierto) entonces seguir fin
+                sino
+                    si no casa_dsem(r, n, ini, fin_, cierto) entonces seguir fin
+                fin
+            fin
+            pon_cand(vu, n)
+        fin
+    fin
+
+    ; las candidatas del período (ordenadas), con BYSETPOS
+    función haz_período(ref vu: Vuelta)
+        variable c: puntero a Cita
+        variable d0, m0, a0, d, m, a, k, i, n, ini, fin_, mes, mi, j: nat32
+        variable v: ent32
+        variable tmp: arreglo [MAX_CAND] de nat32
+        c := vu.c
+        vu.n := 0
+        vu.i := 0
+        de_número(c.día, d0, m0, a0)
+        k := vu.per * c.regla.cada
+        según nat32(c.regla.frec)
+            caso F_DIARIA:
+                n := c.día + k
+                de_número(n, d, m, a)
+                si c.regla.meses <> 0 y c.regla.meses yb (1 << m) = 0 entonces devolver fin
+                si c.regla.n_mdía > 0 y no casa_mdía(c.regla, d, días_del_mes(m, a)) entonces devolver fin
+                si c.regla.n_dsem > 0 y no casa_dsem(c.regla, n, 0, 0, falso) entonces devolver fin
+                si c.regla.n_adía > 0 y no casa_adía(c.regla, n - número_de_día(1, 1, a) + 1, 365 + nat32(bisiesto(a))) entonces devolver fin
+                pon_cand(vu, n)
+            caso F_SEMANAL:
+                ini := empieza_semana(c.día, c.regla.wkst) + 7 * k
+                para i desde 0 hasta 6 hacer
+                    n := ini + i
+                    si c.regla.n_dsem > 0 entonces
+                        si no casa_dsem(c.regla, n, 0, 0, falso) entonces seguir fin
+                    sino
+                        si dsem_de(n) <> dsem_de(c.día) entonces seguir fin
+                    fin
+                    de_número(n, d, m, a)
+                    si c.regla.meses <> 0 y c.regla.meses yb (1 << m) = 0 entonces seguir fin
+                    pon_cand(vu, n)
+                fin
+            caso F_MENSUAL:
+                mi := (a0 * 12 + m0 - 1) + k
+                a := mi div 12
+                m := mi mod 12 + 1
+                si a > 2200 entonces devolver fin
+                si c.regla.meses <> 0 y c.regla.meses yb (1 << m) = 0 entonces devolver fin
+                si c.regla.n_mdía > 0 o c.regla.n_dsem > 0 entonces
+                    días_del_mes_que_casan(vu, c.regla, m, a, SIN_FIN, 0)
+                sino
+                    si d0 <= días_del_mes(m, a) entonces pon_cand(vu, número_de_día(d0, m, a)) fin
+                fin
+            caso F_ANUAL:
+                a := a0 + k
+                si a > 2200 entonces devolver fin
+                ini := número_de_día(1, 1, a)
+                fin_ := número_de_día(31, 12, a)
+                si c.regla.n_adía > 0 entonces
+                    para n desde ini hasta fin_ hacer
+                        si no casa_adía(c.regla, n - ini + 1, fin_ - ini + 1) entonces seguir fin
+                        de_número(n, d, m, j)
+                        si c.regla.meses <> 0 y c.regla.meses yb (1 << m) = 0 entonces seguir fin
+                        si c.regla.n_mdía > 0 y no casa_mdía(c.regla, d, días_del_mes(m, a)) entonces seguir fin
+                        si c.regla.n_dsem > 0 y no casa_dsem(c.regla, n, 0, 0, falso) entonces seguir fin
+                        pon_cand(vu, n)
+                    fin
+                sino si c.regla.n_mdía > 0 o c.regla.n_dsem > 0 entonces
+                    para mes desde 1 hasta 12 hacer
+                        si c.regla.meses <> 0 y c.regla.meses yb (1 << mes) = 0 entonces seguir fin
+                        si c.regla.meses <> 0 entonces
+                            días_del_mes_que_casan(vu, c.regla, mes, a, SIN_FIN, 0)
+                        sino
+                            días_del_mes_que_casan(vu, c.regla, mes, a, ini, fin_)
+                        fin
+                    fin
+                sino si c.regla.meses <> 0 entonces
+                    para mes desde 1 hasta 12 hacer
+                        si c.regla.meses yb (1 << mes) <> 0 y d0 <= días_del_mes(mes, a) entonces pon_cand(vu, número_de_día(d0, mes, a)) fin
+                    fin
+                sino
+                    si d0 <= días_del_mes(m0, a) entonces pon_cand(vu, número_de_día(d0, m0, a)) fin
+                fin
+        fin
+        ; BYSETPOS: las de esas posiciones (en orden)
+        si c.regla.n_pos > 0 y vu.n > 0 entonces
+            n := 0
+            para i desde 1 hasta vu.n hacer
+                para j desde 1 hasta c.regla.n_pos hacer
+                    v := c.regla.pos[j - 1]
+                    si (v > 0 y nat32(v) = i) o (v < 0 y ent32(vu.n) + v + 1 = ent32(i)) entonces
+                        tmp[n] := vu.cand[i - 1]
+                        n := n + 1
+                        romper
+                    fin
+                fin
+            fin
+            para i desde 1 hasta n hacer vu.cand[i - 1] := tmp[i - 1] fin
+            vu.n := n
+        fin
+    fin
+
+    ; el período en que cae (o antes) el día n, para saltar sin contar
+    función período_de(ref c: Cita, n: nat32): nat32
+        variable d0, m0, a0, d, m, a, p: nat32
+        si n <= c.día entonces devolver 0 fin
+        de_número(c.día, d0, m0, a0)
+        de_número(n, d, m, a)
+        según nat32(c.regla.frec)
+            caso F_DIARIA: p := n - c.día
+            caso F_SEMANAL: p := (empieza_semana(n, c.regla.wkst) - empieza_semana(c.día, c.regla.wkst)) div 7
+            caso F_MENSUAL: p := (a * 12 + m) - (a0 * 12 + m0)
+            si no: p := a - a0
+        fin
+        devolver p div c.regla.cada
+    fin
+
+    ; empieza a dar las veces de la cita c desde el día «dsd»
+    público función empieza(ref vu: Vuelta, c: puntero a Cita, dsd: nat32)
+        vu.c := c
+        vu.per := 0
+        vu.n := 0
+        vu.i := 0
+        vu.cuenta := 0
+        vu.primera := cierto
+        vu.acabada := falso
+        vu.vacíos := 0
+        vu.dsd := dsd
+        si c.regla.frec <> F_NO y c.regla.veces = 0 y dsd > c.día + 400 entonces
+            ; sin COUNT se salta hasta cerca (no hace falta contar)
+            vu.per := período_de(valor(c), dsd)
+            si vu.per > 0 entonces vu.per := vu.per - 1 fin
+            si vu.per > 0 entonces vu.primera := falso fin
+            haz_período(vu)
+        sino si c.regla.frec <> F_NO entonces
+            haz_período(vu)
+        fin
+    fin
+
+    función excepción(ref c: Cita, n: nat32): bool
+        variable i: nat32
+        para i desde 1 hasta c.n_excep hacer
+            si c.excep[i - 1] = n entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; ¿pasa ya del UNTIL?
+    función pasada(ref c: Cita, n: nat32): bool
+        si c.regla.hasta_día = SIN_FIN entonces devolver falso fin
+        si n > c.regla.hasta_día entonces devolver cierto fin
+        devolver n = c.regla.hasta_día y not_todo(c) y c.minuto > c.regla.hasta_min
+    fin
+
+    función not_todo(ref c: Cita): bool
+        devolver no c.todo_día
+    fin
+
+    ; la vez siguiente (su día): falso si no quedan
+    público función siguiente(ref vu: Vuelta, ref n: nat32): bool
+        variable c: puntero a Cita
+        variable x: nat32
+        c := vu.c
+        mientras no vu.acabada hacer
+            si vu.primera entonces
+                ; la de DTSTART va siempre (RFC 5545), y cuenta
+                vu.primera := falso
+                vu.cuenta := 1
+                x := c.día
+                si c.regla.frec = F_NO entonces vu.acabada := cierto fin
+                si x >= vu.dsd y no excepción(valor(c), x) entonces
+                    n := x
+                    devolver cierto
+                fin
+                seguir
+            fin
+            si c.regla.frec = F_NO entonces
+                vu.acabada := cierto
+                romper
+            fin
+            si vu.i >= vu.n entonces
+                vu.per := vu.per + 1
+                vu.vacíos := vu.vacíos + 1
+                si vu.vacíos > 3000 o vu.per > 200000 entonces
+                    vu.acabada := cierto
+                    romper
+                fin
+                haz_período(vu)
+                si vu.n > 0 entonces vu.vacíos := 0 fin
+                seguir
+            fin
+            x := vu.cand[vu.i]
+            vu.i := vu.i + 1
+            si x <= c.día entonces seguir fin       ; (la de DTSTART ya ha ido)
+            si pasada(valor(c), x) entonces
+                vu.acabada := cierto
+                romper
+            fin
+            vu.cuenta := vu.cuenta + 1
+            si c.regla.veces > 0 y vu.cuenta > c.regla.veces entonces
+                vu.acabada := cierto
+                romper
+            fin
+            si x < vu.dsd o excepción(valor(c), x) entonces seguir fin
+            n := x
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; ¿tiene la cita una vez ese día (o la toca, si dura varios)?
+    público función cae_en(c: puntero a Cita, n: nat32, ref inicio: nat32): bool
+        variable vu: Vuelta
+        variable x, largo: nat32
+        largo := 0
+        si c.dura > 1440 entonces largo := (c.dura - 1) div 1440 fin
+        si n < largo entonces devolver falso fin
+        empieza(vu, c, n - largo)
+        mientras siguiente(vu, x) hacer
+            si x > n entonces devolver falso fin
+            inicio := x
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; =========================================================================
+    ;  Los avisos
+    ; =========================================================================
+    ; el instante de una vez (su día) de la cita
+    público función instante_de(ref c: Cita, n: nat32): nat32
+        si c.todo_día o (c.clase = CLASE_TAREA) entonces
+            ; (los de todo el día, las tareas y los cumpleaños: desde las 0:00, o la hora puesta)
+            devolver utc_de_madrid(n, c.minuto)
+        fin
+        devolver utc_de_madrid(n, c.minuto)
+    fin
+
+    ; el primer aviso de la cita después del instante «tras» (SIN_FIN si no hay);
+    ; en «vez», el día de esa vez
+    público función próximo_aviso(c: puntero a Cita, tras: nat32, ref vez: nat32): nat32
+        variable vu: Vuelta
+        variable x, i, ant: nat32
+        si no c.usada o c.aviso < 0 entonces devolver SIN_FIN fin
+        si c.clase = CLASE_TAREA y (c.hecha o no c.con_fecha) entonces devolver SIN_FIN fin
+        ; desde el día del instante, menos lo de antes del aviso y un día
+        ant := nat32(c.aviso) div 1440 + 2
+        x := tras div 1440
+        si x > ant entonces x := x - ant sino x := 0 fin
+        empieza(vu, c, x)
+        mientras siguiente(vu, x) hacer
+            i := instante_de(valor(c), x) - nat32(c.aviso)
+            si i > tras entonces
+                vez := x
+                devolver i
+            fin
+        fin
+        devolver SIN_FIN
+    fin
+
+    ; =========================================================================
+    ;  Ayudas
+    ; =========================================================================
+    ; «dd/mm/aaaa» -> número de día (falso si no vale)
+    público función lee_fecha(t: puntero a byte, ref n: nat32): bool
+        variable d, m, a: nat32
+        variable p: puntero a byte
+        p := t
+        d := 0
+        m := 0
+        a := 0
+        mientras valor(p) >= '0' y valor(p) <= '9' hacer
+            d := d * 10 + valor(p) - '0'
+            p := p + 1
+        fin
+        si valor(p) <> '/' y valor(p) <> '-' y valor(p) <> '.' entonces devolver falso fin
+        p := p + 1
+        mientras valor(p) >= '0' y valor(p) <= '9' hacer
+            m := m * 10 + valor(p) - '0'
+            p := p + 1
+        fin
+        si valor(p) <> '/' y valor(p) <> '-' y valor(p) <> '.' entonces devolver falso fin
+        p := p + 1
+        mientras valor(p) >= '0' y valor(p) <= '9' hacer
+            a := a * 10 + valor(p) - '0'
+            p := p + 1
+        fin
+        si a < 100 entonces a := a + 2000 fin
+        si a < 1970 o a > 2200 o m < 1 o m > 12 o d < 1 o d > días_del_mes(m, a) entonces devolver falso fin
+        n := número_de_día(d, m, a)
+        devolver cierto
+    fin
+
+    ; «hh:mm» -> minuto del día
+    público función lee_hora(t: puntero a byte, ref mi: nat32): bool
+        variable h, m: nat32
+        variable p: puntero a byte
+        p := t
+        h := 0
+        m := 0
+        si valor(p) < '0' o valor(p) > '9' entonces devolver falso fin
+        mientras valor(p) >= '0' y valor(p) <= '9' hacer
+            h := h * 10 + valor(p) - '0'
+            p := p + 1
+        fin
+        si valor(p) = ':' o valor(p) = '.' entonces
+            p := p + 1
+            mientras valor(p) >= '0' y valor(p) <= '9' hacer
+                m := m * 10 + valor(p) - '0'
+                p := p + 1
+            fin
+        fin
+        si h > 23 o m > 59 entonces devolver falso fin
+        mi := h * 60 + m
+        devolver cierto
+    fin
+
+    público función texto_fecha(n: nat32, destino: puntero a byte)
+        variable x: arreglo [3] de nat32
+        de_número(n, x[0], x[1], x[2])
+        formatear(destino, 12, "%02u/%02u/%04u", x)
+    fin
+
+    público función texto_hora(mi: nat32, destino: puntero a byte)
+        variable x: arreglo [2] de nat32
+        x[0] := mi div 60
+        x[1] := mi mod 60
+        formatear(destino, 8, "%02u:%02u", x)
+    fin
+
+    ; «el segundo martes» de ese día (para la repetición mensual)
+    público función ordinal_del_día(n: nat32, ref ord: ent32)
+        variable d, m, a: nat32
+        de_número(n, d, m, a)
+        ord := ent32((d - 1) div 7 + 1)
+        si d + 7 > días_del_mes(m, a) entonces ord := -1 fin
+    fin
+
+    ; cuántas veces de la cita hay entre dos días (para las pruebas)
+    público función cuenta_veces(c: puntero a Cita, dsd: nat32, hst: nat32): nat32
+        variable vu: Vuelta
+        variable x, n: nat32
+        n := 0
+        empieza(vu, c, dsd)
+        mientras siguiente(vu, x) y x <= hst hacer n := n + 1 fin
+        devolver n
+    fin
+
+fin AgNucleo.

@@ -1,0 +1,711 @@
+# formulas.txt - Cuentas 2: la batería de fórmulas (CUENTAS --guion), con
+# resultados calculados a mano. La otra mitad la hace haz_formulas.py con Python.
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+# ---- lo de siempre: números, prioridades, signos ----
+pon A1 5
+pon A2 7,5
+pon A3 =A1+A2
+num A3 12.5
+pon A4 =SUMA(A1:A3)
+num A4 25
+pon A1 10
+num A3 17.5
+num A4 35
+pon B1 =2+3*4
+num B1 14
+pon B2 =(2+3)*4
+num B2 20
+form B2 =(2+3)*4
+pon B3 =-2^2
+num B3 4
+pon B4 =2^3^2
+num B4 64
+pon B5 =10-4-3
+num B5 3
+pon B6 =100/10/2
+num B6 5
+pon B7 =50%
+num B7 0.5
+pon B8 =200*15%
+num B8 30
+pon B9 =1/3*3
+num B9 1
+pon B10 =0,1+0,2=0,3
+log B10 1
+pon B11 ="a"&"b"&1,5
+txt B11 ab1,5
+pon B12 =1<2
+log B12 1
+pon B13 ="abc"<"abd"
+log B13 1
+pon B14 ="ABC"="abc"
+log B14 1
+pon B15 =1<"a"
+log B15 1
+pon B16 ="a"<VERDADERO
+log B16 1
+pon B17 =+-+3
+num B17 -3
+pon B18 = 1 + 2
+num B18 3
+pon B19 =1,5E3
+num B19 1500
+pon B20 =3%%
+num B20 0.0003
+
+# ---- errores ----
+pon C1 =1/0
+err C1 #¡DIV/0!
+pon C2 =C1+1
+err C2 #¡DIV/0!
+pon C3 ="a"+1
+err C3 #¡VALOR!
+pon C4 =NOEXISTE(1)
+err C4 #¿NOMBRE?
+pon C5 =nombre_sin_definir
+err C5 #¿NOMBRE?
+pon C6 =RAIZ(-1)
+err C6 #¡NUM!
+pon C7 =BUSCARV(99;A1:A3;1;FALSO)
+err C7 #N/A
+pon C8 =ESERROR(C1)
+log C8 1
+pon C9 =SI.ERROR(C1;"falló")
+txt C9 falló
+pon C10 =ESNOD(C7)
+log C10 1
+pon C11 =TIPO.DE.ERROR(C1)
+num C11 2
+pon C12 =#¡REF!+1
+err C12 #¡REF!
+pon C13 =0^0
+err C13 #¡NUM!
+pon C14 =(-8)^(1/3)
+err C14 #¡NUM!
+
+# ---- referencias circulares ----
+pon D1 =D2+1
+pon D2 =D3+1
+pon D3 =D1+1
+err D1 #¡CIRC!
+circ
+pon D3 5
+num D2 6
+num D1 7
+
+# ---- referencias: relativas, absolutas, mixtas al copiar ----
+pon E1 1
+pon E2 2
+pon E3 3
+pon F1 =E1*$E$1+E$2+$E3
+num F1 6
+copia F1:F1
+pega F2
+form F2 =E2*$E$1+E$2+$E4
+num F2 4
+pega G3
+form G3 =F3*$E$1+F$2+$E5
+num G3 4
+copia F1:F1
+pega A1000
+form A1000 =#¡REF!*$E$1+#¡REF!+$E1002
+err A1000 #¡REF!
+
+# ---- rangos enteros y entre hojas ----
+pon H1 1
+pon H2 2
+pon H3 3
+pon H10 4
+pon I1 =SUMA(H:H)
+num I1 10
+pon I2 =SUMA(1:1)
+form I2 =SUMA(1:1)
+pon I3 =CONTAR(H:H)
+num I3 4
+hoja Ventas
+pon A1 100
+pon A2 200
+hoja Hoja1
+pon I4 =Ventas!A1+Ventas!A2
+num I4 300
+pon I5 =SUMA(Ventas!A1:A2)
+num I5 300
+hoja Mi hoja
+pon B2 7
+hoja Hoja1
+pon I6 ='Mi hoja'!B2*2
+num I6 14
+form I6 ='Mi hoja'!B2*2
+hoja Ventas
+pon A1 150
+hoja Hoja1
+num I4 350
+
+# ---- nombres definidos ----
+nombre IVA =Hoja1!$J$1
+pon J1 21%
+pon J2 =100*IVA
+num J2 21
+pon J1 10%
+num J2 10
+nombre Datos =Hoja1!$H$1:$H$3
+pon J3 =SUMA(Datos)
+num J3 6
+pon J4 =PROMEDIO(Datos)
+num J4 2
+
+# ---- matemáticas ----
+pon K1 =REDONDEAR(2,675;2)
+num K1 2.68
+pon K2 =REDONDEAR(-2,5;0)
+num K2 -3
+pon K3 =REDONDEAR(1234,567;-2)
+num K3 1200
+pon K4 =REDONDEAR.MAS(3,141;2)
+num K4 3.15
+pon K5 =REDONDEAR.MENOS(-3,149;2)
+num K5 -3.14
+pon K6 =ENTERO(-3,5)
+num K6 -4
+pon K7 =TRUNCAR(-3,99)
+num K7 -3
+pon K8 =RESIDUO(-7;3)
+num K8 2
+pon K9 =RESIDUO(7;-3)
+num K9 -2
+pon K10 =ABS(-4)
+num K10 4
+pon K11 =POTENCIA(2;10)
+num K11 1024
+pon K12 =RAIZ(16)
+num K12 4
+pon K13 =SIGNO(-0,5)
+num K13 -1
+pon K14 =PI()
+num K14 3.141592653589793
+pon K15 =FACT(5)
+num K15 120
+pon K16 =COMBINAT(10;3)
+num K16 120
+pon K17 =M.C.D(12;18;24)
+num K17 6
+pon K18 =M.C.M(4;6)
+num K18 12
+pon K19 =MULTIPLO.SUPERIOR(2,1;0,5)
+num K19 2.5
+pon K20 =MULTIPLO.INFERIOR(2,9;0,5)
+num K20 2.5
+pon K21 =REDONDEA.PAR(1,5)
+num K21 2
+pon K22 =REDONDEA.IMPAR(2)
+num K22 3
+pon K23 =NUMERO.ROMANO(1994)
+txt K23 MCMXCIV
+pon K24 =COCIENTE(7;2)
+num K24 3
+pon K25 =GRADOS(PI())
+num K25 180
+pon K26 =LN(EXP(2))
+num K26 2
+pon K27 =LOG10(1000)
+num K27 3
+pon K28 =LOG(8;2)
+num K28 3
+
+# ---- estadística ----
+pon L1 2
+pon L2 4
+pon L3 4
+pon L4 4
+pon L5 5
+pon L6 5
+pon L7 7
+pon L8 9
+pon M1 =PROMEDIO(L1:L8)
+num M1 5
+pon M2 =DESVESTP(L1:L8)
+num M2 2
+pon M3 =MEDIANA(L1:L8)
+num M3 4.5
+pon M4 =MODA(L1:L8)
+num M4 4
+pon M5 =MAX(L1:L8)
+num M5 9
+pon M6 =MIN(L1:L8;1)
+num M6 1
+pon M7 =K.ESIMO.MAYOR(L1:L8;2)
+num M7 7
+pon M8 =K.ESIMO.MENOR(L1:L8;3)
+num M8 4
+pon M9 =JERARQUIA(7;L1:L8)
+num M9 2
+pon M10 =VARP(L1:L8)
+num M10 4
+pon M11 =VAR(L1:L8)
+num M11 4.571428571428571
+pon M12 =CONTARA(L1:L8;"x")
+num M12 9
+pon M13 =CONTAR.BLANCO(L1:L10)
+num M13 2
+pon M14 =PRODUCTO(L1:L3)
+num M14 32
+pon M15 =SUMA.CUADRADOS(3;4)
+num M15 25
+pon M16 =SUMAPRODUCTO(L1:L2;L3:L4)
+num M16 24
+pon M17 =CONTAR.SI(L1:L8;4)
+num M17 3
+pon M18 =CONTAR.SI(L1:L8;">=5")
+num M18 4
+pon M19 =SUMAR.SI(L1:L8;"<>4")
+num M19 28
+pon M20 =PROMEDIO.SI(L1:L8;">4")
+num M20 6.5
+pon M21 =SUMAR.SI.CONJUNTO(L1:L8;L1:L8;">2";L1:L8;"<7")
+num M21 22
+pon M22 =CONTAR.SI.CONJUNTO(L1:L8;">2";L1:L8;"<7")
+num M22 5
+pon M23 =SUBTOTALES(9;L1:L8)
+num M23 40
+pon M24 =SUBTOTALES(1;L1:L8)
+num M24 5
+
+# ---- lógica ----
+pon N1 =SI(1>2;"sí";"no")
+txt N1 no
+pon N2 =SI(FALSO;1)
+log N2 0
+pon N3 =Y(1;VERDADERO;2>1)
+log N3 1
+pon N4 =O(0;FALSO)
+log N4 0
+pon N5 =NO(0)
+log N5 1
+pon N6 =ESNUMERO(5)
+log N6 1
+pon N7 =ESTEXTO("x")
+log N7 1
+pon N8 =ESBLANCO(Z99)
+log N8 1
+pon N9 =ESLOGICO(VERDADERO)
+log N9 1
+pon N10 =ES.PAR(4)
+log N10 1
+pon N11 =VERDADERO()
+log N11 1
+pon N12 =SI(A1>5;SI(A1>8;"mucho";"bastante");"poco")
+txt N12 mucho
+
+# ---- buscar ----
+pon O1 Pan
+pon P1 1,2
+pon O2 Leche
+pon P2 0,9
+pon O3 Huevos
+pon P3 2,5
+pon Q1 =BUSCARV("leche";O1:P3;2;FALSO)
+num Q1 0.9
+pon Q2 =BUSCARV("hue*";O1:P3;2;0)
+num Q2 2.5
+pon Q3 =COINCIDIR("Huevos";O1:O3;0)
+num Q3 3
+pon Q4 =INDICE(O1:P3;2;1)
+txt Q4 Leche
+pon Q5 =INDICE(O1:P3;3;2)
+num Q5 2.5
+pon R1 10
+pon R2 20
+pon R3 30
+pon S1 a
+pon S2 b
+pon S3 c
+pon Q6 =BUSCARV(25;R1:S3;2)
+txt Q6 b
+pon Q7 =BUSCARV(5;R1:S3;2)
+err Q7 #N/A
+pon Q8 =COINCIDIR(25;R1:R3;1)
+num Q8 2
+pon Q9 =BUSCARH(1,2;O1:P1;1;FALSO)
+num Q9 1.2
+pon Q10 =BUSCAR(30;R1:R3;S1:S3)
+txt Q10 c
+pon Q11 =ELEGIR(2;"uno";"dos";"tres")
+txt Q11 dos
+pon Q12 =FILA(R3)
+num Q12 3
+pon Q13 =COLUMNA(S1)
+num Q13 19
+pon Q14 =FILAS(R1:S3)
+num Q14 3
+pon Q15 =COLUMNAS(R1:S3)
+num Q15 2
+pon Q16 =INDIRECTO("R"&2)
+num Q16 20
+pon Q17 =SUMA(DESREF(R1;1;0;2;1))
+num Q17 50
+pon Q18 =DIRECCION(3;2)
+txt Q18 $B$3
+pon Q19 =DIRECCION(3;2;4)
+txt Q19 B3
+pon Q20 =SUMA(R1:INDICE(R1:R3;2))
+num Q20 30
+form Q20 =SUMA(R1:INDICE(R1:R3;2))
+
+# ---- texto ----
+pon T1 =CONCATENAR("Hola, ";"mundo")
+txt T1 Hola, mundo
+pon T2 =IZQUIERDA("Cuentas";3)
+txt T2 Cue
+pon T3 =DERECHA("Cuentas";2)
+txt T3 as
+pon T4 =EXTRAE("Hispa-Pentium";7;7)
+txt T4 Pentium
+pon T5 =LARGO("ñoño")
+num T5 4
+pon T6 =MAYUSC("árbol")
+txt T6 ÁRBOL
+pon T7 =MINUSC("ÁRBOL")
+txt T7 árbol
+pon T8 =NOMPROPIO("josé maría pérez")
+txt T8 José María Pérez
+pon T9 =ESPACIOS("  a   b  ")
+txt T9 a b
+pon T10 =ENCONTRAR("t";"Cuentas")
+num T10 5
+pon T11 =HALLAR("T";"Cuentas")
+num T11 5
+pon T12 =ENCONTRAR("T";"Cuentas")
+err T12 #¡VALOR!
+pon T13 =SUSTITUIR("a-b-c";"-";"+")
+txt T13 a+b+c
+pon T14 =SUSTITUIR("a-b-c";"-";"+";2)
+txt T14 a-b+c
+pon T15 =REEMPLAZAR("abcdef";2;3;"X")
+txt T15 aXef
+pon T16 =REPETIR("ab";3)
+txt T16 ababab
+pon T17 =TEXTO(1234,5;"#.##0,00")
+txt T17 1.234,50
+pon T18 =TEXTO(0,256;"0,0%")
+txt T18 25,6%
+pon T19 =VALOR("1.234,5")
+num T19 1234.5
+pon T20 =CARACTER(65)
+txt T20 A
+pon T21 =CODIGO("a")
+num T21 97
+pon T22 =IGUAL("a";"A")
+log T22 0
+pon T23 =DECIMAL(1234,567;1)
+txt T23 1.234,6
+pon T24 =MONEDA(1234,5)
+txt T24 1.234,50 €
+pon T25 =T(5)
+txt T25
+pon T26 =CARACTER(128)
+txt T26 €
+pon T27 ="Total: "&TEXTO(3,5;"0,00 €")
+txt T27 Total: 3,50 €
+
+# ---- fechas y horas ----
+pon U1 =FECHA(2026;11;22)
+num U1 46348
+pon U2 =AÑO(U1)
+num U2 2026
+pon U3 =MES(U1)
+num U3 11
+pon U4 =DIA(U1)
+num U4 22
+pon U5 =DIASEM(U1)
+num U5 1
+pon U6 =DIASEM(U1;2)
+num U6 7
+pon U7 =FECHA(2026;13;1)
+num U7 46388
+pon U8 =FECHA(2024;2;30)
+num U8 45352
+pon U9 =FIN.MES(FECHA(2024;1;15);1)
+num U9 45351
+pon U10 =FECHA.MES(FECHA(2024;1;31);1)
+num U10 45351
+pon U11 =NSHORA(14;30;0)
+num U11 0.6041666666666666
+pon U12 =HORA(U11)
+num U12 14
+pon U13 =MINUTO(U11)
+num U13 30
+pon U14 =DIAS360(FECHA(2026;1;31);FECHA(2026;3;31))
+num U14 60
+pon U15 =DIAS.LAB(FECHA(2026;11;2);FECHA(2026;11;13))
+num U15 10
+pon U16 =DIA.LAB(FECHA(2026;11;20);1)
+num U16 46349
+pon U17 =SIFECHA(FECHA(2000;5;20);FECHA(2026;11;22);"y")
+num U17 26
+pon U18 =SIFECHA(FECHA(2026;1;31);FECHA(2026;3;1);"m")
+num U18 1
+pon U19 =NUM.DE.SEMANA(FECHA(2026;1;4))
+num U19 2
+pon U20 =FECHANUMERO("22/11/2026")
+num U20 46348
+pon U21 =DIAS(FECHA(2026;12;25);FECHA(2026;11;22))
+num U21 33
+pon U22 =FECHA(1900;3;1)
+num U22 61
+pon U23 =TEXTO(U1;"dddd, d ""de"" mmmm ""de"" aaaa")
+txt U23 domingo, 22 de noviembre de 2026
+pon U24 =TEXTO(U11;"hh:mm")
+txt U24 14:30
+
+# ---- dinero (a mano; los demás con Python) ----
+pon V1 =PAGO(0;10;-1000)
+num V1 100
+pon V2 =VF(0;12;-100)
+num V2 1200
+pon V3 =VA(0;5;-200)
+num V3 1000
+pon V4 =NPER(0;-100;1000)
+num V4 10
+pon V5 =SLN(10000;1000;9)
+num V5 1000
+pon V6 =SYD(10000;1000;5;1)
+num V6 3000
+pon V7 =DDB(10000;1000;5;1)
+num V7 4000
+pon V8 =VNA(10%;-1000;600;600)
+num V8 37.565740045078996
+
+# ---- lo que se teclea y lo que se ve ----
+pon W1 22/11/2026
+num W1 46348
+ver W1 22/11/2026
+pon W2 14:30
+ver W2 14:30
+pon W3 12,5%
+num W3 0.125
+ver W3 12,50%
+pon W4 1.234,56 €
+num W4 1234.56
+ver W4 1.234,56 €
+pon W5 -1.000
+num W5 -1000
+ver W5 -1.000
+pon W6 'texto
+txt W6 texto
+pon W7 '=1+1
+txt W7 =1+1
+form W7 '=1+1
+pon W8 VERDADERO
+log W8 1
+pon W9 1/2/26
+num W9 46054
+pon W10 0,000001234
+num W10 0.000001234
+ver W10 0,000001234
+pon W11 123456789012345
+ver W11 1,23457E+14
+pon W12 1E+20
+num W12 1e20
+fmt W13 0.00
+pon W13 3,14159
+ver W13 3,14
+fmt W14 #,##0.00 €
+pon W14 -1234,5
+ver W14 -1.234,50 €
+fmt W15 0.00;[Red]-0.00
+pon W15 -2
+ver W15 -2,00
+fmt W16 dd/mm/yyyy
+pon W16 46348
+ver W16 22/11/2026
+fmt W17 d mmm yyyy
+pon W17 46348
+ver W17 22 nov 2026
+fmt W18 0%
+pon W18 0,5
+ver W18 50%
+fmt W19 0.00E+00
+pon W19 12345
+ver W19 1,23E+04
+fmt W20 #,##0,
+pon W20 1234567
+ver W20 1.235
+fmt W21 "Cantidad: "0
+pon W21 7
+ver W21 Cantidad: 7
+fmt W22 @
+pon W22 hola
+ver W22 hola
+fmt W23 0.0;-0.0;"cero"
+pon W23 0
+ver W23 cero
+fmt W24 [h]:mm
+pon W24 1,5
+ver W24 36:00
+pon W25 =AHORA()-HOY()<1
+log W25 1
+
+# ---- en inglés ----
+loc en
+pon X1 =SUM(1.5,2.5)
+num X1 4
+pon X2 =IF(1>0,"yes","no")
+txt X2 yes
+form X2 =IF(1>0,"yes","no")
+pon X3 =ROUND(PI(),2)
+num X3 3.14
+loc es
+form X2 =SI(1>0;"yes";"no")
+form X3 =REDONDEAR(PI();2)
+pon X4 =sum(1;2)
+num X4 3
+form X4 =SUMA(1;2)
+pon X5 =año(fecha(2026;1;1))
+num X5 2026
+form X5 =AÑO(FECHA(2026;1;1))
+pon X6 =ANO(FECHA(2026;1;1))
+num X6 2026
+
+# ---- meter y quitar filas y columnas ----
+hoja Estructura
+pon A1 1
+pon A2 2
+pon A3 3
+pon A4 =SUMA(A1:A3)
+pon B1 =A3*10
+insfila 2
+num A5 6
+form A5 =SUMA(A1:A4)
+form B1 =A4*10
+num B1 30
+borfila 3
+form A4 =SUMA(A1:A3)
+form B1 =A3*10
+num A4 4
+borfila 3
+form B1 =#¡REF!*10
+err B1 #¡REF!
+deshaz
+num B1 30
+inscol A
+form C1 =B3*10
+form B4 =SUMA(B1:B3)
+borcol A
+form B1 =A3*10
+
+# ---- deshacer y rehacer ----
+hoja Deshacer
+pon A1 1
+pon A1 2
+pon A1 3
+deshaz
+num A1 2
+deshaz
+num A1 1
+rehaz
+num A1 2
+pon A2 =A1*2
+num A2 4
+deshaz
+vacia A2
+rehaz
+num A2 4
+
+# ---- rellenar series ----
+hoja Series
+pon A1 1
+pon A2 3
+rellena A1:A2 A1:A6
+num A6 11
+pon B1 enero
+rellena B1:B1 B1:B4
+txt B4 abril
+pon C1 Lun
+rellena C1:C1 C1:C3
+txt C3 Mié
+pon D1 Producto 1
+rellena D1:D1 D1:D3
+txt D3 Producto 3
+pon E1 =A1*2
+rellena E1:E1 E1:E3
+form E3 =A3*2
+pon F1 22/11/2026
+rellena F1:F1 F1:F3
+num F3 46350
+pon G1 7
+rellena G1:G1 G1:G3
+num G3 7
+
+# ---- ordenar ----
+hoja Ordenar
+pon A1 Nombre
+pon B1 Edad
+pon A2 Carmen
+pon B2 41
+pon A3 Ángel
+pon B3 35
+pon A4 Beatriz
+pon B4 35
+pon A5 Diego
+pon C2 =B2*2
+pon C3 =B3*2
+pon C4 =B4*2
+ordena A1:C5 B titulos
+txt A2 Ángel
+txt A3 Beatriz
+txt A4 Carmen
+txt A5 Diego
+form C4 =B4*2
+num C4 82
+ordena A1:C5 A desc titulos
+txt A2 Diego
+txt A5 Ángel
+deshaz
+txt A2 Ángel
+
+# ---- pegado especial ----
+hoja Pegar
+pon A1 2
+pon A2 =A1*10
+copia A1:A2
+pega C1 valores
+num C2 20
+vacia C3
+form C2 20
+pega D5 transp
+num D5 2
+form E5 =E4*10
+
+# ---- las hojas: quitar, deshacer, copiar, mover ----
+hoja Temporal
+pon A1 42
+pon A2 =A1*2
+hoja Resumen
+pon A1 =Temporal!A1+1
+pon A2 =SUMA(Temporal!A1:A2)
+num A1 43
+num A2 126
+quitahoja Temporal
+err A1 #¡REF!
+form A1 =#¡REF!+1
+deshaz
+num A1 43
+rehaz
+err A1 #¡REF!
+deshaz
+form A1 =Temporal!A1+1
+hoja Temporal
+pon A1 10
+hoja Resumen
+num A1 11
+num A2 30
+copiahoja Temporal
+hoja Temporal (2)
+num A2 20
+pon A1 1
+num A2 2
+hoja Resumen
+num A1 11
+muevehoja Resumen 0
+num A2 30

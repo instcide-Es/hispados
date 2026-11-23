@@ -5,8 +5,10 @@
 ;    Reloj         la hora y la fecha, grandes; el calendario del mes (se
 ;                  pasa de mes con < y >, con Re Pág y Av Pág, y de día con
 ;                  las flechas; Inicio vuelve a hoy), con los festivos
-;                  nacionales de España (también el Viernes Santo, que se
-;                  calcula); y poner en hora el reloj del equipo
+;                  (AGENDA: los de festivos.cas, la tabla que comparte con la
+;                  Agenda: nacionales, de la comunidad y locales; dos clics
+;                  en un día abren la Agenda en ese día); y poner en hora el
+;                  reloj del equipo
 ;    Alarma        a una hora (de una vez o todos los días), con su mensaje;
 ;                  suena mientras el Reloj está abierto (aunque esté
 ;                  minimizado): un aviso que parpadea en la ventana, el título
@@ -32,7 +34,7 @@ módulo UReloj
 
     modelo usuario
 
-    importar Llamadas, Controles, Textos32, Formato
+    importar Llamadas, Controles, Textos32, Formato, Festivos      ; (AGENDA) Festivos
 
     constante ID_PESTAÑAS = 1
     constante ID_CAL = 2
@@ -64,9 +66,6 @@ módulo UReloj
 
     constante PESTAÑAS = "Reloj|Alarma|Cron\xA2metro|Cuenta atr\xA0s"
     constante MENÚS = "&Archivo|&Ver|A&yuda"
-    constante DÍAS = "lunes|martes|mi\x82rcoles|jueves|viernes|s\xA0bado|domingo"
-    constante DÍAS_CORTOS = "lu|ma|mi|ju|vi|s\xA0|do"
-    constante MESES = "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre"
 
     variable tamaño_: nat32 = T_GRANDE
     variable pestaña: nat32
@@ -124,113 +123,10 @@ módulo UReloj
 
     variable aviso: arreglo [120] de byte
 
-    ; =========================================================================
-    ;  Las fechas
-    ; =========================================================================
-    función bisiesto(a: nat32): bool
-        devolver (a mod 4 = 0 y a mod 100 <> 0) o a mod 400 = 0
-    fin
-
-    función días_del_mes(m: nat32, a: nat32): nat32
-        si m = 2 entonces
-            si bisiesto(a) entonces devolver 29 fin
-            devolver 28
-        fin
-        si m = 4 o m = 6 o m = 9 o m = 11 entonces devolver 30 fin
-        devolver 31
-    fin
-
-    ; los días desde el 1 de enero de 1970 (el día 0, un jueves)
-    función número_de_día(d: nat32, m: nat32, a: nat32): nat32
-        variable n, i: nat32
-        n := 0
-        i := 1970
-        mientras i < a hacer
-            si bisiesto(i) entonces n := n + 366 sino n := n + 365 fin
-            i := i + 1
-        fin
-        i := 1
-        mientras i < m hacer
-            n := n + días_del_mes(i, a)
-            i := i + 1
-        fin
-        devolver n + d - 1
-    fin
-
-    función de_número(n: nat32, ref d: nat32, ref m: nat32, ref a: nat32)
-        variable l: nat32
-        a := 1970
-        mientras cierto hacer
-            si bisiesto(a) entonces l := 366 sino l := 365 fin
-            si n < l entonces romper fin
-            n := n - l
-            a := a + 1
-        fin
-        m := 1
-        mientras n >= días_del_mes(m, a) hacer
-            n := n - días_del_mes(m, a)
-            m := m + 1
-        fin
-        d := n + 1
-    fin
-
-    ; 0 el lunes ... 6 el domingo
-    función día_semana(d: nat32, m: nat32, a: nat32): nat32
-        devolver (número_de_día(d, m, a) + 3) mod 7
-    fin
-
-    ; el Domingo de Resurrección (el algoritmo de Meeus, el de Butcher)
-    función pascua(a: nat32, ref d: nat32, ref m: nat32)
-        variable aa, b, c, dd, e, f, gg, h, i, k, l, x: nat32
-        aa := a mod 19
-        b := a div 100
-        c := a mod 100
-        dd := b div 4
-        e := b mod 4
-        f := (b + 8) div 25
-        gg := (b - f + 1) div 3
-        h := (19 * aa + b - dd - gg + 15) mod 30
-        i := c div 4
-        k := c mod 4
-        l := (32 + 2 * e + 2 * i - h - k) mod 7
-        x := (aa + 11 * h + 22 * l) div 451
-        m := (h + l - 7 * x + 114) div 31
-        d := (h + l - 7 * x + 114) mod 31 + 1
-    fin
-
-    ; el festivo nacional de ese día (nulo si no lo es)
-    función festivo(d: nat32, m: nat32, a: nat32): puntero a byte
-        variable pd, pm, vd, vm, a2: nat32
-        si d = 1 y m = 1 entonces devolver "A\xA4o Nuevo" fin
-        si d = 6 y m = 1 entonces devolver "Epifan\xA1a del Se\xA4or (Reyes)" fin
-        si d = 1 y m = 5 entonces devolver "Fiesta del Trabajo" fin
-        si d = 15 y m = 8 entonces devolver "Asunci\xA2n de la Virgen" fin
-        si d = 12 y m = 10 entonces devolver "Fiesta Nacional de Espa\xA4a" fin
-        si d = 1 y m = 11 entonces devolver "Todos los Santos" fin
-        si d = 6 y m = 12 entonces devolver "D\xA1a de la Constituci\xA2n" fin
-        si d = 8 y m = 12 entonces devolver "Inmaculada Concepci\xA2n" fin
-        si d = 25 y m = 12 entonces devolver "Navidad" fin
-        ; el Viernes Santo: dos días antes de Pascua
-        pascua(a, pd, pm)
-        de_número(número_de_día(pd, pm, a) - 2, vd, vm, a2)
-        si d = vd y m = vm entonces devolver "Viernes Santo" fin
-        devolver nulo
-    fin
-
-    ; «sábado, 21 de noviembre de 2026»
-    función fecha_larga(d: nat32, m: nat32, a: nat32, t: puntero a byte)
-        variable nd: arreglo [16] de byte
-        variable nm: arreglo [16] de byte
-        variable x: arreglo [4] de nat32
-        opción_de(DÍAS, día_semana(d, m, a), nd, 16)
-        opción_de(MESES, m - 1, nm, 16)
-        nd[0] := mayúscula(nd[0])
-        x[0] := nat32(dirección(nd[0]))
-        x[1] := d
-        x[2] := nat32(dirección(nm[0]))
-        x[3] := a
-        formatear(t, 80, "%s, %u de %s de %u", x)
-    fin
+    ; (AGENDA) las fechas (bisiesto, días_del_mes, número_de_día, de_número,
+    ; día_semana, pascua, fecha_larga) y los festivos (festivo) están en
+    ; festivos.cas, la tabla que comparte con la Agenda: los nacionales, los
+    ; de la comunidad elegida en la Agenda y los locales
 
     ; =========================================================================
     ;  La hora de ahora
@@ -488,7 +384,7 @@ módulo UReloj
         fin
         texto_corto(x, y0, t, an, C_TINTA, f <> nulo)
         botón(ID_HOY, x, y0 + LT + 3 * E, "Hoy", falso, falso)
-        texto_corto(x + ancho_botón("Hoy") + LA, y0 + LT + 8 * E, "* festivo   HOY: hoy", an - ancho_botón("Hoy") - LA, C_SUAVE, falso)
+        texto_corto(x + ancho_botón("Hoy") + LA, y0 + LT + 8 * E, "* festivo   HOY: hoy   dos clics: la Agenda", an - ancho_botón("Hoy") - LA, C_SUAVE, falso)   ; (AGENDA)
     fin
 
     función pinta_reloj(yy: ent32, abajo: ent32)
@@ -1072,6 +968,21 @@ módulo UReloj
         devolver 0
     fin
 
+    ; (AGENDA) la Agenda (AGENDA.BIN, el paquete «agenda»), en el día elegido
+    función abre_agenda()
+        variable t: arreglo [24] de byte
+        variable x: arreglo [3] de nat32
+        x[0] := cal_d
+        x[1] := cal_m
+        x[2] := cal_a
+        formatear(t, 24, "/DIA %02u/%02u/%04u", x)
+        si es_error(lanzar_suelto("\\AGENDA.BIN", t)) entonces
+            copiar(aviso, "Para apuntar cosas, instale la Agenda (Programas y actualizaciones)")
+        sino
+            imprimir1("reloj: abro la Agenda %s\n", nat32(dirección(t[0])))
+        fin
+    fin
+
     función principal(): byte
         variable s: Suceso
         variable args: arreglo [160] de byte
@@ -1139,6 +1050,8 @@ módulo UReloj
                     pinta()
                 sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
                     clic(ent32(s.a), ent32(s.b))
+                    ; (AGENDA) dos clics en un día del calendario: la Agenda, en ese día
+                    si Llamadas.veces(s.c) >= 2 y pestaña = 0 y control_en(ent32(s.a), ent32(s.b)) = ID_CAL entonces abre_agenda() fin
                     pinta()
                 sino si s.clase = EV_MENÚ entonces
                     abierto := -1

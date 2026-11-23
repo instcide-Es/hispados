@@ -65,6 +65,7 @@ struct pdfsal {
 	pmarca *mar;
 	u32 n_mar, cabe_mar;
 	char titulo[200], autor[200], asunto[200];
+	char productor[80];		/* (0.8.8) el programa que lo hace: pdf_productor */
 	int mal;
 };
 
@@ -204,6 +205,16 @@ pdfsal *pdf_nuevo(void)
 		obj_nuevo(s);
 	buf_txt(&s->o, "%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
 	return s;
+}
+
+/* (0.8.8) el programa que hace el PDF (/Producer: «Cuentas 2.0 (Hispa-Pentium)») */
+void pdf_productor(pdfsal *s, const char *p)
+{
+	u32 i;
+
+	for (i = 0; p && p[i] && i + 1 < sizeof s->productor; i++)
+		s->productor[i] = p[i];
+	s->productor[i] = 0;
 }
 
 void pdf_datos(pdfsal *s, const char *titulo, const char *autor, const char *asunto)
@@ -369,6 +380,63 @@ void pdf_rect(pdfsal *s, double x, double y, double an, double al, u32 col)
 	num(&s->c, an);
 	num(&s->c, al);
 	buf_txt(&s->c, "re f\n");
+}
+
+/* (CUENTAS32) polígonos rellenos y recortes (Cuentas 2: sectores, marcadores, tramas) */
+static void camino(pdfsal *s, const double *xy, int n)
+{
+	int i;
+
+	for (i = 0; i < n; i++) {
+		num(&s->c, xy[2 * i]);
+		num(&s->c, s->al - xy[2 * i + 1]);
+		buf_txt(&s->c, i ? "l " : "m ");
+	}
+	buf_txt(&s->c, "h ");
+}
+
+void pdf_poligono(pdfsal *s, const double *xy, int n, u32 col)
+{
+	if (!s->en_pagina || n < 3)
+		return;
+	color(&s->c, col, "rg");
+	camino(s, xy, n);
+	buf_txt(&s->c, "f\n");
+}
+
+void pdf_guarda(pdfsal *s)
+{
+	if (s->en_pagina)
+		buf_txt(&s->c, "q\n");
+}
+
+void pdf_restaura(pdfsal *s)
+{
+	if (s->en_pagina)
+		buf_txt(&s->c, "Q\n");
+}
+
+void pdf_recorta_rect(pdfsal *s, double x, double y, double an, double al)
+{
+	if (!s->en_pagina)
+		return;
+	if (an < 0)
+		an = 0;
+	if (al < 0)
+		al = 0;
+	num(&s->c, x);
+	num(&s->c, s->al - y - al);
+	num(&s->c, an);
+	num(&s->c, al);
+	buf_txt(&s->c, "re W n\n");
+}
+
+void pdf_recorta_poligono(pdfsal *s, const double *xy, int n)
+{
+	if (!s->en_pagina || n < 3)
+		return;
+	camino(s, xy, n);
+	buf_txt(&s->c, "W n\n");
 }
 
 void pdf_raya(pdfsal *s, double x0, double y0, double x1, double y1, double g, u32 col)
@@ -728,7 +796,7 @@ int pdf_acaba(pdfsal *s, bufer *b)
 		so_ahora(&a, &me, &d, &h, &mi, &se);
 		obj_empieza(s, OBJ_INFO);
 		buf_txt(&s->o, "<< /Producer ");
-		cadena(&s->o, "Pluma 2.0 (Hispa-Pentium)");
+		cadena(&s->o, s->productor[0] ? s->productor : "Hispa-Pentium");	/* (0.8.8: antes, siempre «Pluma 2.0») */
 		if (s->titulo[0]) {
 			buf_txt(&s->o, " /Title ");
 			cadena(&s->o, s->titulo);

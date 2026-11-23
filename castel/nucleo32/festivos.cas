@@ -1,0 +1,760 @@
+; =============================================================================
+;  festivos.cas - (AGENDA) el calendario y los festivos, una sola tabla para
+;  el Reloj (RELOJ.BIN, ureloj.cas) y la Agenda (AGENDA.BIN, uagenda.cas):
+;
+;    - las fechas: bisiesto, los días del mes, el número del día (desde el
+;      1 de enero de 1970, un jueves) y al revés, el día de la semana (0 el
+;      lunes ... 6 el domingo), la Pascua (Meeus/Butcher) y la fecha larga
+;      en español («Domingo, 22 de noviembre de 2026»);
+;    - los festivos: los nacionales de España, los de cada comunidad
+;      autónoma (la que se elija; de serie, Cataluña) y los locales (los de
+;      un municipio de la tabla —de serie, Albinyana— y los que se apunten
+;      en FESTIVOS.TXT, en la carpeta de la Agenda). Las reglas: fecha fija
+;      («dd/mm»), de un año («dd/mm/aaaa»), contada desde la Pascua («P-3»
+;      es el Jueves Santo, «P+1» el Lunes de Pascua) o quitar uno de un año
+;      («-dd/mm/aaaa»: cuando la comunidad lo pasa a otro día);
+;    - la carpeta de la Agenda (una sola función: carpeta_agenda) y sus
+;      ajustes de los festivos (AGENDA.INI: comunidad= y municipio=).
+;
+;  Antes (ACCESORIOS, 21/11) el Reloj llevaba sus festivos nacionales
+;  dentro; desde la Agenda (22/11) los dos usan esta tabla.
+;  Las fuentes de la tabla, en docs/PENTIUM.md (14 vicies, «Los festivos»).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Festivos
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Controles
+
+    público constante DÍAS = "lunes|martes|mi\x82rcoles|jueves|viernes|s\xA0bado|domingo"
+    público constante DÍAS_CORTOS = "lu|ma|mi|ju|vi|s\xA0|do"
+    público constante MESES = "enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre"
+
+    ; las clases de festivo (lo que dice la Agenda debajo de su nombre)
+    público constante F_NACIONAL = 1
+    público constante F_COMUNIDAD = 2
+    público constante F_LOCAL = 3
+
+    ; =========================================================================
+    ;  Las fechas
+    ; =========================================================================
+    público función bisiesto(a: nat32): bool
+        devolver (a mod 4 = 0 y a mod 100 <> 0) o a mod 400 = 0
+    fin
+
+    público función días_del_mes(m: nat32, a: nat32): nat32
+        si m = 2 entonces
+            si bisiesto(a) entonces devolver 29 fin
+            devolver 28
+        fin
+        si m = 4 o m = 6 o m = 9 o m = 11 entonces devolver 30 fin
+        devolver 31
+    fin
+
+    ; los días desde el 1 de enero de 1970 (el día 0, un jueves); de 1970 en
+    ; adelante (la cuenta de H. Hinnant, sin bucles)
+    público función número_de_día(d: nat32, m: nat32, a: nat32): nat32
+        variable aa, era, yoe, doy, doe, mm: nat32
+        aa := a
+        si m <= 2 entonces aa := aa - 1 fin
+        era := aa div 400
+        yoe := aa - era * 400
+        si m > 2 entonces mm := m - 3 sino mm := m + 9 fin
+        doy := (153 * mm + 2) div 5 + d - 1
+        doe := yoe * 365 + yoe div 4 - yoe div 100 + doy
+        devolver era * 146097 + doe - 719468
+    fin
+
+    público función de_número(n: nat32, ref d: nat32, ref m: nat32, ref a: nat32)
+        variable z, era, doe, yoe, doy, mp: nat32
+        z := n + 719468
+        era := z div 146097
+        doe := z - era * 146097
+        yoe := (doe - doe div 1460 + doe div 36524 - doe div 146096) div 365
+        a := yoe + era * 400
+        doy := doe - (365 * yoe + yoe div 4 - yoe div 100)
+        mp := (5 * doy + 2) div 153
+        d := doy - (153 * mp + 2) div 5 + 1
+        si mp < 10 entonces m := mp + 3 sino m := mp - 9 fin
+        si m <= 2 entonces a := a + 1 fin
+    fin
+
+    ; 0 el lunes ... 6 el domingo
+    público función día_semana(d: nat32, m: nat32, a: nat32): nat32
+        devolver (número_de_día(d, m, a) + 3) mod 7
+    fin
+
+    público función dsem_de(n: nat32): nat32
+        devolver (n + 3) mod 7
+    fin
+
+    ; el Domingo de Resurrección (el algoritmo de Meeus, el de Butcher)
+    público función pascua(a: nat32, ref d: nat32, ref m: nat32)
+        variable aa, b, c, dd, e, f, gg, h, i, k, l, x: nat32
+        aa := a mod 19
+        b := a div 100
+        c := a mod 100
+        dd := b div 4
+        e := b mod 4
+        f := (b + 8) div 25
+        gg := (b - f + 1) div 3
+        h := (19 * aa + b - dd - gg + 15) mod 30
+        i := c div 4
+        k := c mod 4
+        l := (32 + 2 * e + 2 * i - h - k) mod 7
+        x := (aa + 11 * h + 22 * l) div 451
+        m := (h + l - 7 * x + 114) div 31
+        d := (h + l - 7 * x + 114) mod 31 + 1
+    fin
+
+    ; el número de día de la Pascua de ese año
+    público función día_de_pascua(a: nat32): nat32
+        variable d, m: nat32
+        pascua(a, d, m)
+        devolver número_de_día(d, m, a)
+    fin
+
+    ; «Sábado, 21 de noviembre de 2026»
+    público función fecha_larga(d: nat32, m: nat32, a: nat32, t: puntero a byte)
+        variable nd: arreglo [16] de byte
+        variable nm: arreglo [16] de byte
+        variable x: arreglo [4] de nat32
+        opción_de(DÍAS, día_semana(d, m, a), nd, 16)
+        opción_de(MESES, m - 1, nm, 16)
+        nd[0] := mayúscula(nd[0])
+        x[0] := nat32(dirección(nd[0]))
+        x[1] := d
+        x[2] := nat32(dirección(nm[0]))
+        x[3] := a
+        formatear(t, 80, "%s, %u de %s de %u", x)
+    fin
+
+    ; =========================================================================
+    ;  La carpeta de la Agenda (la única función que sabe dónde está)
+    ; =========================================================================
+    ; Con usuarios (la rama «usuarios», la 0.8.7): \USUARIOS\<CARPETA>\AGENDA
+    ; (la llamada 200, 4: «su carpeta»; con un núcleo sin usuarios, o un
+    ; sistema sin instalar, no da nada); si no, \DOCUMENT\AGENDA de la unidad
+    ; del sistema. Las pruebas la fuerzan (carpeta_forzada: «/CARPETA=»).
+    ; El escritorio (escritorio.cas, «(AGENDA)», ruta_próxima) sigue la
+    ; misma regla para leer PROXIMA.TXT: si cambia aquí, cambia allí.
+    público variable carpeta_forzada: arreglo [96] de byte
+
+    función mi_carpeta_de_usuario(destino: puntero a byte, cabe: nat32): nat32
+        variable r: nat32
+        ensamblador
+            mov eax, 200
+            mov ebx, 4
+            mov ecx, {destino}
+            mov edx, {cabe}
+            int 0x80
+            mov {r}, eax
+        fin
+        devolver r
+    fin
+
+    público función carpeta_agenda(destino: puntero a byte)
+        variable r: nat32
+        si carpeta_forzada[0] <> 0 entonces
+            copiar(destino, carpeta_forzada)
+            devolver
+        fin
+        r := mi_carpeta_de_usuario(destino, 80)
+        si r > 0 y r < 80 y destino[0] = '\\' entonces
+            destino[r] := 0
+            concatenar(destino, "\\AGENDA")
+            devolver
+        fin
+        copiar(destino, "\\DOCUMENT\\AGENDA")
+    fin
+
+    ; la ruta de uno de sus archivos («AGENDA.ICS»)
+    público función ruta_agenda(nombre: puntero a byte, destino: puntero a byte)
+        carpeta_agenda(destino)
+        concatenar(destino, "\\")
+        concatenar(destino, nombre)
+    fin
+
+    ; que exista la carpeta (y su madre, \DOCUMENT): cierto si está
+    público función asegura_carpeta(): bool
+        variable r: arreglo [100] de byte
+        variable i: nat32
+        variable m: nat32
+        carpeta_agenda(r)
+        m := abrir(r)
+        si m < PRIMER_ERROR entonces
+            cerrar(m)
+            devolver cierto
+        fin
+        ; cada trozo, de arriba abajo
+        i := 1
+        mientras r[i] <> 0 hacer
+            si r[i] = '\\' entonces
+                r[i] := 0
+                crear_carpeta(r)
+                r[i] := '\\'
+            fin
+            i := i + 1
+        fin
+        m := crear_carpeta(r)
+        devolver m < PRIMER_ERROR o m = YA_EXISTE
+    fin
+
+    ; =========================================================================
+    ;  La tabla de los festivos
+    ; =========================================================================
+    ; «ámbito|regla|nombre». Ámbito: ES (toda España), el código de la
+    ; comunidad (los de COMUNIDADES) o L:MUNICIPIO. Las reglas, arriba.
+    ; Los nacionales «no sustituibles» y los que todas las comunidades
+    ; dejan en su día; lo demás, por comunidad, con los cambios de cada año
+    ; (los traslados al lunes) de las resoluciones del BOE y del DOGC.
+    público constante COMUNIDADES = "Solo los nacionales|Andaluc\xA1a|Arag\xA2n|Asturias|Illes Balears|Canarias|Cantabria|Castilla-La Mancha|Castilla y Le\xA2n|Catalu\xA4a|Comunitat Valenciana|Extremadura|Galicia|Comunidad de Madrid|Regi\xA2n de Murcia|Navarra|Pa\xA1s Vasco|La Rioja|Ceuta|Melilla"
+    constante CÓDIGOS = "ES|AN|AR|AS|IB|CN|CB|CM|CL|CT|VC|EX|GA|MD|MC|NC|PV|RI|CE|ML"
+    constante N_COMUNIDADES = 20
+    público constante MUNICIPIOS = "Ninguno|Albinyana (Baix Pened\x8As)"
+    constante CÓDIGOS_MUNI = "-|ALBINYANA"
+    constante N_MUNICIPIOS = 2
+
+    constante N_REGLAS = 200
+    variable reglas: arreglo [N_REGLAS] de puntero a byte = (
+        "ES|01/01|Año Nuevo",
+        "ES|06/01|Epifanía del Señor (Reyes)",
+        "ES|P-2|Viernes Santo",
+        "ES|01/05|Fiesta del Trabajo",
+        "ES|15/08|Asunción de la Virgen",
+        "ES|12/10|Fiesta Nacional de España",
+        "ES|01/11|Todos los Santos",
+        "ES|06/12|Día de la Constitución",
+        "ES|08/12|Inmaculada Concepción",
+        "ES|25/12|Navidad",
+        "AN|~P-3|Jueves Santo",
+        "AN|~28/02|Día de Andalucía",
+        "AN|28/02/2026|Día de Andalucía",
+        "AN|02/04/2026|Jueves Santo",
+        "AN|02/11/2026|Lunes siguiente a Todos los Santos",
+        "AN|07/12/2026|Lunes siguiente a la Constitución",
+        "AN|01/03/2027|Día de Andalucía (lunes siguiente)",
+        "AN|25/03/2027|Jueves Santo",
+        "AN|16/08/2027|Lunes siguiente a la Asunción",
+        "AR|~P-3|Jueves Santo",
+        "AR|~23/04|San Jorge, Día de Aragón",
+        "AR|02/04/2026|Jueves Santo",
+        "AR|23/04/2026|San Jorge, Día de Aragón",
+        "AR|02/11/2026|Lunes siguiente a Todos los Santos",
+        "AR|07/12/2026|Lunes siguiente a la Constitución",
+        "AR|25/03/2027|Jueves Santo",
+        "AR|23/04/2027|San Jorge, Día de Aragón",
+        "AR|16/08/2027|Lunes siguiente a la Asunción",
+        "AS|~P-3|Jueves Santo",
+        "AS|~08/09|Día de Asturias",
+        "AS|02/04/2026|Jueves Santo",
+        "AS|08/09/2026|Día de Asturias",
+        "AS|02/11/2026|Lunes siguiente a Todos los Santos",
+        "AS|07/12/2026|Lunes siguiente a la Constitución",
+        "AS|25/03/2027|Jueves Santo",
+        "AS|16/08/2027|Lunes siguiente a la Asunción",
+        "AS|08/09/2027|Día de Asturias",
+        "IB|~P-3|Jueves Santo",
+        "IB|~P+1|Lunes de Pascua",
+        "IB|~01/03|Día de las Illes Balears",
+        "IB|02/03/2026|Lunes siguiente al Día de las Illes Balears",
+        "IB|02/04/2026|Jueves Santo",
+        "IB|06/04/2026|Lunes de Pascua",
+        "IB|26/12/2026|Segunda fiesta de Navidad",
+        "IB|01/03/2027|Día de las Illes Balears",
+        "IB|25/03/2027|Jueves Santo",
+        "IB|29/03/2027|Lunes de Pascua",
+        "CN|~P-3|Jueves Santo",
+        "CN|~30/05|Día de Canarias",
+        "CN|02/04/2026|Jueves Santo",
+        "CN|30/05/2026|Día de Canarias",
+        "CN|02/11/2026|Lunes siguiente a Todos los Santos",
+        "CN|25/03/2027|Jueves Santo",
+        "CN|16/08/2027|Lunes siguiente a la Asunción",
+        "CB|~P-3|Jueves Santo",
+        "CB|~28/07|Día de las Instituciones de Cantabria",
+        "CB|~15/09|La Bien Aparecida",
+        "CB|02/04/2026|Jueves Santo",
+        "CB|28/07/2026|Día de las Instituciones de Cantabria",
+        "CB|15/09/2026|La Bien Aparecida",
+        "CB|07/12/2026|Lunes siguiente a la Constitución",
+        "CB|25/03/2027|Jueves Santo",
+        "CB|28/07/2027|Día de las Instituciones de Cantabria",
+        "CB|15/09/2027|La Bien Aparecida",
+        "CM|~P-3|Jueves Santo",
+        "CM|~31/05|Día de Castilla-La Mancha",
+        "CM|02/04/2026|Jueves Santo",
+        "CM|06/04/2026|Lunes de Pascua",
+        "CM|04/06/2026|Corpus Christi",
+        "CM|02/11/2026|Lunes siguiente a Todos los Santos",
+        "CM|25/03/2027|Jueves Santo",
+        "CM|27/05/2027|Corpus Christi",
+        "CM|31/05/2027|Día de Castilla-La Mancha",
+        "CL|~P-3|Jueves Santo",
+        "CL|~23/04|Fiesta de Castilla y León",
+        "CL|02/04/2026|Jueves Santo",
+        "CL|23/04/2026|Fiesta de Castilla y León",
+        "CL|02/11/2026|Lunes siguiente a Todos los Santos",
+        "CL|07/12/2026|Lunes siguiente a la Constitución",
+        "CL|25/03/2027|Jueves Santo",
+        "CL|23/04/2027|Fiesta de Castilla y León",
+        "CL|16/08/2027|Lunes siguiente a la Asunción",
+        "CT|~P+1|Lunes de Pascua",
+        "CT|~24/06|Sant Joan",
+        "CT|~11/09|Diada Nacional de Catalunya",
+        "CT|~26/12|Sant Esteve",
+        "CT|06/04/2026|Lunes de Pascua",
+        "CT|24/06/2026|Sant Joan",
+        "CT|11/09/2026|Diada Nacional de Catalunya",
+        "CT|26/12/2026|Sant Esteve",
+        "CT|29/03/2027|Lunes de Pascua",
+        "CT|24/06/2027|Sant Joan",
+        "CT|11/09/2027|Diada Nacional de Catalunya",
+        "VC|~19/03|San José",
+        "VC|~P+1|Lunes de Pascua",
+        "VC|~24/06|San Juan",
+        "VC|~09/10|Día de la Comunitat Valenciana",
+        "VC|19/03/2026|San José",
+        "VC|06/04/2026|Lunes de Pascua",
+        "VC|24/06/2026|San Juan",
+        "VC|09/10/2026|Día de la Comunitat Valenciana",
+        "VC|19/03/2027|San José",
+        "VC|29/03/2027|Lunes de Pascua",
+        "VC|09/10/2027|Día de la Comunitat Valenciana",
+        "EX|~P-3|Jueves Santo",
+        "EX|~08/09|Día de Extremadura",
+        "EX|02/04/2026|Jueves Santo",
+        "EX|08/09/2026|Día de Extremadura",
+        "EX|02/11/2026|Lunes siguiente a Todos los Santos",
+        "EX|07/12/2026|Lunes siguiente a la Constitución",
+        "EX|25/03/2027|Jueves Santo",
+        "EX|08/09/2027|Día de Extremadura",
+        "EX|11/10/2027|Fiesta de Extremadura (por el 15 de agosto)",
+        "GA|~P-3|Jueves Santo",
+        "GA|~17/05|Día de las Letras Gallegas",
+        "GA|~25/07|Día Nacional de Galicia",
+        "GA|19/03/2026|San José",
+        "GA|02/04/2026|Jueves Santo",
+        "GA|24/06/2026|San Juan",
+        "GA|25/07/2026|Día Nacional de Galicia",
+        "GA|19/03/2027|San José",
+        "GA|25/03/2027|Jueves Santo",
+        "GA|17/05/2027|Día de las Letras Gallegas",
+        "MD|~P-3|Jueves Santo",
+        "MD|~02/05|Fiesta de la Comunidad de Madrid",
+        "MD|02/04/2026|Jueves Santo",
+        "MD|02/05/2026|Fiesta de la Comunidad de Madrid",
+        "MD|02/11/2026|Lunes siguiente a Todos los Santos",
+        "MD|07/12/2026|Lunes siguiente a la Constitución",
+        "MD|19/03/2027|San José",
+        "MD|25/03/2027|Jueves Santo",
+        "MD|16/08/2027|Lunes siguiente a la Asunción",
+        "MC|~19/03|San José",
+        "MC|~P-3|Jueves Santo",
+        "MC|~09/06|Día de la Región de Murcia",
+        "MC|19/03/2026|San José",
+        "MC|02/04/2026|Jueves Santo",
+        "MC|09/06/2026|Día de la Región de Murcia",
+        "MC|07/12/2026|Lunes siguiente a la Constitución",
+        "MC|19/03/2027|San José",
+        "MC|25/03/2027|Jueves Santo",
+        "MC|09/06/2027|Día de la Región de Murcia",
+        "NC|~19/03|San José",
+        "NC|~P-3|Jueves Santo",
+        "NC|~P+1|Lunes de Pascua",
+        "NC|19/03/2026|San José",
+        "NC|02/04/2026|Jueves Santo",
+        "NC|06/04/2026|Lunes de Pascua",
+        "NC|02/11/2026|Lunes siguiente a Todos los Santos",
+        "NC|19/03/2027|San José",
+        "NC|25/03/2027|Jueves Santo",
+        "NC|29/03/2027|Lunes de Pascua",
+        "PV|~P-3|Jueves Santo",
+        "PV|~P+1|Lunes de Pascua",
+        "PV|19/03/2026|San José",
+        "PV|02/04/2026|Jueves Santo",
+        "PV|06/04/2026|Lunes de Pascua",
+        "PV|25/07/2026|Santiago Apóstol",
+        "PV|25/03/2027|Jueves Santo",
+        "PV|29/03/2027|Lunes de Pascua",
+        "PV|07/10/2027|Aniversario del primer Gobierno Vasco",
+        "RI|~P-3|Jueves Santo",
+        "RI|~P+1|Lunes de Pascua",
+        "RI|~09/06|Día de La Rioja",
+        "RI|02/04/2026|Jueves Santo",
+        "RI|06/04/2026|Lunes de Pascua",
+        "RI|09/06/2026|Día de La Rioja",
+        "RI|07/12/2026|Lunes siguiente a la Constitución",
+        "RI|25/03/2027|Jueves Santo",
+        "RI|29/03/2027|Lunes de Pascua",
+        "RI|09/06/2027|Día de La Rioja",
+        "CE|~P-3|Jueves Santo",
+        "CE|~05/08|Nuestra Señora de \xB6frica",
+        "CE|~02/09|Día de Ceuta",
+        "CE|02/04/2026|Jueves Santo",
+        "CE|27/05/2026|Fiesta del Sacrificio (Eid al-Adha)",
+        "CE|05/08/2026|Nuestra Señora de \xB6frica",
+        "CE|02/09/2026|Día de Ceuta",
+        "CE|25/03/2027|Jueves Santo",
+        "CE|17/05/2027|Fiesta del Sacrificio (Eid al-Adha)",
+        "CE|05/08/2027|Nuestra Señora de \xB6frica",
+        "ML|~P-3|Jueves Santo",
+        "ML|~17/09|Día de Melilla",
+        "ML|20/03/2026|Fiesta del Fin del Ramadán (Eid Fitr)",
+        "ML|02/04/2026|Jueves Santo",
+        "ML|27/05/2026|Fiesta del Sacrificio (Eid al-Adha)",
+        "ML|07/12/2026|Lunes siguiente a la Constitución",
+        "ML|10/03/2027|Fiesta del Fin del Ramadán (Eid Fitr)",
+        "ML|25/03/2027|Jueves Santo",
+        "ML|17/05/2027|Fiesta del Sacrificio (Eid al-Adha)",
+        "L:ALBINYANA|~16/07|Mare de Déu del Carme (fiesta local)",
+        "L:ALBINYANA|~24/08|Sant Bartomeu (fiesta local)",
+        "L:ALBINYANA|14/07/2023|Mare de Déu del Carme (fiesta local)",
+        "L:ALBINYANA|24/08/2023|Sant Bartomeu (fiesta local)",
+        "L:ALBINYANA|16/07/2024|Mare de Déu del Carme (fiesta local)",
+        "L:ALBINYANA|23/08/2024|Sant Bartomeu (fiesta local)",
+        "L:ALBINYANA|16/07/2025|Mare de Déu del Carme (fiesta local)",
+        "L:ALBINYANA|25/08/2025|Sant Bartomeu (fiesta local)",
+        "L:ALBINYANA|16/07/2026|Mare de Déu del Carme (fiesta local)",
+        "L:ALBINYANA|24/08/2026|Sant Bartomeu (fiesta local)"
+    )
+    variable n_reglas: nat32
+
+    ; ---- los ajustes (AGENDA.INI) ----
+    variable ajustes_leídos: bool
+    público variable comunidad: nat32 = 9       ; la de COMUNIDADES (de serie, Cataluña)
+    público variable municipio: nat32 = 1       ; el de MUNICIPIOS (de serie, Albinyana)
+
+    ; ---- los locales del usuario (FESTIVOS.TXT) ----
+    constante MAX_PROPIOS = 4096
+    variable propios: arreglo [MAX_PROPIOS] de byte
+    variable n_propios: nat32
+
+    ; ---- lo calculado de un año (para no mirar la tabla en cada día) ----
+    constante MAX_AÑO = 64
+    tipo Año_hecho = estructura
+        año: nat32
+        n: nat32
+        día: arreglo [MAX_AÑO] de nat32
+        clase: arreglo [MAX_AÑO] de byte
+        nombre: arreglo [MAX_AÑO] de puntero a byte
+    fin
+    variable hechos: arreglo [3] de Año_hecho
+    variable turno: nat32
+
+    ; lee los ajustes (comunidad= y municipio=, con su código) y FESTIVOS.TXT
+    público función lee_ajustes()
+        variable r: arreglo [120] de byte
+        variable t: arreglo [1024] de byte
+        variable v: arreglo [24] de byte
+        variable m, n, i: nat32
+        ajustes_leídos := cierto
+        hechos[0].año := 0
+        hechos[1].año := 0
+        hechos[2].año := 0
+        ruta_agenda("AGENDA.INI", r)
+        m := abrir(r)
+        si m < PRIMER_ERROR entonces
+            n := leer(m, t, 1023)
+            cerrar(m)
+            si n > 1023 entonces n := 0 fin
+            t[n] := 0
+            si valor_ini(t, "comunidad", v, 24) entonces
+                para i desde 0 hasta N_COMUNIDADES - 1 hacer
+                    si es_código(CÓDIGOS, i, v) entonces comunidad := i fin
+                fin
+            fin
+            si valor_ini(t, "municipio", v, 24) entonces
+                para i desde 0 hasta N_MUNICIPIOS - 1 hacer
+                    si es_código(CÓDIGOS_MUNI, i, v) entonces municipio := i fin
+                fin
+            fin
+        fin
+        n_propios := 0
+        ruta_agenda("FESTIVOS.TXT", r)
+        m := abrir(r)
+        si m < PRIMER_ERROR entonces
+            n := leer(m, propios, MAX_PROPIOS - 1)
+            cerrar(m)
+            si n > MAX_PROPIOS - 1 entonces n := 0 fin
+            n_propios := n
+        fin
+        propios[n_propios] := 0
+    fin
+
+    ; el código de la comunidad elegida («CT»)
+    público función código_comunidad(destino: puntero a byte)
+        si no ajustes_leídos entonces lee_ajustes() fin
+        opción_de(CÓDIGOS, comunidad, destino, 4)
+    fin
+
+    público función código_municipio(destino: puntero a byte)
+        si no ajustes_leídos entonces lee_ajustes() fin
+        opción_de(CÓDIGOS_MUNI, municipio, destino, 24)
+    fin
+
+    ; las otras: cambiarlas (las guarda la Agenda en AGENDA.INI)
+    público función elige(c: nat32, mu: nat32)
+        si c < N_COMUNIDADES entonces comunidad := c fin
+        si mu < N_MUNICIPIOS entonces municipio := mu fin
+        ajustes_leídos := cierto
+        hechos[0].año := 0
+        hechos[1].año := 0
+        hechos[2].año := 0
+    fin
+
+    ; ¿es «código» la opción i de la lista?
+    función es_código(lista: puntero a byte, i: nat32, código: puntero a byte): bool
+        variable op: arreglo [24] de byte
+        opción_de(lista, i, op, 24)
+        devolver iguales_sin_caja(op, código)
+    fin
+
+    ; el valor de «clave=» en un .INI (texto con CR LF)
+    público función valor_ini(t: puntero a byte, clave: puntero a byte, destino: puntero a byte, cabe: nat32): bool
+        variable p: puntero a byte
+        variable n, k: nat32
+        p := t
+        n := longitud(clave)
+        mientras valor(p) <> 0 hacer
+            si comparar_n(p, clave, n) y p[n] = '=' entonces
+                p := p + n + 1
+                k := 0
+                mientras valor(p) <> 0 y valor(p) <> 13 y valor(p) <> 10 y k + 1 < cabe hacer
+                    destino[k] := valor(p)
+                    k := k + 1
+                    p := p + 1
+                fin
+                destino[k] := 0
+                devolver cierto
+            fin
+            mientras valor(p) <> 0 y valor(p) <> 10 hacer p := p + 1 fin
+            si valor(p) = 10 entonces p := p + 1 fin
+        fin
+        devolver falso
+    fin
+
+    ; ¿empiezan igual (n letras, sin mirar mayúsculas)?
+    función comparar_n(a: puntero a byte, b: puntero a byte, n: nat32): bool
+        variable i: nat32
+        para i desde 1 hasta n hacer
+            si mayúscula(a[i - 1]) <> mayúscula(b[i - 1]) entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; dos cifras (o una) a un número; avanza p
+    función número_en(ref p: puntero a byte): nat32
+        variable n: nat32
+        n := 0
+        mientras valor(p) >= '0' y valor(p) <= '9' hacer
+            n := n * 10 + valor(p) - '0'
+            p := p + 1
+        fin
+        devolver n
+    fin
+
+    ; una regla («dd/mm», «dd/mm/aaaa», «-dd/mm/aaaa», «P+n», «P-n») para el
+    ; año a: su día (cierto si cae ese año); «quita», si es para quitar
+    función día_de_regla(r: puntero a byte, a: nat32, ref n: nat32, ref quita: bool): bool
+        variable d, m, aa: nat32
+        variable k: ent32
+        variable menos: bool
+        quita := falso
+        si valor(r) = '-' y r[1] <> '-' entonces
+            quita := cierto
+            r := r + 1
+        fin
+        si valor(r) = 'P' o valor(r) = 'p' entonces
+            r := r + 1
+            menos := valor(r) = '-'
+            si valor(r) = '-' o valor(r) = '+' entonces r := r + 1 fin
+            k := ent32(número_en(r))
+            si menos entonces k := -k fin
+            n := nat32(ent32(día_de_pascua(a)) + k)
+            devolver cierto
+        fin
+        si valor(r) < '0' o valor(r) > '9' entonces devolver falso fin
+        d := número_en(r)
+        si valor(r) <> '/' entonces devolver falso fin
+        r := r + 1
+        m := número_en(r)
+        si m < 1 o m > 12 o d < 1 o d > días_del_mes(m, a) entonces devolver falso fin
+        si valor(r) = '/' entonces
+            r := r + 1
+            aa := número_en(r)
+            si aa <> a entonces devolver falso fin
+        fin
+        n := número_de_día(d, m, a)
+        devolver cierto
+    fin
+
+    ; apunta (o quita) un festivo en lo hecho del año
+    función apunta(ref h: Año_hecho, n: nat32, clase: nat32, nombre: puntero a byte, quita: bool)
+        variable i, j: nat32
+        i := 0
+        mientras i < h.n hacer
+            si h.día[i] = n entonces
+                si quita entonces
+                    ; fuera (los que van detrás, uno arriba)
+                    j := i
+                    mientras j + 1 < h.n hacer
+                        h.día[j] := h.día[j + 1]
+                        h.clase[j] := h.clase[j + 1]
+                        h.nombre[j] := h.nombre[j + 1]
+                        j := j + 1
+                    fin
+                    h.n := h.n - 1
+                fin
+                devolver                         ; (el primero que se apuntó, manda)
+            fin
+            i := i + 1
+        fin
+        si quita o h.n >= MAX_AÑO entonces devolver fin
+        h.día[h.n] := n
+        h.clase[h.n] := byte(clase)
+        h.nombre[h.n] := nombre
+        h.n := h.n + 1
+    fin
+
+    ; una línea «ámbito|regla|nombre» (o «regla|nombre» de FESTIVOS.TXT, que
+    ; son locales); «nombre» apunta a la línea, que acaba en «\n», «\r» o 0
+    función mira_línea(ref h: Año_hecho, l: puntero a byte, propio: bool)
+        variable ámb: arreglo [16] de byte
+        variable cc: arreglo [24] de byte
+        variable p, regla, nombre: puntero a byte
+        variable clase, n, k: nat32
+        variable quita: bool
+        p := l
+        si valor(p) = ';' o valor(p) = '#' entonces devolver fin
+        clase := F_LOCAL
+        si no propio entonces
+            k := 0
+            mientras valor(p) <> '|' y valor(p) <> 0 y k < 15 hacer
+                ámb[k] := valor(p)
+                k := k + 1
+                p := p + 1
+            fin
+            ámb[k] := 0
+            si valor(p) <> '|' entonces devolver fin
+            p := p + 1
+            si iguales(ámb, "ES") entonces
+                clase := F_NACIONAL
+            sino si empieza_por(ámb, "L:") entonces
+                código_municipio(cc)
+                si no iguales_sin_caja(dirección(ámb[2]), cc) entonces devolver fin
+                clase := F_LOCAL
+            sino
+                código_comunidad(cc)
+                si no iguales(ámb, cc) entonces devolver fin
+                clase := F_COMUNIDAD
+            fin
+        fin
+        ; «~»: la de siempre, solo si ese año no tiene su lista (la del BOE o el DOGC)
+        si valor(p) = '~' entonces
+            si no propio y tiene_lista(ámb, h.año) entonces devolver fin
+            p := p + 1
+        fin
+        regla := p
+        mientras valor(p) <> '|' y valor(p) <> 0 y valor(p) <> 10 hacer p := p + 1 fin
+        si valor(p) <> '|' entonces devolver fin
+        nombre := p + 1
+        si no día_de_regla(regla, h.año, n, quita) entonces devolver fin
+        apunta(h, n, clase, nombre, quita)
+    fin
+
+    ; ¿tiene ese ámbito su lista del año a («ÁMBITO|dd/mm/aaaa|...»)?
+    función tiene_lista(ámb: puntero a byte, a: nat32): bool
+        variable i, n, k: nat32
+        variable p: puntero a byte
+        variable año: arreglo [8] de byte
+        n := longitud(ámb)
+        natural_a_texto(a, año)
+        para i desde 0 hasta N_REGLAS - 1 hacer
+            p := reglas[i]
+            si comparar_n(p, ámb, n) y p[n] = '|' y p[n + 1] <> '~' entonces
+                p := p + n + 1
+                k := 0
+                mientras p[k] <> '|' y p[k] <> 0 hacer k := k + 1 fin
+                si k = 10 y p[5] = '/' y p[6] = año[0] y p[7] = año[1] y p[8] = año[2] y p[9] = año[3] entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; los festivos del año a (de lo hecho, o se hacen)
+    función del_año(a: nat32): puntero a Año_hecho
+        variable i: nat32
+        variable p: puntero a byte
+        variable h: puntero a Año_hecho
+        si no ajustes_leídos entonces lee_ajustes() fin
+        para i desde 0 hasta 2 hacer
+            si hechos[i].año = a entonces devolver dirección(hechos[i]) fin
+        fin
+        h := dirección(hechos[turno])
+        turno := (turno + 1) mod 3
+        h.año := a
+        h.n := 0
+        ; los nacionales, los de la comunidad y los del municipio
+        i := 0
+        mientras i < N_REGLAS hacer
+            mira_línea(valor(h), reglas[i], falso)
+            i := i + 1
+        fin
+        ; los del usuario (FESTIVOS.TXT): «dd/mm|nombre», «dd/mm/aaaa|nombre»,
+        ; «P+n|nombre» o «-dd/mm/aaaa|» (quitar uno)
+        p := dirección(propios[0])
+        mientras valor(p) <> 0 hacer
+            mira_línea(valor(h), p, cierto)
+            mientras valor(p) <> 0 y valor(p) <> 10 hacer p := p + 1 fin
+            si valor(p) = 10 entonces p := p + 1 fin
+        fin
+        devolver h
+    fin
+
+    ; el festivo de ese día (nulo si no lo es); su nombre acaba en «\r»,
+    ; «\n» o 0: nombre_festivo lo copia limpio
+    público función festivo_de(d: nat32, m: nat32, a: nat32, ref clase: nat32): puntero a byte
+        variable h: puntero a Año_hecho
+        variable n, i: nat32
+        h := del_año(a)
+        n := número_de_día(d, m, a)
+        i := 0
+        mientras i < h.n hacer
+            si h.día[i] = n entonces
+                clase := h.clase[i]
+                devolver h.nombre[i]
+            fin
+            i := i + 1
+        fin
+        clase := 0
+        devolver nulo
+    fin
+
+    variable nombre_: arreglo [64] de byte
+
+    ; el nombre del festivo de ese día, limpio (nulo si no lo es): lo que
+    ; usaba el Reloj
+    público función festivo(d: nat32, m: nat32, a: nat32): puntero a byte
+        variable c: nat32
+        variable p: puntero a byte
+        p := festivo_de(d, m, a, c)
+        si p = nulo entonces devolver nulo fin
+        nombre_festivo(p, nombre_, 64)
+        devolver dirección(nombre_[0])
+    fin
+
+    público función nombre_festivo(p: puntero a byte, destino: puntero a byte, cabe: nat32)
+        variable k: nat32
+        k := 0
+        mientras valor(p) <> 0 y valor(p) <> 13 y valor(p) <> 10 y k + 1 < cabe hacer
+            destino[k] := valor(p)
+            k := k + 1
+            p := p + 1
+        fin
+        destino[k] := 0
+        si k = 0 entonces copiar_hasta(destino, "Festivo local", cabe) fin
+    fin
+
+fin Festivos.

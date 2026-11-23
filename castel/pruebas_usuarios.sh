@@ -216,6 +216,11 @@ miracap "con el escritorio, la pantalla de entrada: los tres usuarios, su tipo, 
 miracap "con la contraseña mala: «La contraseña no es esa», y no entra" ue2 negrita 150 350 650 400 "La contraseña no es esa"
 mira "con la buena entra Ana; cerrar la sesión (logo+L) vuelve a la pantalla; Bea, con la suya, entra" \
   "^entrada: la pantalla de entrada$" "^entrada: contraseña que no vale$" "^cuentas: entra Ana (el usuario 1)$" "^cuentas: sale el usuario 1" "^cuentas: entra Bea (el usuario 2)$"
+# (ICONOS) los iconos de cada uno, en la zona de los iconos (organiza.cas; nucleo32/mira_iconos.py)
+if python3 -I $AQUI/nucleo32/mira_iconos.py $S "usuario#1" 800 600 rejilla orden "Mi equipo,Bloc de notas,Consola" > $X/mi.txt 2>&1 \
+   && python3 -I $AQUI/nucleo32/mira_iconos.py $S "usuario#2" 800 600 rejilla orden "Mi equipo,Bloc de notas,Consola" >> $X/mi.txt 2>&1; then
+  ok "al entrar Ana y al entrar Bea, sus iconos: en la zona (ni en la barra ni en el dock), en la rejilla y sin taparse"
+else ko "los iconos al entrar cada usuario:"; head -4 $X/mi.txt | sed 's/^/        /'; fi
 miracap "ADMIN en la Consola de Ana: la ventanita del núcleo pide SU contraseña (no un «Sí»)" ue5 \
   negrita 190 230 420 260 "ORDENES.BIN pide el modo administrador" texto 190 280 420 300 "Contraseña de Ana:" negrita 380 360 470 400 "Aceptar"
 mira "con la contraseña de Ana, ORDENES (en su Consola) tiene el modo administrador" "^permisos: modo administrador para ORDENES.BIN"

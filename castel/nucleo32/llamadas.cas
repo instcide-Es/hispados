@@ -672,6 +672,13 @@ módulo Llamadas
         devolver llamada(11, tarea, 1, 0)
     fin
 
+    ; (CORTES) acaba una tarea que ha lanzado este programa (y las que haya
+    ; lanzado ella), esté donde esté (esperando a la red, al disco...): sus
+    ; archivos se cierran. Luego se recoge con acabada() o esperar()
+    público función acabar_hija(tarea: nat32): nat32
+        devolver llamada(11, tarea, 2, 0)
+    fin
+
     ; ---- el escritorio y las ventanas ----
     ; pone en marcha el escritorio (el entorno gráfico): cierto si queda en marcha
     público función escritorio(): bool

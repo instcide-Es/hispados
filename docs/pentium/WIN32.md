@@ -344,6 +344,116 @@ excepciones de C++, acaba con «una excepción de C++ que nadie recoge»), MIDI,
 Direct3D (los juegos de entonces con OpenGL o por programa no lo necesitan), y
 lo que vaya diciendo `WIN32 COMPRUEBA` y `WIN32.LOG` con el juego de verdad.
 
+## Lo que pedía Half-Life 1 (HL)
+
+*22/11/2026, rama `win32-hl`. Carlos pasó `WIN32 COMPRUEBA` sobre su
+Half-Life 1 (su copia instalada) en la 0.8.7: «faltan 2642 funciones». Casi
+1.700 eran de mentira (VGUI.DLL sí estaba) y el resto, lo de abajo. Hecho y
+probado con programas propios, sin el juego.*
+
+**Las DLL, donde las busca Windows.** Un nombre sin carpeta se busca en la
+carpeta del `.EXE` que arranca el programa (no en la de la DLL que lo
+importa: la `valve\cl_dlls\client.dll` de un juego pide `VGUI.DLL`, que está
+junto a `HL.EXE`), luego en la de trabajo, luego en la del sistema (`\WIN32`)
+y luego en cada carpeta del `PATH` (`cargador.c`, `abrir_dll_desde`). Lo
+mismo al cargar, con `LoadLibrary` y en `WIN32 COMPRUEBA`:
+
+```
+WIN32 COMPRUEBA C:\JUEGOS\HALFLIFE              (la carpeta del programa: la del .EXE)
+WIN32 COMPRUEBA HL.EXE /CON C:\JUEGOS\HALFLIFE  (el .EXE que arranca, y todo lo de la carpeta)
+WIN32 COMPRUEBA HL.EXE /MAQUINA                  (para otros programas: ver abajo)
+```
+
+Con una carpeta, cada DLL se mira desde las carpetas de arriba que tengan un
+`.EXE` (la de más cerca primero: un juego dentro de `C:\JUEGOS` es de su
+carpeta); con `/CON`, siempre desde la del `.EXE` que se nombra. Las que se
+importan **por número** se miran también (antes salían todas como faltas).
+Al final: «En total: N archivos; está todo (no falta nada).» El código de
+salida es 0 si está todo, 1 si falta algo y 2 si no había nada que mirar.
+
+**`/MAQUINA`** (para el Asistente de compatibilidad, `COMPAT.BIN`, y otros
+programas): una línea por hecho, con los campos separados por un tabulador
+(las rutas, en la página del sistema, como lo demás que se escribe):
+
+| Línea | Campos |
+|---|---|
+| `PROGRAMA` | la carpeta del programa principal (si la hay) |
+| `ARCHIVO` | ruta, tipo (`ventanas`, `consola`, `dll`, `otro` o `no-pe`), tamaño en octetos, SHA-256 (64 cifras hex) |
+| `NOHAY` | ruta (no se encuentra) |
+| `USA` | archivo, DLL, de dónde sale (su ruta, o `WIN32.BIN` si es de las de dentro) |
+| `FALTA` | archivo, DLL, función (o `#número`) |
+| `FALTADLL` | archivo, DLL, cuántas funciones pedía de ella |
+| `RESUMEN` | archivo, DLL que importa, funciones que importa, cuántas faltan |
+| `TOTAL` | archivos mirados, funciones que faltan, DLL que faltan (la última línea) |
+
+**El botón «Comprobar compatibilidad».** Si un programa no puede seguir por
+una función que falta (o una DLL que no está), el aviso lleva, además de
+Aceptar, el botón «Comprobar compatibilidad» si en la unidad del sistema está
+`\COMPAT.BIN` (o `\HISPA\COMPAT.BIN`): lanza `COMPAT.BIN /FALLO <ruta del
+.EXE>`. Si no está, no sale.
+
+**WSOCK32 y WS2_32 por número**, como los de Windows (comprobados con las
+listas públicas de exportaciones de Wine, `dlls/wsock32/wsock32.spec` y
+`dlls/ws2_32/ws2_32.spec`, solo como referencia de números): del 1 al 23, del
+51 al 57, del 101 al 116, el 151 (`__WSAFDIsSet`) y el 500; los de WSOCK32
+también del 1001 al 1142. Las dos difieren del 10 al 12 (WSOCK32: 10
+`inet_addr`, 11 `inet_ntoa`, 12 `ioctlsocket`; WS2_32: 10 `ioctlsocket`, 11
+`inet_addr`, 12 `inet_ntoa`). `GetProcAddress` con un número, también. Nuevas:
+`WSAAsyncGetHostByName` y `...ByAddr` (de verdad: resuelve y avisa a la
+ventana con su `hostent`), las otras `WSAAsync*` (avisan «no hay»),
+`WSASetBlockingHook`, `getprotobynumber`, `WSARecvEx`, `inet_network`...
+(`tools/elf2pe.py` importa por número con `-i DLL:nombre@N`.)
+
+**Lo que faltaba**, todo con su prueba (`tests/juegos/hl*.c`):
+
+- KERNEL32 (`archivos.c`, `kernel32.c`): `OpenFile` (con `OF_EXIST`,
+  `OF_DELETE`, `OF_PARSE`, `OF_REOPEN`, `OF_CREATE`), `_lopen`, `_lcreat`,
+  `_lread`, `_lwrite` (con 0, corta), `_llseek`, `_hread`, `_hwrite`;
+  `OpenFileMappingA/W` (y `CreateFileMapping` con nombre: el mismo trozo de
+  memoria, `ERROR_ALREADY_EXISTS`); `SetEnvironmentVariableW`,
+  `SetVolumeLabelA/W` (`ERROR_NOT_SUPPORTED`), `GetProcessVersion` (la de la
+  cabecera del `.EXE`), `FatalAppExitA/W` (el aviso, al registro, y acaba),
+  `EnumSystemLocalesA/W`.
+- USER32 (`user32.c`): `GetLastActivePopup`, `ExcludeUpdateRgn`,
+  `WaitForInputIdle`, `ExitWindowsEx` (no: el equipo se apaga desde Inicio;
+  `ERROR_PRIVILEGE_NOT_HELD` y al registro); DDE: se puede empezar y hacer
+  cadenas y datos, pero conectar falla siempre limpio
+  (`DMLERR_NO_CONV_ESTABLISHED`); `PackDDElParam`, `UnpackDDElParam`,
+  `ReuseDDElParam`, `FreeDDElParam`.
+- GDI32 (`gdi32.c`): `ScaleWindowExtEx`, `ScaleViewportExtEx` (en MM_TEXT, el
+  único modo, no cambian nada, como en Windows), `Escape` y `ExtEscape`
+  (`QUERYESCSUPPORT`: no), `GetBoundsRect`/`SetBoundsRect`.
+- WINSPOOL.DRV (`otros.c`): `DocumentPropertiesA/W` y las demás: «no hay
+  impresoras» (`ERROR_INVALID_PRINTER_NAME`).
+- ADVAPI32, la seguridad (`otros.c`): como un Windows 98, sin seguridad en los
+  objetos: los descriptores no tienen dueño ni DACL («todo permitido»),
+  cambiarlos no hace nada y no falla; `OpenProcessToken` da
+  `ERROR_CALL_NOT_IMPLEMENTED` (como en el 98), `AdjustTokenPrivileges` dice
+  que sí; los SID y las ACL se hacen y se miran de verdad;
+  `LookupPrivilegeValueA` con los nombres de los privilegios.
+- WINMM (`w32/dx/winmm.c`, la misma de Hispa-486): **mmio** de verdad (el
+  archivo va entero a la memoria al abrirlo, o es la del programa con
+  `FOURCC_MEM`, y se escribe al cerrar si ha cambiado: `mmioRead`, `Write`,
+  `Seek`, `Descend` con `FINDRIFF`/`FINDLIST`/`FINDCHUNK` dentro del de arriba,
+  `Ascend` con el tamaño de lo escrito y el relleno, `CreateChunk`, y el
+  acceso directo de `mmioGetInfo`, `SetInfo` y `Advance`); **el mezclador**
+  (uno, con los altavoces —su volumen y su silencio son los generales del
+  sistema, los de SONIDO.BIN: `HispaDXSonido` 4— y el sonido de onda, el de
+  la mezcla del programa; los números de líneas y controles como los de
+  Windows); `mciGetDeviceIDA`; `waveIn*` (no hay micrófono:
+  `MMSYSERR_NODRIVER`), `midiOut*`, `midiStream*`, `midiIn*` (MIDI, aún no:
+  `MMSYSERR_NODRIVER`) y `aux*` (`MMSYSERR_BADDEVICEID`).
+- **WININET.DLL**, nueva (`wininet.c`): HTTP de verdad sobre el Winsock de
+  WIN32.BIN (`InternetOpen`, `InternetOpenUrl` con las redirecciones,
+  `InternetConnect`, `HttpOpenRequest`, `HttpSendRequest` con cuerpo,
+  `HttpQueryInfo` —el código, el texto, las cabeceras, una por su nombre—,
+  `InternetReadFile` con `Content-Length`, en trozos o hasta que se cierra,
+  `InternetCrackUrl`, `InternetCombineUrl`...). Sin red,
+  `InternetGetConnectedState` da FALSE y lo demás `ERROR_INTERNET_DISCONNECTED`;
+  HTTPS y FTP, aún no («no se puede conectar», limpio).
+- No hacen falta (lo dice el resumen de Carlos): `GLIDE2X.DLL` (las tarjetas
+  3dfx), `LIBMYSQL.DLL` (HLTV), los servidores dedicados y los instaladores.
+
 ## Las pruebas
 
 `castel/pruebas.sh`, parte 18 (`SOLO=win32 ./pruebas.sh`; también en `SOLO=32`
@@ -361,3 +471,15 @@ pantalla, volviendo al centro y con DirectInput), REDUDP (contra
 `tests/juegos/eco_udp.py`, de cliente y de servidor por un puerto de QEMU) y
 SONJ (grabando lo que suena: DirectSound 3,5 s sin un corte con 2 s sin llamar
 a nada, waveOut, el CD por MCI sin disco).
+
+(HL) También en la parte 33: HLK32 (KERNEL32, USER32, GDI32, WINSPOOL y la
+seguridad de ADVAPI32), HLORD (Winsock por número), HLMM (mmio, el
+mezclador y lo que no hay), HLNET (WININET sin red y contra el servidor
+HTTP de aquí: un archivo grande, en trozos, una redirección), HLVEN (en el
+escritorio: `GetLastActivePopup`, `ExcludeUpdateRgn`,
+`WSAAsyncGetHostByName`) y el **juego de mentira** `JUEGO99` (el `.EXE` y su
+`VGUI.DLL` en la raíz, las DLL del mod en `MOD\CL_DLLS` y `MOD\DLLS`
+importando Winsock por número): `WIN32 COMPRUEBA` de su carpeta, con `/CON`
+y con `/MAQUINA` (las sumas, comparadas con las de aquí) dice «está todo»,
+y al correr carga las del mod por su ruta y la del cliente encuentra
+`VGUI.DLL` junto al `.EXE`.

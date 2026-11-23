@@ -1,0 +1,798 @@
+; =============================================================================
+;  organiza.cas - (ICONOS) dónde van los iconos del tapiz de Hispa-Pentium.
+;
+;  La ZONA DE TRABAJO es la pantalla menos la barra de tareas, menos el dock
+;  (si se ve) y menos un margen: ningún icono queda fuera de ella, ni debajo
+;  de la barra (con el botón «Inicio», de donde sale su menú) ni del dock. Se
+;  rehace al cambiar la medida de la pantalla, al ver u ocultar el dock y al
+;  entrar otro usuario.
+;
+;  Dentro, una REJILLA de celdas (112 x 76 puntos): los iconos van de arriba
+;  abajo y, cuando no caben en una columna, en la siguiente. Si no caben en la
+;  pantalla, las celdas se estrechan (hasta 80 x 64); y si aun así no caben,
+;  van en PÁGINAS: la última celda de cada una es el botón «Más iconos», que
+;  pasa a la siguiente. Nunca se esconde ninguno.
+;
+;  «Organizar iconos» los pone en orden: como salen (los de siempre, los de
+;  los paquetes, los accesos y los archivos del escritorio), por nombre, por
+;  tipo (programas, carpetas, documentos por su extensión y accesos), por
+;  tamaño o por fecha de modificación (lo más nuevo, primero). Con
+;  «Organización automática» se ordenan solos cada vez que se añade o se
+;  quita alguno; con «Alinear a la cuadrícula», lo que se suelta va a la
+;  celda más cercana (sin ella, se queda donde se suelta, dentro de la zona);
+;  y Mi equipo puede ir siempre el primero. Dos iconos no quedan nunca uno
+;  encima de otro: si se suelta uno encima de otro, va a la celda libre más
+;  cercana.
+;
+;  Lo elegido y dónde está cada icono se guarda en ICONOS.INI, en los
+;  ajustes del que ha entrado (\USUARIOS\CARLOS\AJUSTES), o en \HISPA (en la
+;  raíz, en un sistema sin instalar), en la página 437 y con CR LF:
+;
+;      orden=nombre
+;      automatica=no
+;      cuadricula=si
+;      primero=si
+;      sitio=s:Mi equipo|8|12
+;
+;  Los ARCHIVOS DEL ESCRITORIO son los de la carpeta ESCRITOR del que ha
+;  entrado (\USUARIOS\CARLOS\ESCRITOR); sin usuarios, los de \ESCRITOR en la
+;  unidad del sistema, si está. Los pinta y los atiende escritorio.cas.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Organiza
+
+    importar Fat, Unidades, Textos32, Formato, Cuentas, Accesos, Dock, Usuario, Iconos
+
+    ; ---- las medidas ----
+    público constante MAX_ARCHIVOS = 24         ; los archivos del escritorio (ESCRITOR) que se ven
+    público constante MAX_ICONOS = 4 + MAX_ACCESOS + MAX_ATAJOS + MAX_ARCHIVOS
+    público constante CELDA_AN = 112            ; lo que ocupa uno, con su rótulo
+    público constante CELDA_AL = 62
+    constante PASO_AN = 112                     ; de una celda a la siguiente (a lo ancho)
+    constante PASO_AL = 76                      ; (y a lo alto)
+    constante PASO_AN_MÍN = 80                  ; lo más estrecho, si no caben
+    constante PASO_AL_MÍN = 64
+    constante MARGEN_IZQ = 8
+    constante MARGEN_ARRIBA = 12
+    constante MARGEN_DER = 8
+    constante MARGEN_ABAJO = 8                  ; entre los iconos y el dock (o la barra)
+    público constante SIN_SITIO = -30000        ; uno nuevo, aún sin sitio
+
+    ; ---- las familias (para ordenar por tipo) ----
+    público constante F_PROGRAMA = 0
+    público constante F_CARPETA = 1
+    público constante F_DOCUMENTO = 2
+    público constante F_ACCESO = 3
+
+    ; ---- los órdenes ----
+    público constante O_COMO_SALEN = 0
+    público constante O_NOMBRE = 1
+    público constante O_TIPO = 2
+    público constante O_TAMAÑO = 3
+    público constante O_FECHA = 4
+
+    público tipo Icono = estructura
+        x, ye: ent32
+        acción: nat32
+        dato: nat32                             ; (de un acceso o de un archivo: cuál)
+        nombre: puntero a byte
+        debajo: puntero a nat32                 ; lo que tapa del tapiz (para quitarlo de ahí)
+        familia: nat32                          ; F_PROGRAMA...
+        ext: arreglo [4] de byte                ; su extensión («TXT»), para ordenar por tipo
+        tamaño: nat32
+        fecha: nat32                            ; la de la FAT: arriba la fecha, abajo la hora
+        fijo: bool                              ; Mi equipo: el primero (con «primero»)
+        clave: byte                             ; 's' de siempre, 'p' de un paquete, 'a' un acceso, 'f' un archivo
+        página: nat32
+    fin
+    público variable iconos: arreglo [MAX_ICONOS] de Icono
+    público variable n_iconos: nat32
+
+    ; ---- la zona y su rejilla ----
+    público variable zona_x0, zona_y0, zona_x1, zona_y1: ent32
+    público variable paso_an: ent32 = PASO_AN
+    público variable paso_al: ent32 = PASO_AL
+    público variable columnas, filas: ent32
+    público variable páginas: nat32 = 1
+    público variable página: nat32              ; la que se ve
+    público variable más_x, más_y: ent32        ; el botón «Más iconos» (con más de una página)
+
+    ; ---- lo elegido (ICONOS.INI) ----
+    público variable orden_iconos: nat32 = O_COMO_SALEN
+    público variable automática: bool
+    público variable cuadrícula: bool = cierto
+    público variable primero_equipo: bool = cierto
+
+    ; ---- dónde se ha dejado cada uno (por su clave: «s:Mi equipo») ----
+    constante MAX_SITIOS = 80
+    constante LARGO_CLAVE = 40
+    tipo Sitio = estructura
+        clave: arreglo [LARGO_CLAVE] de byte
+        x, ye: ent32
+    fin
+    variable sitios: arreglo [MAX_SITIOS] de Sitio
+    variable n_sitios: nat32
+
+    ; ---- los archivos del escritorio ----
+    público tipo Archivo = estructura
+        nombre: arreglo [40] de byte            ; el largo (lo que se ve)
+        ruta: arreglo [128] de byte             ; con su letra («C:\USUARIOS\CARLOS\ESCRITOR\CARTA.TXT»)
+        carpeta: bool
+        tamaño: nat32
+        fecha: nat32
+    fin
+    público variable archivos: arreglo [MAX_ARCHIVOS] de Archivo
+    público variable n_archivos: nat32
+    público variable firma_archivos: nat32      ; cambia si cambia lo de la carpeta
+    público variable archivos_de_más: nat32     ; los que no se ven (más de MAX_ARCHIVOS)
+
+    variable lista: arreglo [MAX_ICONOS] de nat32
+    variable colocado: arreglo [MAX_ICONOS] de bool
+    variable tini: arreglo [6144] de byte
+    variable renglón: arreglo [260] de byte
+    variable ruta: arreglo [160] de byte
+
+    ; -------------------------------------------------------------------------
+    ;  La zona y la rejilla
+    ; -------------------------------------------------------------------------
+    función medidas()
+        columnas := (zona_x1 - zona_x0 - CELDA_AN) div paso_an + 1
+        filas := (zona_y1 - zona_y0 - CELDA_AL) div paso_al + 1
+        si columnas < 1 entonces columnas := 1 fin
+        si filas < 1 entonces filas := 1 fin
+    fin
+
+    ; la zona de una pantalla de an x al, con «abajo» ocupado (la barra y el dock)
+    público función pon_zona(an: ent32, al: ent32, abajo: ent32)
+        zona_x0 := MARGEN_IZQ
+        zona_y0 := MARGEN_ARRIBA
+        zona_x1 := an - MARGEN_DER
+        zona_y1 := al - abajo - MARGEN_ABAJO
+        si zona_x1 < zona_x0 + CELDA_AN entonces zona_x1 := zona_x0 + CELDA_AN fin
+        si zona_y1 < zona_y0 + CELDA_AL entonces zona_y1 := zona_y0 + CELDA_AL fin
+        paso_an := PASO_AN
+        paso_al := PASO_AL
+        medidas()
+    fin
+
+    público función celda_x(c: ent32): ent32
+        devolver zona_x0 + c * paso_an
+    fin
+
+    público función celda_y(f: ent32): ent32
+        devolver zona_y0 + f * paso_al
+    fin
+
+    ; las celdas, a la medida de n iconos: si no caben, más estrechas; y si
+    ; aun así no caben, las páginas (con la última celda de cada una para
+    ; «Más iconos»)
+    función a_la_medida(n: nat32)
+        variable cabe: nat32
+        paso_an := PASO_AN
+        paso_al := PASO_AL
+        medidas()
+        mientras nat32(columnas * filas) < n y (paso_an > PASO_AN_MÍN o paso_al > PASO_AL_MÍN) hacer
+            si paso_al > PASO_AL_MÍN entonces paso_al := paso_al - 4 sino paso_an := paso_an - 8 fin
+            medidas()
+        fin
+        cabe := nat32(columnas * filas)
+        si n <= cabe o cabe < 2 entonces
+            páginas := 1
+        sino
+            páginas := (n + cabe - 2) div (cabe - 1)
+        fin
+        si página >= páginas entonces página := páginas - 1 fin
+        más_x := celda_x(columnas - 1)
+        más_y := celda_y(filas - 1)
+    fin
+
+    ; ¿se ve ahora el icono i (es de la página que se ve)?
+    público función en_página(i: nat32): bool
+        devolver i < n_iconos y iconos[i].página = página
+    fin
+
+    función distancia(a: ent32, b: ent32): ent32
+        si a > b entonces devolver a - b fin
+        devolver b - a
+    fin
+
+    ; ¿tapa algo el icono puesto en (x, y)? (los ya colocados de su página, sin contar «menos»)
+    función ocupado(x: ent32, yy: ent32, menos: nat32, solo_colocados: bool): bool
+        variable j: nat32
+        j := 0
+        mientras j < n_iconos hacer
+            si j <> menos y iconos[j].página = página y (no solo_colocados o colocado[j]) entonces
+                si distancia(iconos[j].x, x) < paso_an y distancia(iconos[j].ye, yy) < CELDA_AL entonces devolver cierto fin
+            fin
+            j := j + 1
+        fin
+        si páginas > 1 y distancia(más_x, x) < paso_an y distancia(más_y, yy) < CELDA_AL entonces devolver cierto fin
+        devolver falso
+    fin
+
+    ; dentro de la zona (sin salirse por ningún lado)
+    público función a_la_zona(ref x: ent32, ref yy: ent32)
+        si x > zona_x1 - CELDA_AN entonces x := zona_x1 - CELDA_AN fin
+        si yy > zona_y1 - CELDA_AL entonces yy := zona_y1 - CELDA_AL fin
+        si x < zona_x0 entonces x := zona_x0 fin
+        si yy < zona_y0 entonces yy := zona_y0 fin
+    fin
+
+    ; la celda más cercana a (x, y)
+    función a_la_celda(ref x: ent32, ref yy: ent32)
+        variable c, f: ent32
+        c := (x - zona_x0 + paso_an div 2) div paso_an
+        f := (yy - zona_y0 + paso_al div 2) div paso_al
+        si x < zona_x0 entonces c := 0 fin
+        si yy < zona_y0 entonces f := 0 fin
+        si c >= columnas entonces c := columnas - 1 fin
+        si f >= filas entonces f := filas - 1 fin
+        x := celda_x(c)
+        yy := celda_y(f)
+    fin
+
+    ; la celda libre más cercana a (x, y) (para el icono k): falso si no queda ninguna
+    función celda_libre(k: nat32, ref x: ent32, ref yy: ent32, solo_colocados: bool): bool
+        variable c, f, cx, cy, d, mejor, bx, by: ent32
+        mejor := -1
+        c := 0
+        mientras c < columnas hacer
+            f := 0
+            mientras f < filas hacer
+                cx := celda_x(c)
+                cy := celda_y(f)
+                si no ocupado(cx, cy, k, solo_colocados) entonces
+                    d := (cx - x) * (cx - x) + (cy - yy) * (cy - yy)
+                    si mejor < 0 o d < mejor entonces
+                        mejor := d
+                        bx := cx
+                        by := cy
+                    fin
+                fin
+                f := f + 1
+            fin
+            c := c + 1
+        fin
+        si mejor < 0 entonces devolver falso fin
+        x := bx
+        yy := by
+        devolver cierto
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Ordenar
+    ; -------------------------------------------------------------------------
+    ; la letra, para ordenar: sin tildes y en mayúscula (la página 437)
+    público función letra_de_orden(c: byte): nat32
+        según c
+            caso 'á', 'à', 'â', 'ä', 'Ä': devolver 'A' * 4
+            caso 'é', 'É', 'è', 'ê', 'ë': devolver 'E' * 4
+            caso 'í', 'ì', 'î', 'ï': devolver 'I' * 4
+            caso 'ó', 'ò', 'ô', 'ö', 'Ö': devolver 'O' * 4
+            caso 'ú', 'ù', 'û', 'ü', 'Ü': devolver 'U' * 4
+            caso 'ñ', 'Ñ': devolver 'N' * 4 + 2       ; (la eñe, detrás de la ene)
+            caso 'ç', 'Ç': devolver 'C' * 4 + 1
+        fin
+        devolver nat32(mayúscula(c)) * 4
+    fin
+
+    función compara_textos(a: puntero a byte, b: puntero a byte): ent32
+        variable i, la, lb: nat32
+        i := 0
+        mientras a[i] <> 0 y b[i] <> 0 hacer
+            la := letra_de_orden(a[i])
+            lb := letra_de_orden(b[i])
+            si la <> lb entonces
+                si la < lb entonces devolver -1 fin
+                devolver 1
+            fin
+            i := i + 1
+        fin
+        si a[i] = 0 y b[i] = 0 entonces devolver 0 fin
+        si a[i] = 0 entonces devolver -1 fin
+        devolver 1
+    fin
+
+    ; ¿va «a» antes que «b», en el orden elegido?
+    función antes(a: nat32, b: nat32): bool
+        variable c: ent32
+        si primero_equipo y iconos[a].fijo <> iconos[b].fijo entonces devolver iconos[a].fijo fin
+        si orden_iconos = O_COMO_SALEN entonces devolver a < b fin
+        c := 0
+        si orden_iconos = O_TIPO entonces
+            si iconos[a].familia <> iconos[b].familia entonces devolver iconos[a].familia < iconos[b].familia fin
+            si iconos[a].familia = F_DOCUMENTO entonces c := compara_textos(dirección(iconos[a].ext[0]), dirección(iconos[b].ext[0])) fin
+        sino si orden_iconos = O_TAMAÑO entonces
+            si iconos[a].tamaño <> iconos[b].tamaño entonces devolver iconos[a].tamaño < iconos[b].tamaño fin
+        sino si orden_iconos = O_FECHA entonces
+            si iconos[a].fecha <> iconos[b].fecha entonces devolver iconos[a].fecha > iconos[b].fecha fin
+        fin
+        si c = 0 entonces c := compara_textos(iconos[a].nombre, iconos[b].nombre) fin
+        si c <> 0 entonces devolver c < 0 fin
+        devolver a < b
+    fin
+
+    ; en «lista», los iconos en el orden elegido
+    función ordena()
+        variable i, j, t: nat32
+        i := 0
+        mientras i < n_iconos hacer
+            lista[i] := i
+            i := i + 1
+        fin
+        i := 1
+        mientras i < n_iconos hacer
+            t := lista[i]
+            j := i
+            mientras j > 0 y antes(t, lista[j - 1]) hacer
+                lista[j] := lista[j - 1]
+                j := j - 1
+            fin
+            lista[j] := t
+            i := i + 1
+        fin
+    fin
+
+    ; todos en orden, de arriba abajo y columna a columna (y página a página)
+    público función organiza()
+        variable k, por_página, r: nat32
+        variable i: nat32
+        a_la_medida(n_iconos)
+        ordena()
+        por_página := nat32(columnas * filas)
+        si páginas > 1 entonces por_página := por_página - 1 fin
+        k := 0
+        mientras k < n_iconos hacer
+            i := lista[k]
+            r := k mod por_página
+            iconos[i].página := k div por_página
+            iconos[i].x := celda_x(ent32(r) div filas)
+            iconos[i].ye := celda_y(ent32(r) mod filas)
+            k := k + 1
+        fin
+    fin
+
+    ; cada uno donde está (o donde se dejó), pero dentro de la zona y sin
+    ; tapar a otro; los que no tienen sitio, en la primera celda libre (o
+    ; todos en orden, con la organización automática o si no caben)
+    público función encaja()
+        variable i, k: nat32
+        variable x, yy: ent32
+        a_la_medida(n_iconos)
+        si automática o páginas > 1 entonces
+            organiza()
+            devolver
+        fin
+        i := 0
+        mientras i < n_iconos hacer
+            colocado[i] := falso
+            iconos[i].página := 0
+            i := i + 1
+        fin
+        ; los que tienen sitio, por orden (el primero se queda el suyo)
+        i := 0
+        mientras i < n_iconos hacer
+            si iconos[i].x <> SIN_SITIO entonces
+                x := iconos[i].x
+                yy := iconos[i].ye
+                si cuadrícula entonces a_la_celda(x, yy) sino a_la_zona(x, yy) fin
+                si ocupado(x, yy, i, cierto) entonces
+                    si no celda_libre(i, x, yy, cierto) entonces
+                        organiza()
+                        devolver
+                    fin
+                fin
+                iconos[i].x := x
+                iconos[i].ye := yy
+                colocado[i] := cierto
+            fin
+            i := i + 1
+        fin
+        ; y los nuevos, en el orden elegido: la primera celda libre (de arriba abajo)
+        ordena()
+        k := 0
+        mientras k < n_iconos hacer
+            i := lista[k]
+            si no colocado[i] entonces
+                x := zona_x0
+                yy := zona_y0
+                si no primera_libre(i, x, yy) entonces
+                    organiza()
+                    devolver
+                fin
+                iconos[i].x := x
+                iconos[i].ye := yy
+                colocado[i] := cierto
+            fin
+            k := k + 1
+        fin
+    fin
+
+    función primera_libre(k: nat32, ref x: ent32, ref yy: ent32): bool
+        variable c, f: ent32
+        c := 0
+        mientras c < columnas hacer
+            f := 0
+            mientras f < filas hacer
+                si no ocupado(celda_x(c), celda_y(f), k, cierto) entonces
+                    x := celda_x(c)
+                    yy := celda_y(f)
+                    devolver cierto
+                fin
+                f := f + 1
+            fin
+            c := c + 1
+        fin
+        devolver falso
+    fin
+
+    ; dónde va el icono k que se ha soltado en (x, y): en la zona, en la
+    ; celda (con la cuadrícula) y sin tapar a otro. Con la organización
+    ; automática, vuelve a su sitio en el orden.
+    público función suelta(k: nat32, x: ent32, yy: ent32)
+        si k >= n_iconos entonces devolver fin
+        si automática o páginas > 1 entonces
+            organiza()
+            devolver
+        fin
+        si cuadrícula entonces a_la_celda(x, yy) sino a_la_zona(x, yy) fin
+        si ocupado(x, yy, k, falso) entonces
+            si no celda_libre(k, x, yy, falso) entonces
+                x := iconos[k].x
+                yy := iconos[k].ye
+            fin
+        fin
+        iconos[k].x := x
+        iconos[k].ye := yy
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Dónde se ha dejado cada uno
+    ; -------------------------------------------------------------------------
+    función clave_de(i: nat32, destino: puntero a byte)
+        destino[0] := iconos[i].clave
+        destino[1] := ':'
+        destino[2] := 0
+        copiar_hasta(dirección(destino[2]), iconos[i].nombre, LARGO_CLAVE - 2)
+    fin
+
+    función busca_sitio(c: puntero a byte): ent32
+        variable i: nat32
+        i := 0
+        mientras i < n_sitios hacer
+            si iguales(dirección(sitios[i].clave[0]), c) entonces devolver ent32(i) fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    función apunta(c: puntero a byte, x: ent32, yy: ent32)
+        variable k: ent32
+        k := busca_sitio(c)
+        si k < 0 entonces
+            si n_sitios >= MAX_SITIOS entonces devolver fin
+            k := ent32(n_sitios)
+            n_sitios := n_sitios + 1
+            copiar_hasta(dirección(sitios[k].clave[0]), c, LARGO_CLAVE)
+        fin
+        sitios[k].x := x
+        sitios[k].ye := yy
+    fin
+
+    ; los sitios de ahora, apuntados (para la vez siguiente)
+    público función apunta_sitios()
+        variable i: nat32
+        variable c: arreglo [LARGO_CLAVE] de byte
+        i := 0
+        mientras i < n_iconos hacer
+            si iconos[i].x <> SIN_SITIO y iconos[i].página = 0 entonces
+                clave_de(i, c)
+                apunta(c, iconos[i].x, iconos[i].ye)
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; el sitio que tenía el icono i (si se sabe); si no, SIN_SITIO
+    público función sitio_de_antes(i: nat32)
+        variable c: arreglo [LARGO_CLAVE] de byte
+        variable k: ent32
+        clave_de(i, c)
+        k := busca_sitio(c)
+        si k >= 0 entonces
+            iconos[i].x := sitios[k].x
+            iconos[i].ye := sitios[k].ye
+        sino
+            iconos[i].x := SIN_SITIO
+            iconos[i].ye := SIN_SITIO
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  ICONOS.INI
+    ; -------------------------------------------------------------------------
+    función ruta_ini()
+        si ajuste_de_sesión("ICONOS.INI", ruta, 160) entonces devolver fin
+        si instalado() entonces copiar(ruta, "\\HISPA\\ICONOS.INI") sino copiar(ruta, "\\ICONOS.INI") fin
+    fin
+
+    función línea_de(ref p: nat32): bool
+        variable j: nat32
+        si tini[p] = 0 entonces devolver falso fin
+        j := 0
+        mientras tini[p] <> 0 y tini[p] <> '\n' hacer
+            si tini[p] <> '\r' y j < 258 entonces
+                renglón[j] := tini[p]
+                j := j + 1
+            fin
+            p := p + 1
+        fin
+        si tini[p] = '\n' entonces p := p + 1 fin
+        renglón[j] := 0
+        devolver cierto
+    fin
+
+    función número(t: puntero a byte): ent32
+        variable n: ent32
+        variable i: nat32
+        variable menos: bool
+        n := 0
+        i := 0
+        menos := t[0] = '-'
+        si menos entonces i := 1 fin
+        mientras t[i] >= '0' y t[i] <= '9' hacer
+            n := n * 10 + ent32(t[i] - '0')
+            i := i + 1
+        fin
+        si menos entonces devolver -n fin
+        devolver n
+    fin
+
+    función sí_de(t: puntero a byte): bool
+        devolver t[0] = 's' o t[0] = 'S'
+    fin
+
+    ; lee lo guardado (lo de siempre si no hay nada): el del que ha entrado
+    público función lee_iconos()
+        variable m, n, p, i: nat32
+        orden_iconos := O_COMO_SALEN
+        automática := falso
+        cuadrícula := cierto
+        primero_equipo := cierto
+        n_sitios := 0
+        página := 0
+        si del_sistema = NINGUNA o unidad_en_memoria() entonces devolver fin
+        ruta_ini()
+        m := abrir_archivo(del_sistema, ruta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver fin
+        n := leer_archivo(m, tini, 6143)
+        cerrar_archivo(m)
+        si n >= PRIMER_ERROR entonces n := 0 fin
+        tini[n] := 0
+        p := 0
+        mientras línea_de(p) hacer
+            si empieza_por(renglón, "orden=") entonces
+                si iguales(dirección(renglón[6]), "nombre") entonces orden_iconos := O_NOMBRE fin
+                si iguales(dirección(renglón[6]), "tipo") entonces orden_iconos := O_TIPO fin
+                si iguales(dirección(renglón[6]), "tamano") entonces orden_iconos := O_TAMAÑO fin
+                si iguales(dirección(renglón[6]), "fecha") entonces orden_iconos := O_FECHA fin
+            sino si empieza_por(renglón, "automatica=") entonces
+                automática := sí_de(dirección(renglón[11]))
+            sino si empieza_por(renglón, "cuadricula=") entonces
+                cuadrícula := sí_de(dirección(renglón[11]))
+            sino si empieza_por(renglón, "primero=") entonces
+                primero_equipo := sí_de(dirección(renglón[8]))
+            sino si empieza_por(renglón, "sitio=") y n_sitios < MAX_SITIOS entonces
+                ; sitio=CLAVE|x|y
+                i := 6
+                mientras renglón[i] <> 0 y renglón[i] <> '|' hacer i := i + 1 fin
+                si renglón[i] = '|' y i - 6 < LARGO_CLAVE entonces
+                    renglón[i] := 0
+                    copiar_hasta(dirección(sitios[n_sitios].clave[0]), dirección(renglón[6]), LARGO_CLAVE)
+                    i := i + 1
+                    sitios[n_sitios].x := número(dirección(renglón[i]))
+                    mientras renglón[i] <> 0 y renglón[i] <> '|' hacer i := i + 1 fin
+                    si renglón[i] = '|' entonces
+                        sitios[n_sitios].ye := número(dirección(renglón[i + 1]))
+                        n_sitios := n_sitios + 1
+                    fin
+                fin
+            fin
+        fin
+    fin
+
+    función nombre_del_orden(): puntero a byte
+        según orden_iconos
+            caso O_NOMBRE: devolver "nombre"
+            caso O_TIPO: devolver "tipo"
+            caso O_TAMAÑO: devolver "tamano"
+            caso O_FECHA: devolver "fecha"
+        fin
+        devolver "como salen"
+    fin
+
+    función sí_no(b: bool): puntero a byte
+        si b entonces devolver "si" fin
+        devolver "no"
+    fin
+
+    ; y lo guarda (con los sitios de ahora): falso si no se puede
+    público función guarda_iconos(): bool
+        variable m, n, i: nat32
+        variable d: arreglo [4] de nat32
+        si del_sistema = NINGUNA o unidad_en_memoria() o no escribible(del_sistema) entonces devolver falso fin
+        ; los sitios, solo los de los que hay ahora (los de lo que ya no está, fuera)
+        n_sitios := 0
+        apunta_sitios()
+        copiar(tini, "; los iconos del tapiz: como se organizan y donde esta cada uno\r\n")
+        d[0] := nat32(nombre_del_orden())
+        d[1] := nat32(sí_no(automática))
+        d[2] := nat32(sí_no(cuadrícula))
+        d[3] := nat32(sí_no(primero_equipo))
+        formatear(renglón, 260, "orden=%s\r\nautomatica=%s\r\ncuadricula=%s\r\nprimero=%s\r\n", d)
+        concatenar(tini, renglón)
+        i := 0
+        mientras i < n_sitios hacer
+            d[0] := nat32(dirección(sitios[i].clave[0]))
+            d[1] := nat32(sitios[i].x)
+            d[2] := nat32(sitios[i].ye)
+            formatear(renglón, 260, "sitio=%s|%d|%d\r\n", d)
+            si longitud(tini) + longitud(renglón) < 6140 entonces concatenar(tini, renglón) fin
+            i := i + 1
+        fin
+        ruta_ini()
+        m := abrir_archivo(del_sistema, ruta, PARA_CREAR)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        n := escribir_archivo(m, tini, longitud(tini))
+        cerrar_archivo(m)
+        devolver n = longitud(tini)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que se sabe de un archivo: lo que mide y su fecha
+    ; -------------------------------------------------------------------------
+    ; en la unidad u, la ruta (sin letra): falso si no está
+    público función datos_de(u: nat32, r: puntero a byte, ref tam: nat32, ref fecha: nat32): bool
+        variable i, n, m, k: nat32
+        variable e: Entrada
+        variable largo: arreglo [MAX_LARGO] de byte
+        variable carpeta: arreglo [160] de byte
+        tam := 0
+        fecha := 0
+        si u = NINGUNA entonces devolver falso fin
+        n := longitud(r)
+        si n = 0 o n >= 160 entonces devolver falso fin
+        i := n
+        mientras i > 0 y r[i - 1] <> '\\' hacer i := i - 1 fin
+        si i = n entonces devolver falso fin
+        copiar_hasta(carpeta, r, 160)
+        si i <= 1 entonces
+            carpeta[0] := '\\'
+            carpeta[1] := 0
+        sino
+            carpeta[i - 1] := 0
+        fin
+        m := abrir_archivo(u, carpeta, PARA_LEER)
+        si m >= PRIMER_ERROR entonces devolver falso fin
+        k := leer_entrada_larga(m, dirección(e), largo, MAX_LARGO)
+        mientras k = 1 hacer
+            si iguales_sin_caja(dirección(e.nombre[0]), dirección(r[i])) o iguales_sin_caja(largo, dirección(r[i])) entonces
+                tam := e.tamaño
+                fecha := (nat32(e.fecha) << 16) ob nat32(e.hora)
+                cerrar_archivo(m)
+                devolver cierto
+            fin
+            k := leer_entrada_larga(m, dirección(e), largo, MAX_LARGO)
+        fin
+        cerrar_archivo(m)
+        devolver falso
+    fin
+
+    ; lo mismo, con la ruta de un programa del sistema («\BLOC.BIN»: en
+    ; \HISPA si está instalado) o con su letra («C:\...»)
+    público función datos_de_ruta(r: puntero a byte, ref tam: nat32, ref fecha: nat32): bool
+        tam := 0
+        fecha := 0
+        si r = nulo o r[0] = 0 entonces devolver falso fin
+        si r[1] = ':' entonces devolver datos_de(por_letra(r[0]), dirección(r[2]), tam, fecha) fin
+        si del_sistema = NINGUNA entonces devolver falso fin
+        si r[0] = '\\' y instalado() entonces
+            copiar(ruta, "\\HISPA")
+            concatenar(ruta, r)
+            si datos_de(del_sistema, ruta, tam, fecha) entonces devolver cierto fin
+        fin
+        devolver datos_de(del_sistema, r, tam, fecha)
+    fin
+
+    ; la extensión de un nombre, en mayúsculas («» si no tiene)
+    público función pon_extensión(nombre: puntero a byte, destino: puntero a byte)
+        variable n, i, k: nat32
+        destino[0] := 0
+        n := longitud(nombre)
+        i := n
+        mientras i > 0 y nombre[i - 1] <> '.' hacer i := i - 1 fin
+        si i = 0 o n - i > 3 entonces devolver fin
+        k := 0
+        mientras i < n y k < 3 hacer
+            destino[k] := mayúscula(nombre[i])
+            k := k + 1
+            i := i + 1
+        fin
+        destino[k] := 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los archivos del escritorio (la carpeta ESCRITOR)
+    ; -------------------------------------------------------------------------
+    ; la carpeta (sin letra): la del que ha entrado o \ESCRITOR
+    función carpeta_escritorio(destino: puntero a byte): bool
+        variable c: puntero a Cuenta
+        c := de_id(sesión)
+        si c <> nulo y c.carpeta[0] <> 0 entonces
+            copiar(destino, "\\USUARIOS\\")
+            concatenar(destino, dirección(c.carpeta[0]))
+            concatenar(destino, "\\ESCRITOR")
+            devolver cierto
+        fin
+        si hay_cuentas entonces devolver falso fin
+        copiar(destino, "\\ESCRITOR")
+        devolver cierto
+    fin
+
+    ; vuelve a leer la carpeta; cierto si ha cambiado algo desde la vez de antes
+    público función lee_archivos(): bool
+        variable m, k, f, n, j: nat32
+        variable e: Entrada
+        variable largo: arreglo [MAX_LARGO] de byte
+        variable carpeta: arreglo [128] de byte
+        variable l: byte
+        f := 7
+        n := 0
+        archivos_de_más := 0
+        si del_sistema <> NINGUNA y no unidad_en_memoria() y carpeta_escritorio(carpeta) entonces
+            m := abrir_archivo(del_sistema, carpeta, PARA_LEER)
+            si m < PRIMER_ERROR entonces
+                l := unidades[del_sistema].letra
+                k := leer_entrada_larga(m, dirección(e), largo, MAX_LARGO)
+                mientras k = 1 hacer
+                    si e.nombre[0] <> '.' y e.atributos yb (OCULTO ob DE_SISTEMA ob ETIQUETA) = 0 entonces
+                        si n < MAX_ARCHIVOS entonces
+                            copiar_hasta(dirección(archivos[n].nombre[0]), largo, 40)
+                            archivos[n].ruta[0] := l
+                            archivos[n].ruta[1] := ':'
+                            archivos[n].ruta[2] := 0
+                            concatenar(dirección(archivos[n].ruta[0]), carpeta)
+                            concatenar(dirección(archivos[n].ruta[0]), "\\")
+                            concatenar(dirección(archivos[n].ruta[0]), dirección(e.nombre[0]))
+                            archivos[n].carpeta := e.atributos yb CARPETA <> 0
+                            archivos[n].tamaño := e.tamaño
+                            archivos[n].fecha := (nat32(e.fecha) << 16) ob nat32(e.hora)
+                            n := n + 1
+                        sino
+                            archivos_de_más := archivos_de_más + 1
+                        fin
+                        ; la firma: lo que cambie (un nombre, lo que mide, la fecha) la cambia
+                        f := f * 31 + e.tamaño + nat32(e.fecha) * 7 + nat32(e.hora) + nat32(e.atributos)
+                        j := 0
+                        mientras j < 12 y e.nombre[j] <> 0 hacer
+                            f := f * 31 + nat32(e.nombre[j])
+                            j := j + 1
+                        fin
+                    fin
+                    k := leer_entrada_larga(m, dirección(e), largo, MAX_LARGO)
+                fin
+                cerrar_archivo(m)
+            fin
+        fin
+        f := f + n * 1000003
+        n_archivos := n
+        si f = firma_archivos entonces devolver falso fin
+        firma_archivos := f
+        devolver cierto
+    fin
+
+    ; la familia y la clase de icono de un archivo del escritorio
+    público función clase_de_archivo(k: nat32): nat32
+        devolver clase_de_ruta(dirección(archivos[k].ruta[0]), archivos[k].carpeta)
+    fin
+fin Organiza.

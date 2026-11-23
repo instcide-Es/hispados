@@ -89,7 +89,7 @@ mdir -b -i $V/usb.img@@1M ::EFI/BOOT > $V/efi.txt 2>&1
 mcopy -n -i $V/usb.img@@1M ::boot/grub/grub.cfg $V/grub.cfg 2> /dev/null
 if grep -q 'BOOTX64.EFI' $V/efi.txt && mdir -i $V/usb.img@@1M ::LEEME-UEFI.TXT > /dev/null 2>&1 && mdir -i $V/usb.img@@1M ::boot/grub/i386-pc/normal.mod > /dev/null 2>&1 \
   && grep -q '^if \[ "$grub_platform" = efi \]; then$' $V/grub.cfg && grep -q '^  multiboot2 /ESCRIT8.BIN escritorio' $V/grub.cfg && grep -q '^  module2 /ORDENES.BIN ORDENES.BIN$' $V/grub.cfg \
-  && grep -q '^  multiboot /ESCRIT8.BIN escritorio' $V/grub.cfg; then
+  && grep -q '^  multiboot /ESCRIT8.BIN escritorio' $V/grub.cfg && grep -q '^menuentry "Diagnostico (UEFI)' $V/grub.cfg && grep -q '^  lsacpi$' $V/grub.cfg; then
   ok "en la misma partición FAT (tabla del MBR): \\EFI\\BOOT\\BOOTX64.EFI$(grep -q BOOTIA32 $V/efi.txt && echo ' y BOOTIA32.EFI'), LEEME-UEFI.TXT, el GRUB de la BIOS; y el menú, con multiboot2/module2 por UEFI y multiboot por la BIOS"
 else ko "a la memoria le falta algo de UEFI:"; cat $V/efi.txt | sed 's/^/        /' | head -5; fi
 if grep -q 'Secure Boot' $AQUI/nucleo32/uefi/LEEME-UEFI.TXT && grep -q 'Disabled' $AQUI/nucleo32/uefi/LEEME-UEFI.TXT && grep -q 'volver a encender' $AQUI/nucleo32/uefi/LEEME-UEFI.TXT; then
@@ -109,7 +109,10 @@ cp $V/usb.img $V/u1.img
 # bits, abajo, como en casi todos los PC de verdad; PENTIUM.md, «UEFI»)
 local SIN64="-fw_cfg name=opt/ovmf/X-PciMmio64Mb,string=0"
 local Q64="-machine q35 -m 512 $SIN64 -drive if=pflash,format=raw,readonly=on,file=$F64 -drive if=pflash,format=raw,file=$V/vars64.fd $SSDT"
-local DISCOS="-device qemu-xhci,id=x -drive if=none,id=u,file=$V/u1.img,format=raw -device usb-storage,bus=x.0,drive=u -drive if=none,id=s,file=$V/sata.img,format=raw -device ide-hd,drive=s,bus=ide.0"
+# (con un teclado y un ratón USB de velocidad plena en el xHCI, como el teclado
+# de dentro y el ratón del ASUS GL553V, el ratón detrás de un concentrador
+# (el de QEMU, de velocidad plena): el ratón USB es el que mueve QEMU)
+local DISCOS="-device qemu-xhci,id=x -drive if=none,id=u,file=$V/u1.img,format=raw -device usb-storage,bus=x.0,port=1,drive=u -device usb-kbd,bus=x.0,port=2 -device usb-hub,bus=x.0,port=3 -device usb-mouse,bus=x.0,port=3.1 -drive if=none,id=s,file=$V/sata.img,format=raw -device ide-hd,drive=s,bus=ide.0"
 maquina_uefi qemu-system-x86_64 e64 "$Q64 $DISCOS -S" "${PUESTA[@]}" ":monitor cont" ":espera 90 ^escritorio: en marcha" ":pausa 4" ":espera 30 ^Lectura 1:" ":captura uefi1"
 mira "por UEFI de 64 bits (OVMF, q35): GRUB EFI arranca la primera entrada por multiboot2 y el escritorio se pone a la medida del firmware (GOP)" \
   "^escritorio: en marcha, [0-9]* x [0-9]*"
@@ -127,6 +130,14 @@ if grep -q "rsdp=" $S || grep -q "^ACPI: RSDP en 000[EF]" $S; then
 else ok "(la RSDP no es la de la zona de la BIOS)"; fi
 mira "los discos: el SATA (AHCI) y la memoria USB (xHCI), que es X:, la del sistema" "^usb: controladora xHCI" "QEMU HARDDISK, 64 MB, FAT16 (SATA)" \
   "QEMU HARDDISK, 64 MB, FAT16 (USB)" "^unidades: .*C: (disco [0-9], SATA, FAT16).*X: (disco [0-9], USB, FAT16); la del sistema, X:"
+mira "la primera línea del registro dice por dónde ha arrancado (UEFI de 64 bits, la pantalla del GOP) y la línea del cargador" \
+  "^arranque: por UEFI (64 bits, GOP 1280 x 800); la línea del cargador: .*escritorio escritura=usb unidad=X registro"
+mira "el 8042 y el ratón PS/2, en el registro (ps2: ...)" "^ps2: controlador 8042 sí; prueba de la boca 1 (teclado) 00, de la 2 (ratón) 00 (00: bien); el ratón contesta FA, id 0[03]"
+mira "el teclado y el ratón USB de velocidad plena (en el xHCI; el ratón, detrás de un concentrador) se enumeran por UEFI" "^usb: 1 teclados, 1 ratones, 1 memorias" \
+  "^usb: aparato [0-9], 0627:0001, velocidad plena, en el puerto 1 del concentrador [0-9]; ratón"
+if grep -q "no se deja enumerar" $S; then ko "algo USB no se deja enumerar: $(grep 'no se deja enumerar' $S | head -1)"; else ok "nada USB se queda sin enumerar"; fi
+mira "el SMBIOS, de la tabla del sistema de EFI (sin BIOS no está en F0000h), se lo da el núcleo a ACPI.BIN" "^uefi: el SMBIOS, en 0x" "^ACPI: SMBIOS en [0-9A-F]*h"
+grep -q "^ACPI: SMBIOS en 000F" $S && ko "el SMBIOS sale de F0000h, no de EFI"
 if ! grep -q "excepción\|\*\*\*" $S; then ok "por UEFI, ni una excepción ni una queja del núcleo"; else ko "por UEFI, el núcleo se queja:"; grep "excepción\|\*\*\*" $S | head -3 | sed 's/^/        /'; fi
 # 2b. la medida guardada (PANTALLA.ENV: 800 x 600) se la pide GRUB al
 # firmware; y Configuración > Pantalla: no se cambia en marcha, y lo dice
@@ -137,6 +148,27 @@ maquina_uefi qemu-system-x86_64 conf "$Q64 $DISCOS" ":espera 90 ^escritorio: en 
 mira "la medida guardada en PANTALLA.ENV (800 x 600) se la pide GRUB al firmware (GOP) al arrancar" "^escritorio: en marcha, 800 x 600 con 32 bits"
 miracap "Configuración > Pantalla, por UEFI: no se cambia en marcha (aunque QEMU tenga la VBE de Bochs), lo dice, y se guarda para el próximo arranque" uefi6 \
   texto 150 160 175 180 "Arrancado por UEFI: no se cambia en marcha, la pone el" texto 150 178 175 198 "firmware al arrancar. Se guarda para el próximo arranque."
+# 2c. sin 8254 (como los Intel de 2015 en adelante con el CSM apagado: el
+# firmware lo para): el tic, del HPET; y sin HPET tampoco, del APIC local
+for m in "pit=off:HPET de 0xFED00000" "pit=off,hpet=off:temporizador del APIC local"; do
+  cp $OV/OVMF_VARS_4M.fd $V/vars64.fd
+  cp $V/usb.img $V/u1.img
+  maquina_uefi qemu-system-x86_64 sinpit "-machine q35,${m%%:*} -m 512 $SIN64 -drive if=pflash,format=raw,readonly=on,file=$F64 -drive if=pflash,format=raw,file=$V/vars64.fd -device qemu-xhci,id=x -drive if=none,id=u,file=$V/u1.img,format=raw -device usb-storage,bus=x.0,drive=u" \
+    ":espera 100 ^escritorio: en marcha" ":pausa 2"
+  mira "sin 8254 (QEMU ${m%%:*}): el núcleo lo ve y el tic lo da el ${m#*:}; el escritorio se pone" "^reloj: el 8254 no da su tic" "^reloj: .*el tic, del ${m#*:}" "^reloj: ya llega el tic" "^escritorio: en marcha"
+done
+# 2d. la pantalla por encima de 4 GB (los PC de ahora): en QEMU el GOP no se
+# puede poner allí; se prueba lo que la pone a la vista (páginas de 4 MB,
+# PSE-36) con la RAM de por encima de 4 GB: escribe y QEMU lo lee
+mcopy -n -i $V/usb.img@@1M ::SEMILLA.BIN $V/SEMILLA.BIN
+rm -f $V/mon
+qemu-system-i386 -kernel $V/SEMILLA.BIN -append "pruebapse36" -m 5G -display none -serial file:$V/pse.sal -monitor unix:$V/mon,server,nowait > /dev/null 2>&1 &
+QPID=$!
+for ((i = 0; i < 100; i++)); do grep -q '^pse36:' $V/pse.sal 2> /dev/null && break; sleep 0.5; done
+printf 'xp /1wx 0x100001234\n' | socat - UNIX-CONNECT:$V/mon 2> /dev/null | tr -d '\r' > $V/pse.txt
+printf 'quit\n' | socat - UNIX-CONNECT:$V/mon > /dev/null 2>&1; wait $QPID 2> /dev/null; QPID=
+if grep -q '0000000100001234: 0xcafebabe' $V/pse.txt; then ok "la memoria por encima de 4 GB, a la vista con una página de 4 MB (PSE-36), como la pantalla del GOP alta: lo escrito llega a 0x100001234"
+else ko "PSE-36: lo escrito no llega a 0x100001234: $(tail -1 $V/pse.txt)"; fi
 # 3. la consola del núcleo, en modo texto, por UEFI: la entrada 9 del menú
 cp $OV/OVMF_VARS_4M.fd $V/vars64.fd
 cp $V/usb.img $V/u1.img
@@ -171,8 +203,14 @@ else
 fi
 # 5. la misma memoria, por la BIOS (SeaBIOS), como disco: multiboot, como siempre
 cp $V/usb.img $V/u3.img
-maquina_uefi qemu-system-i386 bios "-machine pc -m 512 -drive file=$V/u3.img,format=raw,if=ide,index=0" ":espera 60 ^escritorio: en marcha" ":pausa 2" ":captura uefi4"
+# (con un teclado detrás de un concentrador en el EHCI, que lo cede a su UHCI
+# compañera, y un ratón detrás de otro en el xHCI: los de velocidad plena)
+local HUBS="-device ich9-usb-ehci1,id=e -device ich9-usb-uhci1,masterbus=e.0,firstport=0,multifunction=on -device ich9-usb-uhci2,masterbus=e.0,firstport=2 -device ich9-usb-uhci3,masterbus=e.0,firstport=4 -device usb-hub,bus=e.0,port=1 -device usb-kbd,bus=e.0,port=1.1 -device qemu-xhci,id=x -device usb-hub,bus=x.0,port=1 -device usb-mouse,bus=x.0,port=1.1"
+maquina_uefi qemu-system-i386 bios "-machine pc -m 512 -drive file=$V/u3.img,format=raw,if=ide,index=0 $HUBS" ":espera 60 ^escritorio: en marcha" ":pausa 2" ":captura uefi4"
 mira "y la misma memoria por la BIOS (SeaBIOS): el GRUB de siempre, el escritorio a 800 x 600" "^escritorio: en marcha, 800 x 600"
+mira "y su registro dice que ha arrancado por la BIOS/CSM, con la VBE de GRUB, y lo del 8042" "^arranque: por la BIOS/CSM (VBE 800 x 600); la línea del cargador: " "^ps2: controlador 8042 sí; .*el ratón contesta FA"
+mira "y por la BIOS, el teclado y el ratón de velocidad plena detrás de concentradores (EHCI/UHCI y xHCI)" "^usb: 1 teclados, 1 ratones, 0 memorias"
+grep -q "no se deja enumerar" $S && ko "por la BIOS, algo USB no se deja enumerar: $(grep 'no se deja enumerar' $S | head -1)"
 if ! grep -q "^uefi:" $S; then ok "por la BIOS, nada de UEFI (multiboot de siempre: la consola es la de texto)"; else ko "por la BIOS dice cosas de UEFI: $(grep '^uefi:' $S | head -1)"; fi
 # 6. el CD por UEFI
 if bash $AQUI/nucleo32/cd.sh $V/cd.iso > $V/cd.txt 2>&1 && xorriso -indev $V/cd.iso -report_el_torito plain > $V/torito.txt 2>&1 && grep -q "UEFI" $V/torito.txt && grep -q "BIOS" $V/torito.txt; then

@@ -1,0 +1,597 @@
+; =============================================================================
+;  agvigia.cas - (AGENDA) el vigilante de los avisos: AGENDA /VIGILAR, que
+;  lanza el escritorio al arrancar (escritorio.cas, «(AGENDA)»).
+;
+;  Casi sin gastar: lee la agenda, calcula cuándo salta el aviso siguiente y
+;  duerme (dormir: el procesador, para los demás) hasta entonces, como mucho
+;  30 segundos de cada vez; al despertar mira el reloj y AGENDA.GEN (si la
+;  Agenda ha guardado, vuelve a leer). Si el reloj se adelanta o se atrasa,
+;  lo ve en la vuelta siguiente.
+;
+;  Cuando salta: el sonido de aviso del sistema (SONIDO.BIN, sonar: con un
+;  núcleo sin sonido, nada) y una ventanita «AVISO - Agenda» con la cita, su
+;  hora y su lugar, y «Posponer 5 min», «10 min», «1 hora», «Hecho» y «Abrir
+;  la Agenda». Si saltan varios, uno detrás de otro (con «y N más»).
+;  Al arrancar: lo que tenía que avisar mientras el equipo estaba apagado
+;  (desde lo último que vio, VISTO.TXT; hasta 31 días), en una lista.
+;  Y deja en PROXIMA.TXT la cita siguiente (para la bandeja: el reloj, con
+;  el ratón encima).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo AgVigia
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Mem32, Controles, Festivos, AgNucleo, AgIcs, AgComun
+
+    constante ID_P5 = 1
+    constante ID_P10 = 2
+    constante ID_P60 = 3
+    constante ID_HECHO = 4
+    constante ID_ABRIR = 5
+    constante ID_VALE = 6
+
+    ; ---- lo que hay que avisar (la cola) ----
+    constante MAX_COLA = 32
+    variable cola_k: arreglo [MAX_COLA] de nat32       ; la cita
+    variable cola_vez: arreglo [MAX_COLA] de nat32     ; el día de esa vez
+    variable n_cola: nat32
+    ; ---- los pospuestos: cuándo y de qué (por su UID: la agenda se puede volver a leer) ----
+    constante MAX_POS = 32
+    variable pos_cuándo: arreglo [MAX_POS] de nat32
+    variable pos_vez: arreglo [MAX_POS] de nat32
+    variable pos_uid: arreglo [MAX_POS] de arreglo [80] de byte
+    variable n_pos: nat32
+    ; ---- lo de antes (con el equipo apagado) ----
+    constante MAX_PERDIDOS = 12
+    variable perdidos: arreglo [MAX_PERDIDOS] de arreglo [100] de byte
+    variable n_perdidos, más_perdidos: nat32
+
+    variable visto: nat32                       ; el último instante mirado
+    variable ventana_abierta: bool
+    variable preparada: bool
+    variable lista_perdidos: bool               ; la ventana es la de lo de antes
+    variable hz: nat32 = 100
+    variable sonó, abierta_en: nat32
+    variable próxima_escrita: arreglo [200] de byte
+
+    ; =========================================================================
+    ;  VISTO.TXT: el último instante mirado y los pospuestos
+    ; =========================================================================
+    función lee_visto()
+        variable r: arreglo [120] de byte
+        variable t: arreglo [4096] de byte
+        variable m, n, k: nat32
+        variable p, q: puntero a byte
+        visto := 0
+        n_pos := 0
+        ruta_agenda("VISTO.TXT", r)
+        m := abrir(r)
+        si m >= PRIMER_ERROR entonces devolver fin
+        n := leer(m, t, 4095)
+        cerrar(m)
+        si n > 4095 entonces devolver fin
+        t[n] := 0
+        p := dirección(t[0])
+        mientras valor(p) <> 0 hacer
+            si empieza_por(p, "visto=") entonces
+                texto_a_natural_en(p + 6, visto)
+            sino si empieza_por(p, "pospuesto=") y n_pos < MAX_POS entonces
+                ; pospuesto=cuándo|vez|uid
+                q := p + 10
+                texto_a_natural_en(q, pos_cuándo[n_pos])
+                q := buscar_car(q, '|')
+                si q <> nulo entonces
+                    texto_a_natural_en(q + 1, pos_vez[n_pos])
+                    q := buscar_car(q + 1, '|')
+                fin
+                si q <> nulo entonces
+                    k := 0
+                    q := q + 1
+                    mientras valor(q) <> 0 y valor(q) <> 13 y valor(q) <> 10 y k < 79 hacer
+                        pos_uid[n_pos][k] := valor(q)
+                        k := k + 1
+                        q := q + 1
+                    fin
+                    pos_uid[n_pos][k] := 0
+                    n_pos := n_pos + 1
+                fin
+            fin
+            mientras valor(p) <> 0 y valor(p) <> 10 hacer p := p + 1 fin
+            si valor(p) = 10 entonces p := p + 1 fin
+        fin
+    fin
+
+    función texto_a_natural_en(p: puntero a byte, ref n: nat32)
+        n := 0
+        mientras valor(p) >= '0' y valor(p) <= '9' hacer
+            n := n * 10 + valor(p) - '0'
+            p := p + 1
+        fin
+    fin
+
+    función guarda_visto()
+        variable r: arreglo [120] de byte
+        variable t: arreglo [200] de byte
+        variable x: arreglo [3] de nat32
+        variable m, i: nat32
+        si no asegura_carpeta() entonces devolver fin
+        ruta_agenda("VISTO.TXT", r)
+        m := crear(r)
+        si m >= PRIMER_ERROR entonces devolver fin
+        x[0] := visto
+        formatear(t, 200, "visto=%u\r\n", x)
+        escribir_archivo(m, t, longitud(t))
+        para i desde 1 hasta n_pos hacer
+            x[0] := pos_cuándo[i - 1]
+            x[1] := pos_vez[i - 1]
+            x[2] := nat32(dirección(pos_uid[i - 1][0]))
+            formatear(t, 200, "pospuesto=%u|%u|%s\r\n", x)
+            escribir_archivo(m, t, longitud(t))
+        fin
+        cerrar(m)
+    fin
+
+    ; =========================================================================
+    ;  Lo que salta
+    ; =========================================================================
+    ; el aviso siguiente después de «tras»: su instante (SIN_FIN si no hay), la cita y la vez
+    función siguiente_aviso(tras: nat32, ref k: nat32, ref vz: nat32): nat32
+        variable i, n, v, mejor: nat32
+        mejor := SIN_FIN
+        para i desde 1 hasta n_citas hacer
+            n := próximo_aviso(dirección(citas[i - 1]), tras, v)
+            si n < mejor entonces
+                mejor := n
+                k := i - 1
+                vz := v
+            fin
+        fin
+        devolver mejor
+    fin
+
+    función a_la_cola(k: nat32, vz: nat32)
+        variable i: nat32
+        para i desde 1 hasta n_cola hacer
+            si cola_k[i - 1] = k y cola_vez[i - 1] = vz entonces devolver fin
+        fin
+        si n_cola >= MAX_COLA entonces devolver fin
+        cola_k[n_cola] := k
+        cola_vez[n_cola] := vz
+        n_cola := n_cola + 1
+    fin
+
+    función quita_primero()
+        variable i: nat32
+        si n_cola = 0 entonces devolver fin
+        para i desde 1 hasta n_cola - 1 hacer
+            cola_k[i - 1] := cola_k[i]
+            cola_vez[i - 1] := cola_vez[i]
+        fin
+        n_cola := n_cola - 1
+    fin
+
+    ; «Mar 24/11 10:00 Taller (Casal)»
+    función describe(k: nat32, vz: nat32, destino: puntero a byte, cabe: nat32)
+        variable t: arreglo [120] de byte
+        variable c: puntero a Cita
+        c := dirección(citas[k])
+        opción_de(DÍAS_CORTOS, dsem_de(vz), destino, 4)
+        destino[0] := mayúscula(destino[0])
+        concatenar(destino, " ")
+        texto_fecha(vz, t)
+        t[5] := 0
+        concatenar(destino, t)
+        concatenar(destino, " ")
+        si no c.todo_día y c.clase = CLASE_CITA entonces
+            texto_hora(c.minuto, t)
+            concatenar(destino, t)
+            concatenar(destino, " ")
+        fin
+        título_de(valor(c), vz, t, 100)
+        copiar_hasta(dirección(destino[longitud(destino)]), t, cabe - longitud(destino))
+        si c.lugar[0] <> 0 y longitud(destino) + longitud(c.lugar) + 4 < cabe entonces
+            concatenar(destino, " (")
+            concatenar(destino, c.lugar)
+            concatenar(destino, ")")
+        fin
+    fin
+
+    ; mira el reloj: lo que ha saltado, a la cola; los pospuestos que tocan, también
+    función mira(ahora_: nat32)
+        variable k, vz, n, i, j: nat32
+        variable c: puntero a Cita
+        mientras cierto hacer
+            n := siguiente_aviso(visto, k, vz)
+            si n = SIN_FIN o n > ahora_ entonces romper fin
+            visto := n
+            a_la_cola(k, vz)
+            imprimir2("agenda: AVISO %s (la del %u)\n", nat32(dirección(citas[k].título[0])), vz)
+        fin
+        i := 0
+        mientras i < n_pos hacer
+            si pos_cuándo[i] <= ahora_ entonces
+                c := busca_cita(pos_uid[i])
+                si c <> nulo entonces
+                    a_la_cola((nat32(c) - nat32(citas)) div tamaño(Cita), pos_vez[i])
+                    imprimir1("agenda: AVISO pospuesto %s\n", nat32(dirección(c.título[0])))
+                fin
+                para j desde i + 1 hasta n_pos - 1 hacer
+                    pos_cuándo[j - 1] := pos_cuándo[j]
+                    pos_vez[j - 1] := pos_vez[j]
+                    copiar(pos_uid[j - 1], pos_uid[j])
+                fin
+                n_pos := n_pos - 1
+            sino
+                i := i + 1
+            fin
+        fin
+        si ahora_ > visto entonces visto := ahora_ fin
+    fin
+
+    ; lo que tenía que avisar entre «antes» y «ahora_» (con el equipo apagado)
+    función mira_perdidos(antes: nat32, ahora_: nat32)
+        variable k, vz, n: nat32
+        variable t: nat32
+        n_perdidos := 0
+        más_perdidos := 0
+        t := antes
+        mientras cierto hacer
+            n := siguiente_aviso(t, k, vz)
+            si n = SIN_FIN o n > ahora_ entonces romper fin
+            t := n
+            si n_perdidos < MAX_PERDIDOS entonces
+                describe(k, vz, perdidos[n_perdidos], 100)
+                n_perdidos := n_perdidos + 1
+            sino
+                más_perdidos := más_perdidos + 1
+            fin
+        fin
+    fin
+
+    ; PROXIMA.TXT: la cita siguiente (de hoy en adelante, 30 días), para la bandeja
+    función escribe_próxima(ahora_: nat32)
+        variable i, x, mejor, k, vz, i0, hoy, mi, d, m, a: nat32
+        variable vu: Vuelta
+        variable c: puntero a Cita
+        variable t: arreglo [200] de byte
+        variable r: arreglo [120] de byte
+        variable mm: nat32
+        mejor := SIN_FIN
+        k := 0
+        vz := 0
+        madrid_de_utc(ahora_, hoy, mi)
+        para i desde 1 hasta n_citas hacer
+            c := dirección(citas[i - 1])
+            si c.usada y c.clase <> CLASE_TAREA entonces
+                empieza(vu, c, hoy)
+                mientras siguiente(vu, x) y x <= hoy + 30 hacer
+                    i0 := instante_de(valor(c), x)
+                    si c.todo_día entonces i0 := utc_de_madrid(x, 0) fin
+                    ; (las de todo el día de hoy cuentan todo el día)
+                    si i0 + nat32(c.todo_día) * 1439 >= ahora_ o (no c.todo_día y i0 + c.dura > ahora_) entonces
+                        si i0 < mejor entonces
+                            mejor := i0
+                            k := i - 1
+                            vz := x
+                        fin
+                        romper
+                    fin
+                fin
+            fin
+        fin
+        si mejor = SIN_FIN entonces
+            copiar(t, "Agenda: nada en los pr\xA2ximos 30 d\xA1as\r\n")
+        sino
+            copiar(t, "Pr\xA2xima cita: ")
+            si vz = hoy entonces concatenar(t, "hoy ") sino si vz = hoy + 1 entonces concatenar(t, "ma\xA4ana ") fin
+            describe(k, vz, dirección(t[longitud(t)]), 190 - longitud(t))
+            concatenar(t, "\r\n")
+        fin
+        si iguales(t, próxima_escrita) entonces devolver fin
+        si no asegura_carpeta() entonces devolver fin
+        ruta_agenda("PROXIMA.TXT", r)
+        mm := crear(r)
+        si mm >= PRIMER_ERROR entonces devolver fin
+        escribir_archivo(mm, t, longitud(t))
+        cerrar(mm)
+        copiar(próxima_escrita, t)
+        d := 0
+        m := 0
+        a := 0
+    fin
+
+    ; =========================================================================
+    ;  La ventanita
+    ; =========================================================================
+    función al_centro_(vv: nat32)
+        ensamblador
+            mov eax, 80
+            mov ebx, {vv}
+            mov ecx, 0xFFFFFFFF
+            xor edx, edx
+            int 0x80
+        fin
+    fin
+
+    función abre_ventana(): bool
+        variable an, al: nat32
+        an := 640
+        al := 400                               ; (así, con la letra grande: escala() pide 360)
+        si lista_perdidos entonces al := 470 fin
+        si no preparada entonces
+            si no preparar_medida("AVISO - Agenda", an, al, T_GRANDE) entonces devolver falso fin
+            preparada := cierto
+        sino
+            v := ventana("AVISO - Agenda", an, al)
+            si es_error(v) entonces devolver falso fin
+            al_centro_(v)
+            nuevo_tamaño(ent32(an), ent32(al), T_GRANDE)
+        fin
+        ventana_abierta := cierto
+        foco := ID_HECHO
+        si lista_perdidos entonces foco := ID_VALE fin
+        sonó := 0
+        abierta_en := tics()
+        suena()
+        devolver cierto
+    fin
+
+    función cierra_ventana()
+        si ventana_abierta entonces cerrar_ventana(v) fin
+        ventana_abierta := falso
+    fin
+
+    función suena()
+        sonar(SISTEMA_AVISO)
+        sonó := tics()
+    fin
+
+    función pinta()
+        variable c: puntero a Cita
+        variable t: arreglo [160] de byte
+        variable h: arreglo [16] de byte
+        variable yy, x, i, vueltas: ent32
+        variable dd, mm, aa, k, vz, fd, fm: nat32
+        variable ahora_: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            ; la franja de arriba, con la palabra (no solo el color)
+            caja(0, 0, ancho, LT + 10 * E, 0xFACC15)
+            caja(0, LT + 10 * E, ancho, 2, C_TINTA)
+            si lista_perdidos entonces
+                negrita(LA, 5 * E, "AVISOS: mientras el equipo estaba apagado", C_TINTA)
+                yy := LT + 18 * E
+                para i desde 1 hasta ent32(n_perdidos) hacer
+                    texto_corto(LA, yy, perdidos[i - 1], ancho - 2 * LA, C_TINTA, falso)
+                    yy := yy + LT + 2 * E
+                fin
+                si más_perdidos > 0 entonces
+                    formatear(t, 160, "y %u m\xA0s", dirección(más_perdidos))
+                    texto_corto(LA, yy, t, ancho - 2 * LA, C_SUAVE, falso)
+                fin
+                yy := alto - alto_botón() - 6 * E
+                x := LA + botón(ID_VALE, LA, yy, "Vale", cierto, falso) + LA
+                botón(ID_ABRIR, x, yy, "Abrir la Agenda", falso, falso)
+            sino si n_cola > 0 entonces
+                k := cola_k[0]
+                vz := cola_vez[0]
+                c := dirección(citas[k])
+                si c.clase = CLASE_TAREA entonces copiar(t, "AVISO: tarea") sino si c.clase = CLASE_CUMPLE entonces copiar(t, "AVISO: cumplea\xA4os") sino copiar(t, "AVISO: cita") fin
+                negrita(LA, 5 * E, t, C_TINTA)
+                si n_cola > 1 entonces
+                    natural_a_texto(n_cola - 1, h)
+                    copiar(t, "(y ")
+                    concatenar(t, h)
+                    concatenar(t, " m\xA0s)")
+                    negrita(ancho - ancho_negrita(t) - LA, 5 * E, t, C_TINTA)
+                fin
+                yy := LT + 18 * E
+                si c.categoría > 0 entonces
+                    símbolo(c.categoría, LA, yy + (LT - 16) div 2 + 2, 16)
+                    título_de(valor(c), vz, t, 160)
+                    texto_ne(LA + 24, yy, t, caben_ne(t, longitud(t), ancho - 2 * LA - 24, M + 1, cierto), C_TINTA, M + 1, cierto)
+                sino
+                    título_de(valor(c), vz, t, 160)
+                    texto_ne(LA, yy, t, caben_ne(t, longitud(t), ancho - 2 * LA, M + 1, cierto), C_TINTA, M + 1, cierto)
+                fin
+                yy := yy + 12 * (M + 1) div 2 * 2 + 6 * E
+                de_número(vz, dd, mm, aa)
+                fecha_larga(dd, mm, aa, t)
+                si c.clase = CLASE_CITA y no c.todo_día entonces
+                    concatenar(t, ", ")
+                    texto_horas(valor(c), dirección(t[longitud(t)]))
+                fin
+                texto_corto(LA, yy, t, ancho - 2 * LA, C_TINTA, cierto)
+                yy := yy + LT + 4 * E
+                si c.lugar[0] <> 0 entonces
+                    copiar(t, "En: ")
+                    concatenar(t, c.lugar)
+                    texto_corto(LA, yy, t, ancho - 2 * LA, C_TINTA, falso)
+                    yy := yy + LT + 4 * E
+                fin
+                ; cuánto falta
+                ahora_ := instante_ahora()
+                fd := instante_de(valor(c), vz)
+                si fd > ahora_ entonces
+                    fm := fd - ahora_
+                    si fm >= 1440 entonces
+                        natural_a_texto(fm div 1440, h)
+                        copiar(t, "Empieza dentro de ")
+                        concatenar(t, h)
+                        si fm div 1440 = 1 entonces concatenar(t, " d\xA1a") sino concatenar(t, " d\xA1as") fin
+                    sino si fm >= 60 entonces
+                        copiar(t, "Empieza dentro de ")
+                        natural_a_texto(fm div 60, h)
+                        concatenar(t, h)
+                        concatenar(t, " h ")
+                        natural_a_texto(fm mod 60, h)
+                        concatenar(t, h)
+                        concatenar(t, " min")
+                    sino
+                        copiar(t, "Empieza dentro de ")
+                        natural_a_texto(fm, h)
+                        concatenar(t, h)
+                        concatenar(t, " minutos")
+                    fin
+                sino si c.clase = CLASE_CITA y no c.todo_día entonces
+                    copiar(t, "Ya ha empezado")
+                sino
+                    copiar(t, "Es hoy")
+                fin
+                texto_corto(LA, yy, t, ancho - 2 * LA, C_SUAVE, cierto)
+                yy := alto - 2 * alto_botón() - 10 * E
+                x := LA + botón(ID_P5, LA, yy, "Posponer 5 min", falso, falso) + LA div 2
+                x := x + botón(ID_P10, x, yy, "10 min", falso, falso) + LA div 2
+                botón(ID_P60, x, yy, "1 hora", falso, falso)
+                yy := yy + alto_botón() + 4 * E
+                x := LA + botón(ID_HECHO, LA, yy, "Hecho", cierto, falso) + LA
+                botón(ID_ABRIR, x, yy, "Abrir la Agenda", falso, falso)
+            fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    función pospone(min: nat32)
+        variable c: puntero a Cita
+        si n_cola = 0 entonces devolver fin
+        c := dirección(citas[cola_k[0]])
+        si n_pos < MAX_POS entonces
+            pos_cuándo[n_pos] := instante_ahora() + min
+            pos_vez[n_pos] := cola_vez[0]
+            copiar(pos_uid[n_pos], c.uid)
+            n_pos := n_pos + 1
+        fin
+        imprimir2("agenda: pospuesto %u minutos: %s\n", min, nat32(dirección(c.título[0])))
+        quita_primero()
+        guarda_visto()
+    fin
+
+    función abre_agenda(vz: nat32)
+        variable t: arreglo [24] de byte
+        copiar(t, "/DIA ")
+        texto_fecha(vz, dirección(t[5]))
+        lanzar_suelto("\\AGENDA.BIN", t)
+    fin
+
+    función hace(id: nat32)
+        variable vz: nat32
+        según nat32(id)
+            caso ID_P5: pospone(5)
+            caso ID_P10: pospone(10)
+            caso ID_P60: pospone(60)
+            caso ID_HECHO:
+                si n_cola > 0 entonces imprimir1("agenda: hecho: %s\n", nat32(dirección(citas[cola_k[0]].título[0]))) fin
+                quita_primero()
+            caso ID_VALE: lista_perdidos := falso
+            caso ID_ABRIR:
+                si lista_perdidos entonces
+                    lista_perdidos := falso
+                    abre_agenda(visto div 1440)
+                sino si n_cola > 0 entonces
+                    vz := cola_vez[0]
+                    quita_primero()
+                    abre_agenda(vz)
+                fin
+        fin
+    fin
+
+    ; atiende la ventana (sin esperar): falso si se ha cerrado
+    función atiende()
+        variable s: Suceso
+        variable id: nat32
+        mientras suceso(v, s, falso) hacer
+            si s.clase = EV_TECLA entonces
+                si s.a = '\t' o s.a = TECLA_MAYÚS_TAB entonces pasar_foco(s.a = '\t') fin
+                si s.a = '\n' o s.a = ' ' entonces hace(foco) fin
+                si s.a = 27 entonces
+                    si lista_perdidos entonces hace(ID_VALE) sino hace(ID_HECHO) fin
+                fin
+                pinta()
+            sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                id := control_en(ent32(s.a), ent32(s.b))
+                si id <> 0 entonces
+                    foco := id
+                    hace(id)
+                fin
+                pinta()
+            sino si s.clase = EV_CERRAR entonces
+                si lista_perdidos entonces hace(ID_VALE) sino hace(ID_HECHO) fin
+            sino si s.clase = EV_TAMAÑO entonces
+                nuevo_tamaño(ent32(s.a), ent32(s.b), T_GRANDE)
+                pinta()
+            fin
+        fin
+    fin
+
+    ; =========================================================================
+    ;  El bucle
+    ; =========================================================================
+    público función vigila(): byte
+        variable ahora_, n, k, vz, g, espera, vuelta: nat32
+        hz := dato(DATO_HZ)
+        si hz = 0 o hz > 10000 entonces hz := 100 fin
+        carga_agenda()
+        lee_visto()
+        ahora_ := instante_ahora()
+        escribir("agenda: el vigilante de los avisos, en marcha\n")
+        ; lo que se pasó con el equipo apagado (hasta 31 días; lo del último minuto, como siempre)
+        si visto = 0 o visto > ahora_ entonces visto := ahora_ fin
+        si ahora_ > visto + 1 entonces
+            si ahora_ - visto > 31 * 1440 entonces visto := ahora_ - 31 * 1440 fin
+            mira_perdidos(visto, ahora_ - 1)
+            si n_perdidos > 0 entonces
+                imprimir1("agenda: con el equipo apagado se pasaron %u avisos\n", n_perdidos + más_perdidos)
+                lista_perdidos := cierto
+                si abre_ventana() entonces pinta() fin
+            fin
+            visto := ahora_ - 1
+        fin
+        guarda_visto()
+        vuelta := 0
+        mientras cierto hacer
+            ahora_ := instante_ahora()
+            ; ¿se ha guardado la agenda? (o la hora ha ido hacia atrás)
+            g := lee_generación()
+            si g <> generación entonces
+                carga_agenda()
+                imprimir1("agenda: vuelvo a leer la agenda (%u)\n", g)
+            fin
+            si ahora_ + 5 < visto entonces visto := ahora_ fin
+            n := n_cola
+            mira(ahora_)
+            si n_cola > n entonces guarda_visto() fin
+            escribe_próxima(ahora_)
+            ; la ventana: la cola, de uno en uno
+            si (n_cola > 0 o lista_perdidos) y no ventana_abierta entonces
+                si abre_ventana() entonces pinta() fin
+            fin
+            si ventana_abierta entonces
+                atiende()
+                si n_cola = 0 y no lista_perdidos entonces
+                    cierra_ventana()
+                    guarda_visto()
+                sino
+                    ; el sonido, cada 10 s durante el primer minuto
+                    si tics() - sonó >= 10 * hz y tics() - abierta_en < 60 * hz entonces suena() fin
+                    vuelta := vuelta + 1
+                    si vuelta mod 50 = 0 entonces pinta() fin   ; (lo que falta)
+                fin
+                dormir(hz div 10)
+            sino
+                ; a dormir hasta el aviso siguiente (como mucho 30 s)
+                espera := 30
+                n := siguiente_aviso(visto, k, vz)
+                si n <> SIN_FIN y n > ahora_ y (n - ahora_) * 60 < espera entonces espera := (n - ahora_) * 60 fin
+                si n_pos > 0 entonces espera := 15 fin
+                dormir(espera * hz)
+            fin
+        fin
+        devolver 0
+    fin
+
+fin AgVigia.

@@ -1,0 +1,55 @@
+Cuentas 2.0 - la hoja de cálculo de Hispa-Pentium, de 32 bits y en C
+portable (docs/PENTIUM.md, «Cuentas 2»): se compila tal cual para Hispa-64.
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Lo que pone el paquete «cuentas»:
+  \HISPA\CUENTAS.BIN       el programa (menú Inicio > Oficina > Cuentas; y Mi
+                           equipo abre con él los .HOJ, .XLSX, .XLS, .ODS y .CSV)
+  \HISPA\MENU\CUENTAS.MNU, CUENTAS.ICP   el acceso del menú y su icono
+  \HISPA\CUENTAS\LEEME.TXT esto
+
+Qué hace (al estilo de Excel 5, en español):
+  La hoja: 65.536 filas por 256 columnas (de la A a la IV), varias hojas por
+  libro con sus pestañas; ancho de columnas y alto de filas (arrastrando el
+  borde de su rótulo; doble clic: autoajustar), ocultarlas, inmovilizar
+  paneles, combinar celdas, formatos de número (general, número, moneda (euros),
+  porcentaje, fecha y hora en español, científica, texto y los
+  personalizados: «#.##0,00», «dd/mm/aaaa»...), la letra (las TrueType),
+  alineación, bordes, relleno con color y con trama (se ve sin color),
+  formato condicional con un símbolo (flechas, marcas, aspas...) además del color, y
+  comentarios.
+  Las fórmulas: =SUMA(A1:A9)*2, referencias relativas, absolutas ($A$1) y
+  mixtas, rangos, columnas y filas enteras (A:A, 3:7), de otras hojas
+  (Ventas!B2, 'Mi hoja'!A1:C5) y nombres definidos; las funciones en español
+  y en inglés (SUMA o SUM, BUSCARV o VLOOKUP...: unas 160, las de dinero,
+  estadística, fechas, texto, búsqueda y lógica); los errores de siempre
+  (#¡DIV/0!, #¡REF!, #¿NOMBRE?, #N/A, #¡VALOR!, #¡NUM!) y las referencias
+  circulares (#¡CIRC!, y la barra de estado dice dónde). Solo se calcula lo
+  que depende de lo que cambia. Coma decimal y «;» entre los argumentos (o
+  punto y «,»: Herramientas > Opciones).
+  Gráficos de columnas, barras, líneas, sectores y dispersión, en la hoja,
+  con su leyenda; cada serie, con su trama y su marcador (no solo su color).
+  Datos: ordenar por tres columnas, autofiltro, rellenar series arrastrando
+  el cuadradito (1, 2, 3... enero, febrero... Producto 1, 2...), buscar y
+  reemplazar, pegado especial (valores, formatos, transponer), deshacer y
+  rehacer sin límite.
+
+Formatos: .HOJ (el de Cuentas de Hispa-386: delante va lo que entiende
+aquel y detrás todo lo de Cuentas 2; un .HOJ de 386 se abre como era),
+.XLSX (Excel), .ODS (LibreOffice) y .CSV (con «;», «,» o tabulador, en
+UTF-8, Windows-1252 o 437); y exportar a PDF (con el área de impresión y
+los saltos de página). Imprimir: aún no hay impresoras; Cuentas ofrece el
+PDF.
+
+La orden, para la Consola:
+  CUENTAS [libro]
+  CUENTAS --convierte ENTRADA SALIDA   (el formato de SALIDA, por su extensión)
+  CUENTAS --info ENTRADA | --valores ENTRADA | --mide FORMULAS
+
+Lo de otros que lleva dentro (todo libre):
+  miniz 3.0.2 (Rich Geldreich y otros; licencia MIT): ZIP y Flate.
+  stb_image 2.30, stb_image_write 1.19 y stb_truetype 1.26 (Sean Barrett y
+    otros; de dominio público o MIT, a elegir).
+  Las letras DejaVu (recortadas a Europa occidental; la licencia de
+    Bitstream Vera, con las de DejaVu).
+Sus licencias, enteras, en terceros/ del código fuente.

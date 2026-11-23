@@ -1,0 +1,36 @@
+Hispa-Pentium (semilla), un núcleo de 32 bits escrito en Castel
+memoria: 128 MB, 32290 marcos libres; paginación activa; 0 programas de usuario.
+disco 0: QEMU HARDDISK, 40 MB, FAT32.
+disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE).
+cd: D: el lector QEMU DVD-ROM (IDE)
+escritorio: el ratón PS/2 tiene rueda
+escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha puesto el núcleo, por la VBE de Bochs/QEMU), tapiz 0
+pantalla: arrancada a 800 x 600, 32 bits (la ha puesto el núcleo)
+edid: QEMU Monitor, hecha para 1280x800; lo más: 1280x800 (la tarjeta de QEMU)
+pantalla: EDID: «QEMU Monitor», hecha para 1280 x 800 (la tarjeta de QEMU)
+pantalla: no se guarda la medida aquí (Sin instalar no se guarda (no arranca de aquí): instálelo.)
+Escriba «ayuda».
+> escritorio: lanzo \CONSOLA.BIN (la tarea 5)
+cuentas: lista (720x453)
+cuentas: cuadro «Asistente para gráficos»
+cuentas: aviso: Gráfico: se arrastra (y su esquina, el tamaño)
+cuentas: cuadro «Guardar como»
+cuentas: aviso: Guardado: PRUEBA.HOJ
+cuentas: guardado C:\PRUEBA.HOJ
+cuentas: cuadro «Guardar como»
+cuentas: aviso: Guardado como PRUEBA.XLS (el sistema aún guarda los nombres en 8+3; se abre igual)
+cuentas: guardado C:\PRUEBA.XLS
+cuentas: cuadro «Exportar a PDF»
+cuentas: aviso: Exportado a PDF: PRUEBA.PDF
+cuentas: pdf C:\PRUEBA.PDF
+cuentas: cuadro «Formato de celdas»
+cuentas: adiós
+cuentas: aviso: PRUEBA.HOJ: 3 hojas (Libro de Cuentas (.HOJ))
+cuentas: abierto PRUEBA.HOJ
+cuentas: lista (720x453)
+cuentas: adiós
+cuentas: aviso: PRUEBA.XLS: 3 hojas (Libro de Excel (.XLSX))
+cuentas: abierto PRUEBA.XLS
+cuentas: lista (720x453)
+cuentas: adiós
+[sigue encendido]

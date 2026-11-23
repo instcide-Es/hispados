@@ -9,6 +9,7 @@
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include <string.h>
 #include "archivo.h"
+#include "pluma.h"		/* (0.8.8) PLUMA_VERSION */
 #include "f_xmlcomun.h"
 #include "zip.h"
 #include "xml.h"
@@ -2010,7 +2011,7 @@ int odt_escribe(documento *d, bufer *sal)
 		est = e2;
 	}
 	/* meta.xml */
-	buf_txt(&meta, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-meta " NS_OFFICE "><office:meta><meta:generator>Pluma/" "2.0" " (Hispa-Pentium)</meta:generator>");
+	buf_txt(&meta, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<office:document-meta " NS_OFFICE "><office:meta><meta:generator>Pluma/" PLUMA_VERSION " (Hispa-Pentium)</meta:generator>");
 	if (d->titulo[0])
 		xml_pon_elem(&meta, "dc:title", d->titulo);
 	if (d->autor[0]) {

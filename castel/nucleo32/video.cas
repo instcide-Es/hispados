@@ -39,7 +39,7 @@
 ; =============================================================================
 módulo Video
 
-    importar Cpu, Multiboot, Paginas, Monton, Grafico
+    importar Cpu, Multiboot, Paginas, Monton, Grafico, Formato     ; (UEFI) Formato
 
     constante VBE_ÍNDICE = 0x1CE
     constante VBE_DATO = 0x1CF
@@ -65,6 +65,7 @@ módulo Video
     variable octetos_fila: nat32                ; de una fila a la siguiente, en ella
     variable lienzo_aparte: puntero a byte      ; el lienzo de 32 bits (si el modo no lo es), para soltarlo al cambiar
     variable al_revés: bool                     ; (UEFI) la pantalla es RGB (el rojo abajo): volcar() da la vuelta a los puntos
+    público variable vista_alta: bool           ; (UEFI) la pantalla está por encima de 4 GB y se ve con páginas de 4 MB
 
     función vbe_pon(índice: nat32, dato: nat32)
         ensamblador
@@ -212,9 +213,76 @@ módulo Video
         devolver virt * (bits div 8)
     fin
 
+    ; (UEFI) dónde se ve la pantalla de dirección física «base» (los 32 bits
+    ; bajos): en la zona de los gráficos, con su desplazamiento en la página
+    ; (de 4 K; o de 4 MB si está por encima de 4 GB)
+    público función vista(base: nat32): nat32
+        si vista_alta entonces devolver GRÁFICOS_INICIO + (base yb 0x3FFFFF) fin
+        devolver GRÁFICOS_INICIO + (base yb 0xFFF)
+    fin
+
+    ; (UEFI) la pantalla del GOP por encima de los 4 GB (los PC de ahora): el
+    ; núcleo es de 32 bits sin PAE, pero con PSE-36 (casi todos los
+    ; procesadores desde el Pentium III) una página de 4 MB del directorio
+    ; llega hasta los 40 bits de dirección: las cuatro entradas de la zona de
+    ; los gráficos pasan a ser páginas de 4 MB sobre ella (las tablas de antes
+    ; se dejan). Antes de que haya programas (cada uno copia el directorio del
+    ; núcleo). Falso si no se puede (y lo dice).
+    público función prepara_pantalla_alta(): bool
+        variable alta, base, fila, an, al, bits, d, i, edx, f: nat32
+        variable dir: puntero a nat32
+        alta := pantalla_alta()
+        si alta = 0 entonces devolver falso fin
+        alta_vale := cierto
+        si no pantalla_del_cargador(base, fila, an, al, bits) entonces
+            alta_vale := falso
+            devolver falso
+        fin
+        alta_vale := falso
+        ensamblador
+            mov eax, 1
+            db 0x0F, 0xA2                       ; cpuid
+            mov {edx}, edx
+        fin
+        si edx yb 0x20000 = 0 o alta > 0xFF entonces
+            imprimir2("uefi: la pantalla del firmware está en 0x%X%08X, por encima de 4 GB, y este procesador no la alcanza sin PAE (PSE-36): sin pantalla\n", alta, base)
+            devolver falso
+        fin
+        si (base yb 0x3FFFFF) + fila * al > GRÁFICOS_TABLAS * 0x400000 entonces
+            escribir("uefi: la pantalla del firmware, por encima de 4 GB, no cabe en la zona de los gráficos\n")
+            devolver falso
+        fin
+        mapea_alta(alta, base)
+        vista_alta := cierto
+        alta_vale := cierto
+        imprimir2("uefi: la pantalla del firmware está en 0x%X%08X (por encima de 4 GB): a la vista con páginas de 4 MB (PSE-36)\n", alta, base)
+        devolver cierto
+    fin
+
+    ; (UEFI) las cuatro entradas del directorio de la zona de los gráficos,
+    ; páginas de 4 MB (PSE-36) sobre la memoria física alta:base (de 40 bits)
+    público función mapea_alta(alta: nat32, base: nat32)
+        variable d, i, f: nat32
+        variable dir: puntero a nat32
+        ensamblador
+            mov eax, cr4
+            or eax, 0x10                        ; PSE: las páginas de 4 MB
+            mov cr4, eax
+        fin
+        dir := puntero(directorio_núcleo)
+        f := base yb 0xFFC00000
+        para i desde 0 hasta GRÁFICOS_TABLAS - 1 hacer
+            ; (PS, escribir, presente; los bits 32-39 de la dirección, en 13-20)
+            d := (f + i * 0x400000) ob (alta << 13) ob 0x83
+            dir[(GRÁFICOS_INICIO >> 22) + i] := d
+        fin
+        poner_cr3(leer_cr3())
+    fin
+
     ; pone la memoria física de la pantalla en la zona de los gráficos
     público función a_la_vista(física: nat32, octetos: nat32): bool     ; (UEFI) público: también textouefi.cas
         variable v: nat32
+        si vista_alta entonces devolver cierto fin      ; (UEFI) ya está, con páginas de 4 MB
         si octetos > GRÁFICOS_TABLAS * 0x400000 entonces devolver falso fin
         v := 0
         mientras v < octetos + (física yb 0xFFF) hacer
@@ -358,7 +426,7 @@ módulo Video
         bits_pantalla := bits
         al_revés := bits = 32 y pantalla_al_revés()          ; (UEFI)
         si bits = 32 y fila yb 3 = 0 y no al_revés entonces
-            pon_lienzo(pantalla, puntero(GRÁFICOS_INICIO + (base yb 0xFFF)), fila div 4, an, al)
+            pon_lienzo(pantalla, puntero(vista(base)), fila div 4, an, al)      ; (UEFI) vista()
         sino
             ; no es de 32 bits: se dibuja en un lienzo aparte, y volcar() lo pasa
             si bits = 32 y no al_revés entonces bits_pantalla := 24 fin     ; (no pasa: una fila de 32 bits siempre es múltiplo de 4)
@@ -367,7 +435,7 @@ módulo Video
                 escribir("pantalla: no hay memoria para el lienzo de la pantalla\n")
                 devolver falso
             fin
-            real := GRÁFICOS_INICIO + (base yb 0xFFF)
+            real := vista(base)                 ; (UEFI)
             octetos_fila := fila
             lienzo_aparte := m
             pon_lienzo(pantalla, puntero(m), an, an, al)

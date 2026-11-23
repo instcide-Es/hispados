@@ -10,7 +10,6 @@
 #define STBI_NO_PSD
 #define STBI_NO_PIC
 #define STBI_NO_PNM
-#define STBI_NO_TGA
 #define STBI_ASSERT(x) ((void)0)
 #define STBI_MALLOC(n) so_pide(n)
 #define STBI_REALLOC(p, n) so_repide(p, n)
@@ -44,14 +43,13 @@ int imagen_mide(const u8 *d, u32 n, int *an, int *al)
 	return *an > 0 && *al > 0;
 }
 
-u32 *imagen_lee(const u8 *d, u32 n, int *an, int *al)
+/* (lo de stb_image a 0xAARRGGBB) */
+static u32 *de_stb(const u8 *d, u32 n, int *an, int *al)
 {
 	int a, b, c, i;
 	u8 *px;
 	u32 *r;
 
-	if (!imagen_mide(d, n, &a, &b) || (u64)a * b > IMAGEN_MAX_PUNTOS)
-		return NULL;
 	px = stbi_load_from_memory(d, (int)n, &a, &b, &c, 4);
 	if (!px)
 		return NULL;
@@ -63,6 +61,45 @@ u32 *imagen_lee(const u8 *d, u32 n, int *an, int *al)
 	*an = a;
 	*al = b;
 	return r;
+}
+
+u32 *imagen_lee(const u8 *d, u32 n, int *an, int *al)
+{
+	int a, b;
+
+	if (!imagen_mide(d, n, &a, &b) || (u64)a * b > IMAGEN_MAX_PUNTOS)
+		return NULL;
+	return de_stb(d, n, an, al);
+}
+
+int imagen_mide_tga(const u8 *d, u32 n, int *an, int *al)
+{
+	int c;
+
+	/* (TGA no tiene firma: solo si lo dice la extensión; stb mira la cabecera) */
+	if (n < 18 || n > 0x7FFFFFFF)
+		return 0;
+	if (!stbi_info_from_memory(d, (int)n, an, al, &c))
+		return 0;
+	return *an > 0 && *al > 0;
+}
+
+u32 *imagen_lee_tga(const u8 *d, u32 n, int *an, int *al, u32 max_puntos)
+{
+	int a, b;
+
+	if (imagen_tipo(d, n) || !imagen_mide_tga(d, n, &a, &b) || (u64)a * b > max_puntos)
+		return NULL;
+	return de_stb(d, n, an, al);
+}
+
+u32 *imagen_lee_max(const u8 *d, u32 n, int *an, int *al, u32 max_puntos)
+{
+	int a, b;
+
+	if (!imagen_mide(d, n, &a, &b) || (u64)a * b > max_puntos)
+		return NULL;
+	return de_stb(d, n, an, al);
 }
 
 int imagen_jpeg_componentes(const u8 *d, u32 n)
