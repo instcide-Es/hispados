@@ -90,13 +90,40 @@ static u64 tsc(void)
 	return ((u64)d << 32) | a;
 }
 
+/* (TERMO) el reloj del servicio va con los tics del núcleo (100 por segundo,
+ * los que cuentan bien: el Termómetro apunta cada 2 s con ellos) y, dentro
+ * de cada tic, con el contador del procesador; y nunca hacia atrás. Antes
+ * era solo el contador del procesador con las vueltas por ms medidas al
+ * arrancar: si aquella medida salía grande (el servicio, quitado del
+ * procesador mientras medía, con el arranque ocupado), su reloj iba más
+ * despacio que el de verdad, y con él la lectura de la batería (cada 10 s
+ * de su reloj) y la de las zonas (cada 2 s): en el Monovate 14.1, la
+ * batería, la misma de principio a fin (23/11/2026) */
+static u32 tic_visto;
+static u64 tsc_visto, us_ultimo;
+
 u64 mq_ahora_us(void)
 {
-	if (tsc_ms)
-		return (tsc() - tsc0) * 1000 / tsc_ms;
-	/* sin contador: los tics del núcleo (100 por segundo) y, dentro de
-	 * cada tic, un poco cada vez que se pregunta (para que avance) */
-	return (u64)sc(SC_TICS, 0, 0, 0) * 10000 + (falso_us += 2) % 10000;
+	u32 t = sc(SC_TICS, 0, 0, 0);
+	u64 v, dentro;
+
+	if (tsc_ms) {
+		u64 x = tsc();
+
+		if (t != tic_visto || !tsc_visto) {
+			tic_visto = t;
+			tsc_visto = x;
+		}
+		dentro = (x - tsc_visto) * 1000 / tsc_ms;
+	} else
+		dentro = (falso_us += 2) % 10000;	/* (sin contador: un poco cada vez que se pregunta, para que avance) */
+	if (dentro > 9999)
+		dentro = 9999;
+	v = (u64)t * 10000 + dentro;
+	if (v < us_ultimo)
+		v = us_ultimo;
+	us_ultimo = v;
+	return v;
 }
 
 void mq_espera_us(u32 us)
@@ -216,11 +243,15 @@ void mq_inicia(const struct ll_inicio *i)
 }
 
 /* las vueltas del contador de tiempo por milisegundo, contra los tics del
- * núcleo (100 por segundo): diez tics. 0 si el procesador no lo tiene. */
+ * núcleo (100 por segundo). 0 si el procesador no lo tiene. (TERMO) Cinco
+ * medidas de 5 tics; solo valen las que han visto los tics de uno en uno (el
+ * servicio no se ha quedado sin procesador en medio: entonces la medida sale
+ * de más) y, de esas, la del medio. Si ninguna vale, de las otras la más
+ * pequeña, con los tics que han pasado de verdad */
 u32 mq_mide_tsc(void)
 {
-	u32 a, b, c, d, t;
-	u64 x0;
+	u32 a, b, c, d, t, t1, i, n = 0, j;
+	u64 x0, x1, m[5], peor = 0;
 
 	__asm__ __volatile__("pushfl; popl %0; movl %0, %1; xorl $0x200000, %0; pushl %0; popfl; pushfl; popl %0"
 			     : "=&r"(a), "=&r"(b));
@@ -229,12 +260,47 @@ u32 mq_mide_tsc(void)
 	__asm__ __volatile__("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
 	if (!(d & 0x10))
 		return 0;	/* sin RDTSC */
-	t = sc(SC_TICS, 0, 0, 0);
-	while (sc(SC_TICS, 0, 0, 0) == t)
-		;
-	t++;
-	x0 = tsc();
-	while (sc(SC_TICS, 0, 0, 0) < t + 10)
-		;
-	return (u32)((tsc() - x0) / 100);
+	for (i = 0; i < 5; i++) {
+		int bien = 1;
+
+		t = sc(SC_TICS, 0, 0, 0);
+		while ((t1 = sc(SC_TICS, 0, 0, 0)) == t)
+			;
+		x0 = tsc();
+		if (t1 != t + 1)
+			bien = 0;
+		t = t1;
+		for (;;) {
+			u32 ahora = sc(SC_TICS, 0, 0, 0);
+
+			if (ahora != t1) {
+				if (ahora != t1 + 1)
+					bien = 0;
+				t1 = ahora;
+			}
+			if (t1 >= t + 5)
+				break;
+		}
+		x1 = tsc();
+		if (sc(SC_TICS, 0, 0, 0) != t1)
+			bien = 0;
+		if (bien && t1 == t + 5)
+			m[n++] = (x1 - x0) / 50;
+		else if (t1 > t) {
+			u64 v = (x1 - x0) / ((u64)(t1 - t) * 10);
+
+			if (!peor || v < peor)
+				peor = v;
+		}
+	}
+	if (!n)
+		return (u32)peor;
+	for (i = 1; i < n; i++)		/* (de menor a mayor) */
+		for (j = i; j > 0 && m[j] < m[j - 1]; j--) {
+			u64 x = m[j];
+
+			m[j] = m[j - 1];
+			m[j - 1] = x;
+		}
+	return (u32)m[n / 2];
 }

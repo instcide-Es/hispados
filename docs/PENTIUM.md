@@ -715,7 +715,7 @@ usb: controladora EHCI 8086:24CD, 6 puertos
 usb: aparato 0, 0627:0001, velocidad alta, en el puerto 1 (EHCI); teclado
 usb: aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón
 usb: aparato 2, 46F4:0001, velocidad alta, en el puerto 3 (EHCI); almacenamiento
-usb: 1 teclados, 1 ratones, 1 memorias.
+usb: 1 teclado, 1 ratón, 1 memoria.
 disco 0: QEMU HARDDISK, 40 MB, FAT32 (SATA).
 disco 1: QEMU    QEMU HARDDISK, 16 MB, FAT16 (USB).
 los discos de dentro son de solo lectura (para escribir en ellos: «escritura» en la línea del cargador).
@@ -9662,6 +9662,9 @@ la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
 
 | **ASUS ROG GL553V** (de Carlos, objetivo) | i7-7700HQ Kaby Lake (4/8); GTX 1050/1050 Ti (GP107, Optimus) | — | la GPU Pascal (20460h, solo leer) sin despertarla si duerme (Optimus: el enlace del puerto); ventiladores y temperatura por el WMI de ASUS (DSTS, nunca DEVS); en el LEEME, Esc/F2 y «Launch CSM» |
 | **ASUS ROG GL553VD** (real, 23/11 por UEFI) | i5-7300HQ Kaby Lake (4 núcleos / 4 hilos); GTX 1050 | GOP 1920x1080 | todo leído: núcleos 0-3 y paquete (26→54 °C), GPU 21→41 °C, THRM, ventilador del CPU por WMI (1900→2700 r.p.m.; antes de girar, «parado»), el de la GPU «no disponible»; la topología por CPUID 0Bh (decía «2 núcleos, 2 hilos»: CPUID 1/4 dan lo que cabe, no lo que hay); en el informe, el consumo (_BST) y la autonomía (bajó del 42 al 25 % en 9 min con la carga) |
+| **Monovate 14.1** (real, 23/11 por UEFI) | i3-1115G4 Tiger Lake (2/4); firmware Insoluxia TN29V2.17; el 8254 parado (tic del HPET) | la batería, la misma lectura de principio a fin (enchufado o no); «de bien a templado» cada 2-4 s a 59-63 °C; «sin pantalla» con GOP; la hora del registro, 4 s atrás | el reloj de ACPI.BIN va con los tics del núcleo (antes, las vueltas del procesador medidas al arrancar: si el servicio se quedaba sin procesador mientras medía, su reloj iba lento y no releía); aviso si la batería no se relee en 40 s; 3 °C de margen al bajar de estado; el GOP aunque esté por encima de 4 GB; la hora del registro no va hacia atrás |
+| **ThinkPad E14 Gen 5** (real, 23/11 por UEFI) | i7-1355U Raptor Lake (híbrido: 2 de rendimiento con 2 hilos + 8 eficientes) | «12 procesadores (10 núcleos, 2 hilos por núcleo)»; «equipo  , placa  , BIOS » vacíos | los hilos de cada núcleo (CPUID 07h EDX[15] y 1Ah): «10 núcleos: 2 de rendimiento (2 hilos cada uno) y 8 eficientes», también en el INFORME; el suceso de ACPI espera a su primera lectura (salía con el bloque a cero); SMBIOS 3 por encima de 4 GB: el de SMBIOS 2 |
+| **Medion S2217** (batería muerta) | — | sin nada de la batería | «batería: no la encuentro o no está (va con el cable)» y el porqué, en el .LOG y en el INFORME |
 
 Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
 

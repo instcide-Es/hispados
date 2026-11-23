@@ -163,12 +163,18 @@ módulo Usbcal
     ; cuelga de él): a sus clases
     función ha_llegado(a: nat32)
         variable j, m: nat32
+        variable dd: arreglo [4] de nat32
         para j desde 0 hasta MAX_APARATOS - 1 hacer
             si aparatos[j].usado y cuelga_de(j, a) entonces
                 enchufados := enchufados + 1
                 enseña_aparato(j, "se enchufa el aparato")
                 si Usbhid.nuevo(j) <> 0 entonces
-                    apunta2("usb: %u teclados, %u ratones.\n", teclados, ratones)
+                    ; («1 teclado», «2 ratones»: en singular o en plural)
+                    dd[0] := teclados
+                    si teclados = 1 entonces dd[1] := nat32("teclado") sino dd[1] := nat32("teclados") fin
+                    dd[2] := ratones
+                    si ratones = 1 entonces dd[3] := nat32("ratón") sino dd[3] := nat32("ratones") fin
+                    apunta("usb: %u %s, %u %s.\n", dd)
                 fin
                 m := Usbalm.nueva(j)
                 si m <> NINGUNO entonces memoria_nueva(m) fin

@@ -668,7 +668,9 @@ static void ta_smbios(void)
 		if (*(const u32 *)(e + 0x14) == 0) {
 			dir = *(const u32 *)(e + 0x10);
 			largo = *(const u32 *)(e + 0x0C);
-		}
+		} else
+			reg("ACPI: (TERMO) la tabla del SMBIOS 3 está por encima de los 4 GB (%X%08Xh): no se alcanza\n",
+			    *(const u32 *)(e + 0x14), *(const u32 *)(e + 0x10));
 	} else if (!memcmp((void *)e, "_SM_", 4)) {
 		largo = *(const u16 *)(e + 0x16);
 		dir = *(const u32 *)(e + 0x18);

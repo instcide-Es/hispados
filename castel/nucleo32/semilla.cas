@@ -642,7 +642,7 @@ módulo Semilla
     ; USB y lo que haya traído el cargador. Dice lo que encuentra.
     función busca_discos()
         variable d, u, n, pedida: nat32
-        variable dd: arreglo [4] de nat32
+        variable dd: arreglo [6] de nat32
         ; en los discos solo se escribe si el cargador lo dice: «escritura»
         ; (en todos) o «escritura=usb» (solo en las memorias USB). En un PC
         ; de verdad, el disco es el del dueño.
@@ -668,10 +668,14 @@ módulo Semilla
                 Usbhid.prepara()
                 enseña_descriptor()
                 si Usbalm.prepara() <> 0 entonces busca_usb() fin
+                ; («1 ratón», «2 ratones»: en singular o en plural)
                 dd[0] := teclados
-                dd[1] := ratones
-                dd[2] := Usbalm.cuántas
-                apunta("usb: %u teclados, %u ratones, %u memorias.\n", dd)
+                si teclados = 1 entonces dd[1] := nat32("teclado") sino dd[1] := nat32("teclados") fin
+                dd[2] := ratones
+                si ratones = 1 entonces dd[3] := nat32("ratón") sino dd[3] := nat32("ratones") fin
+                dd[4] := Usbalm.cuántas
+                si Usbalm.cuántas = 1 entonces dd[5] := nat32("memoria") sino dd[5] := nat32("memorias") fin
+                apunta("usb: %u %s, %u %s, %u %s.\n", dd)
                 ; y lo que se enchufe y se desenchufe a partir de ahora
                 Usbcal.prepara()
             fin
@@ -754,6 +758,13 @@ módulo Semilla
             tabla_efi(de64)
             d[0] := 32
             si de64 entonces d[0] := 64 fin
+            ; (la del GOP aunque esté por encima de 4 GB: aquí aún no se ha
+            ; puesto a la vista, y pantalla_del_cargador no la daría)
+            si no hay y medida_del_cargador(an, al, bits) entonces
+                hay := cierto
+                d[1] := an
+                d[2] := al
+            fin
             si hay entonces formatear(modo_arranque, 64, "por UEFI (%u bits, GOP %u x %u)", d) sino formatear(modo_arranque, 64, "por UEFI (%u bits, sin pantalla)", d) fin
         sino si mb2() entonces
             Textos32.copiar(modo_arranque, "por multiboot2 (sin UEFI)")
@@ -803,6 +814,13 @@ módulo Semilla
                 si v[0] = 0xF2FD1544 y v[1] = 0x4A2C9794 y v[2] = 0xBBE52E99 y v[3] = 0x94E320CF entonces d3 := v[4] fin
                 si v[0] = 0xEB9D2D31 y v[1] = 0x11D32D88 y v[2] = 0x9000169A y v[3] = 0x4DC13F27 entonces d2 := v[4] fin
             fin
+        fin
+        ; (TERMO) si la tabla del SMBIOS 3 está por encima de 4 GB (su punto
+        ; de entrada «_SM3_» da 64 bits: +10h la dirección, +14h la parte
+        ; alta), ACPI.BIN no la alcanza: entonces, la del SMBIOS 2 si la hay
+        si d3 <> 0 y d2 <> 0 entonces
+            v := puntero(mapear_aparato(d3, 32))
+            si v <> nulo y v[5] <> 0 entonces devolver d2 fin
         fin
         si d3 <> 0 entonces devolver d3 fin
         devolver d2

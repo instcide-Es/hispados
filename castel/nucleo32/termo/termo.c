@@ -383,6 +383,7 @@ struct energia {
 };
 static struct energia en;
 static int hay_bateria;
+static char sin_bat_texto[160];	/* (TERMO) por qué no hay batería, si no la hay (a los 20 s) */
 /* (TERMO) la batería sin enchufar: el primer y el último porcentaje vistos y
  * cuándo (cuenta_s), si ha habido carga entretanto, y lo que gastaba (mW, de
  * _BST: lo más alto y la última lectura); para el consumo y la autonomía del
@@ -413,7 +414,10 @@ static void lee_zonas(void)
 {
 	u32 i;
 
-	if (sc(SC_ZONAS, (u32)&za, 0, 0) != 1 || za.t.version != TA_VERSION)
+	/* (TERMO) con lecturas = 0, ACPI.BIN aún no ha leído nada (el bloque
+	 * que da antes de la primera lectura, a cero): en el ThinkPad E14 salía
+	 * «0 zonas térmicas, equipo  , placa  , BIOS » y luego llegaba la zona */
+	if (sc(SC_ZONAS, (u32)&za, 0, 0) != 1 || za.t.version != TA_VERSION || za.t.lecturas == 0)
 		return;
 	if (!hay_zonas) {
 		hay_zonas = 1;
@@ -552,9 +556,26 @@ static char ruta_csv[64], ruta_txt[64], aviso_archivo[160];
 static int csv_listo, csv_malo;
 static u32 t_inicio;
 
+/* (TERMO) la hora del registro no va hacia atrás: en el Monovate 14.1 (el
+ * 8254 parado, el tic del HPET) las primeras líneas salían con 13:59:24 y
+ * las siguientes con 13:59:20 (23/11/2026). Si el reloj de la CMOS dice una
+ * hora de hasta 10 min antes que la última dada (el mismo día), se da otra
+ * vez la última; un salto mayor (o al día siguiente) se toma tal cual */
+static u32 fh_ultima;
+
 static void fecha_hora(u32 *a, u32 *me, u32 *d, u32 *h, u32 *mi, u32 *s)
 {
-	u32 f = sc(SC_DATO, DATO_FECHA, 0, 0), fe = f >> 16, ho = f & 0xFFFF;
+	u32 f = sc(SC_DATO, DATO_FECHA, 0, 0), fe, ho;
+
+	if (fh_ultima && (f >> 16) == (fh_ultima >> 16) && (f & 0xFFFF) < (fh_ultima & 0xFFFF)) {
+		u32 x = f & 0xFFFF, y = fh_ultima & 0xFFFF;
+		u32 sx = (x >> 11) * 3600 + ((x >> 5) & 63) * 60 + (x & 31) * 2, sy = (y >> 11) * 3600 + ((y >> 5) & 63) * 60 + (y & 31) * 2;
+
+		if (sy - sx <= 600)
+			f = fh_ultima;
+	}
+	fh_ultima = f;
+	fe = f >> 16, ho = f & 0xFFFF;
 
 	*a = 1980 + (fe >> 9);
 	*me = (fe >> 5) & 15;
@@ -1023,6 +1044,21 @@ static void mira_cambios(void)
 	for (k = 0; k < ns && cuenta_s == 4; k++)
 		if (S[k].clase == CL_GPU && S[k].t == NO)
 			suceso_log("sensor «%s»: sin dato: %s (no se escribe nada en la tarjeta)", S[k].nombre, gpu_estado[k] < 10 ? estado_gpu[gpu_estado[k]] : "?");
+	/* (TERMO) sin batería (la Medion S2217, con la suya muerta: se apaga al
+	 * desenchufar): que se diga, en el .LOG y en el informe. A los 20 s, con
+	 * la primera lectura de ACPI.BIN ya hecha */
+	if (cuenta_s == 20 && !sin_bat_texto[0] && (!hay_bateria || en.pct > 100)) {
+		struct energia e2;
+		int r = sc(SC_ENERGIA, (u32)&e2, 0, 0) == 1;
+
+		if (hay_bateria)
+			snprintf(sin_bat_texto, sizeof sin_bat_texto, "está puesta, pero no dice cuánto le queda (¿gastada o muerta?)");
+		else
+			snprintf(sin_bat_texto, sizeof sin_bat_texto, "no la encuentro o no está (va con el cable): %s",
+				 !r ? "el servicio de ACPI no dice nada de ella" : e2.fase == 2 ? "el equipo no declara ninguna batería (ACPI)" :
+				 e2.fase == 3 ? "ACPI no va en este equipo" : e2.fase == 0 ? "ACPI aún no ha acabado de leerla" : "el equipo la declara, pero dice que no está puesta (_STA)");
+		suceso_log("batería: %s", sin_bat_texto);
+	}
 	if (cuenta_s == 4 && !hay_gpus)
 		suceso_log("gráficas NVIDIA Maxwell: ninguna en el PCI%s", busca(za.t.producto, "GT80") ? " (en el GT80: el interruptor de gráficos las apaga)" : "");
 	if (hay_zonas && za.t.asus_hay && cuenta_s == 6)
@@ -1059,6 +1095,16 @@ static void mira_cambios(void)
 	for (k = 0; k < ns; k++) {
 		int e = estado_de(S[k].t, S[k].limite);
 
+		/* (TERMO) con margen al bajar: de un estado al de debajo solo
+		 * cuando está 3 °C por debajo del umbral (en el Monovate 14.1, a
+		 * 59-63 °C, salía cada 2-4 s «de bien a templado» y «de templado a
+		 * bien»); al subir, en cuanto lo pasa */
+		if (e != E_NADA && est_antes[k] != E_NADA && e < est_antes[k] && S[k].t != NO) {
+			int e3 = estado_de(S[k].t + 30, S[k].limite);
+
+			if (e3 > e)
+				e = e3 < est_antes[k] ? e3 : est_antes[k];
+		}
 		/* (los núcleos de los demás procesadores solo se leen en la carga: no es un fallo) */
 		if (S[k].t == NO && vistos_antes[k] && !(S[k].clase == CL_CPU && (S[k].zona & 0x10000)))
 			suceso_log("AVISO: el sensor «%s» ha dejado de responder", S[k].nombre);
@@ -1093,6 +1139,23 @@ static void mira_cambios(void)
 			suceso_log("ventilador %u: %s", i + 1, m);
 		}
 		vent_antes[i] = x;
+	}
+	/* (TERMO) ACPI.BIN lee la batería cada 10 s: si en 40 s no ha leído
+	 * otra vez, lo que se ve de ella es viejo (el Monovate 14.1, 23/11/2026:
+	 * «78 % sin enchufar, 15,8 W» de principio a fin, enchufado o no) */
+	if (hay_bateria) {
+		static u32 lect_antes, lect_s;
+		static int lect_dicho;
+
+		if (en.lecturas != lect_antes || !lect_s) {
+			if (lect_dicho)
+				suceso_log("batería: el servicio de ACPI vuelve a leerla (lectura n.º %u)", en.lecturas);
+			lect_antes = en.lecturas, lect_s = cuenta_s, lect_dicho = 0;
+		} else if (!lect_dicho && cuenta_s - lect_s >= 40) {
+			lect_dicho = 1;
+			suceso_log("AVISO: el servicio de ACPI no ha vuelto a leer la batería en %u s (sigue en la lectura n.º %u): lo que se ve de ella puede ser viejo",
+				   cuenta_s - lect_s, en.lecturas);
+		}
 	}
 	if (hay_bateria) {
 		if ((int)en.ca != ca_antes)
@@ -1475,6 +1538,10 @@ struct ap_ficha { u32 apic, estado, vueltas, msr, lecturas, latido, tsc, z; };
 struct ap_tabla { u32 n, motivo, base, r; struct ap_ficha e[16]; };
 static struct ap_tabla apt;
 static int smt_bits, nucleo_bsp, nucleos_vistos = 1, hilos_vistos = 1;	/* (cuántos núcleos y hilos de verdad: los vistos en la carga) */
+/* (TERMO) los híbridos: cuántos núcleos con hilos (y cuántos hilos), cuántos
+ * con uno solo, si CPUID dice que es híbrido y el tipo de este (1Ah) */
+static int topo_varios, topo_uno, topo_hilos_varios = 1, topo_hibrido, topo_tipo_bsp;
+static const char *topologia_texto(void);
 static const char *const motivo_ap[] = { "", "sin APIC", "el APIC está apagado (lo dejó así la BIOS)", "no se puede ver el APIC",
 					 "no hay sitio libre en la memoria baja", "el trampolín no cabe", "ningún otro procesador ha contestado (tiene uno, o no responden)" };
 
@@ -1564,9 +1631,43 @@ static void ap_sensores(void)
 		}
 		nucleos_vistos = nv;
 		hilos_vistos = (ap_cargados + 1 + nv - 1) / nv;
+		/* (TERMO) los híbridos (Intel de 12.ª generación en adelante: el
+		 * i7-1355U, 2 núcleos de rendimiento con 2 hilos y 8 eficientes con
+		 * 1): cuántos hilos tiene cada núcleo, de los procesadores que han
+		 * contestado (los «Atom» no llevan hilos), y CPUID 07h EDX[15]
+		 * (híbrido) y 1Ah (el tipo de este: 40h Core, 20h Atom) */
+		{
+			int cuantos[17] = { 0 };
+
+			for (j = 0; j < nv; j++) {
+				cuantos[j] = vistos[j] == nucleo_bsp ? 1 : 0;
+				for (i = 0; i < apt.n && i < 16; i++)
+					if ((int)apt.e[i].apic >> smt_bits == vistos[j])
+						cuantos[j]++;
+			}
+			topo_varios = topo_uno = 0;
+			topo_hilos_varios = 1;
+			for (j = 0; j < nv; j++)
+				if (cuantos[j] > 1) {
+					topo_varios++;
+					if (cuantos[j] > topo_hilos_varios)
+						topo_hilos_varios = cuantos[j];
+				} else
+					topo_uno++;
+		}
+		topo_hibrido = 0;
+		if (cpu.intel && cpu.max_hoja >= 7) {
+			u32 r[4];
+
+			__asm__ volatile("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(7), "c"(0));
+			topo_hibrido = (r[3] >> 15) & 1;
+			if (topo_hibrido && cpu.max_hoja >= 0x1A) {
+				__asm__ volatile("cpuid" : "=a"(r[0]), "=b"(r[1]), "=c"(r[2]), "=d"(r[3]) : "a"(0x1A), "c"(0));
+				topo_tipo_bsp = (int)(r[0] >> 24);
+			}
+		}
 	}
-	suceso_log("la carga, en %d procesadores (este y %d más: %d %s, %d %s)", ap_cargados + 1, ap_cargados,
-		   nucleos_vistos, nucleos_vistos == 1 ? "núcleo" : "núcleos", hilos_vistos, hilos_vistos == 1 ? "hilo por núcleo" : "hilos por núcleo");
+	suceso_log("la carga, en %d procesadores (este y %d más: %s)", ap_cargados + 1, ap_cargados, topologia_texto());
 	if (csv_listo)
 		csv_cabecera();
 }
@@ -1774,6 +1875,8 @@ static void escribe_informe(void)
 	IN("Equipo: %s %s %s\r\n", za.t.fabricante, za.t.producto, za.t.version_eq);
 	IN("Placa: %s %s   BIOS: %s\r\n", za.t.placa_fab, za.t.placa, za.t.bios);
 	IN("Procesador: %s (TjMax %d °C, %s)\r\n", cpu.marca, cpu.tjmax, cpu.tj_de_msr ? "la que dice el procesador" : "de tabla");
+	if (ap_cargados)
+		IN("Núcleos: %s (%d procesadores)\r\n", topologia_texto(), ap_cargados + 1);
 	IN("Prueba de esfuerzo: %s, %d s%s; carga de coma flotante en %d %s\r\n", por_seguridad ? "PARADA DE SEGURIDAD" : por_esc ? "parada a mano (Esc)" : "completa",
 	   seg_carga, por_seguridad ? "" : "", 1 + ap_cargados, ap_cargados ? "procesadores (hilos)" : "núcleo (Hispa-Pentium usa uno)");
 	if (por_seguridad)
@@ -1819,6 +1922,8 @@ static void escribe_informe(void)
 		if (en.salud_pct < 50)
 			IN("  La batería está muy gastada (menos de la mitad de lo que guardaba nueva): conviene cambiarla. Si la tapa de abajo o el ratón táctil abomban, puede estar hinchada: llévelo al técnico cuanto antes.\r\n");
 	}
+	if (sin_bat_texto[0] && !(hay_bateria && en.pct <= 100))
+		IN("\r\nBatería: %s.\r\n", sin_bat_texto);
 	if (anterior[0])
 		IN("\r\nLA VEZ ANTERIOR\r\n  %s\r\n", anterior);
 	if (hay_zonas && za.t.equipo_hecho == 1 && (za.t.equipo_tablas || za.t.equipo_pci))
@@ -2281,13 +2386,33 @@ static void pulso(void)
 	}
 }
 
+/* «2 núcleos, 2 hilos por núcleo»; o, si no todos los núcleos tienen los
+ * mismos hilos, «10 núcleos: 2 de rendimiento (2 hilos cada uno) y 8
+ * eficientes» (los híbridos; sin el CPUID de híbrido, «2 con 2 hilos y 8
+ * con 1») */
+static const char *topologia_texto(void)
+{
+	static char t[120];
+
+	if (topo_varios && topo_uno) {
+		if (topo_hibrido)
+			snprintf(t, sizeof t, "%d núcleos: %d de rendimiento (%d hilos cada uno) y %d %s", nucleos_vistos, topo_varios, topo_hilos_varios, topo_uno,
+				 topo_uno == 1 ? "eficiente" : "eficientes");
+		else
+			snprintf(t, sizeof t, "%d núcleos: %d con %d hilos y %d con 1", nucleos_vistos, topo_varios, topo_hilos_varios, topo_uno);
+	} else
+		snprintf(t, sizeof t, "%d %s, %d %s%s", nucleos_vistos, nucleos_vistos == 1 ? "núcleo" : "núcleos", hilos_vistos, hilos_vistos == 1 ? "hilo por núcleo" : "hilos por núcleo",
+			 topo_hibrido ? (topo_tipo_bsp == 0x20 ? "; híbrido, este es eficiente" : "; híbrido") : "");
+	return t;
+}
+
 static const char *nucleos_texto(void)
 {
-	static char t[64];
+	static char t[160];
 
 	if (!ap_cargados)
 		return "solo 1 núcleo cargado";
-	snprintf(t, sizeof t, "%d procesadores cargados (%d núcleos, %d por núcleo)", ap_cargados + 1, nucleos_vistos, hilos_vistos);
+	snprintf(t, sizeof t, "%d procesadores cargados (%s)", ap_cargados + 1, topologia_texto());
 	return t;
 }
 
