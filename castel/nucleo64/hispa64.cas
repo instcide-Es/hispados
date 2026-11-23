@@ -18,7 +18,7 @@ módulo Hispa64
 
     modelo hispa64
 
-    importar Cifras64, Cpu64, Consola64, Excepciones64
+    importar Cifras64, Cpu64, Pant64, Excep64
 
     constante VERSIÓN = "0.0.1"
     constante MB1 = 0x2BADB002

@@ -1,5 +1,5 @@
 ; =============================================================================
-;  excepciones64.cas - Hispa-64: la tabla de interrupciones (IDT de 64 bits) con
+;  excep64.cas - Hispa-64: la tabla de interrupciones (IDT de 64 bits) con
 ;  las 32 excepciones del procesador, y lo que se dice de cada una, en español:
 ;  qué ha pasado, dónde (RIP, CS, RFLAGS, RSP), el número de error si lo hay, los
 ;  registros y, en un fallo de página, la dirección (CR2) y por qué. Un punto
@@ -7,7 +7,7 @@
 ;  «apagar» en la línea de órdenes, apagan QEMU con el código 99: las pruebas).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo Excepciones64
+módulo Excep64
 
     importar Cifras64
 
@@ -352,4 +352,4 @@ módulo Excepciones64
         fin
     fin
 
-fin Excepciones64.
+fin Excep64.

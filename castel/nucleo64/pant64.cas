@@ -1,5 +1,5 @@
 ; =============================================================================
-;  consola64.cas - Hispa-64: la consola en la pantalla gráfica (la del GOP de
+;  pant64.cas - Hispa-64: la consola en la pantalla gráfica (la del GOP de
 ;  UEFI, que GRUB pasa por multiboot2), con la letra propia de Hispa (la «Hispa
 ;  8x16» de nucleo32/letra.cas, en la página 437). Guarda el texto y el color
 ;  de cada casilla: al llegar abajo sube el texto y vuelve a pintar, sin leer
@@ -10,7 +10,7 @@
 ;  (queda el puerto serie).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo Consola64
+módulo Pant64
 
     importar Letra
 
@@ -208,4 +208,4 @@ módulo Consola64
         letra(byte(c))
     fin
 
-fin Consola64.
+fin Pant64.

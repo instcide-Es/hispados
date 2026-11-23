@@ -81,8 +81,7 @@ else ko "prueba=alto no va (códigos $c y $c2): $(serie "$T/alto.txt" | grep Pru
 rm -f "$T/no64.txt"
 timeout 8 qemu-system-x86_64 -cpu qemu64,-lm -kernel "$T/HISPA64.BIN" -append apagar -display none -serial file:"$T/no64.txt" \
   -monitor none $DBG -no-reboot -nic none -m 256 > /dev/null 2>&1; c=$?
-if [ $c = 124 ] && grep -q "Hispa-64: este procesador no es de 64 bits (no tiene el modo largo)." "$T/no64.txt" \
-   && grep -q "Este equipo necesita Hispa-Pentium" "$T/no64.txt"; then
+if [ $c = 124 ] && grep -q "Hispa-64: el procesador no es de 64 bits. Use Hispa-Pentium." "$T/no64.txt"; then
   ok "con un procesador sin modo largo lo dice por el puerto serie y se para"
 else ko "sin modo largo no lo dice (código $c): $(tr -d '\r' < "$T/no64.txt" | paste -sd ' ')"; fi
 

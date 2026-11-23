@@ -247,6 +247,6 @@ if command -v qemu-system-x86_64 > /dev/null; then
   # con CASTEL64 y ENSAMB64 (que tienen que sacar lo mismo que ccastel.py y NASM)
   if CASTEL64=$W/castel64 ENSAMB64=$W/ensamb64 $AQUI/nucleo64/pruebas.sh $W/h64 > $W/h64.txt 2>&1; then
     ok "Hispa-64, etapa 0 (nucleo64/pruebas.sh): $(tail -1 $W/h64.txt | sed 's/^== Hispa-64: //; s/ ==$//') (multiboot, excepciones, UEFI con OVMF y GRUB, la pantalla del GOP; igual con CASTEL64 y ENSAMB64)"
-  else ko "Hispa-64, etapa 0 (nucleo64/pruebas.sh): $(grep 'MAL:' $W/h64.txt | head -3 | paste -sd ' ')"; fi
+  else ko "Hispa-64, etapa 0 (nucleo64/pruebas.sh): $(grep -a 'MAL:' $W/h64.txt | head -3 | paste -sd ' ')"; fi
 fi
 }

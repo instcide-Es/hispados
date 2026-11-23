@@ -334,6 +334,28 @@ Ocupa 1.432 octetos.
 
 ---
 
+## 10 bis. `modelo hispa64`: el núcleo de verdad (23/11/2026)
+
+El núcleo de Hispa-64 (`nucleo64/hispa64.cas`, docs/64/HISPA-64.md) usa su propio
+modelo, **`modelo hispa64`**, que es `núcleo64` con otro arranque
+(`ARRANQUE64['hispa64']` y `APOYO_HISPA64` en ccastel.py; `Apoyo64` lo copia con
+`haz_apoyo.py`, y Gen64 lo elige con `es_hispa64`):
+
+- La cabecera de multiboot2 **pide a GRUB la pantalla gráfica** (la etiqueta 5: la
+  que deje el firmware, el GOP con UEFI). Sigue la de multiboot (QEMU `-kernel`).
+- **Mira el modo largo con CPUID** (80000001h, EDX bit 29) antes de usarlo; si no
+  lo hay, lo dice por el puerto serie y se para.
+- **Las tablas de páginas van dentro del núcleo** (`C_tablas`, en lo que empieza a
+  cero, alineadas a 4 KB; no en 0x70000, que con UEFI puede ser del firmware): los
+  64 primeros GB tal cual y otra vez en la mitad alta (`0xFFFF800000000000`), con
+  páginas de 2 MB.
+- No hay pantalla de texto: lo que se escribe va al puerto serie (sin esperar si no
+  está) y a la función que el núcleo ponga en **`C_consola`** (una función de Castel
+  de un parámetro, que recibe la letra; la consola del GOP).
+- El texto del arranque sale entero en una línea `db` del compilador escrito en
+  Castel: no debe pasar de unos 2.900 octetos (ENSAMB64 no lee líneas de más de
+  12.000 letras).
+
 ## 11. Probar y comprobar
 
 `pruebas64.sh` es la parte 23 de `pruebas.sh` (`SOLO=castel64 ./pruebas.sh`, unos 4

@@ -5630,21 +5630,23 @@ C_pila:
     resb 65536
 C_pila_fin:
 """,
-    # [HISPA-64] el núcleo de Hispa-64 (docs/64/HISPA-64.md)
+    # [HISPA-64] el núcleo de Hispa-64 (docs/64/HISPA-64.md). Lo carga GRUB por
+    # multiboot2 (UEFI de 64 bits o BIOS) o QEMU con -kernel (multiboot), en modo
+    # protegido de 32 bits; pide a GRUB la pantalla gráfica. El arranque mira que
+    # haya modo largo (si no, lo dice por el puerto serie y se para), pone sus
+    # tablas de páginas (en C_tablas: los 64 primeros GB tal cual y otra vez en la
+    # mitad alta, desde 0xFFFF800000000000, con páginas de 2 MB) y pasa al modo
+    # largo. Lo que se escribe va al puerto serie y a C_consola (la consola del
+    # núcleo). Ojo: el texto entero sale en una línea «db» del compilador en
+    # Castel, y ENSAMB64 no lee líneas de más de 12.000 letras (Montador,
+    # MAX_LINEA): este texto, por debajo de 2.900 octetos.
     'hispa64': r"""
 ; Ensamblar:  nasm -f bin ESTE.asm -o HISPA64.BIN
 ; -----------------------------------------------------------------
 cpu x64
 bits 32
 org 0x100000
-; el núcleo de Hispa-64: lo carga GRUB por multiboot2 (con UEFI de 64 bits, con
-; UEFI de 32 bits, como los Atom Bay Trail, o con la BIOS) o QEMU con -kernel
-; (multiboot), en modo protegido de 32 bits. Pide a GRUB la pantalla gráfica
-; (la que deje el firmware). El arranque mira que el procesador sea de 64 bits
-; (si no, lo dice por el puerto serie y se para), pone sus tablas de páginas
-; (dentro del núcleo, en C_tablas: los 64 primeros GB tal cual y otra vez en
-; la mitad alta, desde 0xFFFF800000000000, con páginas de 2 MB) y pasa al
-; modo largo. Lo que se escribe va al puerto serie y a C_consola.
+; Hispa-64 (docs/64/HISPA-64.md): multiboot2 (GRUB) o multiboot (QEMU -kernel)
 C_ini:
     jmp C_arranque
     align 4, db 0
@@ -5676,7 +5678,6 @@ C_multiboot2:
     dw 0, 0
     dd 8
 C_mb2_fin:
-; la tabla de descriptores: código de 64 bits (0x08) y datos (0x10)
 C_gdt:
     dd 0, 0
     dd 0x0000FFFF, 0x00AF9A00
@@ -5691,8 +5692,9 @@ C_mb_info:
 C_consola:
     dq 0
 C_no64:
-    db 13, 10, 'Hispa-64: este procesador no es de 64 bits (no tiene el modo largo).', 13, 10
-    db 'Este equipo necesita Hispa-Pentium, que es de 32 bits.', 13, 10, 0
+    db 13, 10, 'Hispa-64: el procesador no es de 64 bits. Use Hispa-Pentium.', 13, 10, 0
+C_com1:
+    db 2, 0, 4, 0x80, 1, 1, 2, 0, 4, 3, 3, 0xC7, 5, 3, 0
 C_arranque:
     cli
     cld
@@ -5702,29 +5704,19 @@ C_arranque:
     mov ecx, _vacio_fin-_vacio
     xor eax, eax
     rep stosb
-; el puerto serie COM1 a 115200, 8N1
-    mov edx, 0x3F9
-    xor al, al
+; COM1 a 115200, 8N1 (C_com1: registro + 1 y valor)
+    mov esi, C_com1
+.com1:
+    movzx edx, byte [esi]
+    test edx, edx
+    jz .com1_ya
+    add edx, 0x3F7
+    mov al, [esi+1]
     out dx, al
-    mov edx, 0x3FB
-    mov al, 0x80
-    out dx, al
-    mov edx, 0x3F8
-    mov al, 1
-    out dx, al
-    mov edx, 0x3F9
-    xor al, al
-    out dx, al
-    mov edx, 0x3FB
-    mov al, 3
-    out dx, al
-    mov edx, 0x3FA
-    mov al, 0xC7
-    out dx, al
-    mov edx, 0x3FC
-    mov al, 3
-    out dx, al
-; ¿es de 64 bits? (CPUID 80000001h, EDX bit 29: el modo largo)
+    add esi, 2
+    jmp .com1
+.com1_ya:
+; ¿hay modo largo? (CPUID 80000001h, EDX bit 29)
     mov eax, 0x80000000
     cpuid
     cmp eax, 0x80000001
@@ -5756,8 +5748,7 @@ C_arranque:
 .para:
     hlt
     jmp .para
-; las tablas de páginas: la PML4 (la 0 y la 256 a la misma PDPT), la PDPT (64
-; entradas, una por GB) y 64 PD con páginas de 2 MB: de 0 a 64 GB
+; las tablas: 64 GB tal cual y en la mitad alta (PML4 0 y 256), páginas de 2 MB
 .si64:
     mov edi, C_tablas
     lea eax, [edi+0x1003]
