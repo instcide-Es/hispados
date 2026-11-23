@@ -34,7 +34,7 @@
 ; =============================================================================
 módulo Dispositivos
 
-    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid, Sonido
+    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid, Sonido, I2c, I2chid
 
     ; ---- los buses ----
     público constante BUS_PCI = 1
@@ -343,6 +343,15 @@ módulo Dispositivos
         ; los puentes (al procesador, ISA/LPC, PCI): los lleva el propio bus
         si sub = 0x06 entonces
             lleva(EST_FUNCIONA, "pci.cas")
+            devolver
+        fin
+        ; (I2CHID) las controladoras I2C de Intel LPSS (i2c.cas): de ellas cuelgan los touchpads HID sobre I2C
+        si (uno.clase >> 8 = 0x1180 o uno.clase >> 8 = 0x0C80) y I2c.busca(a) <> NINGUNA_I2C entonces
+            k := I2c.busca(a)
+            lleva(EST_FUNCIONA, "i2c.cas")
+            dd[0] := i2cs[k].velocidad div 1000
+            dd[1] := I2chid.touchpads
+            formatear(uno.detalle, 80, "I2C (DesignWare), a %u kHz; touchpads HID sobre I2C: %u", dd)
             devolver
         fin
         ; SATA (AHCI)

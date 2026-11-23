@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, I2c, I2chid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -625,7 +625,8 @@ módulo Semilla
     ; teclados y los ratones USB (si llegan sus informes) y lo guarda
     función registro_luego(nada: nat32)
         dormir(30 * HZ)
-        enseña_estado()
+        Usbhid.enseña_estado()
+        I2chid.enseña_estado()                  ; (I2CHID)
         guarda_registro()
     fin
 
@@ -667,6 +668,10 @@ módulo Semilla
                 Usbcal.prepara()
             fin
         fin
+        ; (I2CHID) las controladoras I2C (Intel LPSS): de ellas cuelgan los
+        ; touchpads HID sobre I2C, que dice luego ACPI.BIN (i2chid.cas); con
+        ; «sini2c», no se tocan
+        I2c.prepara()
         ; (CD) los lectores de CD y DVD (detrás de los discos y las memorias)
         si buscar(línea_del_cargador(), "sindisco") = nulo entonces busca_cd() fin
         n := 0
@@ -722,7 +727,7 @@ módulo Semilla
             si escribible(del_sistema) y tiene_sistema(del_sistema) entonces
                 guarda_registro()
                 ; y, al medio minuto, otra vez, con cómo van el teclado y el ratón
-                si teclados + ratones <> 0 entonces crear_tarea("registro", nat32(dirección(registro_luego)), 0) fin
+                si teclados + ratones + I2c.cuántas <> 0 entonces crear_tarea("registro", nat32(dirección(registro_luego)), 0) fin
             fin
         fin
     fin
@@ -862,7 +867,8 @@ módulo Semilla
                 escribir("teclado: el español\n")
             sino si es("usb") entonces
                 Usb.enseña()
-                enseña_estado()
+                Usbhid.enseña_estado()
+                I2chid.enseña_estado()
             sino si iguales(palabra1, "quitar") entonces
                 orden_quitar()
             sino si es("escritorio") entonces
