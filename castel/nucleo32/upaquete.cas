@@ -87,7 +87,7 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
-    constante VERSIÓN_PAQUETES = "1.5"                ; (CORTES)
+    constante VERSIÓN_PAQUETES = "1.6"                ; (CORTES) (COMPAT, 0.8.9: 1.6)
 
     ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
     ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)

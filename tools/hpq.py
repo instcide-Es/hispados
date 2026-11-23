@@ -268,7 +268,8 @@ SISTEMA = [
     # (explorador, dispositivos) el explorador de archivos, sus miniaturas y el Administrador de dispositivos
     # (REPRODUCTOR) la 0.9.3: la música (.MP3, .OGG, .FLAC, .WAV, .CUE...) se abre con el Reproductor si está
     # (0.8.8) la 0.9.4: una sola «Editar con Pintura» (Pintura 2 o, sin ella, la de la oficina)
-    ('equipo', '0.9.4', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+    # (0.8.9) 0.9.5: (COMPAT) «Comprobar compatibilidad» en el menú de un .EXE o de una carpeta
+    ('equipo', '0.9.5', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_085, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),
@@ -285,7 +286,8 @@ SISTEMA = [
     # (PROGRAMAS) la 1.2 (sobre la 1.1, la de la revisión de seguridad): los tipos,
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
-    ('paquetes', '1.5', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    # (0.8.9) 1.6: (COMPAT) los ganchos del Asistente al instalar o actualizar win32 (PAQUETES y ACTUALIZ /BANDEJA)
+    ('paquetes', '1.6', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
@@ -294,7 +296,8 @@ SISTEMA = [
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
-    ('ssh', VERSION_087, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda)', 'base >= ' + VERSION_087 + ', red >= 0.8.4', [
+    # (0.8.9) SSH con el terminal nuevo en su ventana (ssh/vt.c: xterm-256color, el tamaño con window-change; el del Termómetro)
+    ('ssh', VERSION_089, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda)', 'base >= ' + VERSION_087 + ', red >= 0.8.4', [
         ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
     ('tailscal', VERSION_087, 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
