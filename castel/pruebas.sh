@@ -4053,6 +4053,7 @@ if [ "$(id -u)" = 0 ] && [ -x "${HEADSCALE:-}" ] && command -v tailscaled > /dev
     "tailscale: pares-vps: túnel hecho" "^Haciendo ping a pares-vps \[100.64.0." "^Respuesta desde 100.64.0." "ssh: conectando con pares-vps (100.64.0." "ssh: dentro, con la llave propia$"
   S=$R/ts/fuera.txt
   mira "y desde el otro equipo (tailscaled), SSH al SSHD de Hispa-Pentium por la red de Tailscale" "hispa-pentium" "^hola por tailscale$" "^código 0$"
+  mira "lo que el servidor de control guarda del equipo (la actualización ligera del MapRequest): la clave del disco, y el otro equipo la ve con el relevo de casa" "^nodo hispa-pentium disco sí" "^par hispa-pentium disco sí derp 999$"
 else echo "  (Tailscale: hace falta root, ip netns, tailscaled y HEADSCALE=el binario de Headscale: se salta)"; fi
 if ! cat $R/*.txt | grep -q "excepción\|\*\*\*"; then ok "en todos esos arranques, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; cat $R/*.txt | grep "excepción\|\*\*\*" | head -3 | sed 's/^/        /'; fi
