@@ -1745,9 +1745,10 @@ else ko "ATAJOS.INI o DOCK.INI no guardan lo que tocaba:"; cat $G/atajos.ini $G/
 if sano $G/ex.img; then ok "y el disco, sano (fsck.fat)"; else ko "el disco ha quedado mal:"; sed 's/^/        /' $P/fsck.txt | head -5; fi
 if ! grep -q "excepción\|\*\*\*" $S; then ok "en toda esa sesión, ni una excepción ni una queja del núcleo"
 else ko "el núcleo se ha quejado:"; grep "excepción\|\*\*\*" $S | head -4 | sed 's/^/        /'; fi
-# la orden ESCRITORIO del intérprete, y abrir un documento desde el menú
+# la orden ESCRITORIO del intérprete, y abrir un documento desde el menú ((PUNTEROS)
+# la flecha se aparta antes de la captura: en el Bloc es la «I», que tapaba el texto)
 CAPTURAS=$G DISCO=$P/d16.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" escritorio ":pausa 2" ":clic 40 585" ":clic 300 171" ":pausa 1" ":clic 500 171" ":pausa 2" \
-  ":captura o1" ":clic 40 585" ":clic 360 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
+  ":raton 700 530" ":captura o1" ":clic 40 585" ":clic 360 545" ":clic 533 327" ":captura o2" > $G/orden.sal 2>&1
 S=$G/orden.sal
 mira "la orden ESCRITORIO del intérprete de órdenes (por la llamada al sistema) pone en marcha el escritorio, y ese intérprete acaba" \
   "^C:.>escritorio$" "^escritorio: en marcha, 800 x 600" "^El escritorio está en marcha\.$" "^ORDENES.BIN ha acabado con el código 0"

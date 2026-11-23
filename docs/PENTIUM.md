@@ -4550,6 +4550,93 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.9** (23/11, rama `pentium-089`: las ramas `pentium-uefi` —dentro de
+`termometro`—, `termometro`, `compat`, `touchpad` y `punteros`, y luego en la
+misma rama el reposo con MWAIT y el estado P; la `termometro` de después —el
+USB de los Intel nuevos— queda para la 0.8.10). Lo que se tocó al juntar:
+
+- **Una sola versión**: `VERSION_089` en `hpq.py` (la base; `VERSION_TOUCHPAD`
+  y `VERSION_PUNTEROS` son la misma) y `Usuario.VERSIÓN_TEXTO` («0.8.9»).
+- **Arrancar por UEFI** («Arrancar por UEFI», en la sección del arranque): la
+  memoria USB y el CD, de 64 y de 32 bits (`BOOTIA32.EFI`), la pantalla del
+  GOP (también por encima de 4 GB, con PSE-36), el tic del HPET o del APIC
+  local sin 8254, el SMBIOS de la tabla de EFI y el USB de velocidad plena
+  detrás de concentradores; parte 48 (`uefi`).
+- **El Termómetro** (sección 14 quatervicies; `TERMO.BIN`, paquete nuevo
+  `termo` 1.0, tipo herramientas; las llamadas 220 a 225 en la base), con los
+  demás procesadores en la carga (INIT-SIPI): **el trampolín de los AP va en
+  octetos** (ni `ensambla.py` ni ENSAMB32 ni ENSAMB64 saben `bits 16`, el
+  salto lejano ni el x87; con él escrito en ensamblador, las partes 16,
+  castel32 y castel64 decían que la semilla no salía igual que con NASM);
+  parte 46 (`termo`).
+- **El reposo con MWAIT** y **el estado P al arrancar** (en la sección del
+  Termómetro, «(MWAIT)» y «(PSTATE)»): `ocioso=hlt`/`ocioso=mwait` y
+  `sinpstate` en la línea del núcleo; las líneas «reposo:» y «procesador:» en
+  el registro.
+- **El Asistente de compatibilidad** (sección 14 quinvicies; `COMPAT.BIN`,
+  paquete nuevo `compat` 1.0, tipo herramientas): «Comprobar compatibilidad» en
+  Mi equipo (equipo **0.9.5**) y los ganchos al instalar o actualizar win32
+  (paquetes **1.6**); parte 49 (`compat`).
+- **El touchpad** (sección 14 sexvicies; `touchpad.cas`, `RATON.BIN` en la
+  base) y **los punteros del ratón** (sección 14 septemvicies; la llamada 177,
+  `PUNTERO.INI`): Panel de control › Ratón con Puntero y Touchpad; partes 50
+  (`touchpad`) y 51 (`punteros`). Los programas que piden su puntero: bloc
+  1.0.1, correo 1.0.3, pluma 2.0.2, pintura 2.0.1 (pide esta base) y navega
+  0.2.3.
+- **SSH 0.8.9**: el terminal nuevo (`ssh/vt.c`, xterm-256color, el tamaño con
+  window-change) en su ventana, el mismo del Termómetro.
+- **El montador** (`montador.cas`): `PARRAFOS_SIM` de 0x2000 a 0x3000 (192 K
+  para las etiquetas con nombre): con la 0.8.9 la semilla pasaba de 128 K y
+  ENSAMB32 y ENSAMB64 decían «demasiadas etiquetas» (partes castel32 y
+  castel64).
+- **Dos carreras al cargar un programa**, que salían con el equipo cargado:
+  ARGON2.BIN espera (la llamada 209, hasta 100 tics) a que el núcleo apunte
+  su número, o la contraseña buena «no valía» (parte `usuarios`); y la TEB
+  del hilo principal de WIN32.BIN se pone al crear la tarea (dentro de
+  `cargar_imagen`, sin interrupciones) y no al volver de `carga_de`: si el
+  reloj le daba la vez antes, su primera llamada (la 183, 9, quitar las
+  primeras 64 K) no valía sin TEB y el puntero nulo de un programa de
+  Windows no fallaba (SEH, parte `win32juegos`, una vez sí y otra no).
+- **Las pruebas que cambian**: la parte 07 acepta win32 1.x en la lista de
+  PAQUETES (el sistema lleva la 1.3); la parte `acpi` acepta el indicador
+  «> » delante de «escritorio: reiniciar».
+
+Los paquetes: base y ssh **0.8.9**, paquetes 1.6, equipo 0.9.5, bloc 1.0.1,
+correo 1.0.3, pluma 2.0.2, pintura 2.0.1, navega 0.2.3; nuevos compat 1.0 y
+termo 1.0; lo demás, tal cual lo publicado (red, tls y wifi siguen en la
+0.8.8; comprim y mirador 1.0.1 y win32 1.3, como se publicaron aparte;
+tailscal 0.8.9 se publicó aparte, de `worktree-v0.1-nucleo`, que también
+está fusionada aquí).
+
+**Las pruebas de la 0.8.9** (23/11; en el PC de Albinyana con
+`tools/pruebas_castel_pc.sh -j 5`, 39 partes, **3790 bien, 0 mal**): `16`
+139/0, `06` 168/0, `07` 102/0, `castel32` 67/0, `castel64` 72/0, `caliente`
+79/0, `paquetes` 108/0, `red` 72/0, `acpi` 78/0, `tls` 72/0, `cd` 77/0,
+`pantalla` 98/0, `dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0, `win32`
+90/0, `rueda` 71/0, `menu` 95/0, `programas` 92/0, `protege` 76/0, `wifi`
+96/0, `accesorios` 81/0, `sonido` 109/0, `zip` 118/0, `mirador` 75/0,
+`usuarios` 94/0, `panel` 108/0, `bloc` 119/0, `reproductor` 111/0,
+`win32juegos` 118/0 (y tres veces más sola, 118/0: antes del arreglo de la
+TEB salía mal una vez sí y otra no), `juegos` 98/0, `oficina` 101/0,
+`correo` 193/0, `agenda` 91/0, `cortes` 86/0, `iconos` 95/0, `compat` 58/0,
+`touchpad` 113/0, `punteros` 136/0. En el VPS, una a una: `uefi` 88/0,
+`pluma` 79/0, `cuentas` 85/0, `pintura` 74/0, `pdf` 80/0, `navegador` 98/0,
+`escudo` 103/0, `termo` 104/0, y `ssh` 72/0 ya con Tailscale 0.8.9. En una
+primera tanda del PC (que se cortó al reiniciarse WSL), `06` (la memoria
+UHCI) y `sonido` (un tono) dieron 1 mal cada una con el PC cargado; solas en
+el VPS, 168/0 y 109/0, y en la tanda buena, bien: es el tiempo, no el código.
+`SOLO=32` (la octava; sin pasar desde la 0.8.4) no acaba en las 2 h de
+`pruebas_castel_pc.sh`, ni con la 0.8.9 ni con la 0.8.8 (`pentium-088`, sola
+en el PC: 483 bien y 15 mal hasta la parte del TLS). Se han puesto al día
+cuatro cosas que habían cambiado: AZAR.SEM en la raíz (21 entradas, 18
+archivos), el reloj de la bandeja (cualquier minuto de la sesión: probar.sh
+compila antes la semilla), la selección del Bloc y LEEME.TXT abierto desde el
+menú (la flecha nueva, la «I» del Bloc, tapaba lo que se mira). Con eso la
+0.8.9 da en esa parte los mismos 12 mal que la 0.8.8 (el explorador: dos
+clics en la unidad, la vista de detalles, copiar y pegar, F2, el recuadro, el
+acceso en el tapiz, ATAJOS.INI y DOCK.INI) y la memoria USB con GRUB
+(`usb.sh`, «41 programas»): vienen de antes, quedan para la 0.8.10.
+
 **La 0.8.8** (22/11, rama `pentium-088`, corta: las ramas `agenda`, `cuentas32`,
 `pintura32` y, al final, `red-cortes` e `iconos-escritorio`; `termometro` va
 aparte). Lo que se tocó al juntar:
