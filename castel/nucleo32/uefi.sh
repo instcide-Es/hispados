@@ -7,7 +7,7 @@
 #              x86_64-efi (los PC de 64 bits: BOOTX64.EFI) e i386-efi (los de
 #              firmware de 32 bits, como los Bay Trail: el Acer One 10, el
 #              Medion: BOOTIA32.EFI); vacío si no hay ninguna (entonces la
-#              imagen arranca solo por la BIOS, como antes de la 0.8.8). Vienen
+#              imagen arranca solo por la BIOS, como antes de la 0.8.9). Vienen
 #              de los paquetes grub-efi-amd64-bin y grub-efi-ia32-bin.
 # y las funciones:
 #   haz_efi CARPETA   pone en CARPETA/EFI/BOOT/ el GRUB de cada plataforma,

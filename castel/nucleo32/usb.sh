@@ -44,7 +44,7 @@
 #     CARPETAS.TXT, que le dice a INSTALAR lo que va a C:\OFICINA.
 #   - y el servicio de ACPI, ACPI.BIN (acpi/pentium/hacer.sh): apagar de
 #     verdad y la batería; con «registro», lo suyo queda en X:\ACPI.TXT.
-# (UEFI) Desde la 0.8.8 arranca también por UEFI (x64 y, si está su GRUB,
+# (UEFI) Desde la 0.8.9 arranca también por UEFI (x64 y, si está su GRUB,
 # ia32: los Bay Trail como el Acer One 10): en la misma partición FAT (la
 # tabla sigue siendo la del MBR, como la de Rufus «MBR para BIOS o UEFI»)
 # van \EFI\BOOT\BOOTX64.EFI y BOOTIA32.EFI, el GRUB EFI (nucleo32/uefi.sh),

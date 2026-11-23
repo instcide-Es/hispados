@@ -23,7 +23,7 @@
 # Lleva también, en \PAQUETES, los paquetes del sistema con su catálogo (con
 # CLAVE_PRIVADA, firmado: CATALOGO.FIR), por si se quieren copiar a otro sitio.
 # Con GUARDA_PAQ=carpeta, deja ahí también los paquetes (para las pruebas).
-# (UEFI) Desde la 0.8.8 arranca también por UEFI (x64 y, si está su GRUB,
+# (UEFI) Desde la 0.8.9 arranca también por UEFI (x64 y, si está su GRUB,
 # ia32): grub-mkrescue pone, junto al El Torito de la BIOS, otro para EFI (una
 # imagen FAT con \EFI\BOOT\BOOTX64.EFI y BOOTIA32.EFI) y la tabla de la
 # memoria USB (si se graba con dd); el menú, con «$grub_platform» = efi, tiene
