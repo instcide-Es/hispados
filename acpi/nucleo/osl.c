@@ -101,6 +101,7 @@ ACPI_STATUS AcpiOsReadMemory(ACPI_PHYSICAL_ADDRESS d, UINT64 *v, UINT32 bits)
 
 	if (!p)
 		return AE_NOT_EXIST;
+	mq_traza_lee((u32)d, bits);	/* (TERMO) */
 	switch (bits) {
 	case 8: *v = *(volatile u8 *)p; break;
 	case 16: *v = *(volatile u16 *)p; break;

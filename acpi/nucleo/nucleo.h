@@ -17,6 +17,7 @@ void mq_desmapa(void *p, u32 tam);
 /* (TERMO) lo que el AML va a escribir en la memoria física, antes de
  * escribirlo (Hispa-Pentium lo apunta, para ver qué congela un equipo) */
 void mq_traza_mem(u32 fisica, u32 v, u32 bits);
+void mq_traza_lee(u32 fisica, u32 bits);	/* (y lo que va a leer: en un Bay Trail, leer un aparato apagado cuelga el equipo) */
 u64 mq_ahora_us(void);			/* microsegundos desde que arrancó el núcleo */
 void mq_espera_us(u32 us);		/* espera sin soltar el procesador */
 u32 mq_rsdp(void);			/* dirección física de la RSDP (0: no hay ACPI) */

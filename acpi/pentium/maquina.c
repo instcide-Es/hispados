@@ -74,6 +74,14 @@ void mq_traza_mem(u32 fisica, u32 v, u32 bits)
 	traza("memoria", fisica, v, bits / 8);
 }
 
+/* (las lecturas de la memoria física también: en un Bay Trail, leer los
+ * registros de un aparato apagado (LPSS, SCC) cuelga el equipo entero; se
+ * apunta la dirección y, en vez del valor, el tamaño) */
+void mq_traza_lee(u32 fisica, u32 bits)
+{
+	traza("lee memoria", fisica, bits / 8, 1);
+}
+
 u32 mq_es_lee(u32 p, u32 n)
 {
 	if (p == 0xCF8 && n == 4)
