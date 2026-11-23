@@ -6093,6 +6093,28 @@ C_multiboot:
 ; sitio para pedirle al cargador un modo gráfico (clase, ancho, alto y bits
 ; por punto): a cero y sin su bandera, no se pide (nucleo32/modo_grafico.py)
     dd 0, 0, 0, 0
+; (UEFI) la cabecera multiboot2 (GRUB EFI: «multiboot2»): las mismas
+; direcciones y la misma entrada, y la pantalla que deje el firmware (GOP;
+; la etiqueta 5 es optativa: sin ancho ni alto, la que diga gfxpayload).
+; Mide 88 octetos; la suma, ya hecha: -(0xE85250D6 + 88)
+    align 8, db 0
+C_multiboot2:
+    dd 0xE85250D6, 0
+    dd 88
+    dd 0x17ADAED2
+    dw 2, 0
+    dd 24
+    dd C_multiboot2, C_ini, _datos_fin, _vacio_fin
+    dw 3, 0
+    dd 12
+    dd C_arranque
+    dd 0
+    dw 5, 1
+    dd 20
+    dd 0, 0, 32
+    dd 0
+    dw 0, 0
+    dd 8
 ; la tabla de descriptores: código (0x08) y datos (0x10), planos, de 4 GB
 C_gdt:
     dd 0, 0

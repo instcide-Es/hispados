@@ -55,6 +55,11 @@ módulo Usb
     constante MAX_FALLOS = 8
     tipo Fallo = estructura
         hc_clase, puerto_raíz, padre, puerto, velocidad, punto: nat32
+        código: nat32                           ; (UEFI) el del xHCI en ese paso (Xhci.último_código)
+        leídos: nat32                           ; (UEFI) los octetos que han llegado (o el error)
+        datos: arreglo [8] de byte              ; (UEFI) los 8 primeros de lo leído
+        luego_bien: bool                        ; (UEFI) al reintentarlo (otro reinicio del puerto), sí
+        paquete0, tt: nat32                     ; (UEFI) el paquete del extremo 0 con que se iba; el traductor (dir. y puerto)
     fin
     variable fallos: arreglo [MAX_FALLOS] de Fallo
     público variable n_fallos: nat32
@@ -81,6 +86,7 @@ módulo Usb
         p[7] := n >> 8
         r := T_FALLO
         intentos := 0
+        si n <> 0 y pide yb 0x80 <> 0 entonces llenar(puntero(página + DATOS), 8, 0) fin      ; (UEFI) para ver luego lo que llega (solo si entra: si sale, son los datos)
         mientras r = T_FALLO y intentos < 3 hacer
             si a.hc_clase = HC_XHCI entonces
                 r := Xhci.control(a.hc, a, página, página + DATOS, n, pide yb 0x80 <> 0)
@@ -91,6 +97,7 @@ módulo Usb
             fin
             intentos := intentos + 1
         fin
+        último_r := r                           ; (UEFI)
         devolver r
     fin
 
@@ -301,7 +308,11 @@ módulo Usb
     ; el aparato de la ficha i no se deja enumerar: se apunta en qué paso
     ; (1: la dirección; 2 y 3: su descriptor; 4 y 5: su configuración; 6:
     ; los extremos; 7: ponerle la configuración). Da NINGUNO.
+    variable último_r: ent32                    ; (UEFI) lo que dio la última petición de enumera (para el registro)
+
     función no_se_deja(i: nat32, punto: nat32): nat32
+        variable k: nat32
+        variable p: puntero a byte
         ; (lo que se le haya dado, se suelta: la ranura del xHCI, la dirección)
         si aparatos[i].hc_clase = HC_XHCI entonces
             Xhci.quita_aparato(aparatos[i].hc, aparatos[i])
@@ -316,6 +327,16 @@ módulo Usb
             fallos[n_fallos].puerto := aparatos[i].puerto
             fallos[n_fallos].velocidad := aparatos[i].velocidad
             fallos[n_fallos].punto := punto
+            ; (UEFI) cómo ha acabado (el código del xHCI), cuánto ha llegado y lo primero
+            fallos[n_fallos].código := 0
+            si aparatos[i].hc_clase = HC_XHCI entonces fallos[n_fallos].código := Xhci.último_código fin
+            fallos[n_fallos].leídos := nat32(último_r)
+            p := puntero(página + DATOS)
+            para k desde 0 hasta 7 hacer fallos[n_fallos].datos[k] := p[k] fin
+            fallos[n_fallos].luego_bien := falso
+            fallos[n_fallos].paquete0 := aparatos[i].paquete0
+            fallos[n_fallos].tt := (aparatos[i].tt_dir << 8) ob aparatos[i].tt_puerto
+            si aparatos[i].hc_clase = HC_XHCI entonces fallos[n_fallos].tt := (aparatos[i].tt_ranura << 8) ob aparatos[i].tt_puerto fin
             n_fallos := n_fallos + 1
         fin
         devolver NINGUNO
@@ -352,6 +373,10 @@ módulo Usb
             caso V_SÚPER: aparatos[i].paquete0 := 512
             si no: aparatos[i].paquete0 := 8
         fin
+        ; (UEFI) en el xHCI, uno de velocidad plena empieza con 64 (como Linux):
+        ; se leen 8 octetos (un paquete corto si su extremo 0 es de 8) y luego
+        ; se le dice lo que diga él (Evaluate Context)
+        si hc_clase = HC_XHCI y velocidad = V_PLENA entonces aparatos[i].paquete0 := 64 fin
         si padre <> SIN_APARATO entonces
             aparatos[i].nivel := aparatos[padre].nivel + 1
             largo := puerto
@@ -375,6 +400,10 @@ módulo Usb
         ; la dirección
         si hc_clase = HC_XHCI entonces
             si no Xhci.nuevo_aparato(hc, aparatos[i]) entonces devolver no_se_deja(i, 1) fin
+            ; (UEFI) el rato que necesita el aparato después de su dirección (la
+            ; norma da 2 ms; con el EHCI ya se esperaban 10, con el xHCI nada,
+            ; y hay ratones y teclados de velocidad plena que no contestaban)
+            espera_ms(10)
         sino
             largo := toma_dir()
             si largo = 0 entonces devolver NINGUNO fin
@@ -458,7 +487,22 @@ módulo Usb
 
     ; hay algo en ese puerto del concentrador i: reiniciar el puerto, esperar
     ; a que acabe y enumerarlo. Da su número, o NINGUNO.
+    ; (UEFI) como enumera_o_reintenta, para el puerto de un concentrador: si
+    ; lo que hay no se deja (los aparatos del Bluetooth de los Mac, detrás de
+    ; su concentrador, tardan en estar listos), otro reinicio del puerto y otra vez
     función puerto_de_concentrador(i: nat32, puerto: nat32): nat32
+        variable r, n0: nat32
+        n0 := n_fallos
+        r := puerto_de_concentrador_una(i, puerto)
+        si r <> NINGUNO o n_fallos = n0 entonces devolver r fin
+        espera_ms(100)
+        r := puerto_de_concentrador_una(i, puerto)
+        si r <> NINGUNO entonces fallos[n0].luego_bien := cierto fin
+        si r = NINGUNO y n_fallos > n0 + 1 entonces n_fallos := n0 + 1 fin
+        devolver r
+    fin
+
+    función puerto_de_concentrador_una(i: nat32, puerto: nat32): nat32
         variable p: puntero a byte
         variable r: ent32
         variable estado, v, vueltas: nat32
@@ -505,9 +549,32 @@ módulo Usb
                     caso HC_EHCI: v := Ehci.puerto_reinicia(hc, p)
                     si no: v := Uhci.puerto_reinicia(hc, p)
                 fin
-                si v <> 0 entonces enumera(hc_clase, hc, p, SIN_APARATO, 0, v) fin
+                si v <> 0 entonces enumera_o_reintenta(hc_clase, hc, p, v) fin       ; (UEFI)
             fin
         fin
+    fin
+
+    ; (UEFI) enumera lo del puerto p de la controladora; si no se deja, otro
+    ; reinicio del puerto, un rato, y otra vez (como Windows y Linux: hay
+    ; aparatos que la primera vez no contestan bien). En el registro queda el
+    ; primer fallo, con «luego sí» si a la segunda ha ido.
+    función enumera_o_reintenta(hc_clase: nat32, hc: nat32, p: nat32, v: nat32): nat32
+        variable r, n0: nat32
+        n0 := n_fallos
+        r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v)
+        si r <> NINGUNO o n_fallos = n0 entonces devolver r fin
+        espera_ms(100)
+        según hc_clase
+            caso HC_XHCI: v := Xhci.puerto_reinicia(hc, p)
+            caso HC_EHCI: v := Ehci.puerto_reinicia(hc, p)
+            si no: v := Uhci.puerto_reinicia(hc, p)
+        fin
+        si v = 0 entonces devolver NINGUNO fin
+        espera_ms(50)
+        r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v)
+        si r <> NINGUNO y n_fallos > n0 entonces fallos[n0].luego_bien := cierto fin
+        si r = NINGUNO y n_fallos > n0 + 1 entonces n_fallos := n0 + 1 fin    ; (el mismo, una vez)
+        devolver r
     fin
 
     ; busca las controladoras USB, las toma y enumera lo que haya
@@ -612,7 +679,7 @@ módulo Usb
             si no: v := Uhci.puerto_reinicia(hc, p)
         fin
         r := NINGUNO
-        si v <> 0 entonces r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v) fin
+        si v <> 0 entonces r := enumera_o_reintenta(hc_clase, hc, p, v) fin        ; (UEFI)
         soltar(cerrojo)
         devolver r
     fin
@@ -769,8 +836,23 @@ módulo Usb
     fin
 
     ; dice las controladoras y los aparatos que hay, uno por línea
+    ; (UEFI) qué quiere decir el código con que acaba algo en el xHCI
+    función nombre_código(c: nat32): puntero a byte
+        según c
+            caso 0: devolver "no es del xHCI"
+            caso 1: devolver "bien"
+            caso 3: devolver "babble: más datos de los esperados"
+            caso 4: devolver "error de la transacción"
+            caso 5: devolver "error del TRB"
+            caso 6: devolver "STALL: el aparato dice que no"
+            caso 13: devolver "corto"
+            caso 0xFF: devolver "se pasó el tiempo"
+        fin
+        devolver "otro"
+    fin
+
     público función enseña()
-        variable c, i: nat32
+        variable c, i, k: nat32
         variable d: arreglo [4] de nat32
         c := 0
         mientras c < Xhci.cuántas hacer
@@ -809,6 +891,22 @@ módulo Usb
             si fallos[i - 1].padre <> SIN_APARATO entonces
                 apunta2(": puerto %u del concentrador %u", fallos[i - 1].puerto, fallos[i - 1].padre)
             fin
+            ; (UEFI) cómo ha acabado y lo que ha llegado, para saber qué pasa
+            si fallos[i - 1].hc_clase = HC_XHCI entonces
+                d[0] := fallos[i - 1].código
+                d[1] := nat32(nombre_código(fallos[i - 1].código))
+                apunta("; código xHCI %u (%s)", d)
+            fin
+            d[0] := fallos[i - 1].leídos
+            d[1] := fallos[i - 1].paquete0
+            d[2] := fallos[i - 1].tt >> 8
+            d[3] := fallos[i - 1].tt yb 0xFF
+            apunta("; dio %d; extremo 0 de %u; traductor %u, puerto %u", d)
+            para k desde 0 hasta 7 hacer
+                d[0] := fallos[i - 1].datos[k]
+                si k = 0 entonces apunta("; lo leído: %02X", d) sino apunta(" %02X", d) fin
+            fin
+            si fallos[i - 1].luego_bien entonces apunta0("; al reintentarlo, sí") fin
             apunta0("\n")
         fin
     fin

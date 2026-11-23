@@ -106,7 +106,7 @@ módulo Marcos
         ; lo que no se puede dar: el primer mega, el núcleo, lo del cargador
         tapa_trozo(0, 0x100000)
         tapa_trozo(0x100000, fin_núcleo)
-        tapa_trozo(dirección_info(), dirección_info() + 88)
+        tapa_trozo(dirección_info(), dirección_info() + largo_info())     ; (UEFI) con multiboot2, todas sus etiquetas
         tapa_trozo(dirección_mapa(), dirección_mapa() + largo_mapa())
         ; los textos que deja el cargador (lo que se le dijo al núcleo y el
         ; nombre de cada módulo) pueden estar justo detrás del núcleo

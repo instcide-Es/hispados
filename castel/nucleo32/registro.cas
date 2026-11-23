@@ -17,6 +17,10 @@ módulo Registro
     público variable registro_largo: nat32
     variable renglón: arreglo [240] de byte
     variable datos: arreglo [4] de nat32
+    ; (UEFI) por dónde ha arrancado («por UEFI (64 bits, GOP 1366 x 768)»,
+    ; «por la BIOS/CSM (VBE 800 x 600)»...): la primera línea del registro y
+    ; Acerca de (semilla.cas, apunta_arranque)
+    público variable modo_arranque: arreglo [64] de byte
 
     ; escribe un texto y lo apunta
     público función apunta0(t: puntero a byte)

@@ -142,14 +142,64 @@ static u32 busca_rsdp(u32 desde, u32 hasta)
 	return 0;
 }
 
+/* (UEFI) la que dice el núcleo («rsdp=» en la línea: la copia de GRUB EFI,
+ * porque sin BIOS no está en su zona ni hay EBDA) */
+static u32 rsdp_dada;
+
+void mq_pon_rsdp(u32 d)
+{
+	rsdp_dada = d;
+}
+
+/* (UEFI) el punto de entrada del SMBIOS («_SM3_», «_SM_» o «_DMI_»): el
+ * que dice el núcleo («smbios=», sacado de la tabla del sistema de EFI) o,
+ * si no lo dice (la BIOS de siempre), el que haya entre F0000h y FFFFFh, de
+ * 16 en 16. Da su dirección física (0: no hay) */
+static u32 smbios_dado;
+
+static int es(const u8 *p, const char *t)
+{
+	for (; *t; p++, t++)
+		if (*p != (u8)*t)
+			return 0;
+	return 1;
+}
+
+void mq_pon_smbios(u32 d)
+{
+	smbios_dado = d;
+}
+
+u32 mq_smbios(void)
+{
+	const u8 *b;
+	u32 i;
+
+	if (smbios_dado)
+		return smbios_dado;
+	b = mq_mapa(0xF0000, 0x10000);
+	if (!b)
+		return 0;
+	for (i = 0; i + 32 <= 0x10000; i += 16)
+		if (es(b + i, "_SM3_") || es(b + i, "_SM_") || es(b + i, "_DMI_"))
+			return 0xF0000 + i;
+	return 0;
+}
+
 u32 mq_rsdp(void)
 {
 	static u32 hallada = 1;
-	const u16 *bda = mq_mapa(0x40E, 2);
-	u32 ebda = bda ? (u32)*bda << 4 : 0, d = 0;
+	const u16 *bda;
+	u32 ebda, d = 0;
 
 	if (hallada != 1)
 		return hallada;
+	if (rsdp_dada) {	/* (UEFI) */
+		hallada = rsdp_dada;
+		return hallada;
+	}
+	bda = mq_mapa(0x40E, 2);
+	ebda = bda ? (u32)*bda << 4 : 0;
 	if (ebda >= 0x40000 && ebda < 0xA0000)
 		d = busca_rsdp(ebda, ebda + 1024);
 	if (!d)

@@ -470,6 +470,22 @@ int servicio_principal(void)
 			cada = cada * 10 + *p - '0';
 	if (cada < 1 || cada > 600)
 		cada = 10;
+	/* (UEFI) la RSDP, si la dice el núcleo (en hexadecimal) */
+	if ((p = tiene(args, "rsdp=")) != 0) {
+		u32 d = 0;
+
+		for (; (*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'); p++)
+			d = d * 16 + (u32)(*p <= '9' ? *p - '0' : *p - 'A' + 10);
+		mq_pon_rsdp(d);
+	}
+	/* (UEFI) y el SMBIOS (mq_smbios) */
+	if ((p = tiene(args, "smbios=")) != 0) {
+		u32 d = 0;
+
+		for (; (*p >= '0' && *p <= '9') || (*p >= 'A' && *p <= 'F'); p++)
+			d = d * 16 + (u32)(*p <= '9' ? *p - '0' : *p - 'A' + 10);
+		mq_pon_smbios(d);
+	}
 	fin = sc(SC_MAS_MEMORIA, MONTON, 0, 0);
 	if (ES_ERROR(fin)) {
 		static const char m[] = "ACPI: no hay memoria para el servicio\n";
@@ -502,6 +518,7 @@ int servicio_principal(void)
 			preparado = 1;
 			if (apm.fase != FASE_ERROR || mq_rsdp())
 				prepara_energia();
+			reg("ACPI: SMBIOS en %08Xh\n", mq_smbios());	/* (UEFI) */
 			reg("ACPI: el núcleo ha puesto a la vista %u KB de memoria física\n", mq_puestos >> 10);
 		}
 		/* (dispositivos) una vez, con la tarea quieta y ya leída la batería */
