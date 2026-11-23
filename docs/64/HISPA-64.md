@@ -1156,7 +1156,7 @@ minutos. Las de la etapa 4:
 
 `SOLO=castel64` (con CASTEL64 y ENSAMB64 el núcleo sale igual, octeto a octeto, y
 CASTEL32 con corre32 también): **80 bien y 0 mal** (12 minutos, con el servidor
-cargado). Las imágenes de la carpeta del taller (el disco por UEFI con 4
+cargado). `SOLO=castel32` y `SOLO=16`, como antes: 73 bien y 0 mal, y 145 bien y 0 mal. Las imágenes de la carpeta del taller (el disco por UEFI con 4
 procesadores y el CD por la BIOS), arrancadas en QEMU hasta «todo en orden».
 
 En QEMU, con la pantalla gráfica (GOP o la de la BIOS), las pruebas de los
