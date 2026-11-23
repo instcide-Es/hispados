@@ -458,6 +458,9 @@ mismo: lo que sale para Hispa-8086 e Hispa-Pentium no ha cambiado.
 - **Variables alineadas con valor inicial**, o locales (§10 ter: solo las del módulo
   sin él).
 - **Llamar a C** (System V AMD64): `externa función`, con su puente (§4).
-- **Los programas del anillo 3 de Hispa-64** (un `modelo usuario64`, con su llamada
-  al sistema por `syscall`), y el núcleo de verdad: memoria, tareas, discos...
+- ~~Los programas del anillo 3 de Hispa-64 (un `modelo usuario64`)~~: **no hace
+  falta** (etapa 4 de Hispa-64, 23/11/2026, docs/64/HISPA-64.md §10): Hispa-64 tiene
+  las llamadas al sistema de Linux x86-64, así que un programa de `modelo linux64`
+  corre tal cual en su anillo 3 (`nucleo64/programas/holacas.cas`). Lo que queda
+  del núcleo de verdad (discos, la entrada, musl...), en las etapas siguientes.
 - Ir relativo a RIP (programas que se carguen en cualquier sitio, PIE).

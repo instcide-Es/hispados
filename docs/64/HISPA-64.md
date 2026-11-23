@@ -440,7 +440,7 @@ con la imagen y un LEEME.TXT.
   órdenes). La pantalla se comprueba con un pantallazo (`screendump` por el monitor
   de QEMU). Ojo con lo que QEMU no tiene igual que el hardware: no hay GOP por
   encima de 4 GB, sí hay 8254 y COM1. Por eso cada etapa va también al taller.
-- `castel/nucleo64/pruebas.sh` (solo, unos 4 minutos desde la etapa 3) y `SOLO=castel64 ./pruebas.sh`
+- `castel/nucleo64/pruebas.sh` (solo, unos 6 minutos desde la etapa 4) y `SOLO=castel64 ./pruebas.sh`
   (CASTEL64 entero, que lo llama). **Los martes y jueves de 16:30 a 21:00, nada
   pesado en el servidor** (el bingo).
 
@@ -1119,3 +1119,73 @@ núcleo; `mmap` fijo en el núcleo y en la página 0; `munmap` y `mprotect` del
 núcleo; `brk` hasta el núcleo: todas dan su error y el programa sigue.
 
 El núcleo ocupa 124 KB.
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **53 pruebas** (54 con CASTEL64 y ENSAMB64), unos 6
+minutos. Las de la etapa 4:
+
+- los programas de prueba se hacen (`programas/hazlos.sh`: los cuatro en C con el
+  gcc del servidor, `-static -nostdlib -ffreestanding`, y HOLACAS con ccastel.py y
+  NASM) y van como módulos (`-initrd` con comas por multiboot; `module2` por GRUB);
+- **por multiboot con 1 procesador** (`pc`, 128 MB), **2** (`pc`), **4** (q35) y
+  **8** (`-cpu max`: con SMEP, SMAP y UMIP), y **por UEFI** (OVMF + GRUB) con 1 y
+  con 4 (`-cpu max`, 3 GB). En todas (`e4_bien`): HOLA (28 comprobaciones propias:
+  argv, la pila alineada, el vector auxiliar, getpid, set_tid_address, uname,
+  nanosleep de 20 ms, CLOCK_REALTIME, un reloj que no hay, FS con arch_prctl y
+  `%fs:0`, open/read/lseek/close de SALUDO.TXT, close dos veces, uno que no está,
+  abrir para escribir, openat sin mirar mayúsculas, ioctl, writev, sched_yield, una
+  llamada que no existe, coma flotante con SSE), HOLACAS (Castel: argv, getpid,
+  uname, los acentos de la página 437), MEMORIA (29: brk que crece, mengua y no se
+  pasa; mmap de 1 MB, munmap de un trozo, mmap fijo en el hueco, mprotect;
+  64 MB con 64 páginas tocadas; MAP_32BIT; los errores), **ocho CUENTA a la
+  vez** (cada uno hace su cuenta dos veces, de un tirón y cediendo el procesador:
+  iguales, también la de coma flotante y FS; con 2 o más procesadores, en más de
+  uno), **MALO punteros** (24 llamadas con punteros malos, todas con su error) y
+  **los once MALO que fallan, a la vez** (cada uno explicado y cerrado con su
+  señal: 139, 136, 132), lo que no se arranca, y **después, nada de más**: 0
+  procesos, 0 espacios, 0 tablas de programas, y la memoria física, el montón y
+  las pilas, los de antes; con 2 o más procesadores, **la TLB de un espacio**: el
+  aviso de quitar la página va solo al procesador que lo tiene puesto (1 IPI), a
+  ese le falla la lectura y al que lo había dejado también, al volver a él;
+- **el CD** (`imagen.sh` con `CD=1`, `grub-mkrescue`): por la BIOS (`-cdrom`, 2
+  procesadores) y por UEFI (OVMF, q35, 4 procesadores), con los programas y «todo
+  en orden»;
+- lo de las etapas 0 a 3, igual (las excepciones del núcleo, con `sinpruebas`, que
+  quita también las de los programas).
+
+`SOLO=castel64` (con CASTEL64 y ENSAMB64 el núcleo sale igual, octeto a octeto, y
+CASTEL32 con corre32 también): **80 bien y 0 mal** (12 minutos, con el servidor
+cargado). Las imágenes de la carpeta del taller (el disco por UEFI con 4
+procesadores y el CD por la BIOS), arrancadas en QEMU hasta «todo en orden».
+
+En QEMU, con la pantalla gráfica (GOP o la de la BIOS), las pruebas de los
+programas van de 10 a 20 veces más despacio que solo con el puerto serie (los once
+avisos de MALO, 2,4 s en vez de 0,14): es la consola dibujada letra a letra y
+desplazada por el TCG; en un equipo de verdad, la pantalla con escritura combinada
+va mucho más deprisa.
+
+Lo que QEMU no prueba: **PCID** (el TCG de QEMU 8.2 no lo tiene, ni con
+`-cpu max,+pcid`): el camino con PCID (CR3 sin vaciar, el número de cada espacio y
+hasta qué aviso llega) solo se prueba en el taller, con la entrada «sin PCID» por si
+falla. Y, como antes, x2APIC y los híbridos.
+
+### Lo que queda para la etapa 5 (y más adelante)
+
+- **Discos y archivos** (etapa 5): NVMe, AHCI, GPT, el VFS con caché de páginas,
+  FAT32 y exFAT; la unidad en memoria pasará a ser un sistema de archivos más del
+  VFS (`open` y `openat` con carpetas, `stat`, `getdents64`, escribir).
+- **El intérprete de órdenes en el anillo 3** pide leer el teclado desde un
+  programa (`read` de la consola: hoy da 0): con la entrada (etapa 6), o antes con
+  el teclado PS/2 que ya atiende el núcleo; y un `execve`/`wait4` para arrancar
+  programas desde un programa.
+- **musl** (etapa 7): `clone` (hilos de POSIX, varios hilos por proceso: el aviso
+  de vaciar la TLB ya va a todos los que tienen el espacio puesto), `futex`,
+  señales (`rt_sigaction`, `rt_sigprocmask`: hoy un fallo cierra el programa sin
+  más), `fork` con **copiar al escribir**, `mmap` de archivos, `fstat`, los ELF
+  dinámicos y PIE (`ld-musl`), y AVX (XSAVE).
+- Esperas con plazo y despertar por señal (etapa 3, pendiente).
+- Las tablas de páginas del núcleo que se quedan vacías siguen sin devolverse; las
+  de los programas, sí (al acabar).
+- Como mucho 48 regiones y 16 archivos abiertos por proceso; `brk` hasta 1 GB y
+  `mmap` hasta 1 TB de una vez.
