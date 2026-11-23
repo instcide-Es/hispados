@@ -3871,7 +3871,11 @@ de nuevo.
   `realtek: revisión PCI 15, TxConfig ..., XID 541: RTL8168H/8111H`, si la
   encontró en `NOW_IS_OOB`, si el PLL o el PHY estaban apagados, el
   `PHYstatus` cada vez que cambia y si la tarjeta no suelta un descriptor de
-  envío. Con eso se sabe qué ha pasado en el ASUS.
+  envío. Con eso se sabe qué ha pasado en el ASUS. Con **`Registro=SI`** en
+  `RED.INI`, lo apuntado va también a **`RED.LOG`** (al lado de `RED.INI`,
+  cada 2 s si ha cambiado): para los equipos en los que no se puede escribir
+  `IPCONFIG /TODO` (el ASUS por UEFI, sin teclado: la memoria de prueba lo
+  lleva).
 - La interrupción, si su línea está entre la 3 y la 11 (con el APIC de los
   equipos de ahora suele ser 16 o más: entonces se mira en cada vuelta).
 
