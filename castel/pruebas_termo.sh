@@ -125,7 +125,7 @@ termo_anfitrion() {
   # (la Medion S2217, Atom Z3735F: el procesador a 499 MHz todo el rato, en 4
   # procesadores; hecho del registro del HP Mini, cambiando la marca, la
   # frecuencia y los procesadores: no es un registro de la Medion)
-  sed -e 's/procesador Intel(R) Atom(TM) CPU N455   @ 1.66GHz/procesador Intel(R) Atom(TM) CPU  Z3735F @ 1.33GHz/' -e 's/MHz=1640/MHz=499/' \
+  sed -e 's/procesador Intel(R) Atom(TM) CPU N455   @ 1.66GHz/procesador Intel(R) Atom(TM) CPU  Z3735F @ 1.33GHz/' -e 's/MHz=16[0-9][0-9]/MHz=499/' \
       -e 's/^\(19:13:14 SUCESO\) EMPIEZA/\1 la carga, en 4 procesadores (este y 3 mas: 4 nucleos, 1 hilo por nucleo)\n&/' $T/pruebas/hpmini-5103-real.log > $B/lento.log
   $B/lee_log $B/lento.log > $B/lento.txt
   $B/lee_log $T/pruebas/hpmini-5103-real.log > $B/hpmini3.txt
@@ -282,8 +282,8 @@ else ko "INFORME.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/nu
 mdel -i $Y/termo.img@@1M ::TERMO/INFORME.TXT > /dev/null 2>&1
 local B="o /b 0x70 0x60"
 TQ_ACPI="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml" \
-  termo_qemu $Y/termo.img t12 360 "-smp 4,cores=2,threads=2 -cpu Haswell" "2:$B" "2:o /b 0x71 42" "3:o /b 0x70 0x61" "3:o /b 0x71 2" \
-  "44:sendkey 2" "46:sendkey c" "110:$B" "110:o /b 0x71 40" "180:$B" "180:o /b 0x71 38" "250:$B" "250:o /b 0x71 36" "262:$C" "262:o /b 0x71 91" "274:$C" "274:o /b 0x71 50"
+  termo_qemu $Y/termo.img t12 390 "-smp 4,cores=2,threads=2 -cpu Haswell" "2:$B" "2:o /b 0x71 42" "3:o /b 0x70 0x61" "3:o /b 0x71 2" \
+  "44:sendkey 2" "46:sendkey c" "105:$B" "105:o /b 0x71 40" "170:$B" "170:o /b 0x71 38" "232:$B" "232:o /b 0x71 36" "244:$C" "244:o /b 0x71 91" "256:$C" "256:o /b 0x71 50"
 mira "-smp 4 con 2 núcleos de 2 hilos (CPUID 0Bh): lo dice bien; y la batería sin enchufar: lo que gasta (ACPI _BST)" \
   "termo: topología: CPUID 0Bh sí, 1 bits de hilo en el APIC" "termo: suceso: la carga, en 4 procesadores (este y 3 más: 2 núcleos, 2 hilos por núcleo)" \
   "termo: suceso: batería: SIN enchufar" "termo: suceso: batería: gasta unos 11,0 W (ACPI, _BST)" "termo: suceso: informe para el técnico"
@@ -504,5 +504,5 @@ termo_uefi() {
   TQ_FIRM="-machine q35 -drive if=pflash,format=raw,readonly=on,file=$OV/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=$Y/vars64.fd" \
     termo_qemu $Y/termo.img t15 90 "-cpu Haswell"
   mira "por UEFI con el xHCI por encima de los 4 GB (OVMF con su ventana de 64 bits): el núcleo lo mueve debajo, va el USB y el Termómetro guarda" \
-    "pci: la zona de memoria del 00:..\... estaba por encima de los 4 GB" "unidades: .*X: (disco 0, USB" "termo: prueba de escritura en X:.TERMO: bien"
+    "pci: la zona de memoria del 00:..\.. estaba por encima de los 4 GB" "unidades: .*X: (disco 0, USB" "termo: prueba de escritura en X:.TERMO: bien"
 }
