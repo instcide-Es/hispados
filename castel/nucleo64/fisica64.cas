@@ -5,7 +5,7 @@
 ;  o el de la BIOS, que pasa el cargador): solo es libre lo que el firmware da
 ;  por disponible, y aun de eso se guarda lo que no se puede dar:
 ;    - el primer MB (las tablas de la BIOS y, en la etapa 3, el trampolín de los
-;      demás procesadores);
+;      demás procesadores: pide_bajo, una página de él que sea disponible);
 ;    - lo que se le diga con aparta() antes de prepara_marcos(): el núcleo, la
 ;      información del cargador, sus módulos, la pantalla;
 ;    - el propio mapa de bits.
@@ -85,6 +85,34 @@ módulo Fisica64
         mientras i < n_res hacer
             si a < res_fin[i] y res_ini[i] < b entonces devolver res_fin[i] fin
             i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; [etapa 3] una página disponible por debajo de 1 MB (de 0x1000 a 0x9F000,
+    ; empezando por arriba) que no pise nada de lo apartado (la información del
+    ; cargador, sus módulos): el trampolín de los demás procesadores (el SIPI
+    ; arranca en modo real, en una página de por debajo de 1 MB). Nunca se da
+    ; a nadie más: el primer MB no es de la memoria libre. 0 si no hay.
+    público función pide_bajo(): nat64
+        variable a: nat64
+        variable i, k: nat32
+        variable bien: bool
+        a := 0x9E000
+        mientras a >= 0x1000 hacer
+            bien := falso
+            i := 0
+            mientras i < n_ram hacer
+                si ram_ini[i] <= a y a + 4096 <= ram_fin[i] entonces bien := cierto fin
+                i := i + 1
+            fin
+            k := 0
+            mientras bien y k < n_res hacer
+                si a < res_fin[k] y res_ini[k] < a + 4096 entonces bien := falso fin
+                k := k + 1
+            fin
+            si bien entonces devolver a fin
+            a := a - 4096
         fin
         devolver 0
     fin

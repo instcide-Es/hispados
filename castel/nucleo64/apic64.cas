@@ -12,12 +12,15 @@
 ;    - lo que atiende: el tic, el teclado PS/2 (la IRQ 1: guarda los códigos),
 ;      la SCI de ACPI (el botón de encendido), una prueba (el vector 0x32) y la
 ;      espuria del APIC.
-;  Lo que es de cada procesador (su APIC, sus tics) va por PorCpu64 (etapa 3).
+;  Lo que es de cada procesador (su APIC, sus tics) va por PorCpu64.
+;  [etapa 3] Los avisos entre procesadores (IPI: ipi, ipi_a_los_demás; los
+;  usa Smp64 para encenderlos, vaciar la TLB y parar, y Hilos64 para que
+;  replanifique otro) y el tic de cada uno, que llama al planificador (al_tic).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Apic64
 
-    importar Cifras64, Pagina64, Es64, Acpi64, Reloj64, Excep64, Cpu64, PorCpu64
+    importar Cifras64, Pagina64, Es64, Acpi64, Reloj64, Excep64, Cpu64, PorCpu64, Cerrojo
 
     público constante V_ISA = 0x30              ; las IRQ de ISA, desde aquí (0x31 el teclado)
     público constante V_PRUEBA = 0x3E
@@ -42,6 +45,7 @@ módulo Apic64
     variable io_n: arreglo [8] de nat32         ; cuántas entradas tiene cada uno
     público variable sci_gsi: nat32
     público variable botón: bool                ; se ha pulsado el botón de encendido
+    público variable al_tic: nat64              ; [etapa 3] lo que se hace en cada tic (Hilos64)
 
     ; ---- el APIC local ----
     público función apic_lee(r: nat32): nat32
@@ -86,11 +90,13 @@ módulo Apic64
         variable b: nat64
         variable c: puntero a Cpu
         b := lee_msr(0x1B)
-        si x2apic y b yb 0x400 = 0 entonces
-            b := b ob 0xC00                         ; encendido, en x2APIC
+        ; (de apagado a x2APIC no se puede ir de una vez: antes, a xAPIC)
+        si b yb 0x800 = 0 entonces
+            b := b ob 0x800                         ; encendido
             pon_msr(0x1B, b)
-        sino si b yb 0x800 = 0 entonces
-            b := b ob 0x800
+        fin
+        si x2apic y b yb 0x400 = 0 entonces
+            b := b ob 0xC00                         ; en x2APIC
             pon_msr(0x1B, b)
         fin
         x2 := b yb 0x400 <> 0
@@ -190,12 +196,62 @@ módulo Apic64
         devolver 0xFFFFFFFF
     fin
 
+    ; ---- [etapa 3] los avisos entre procesadores (IPI) ----
+    ; espera a que el APIC haya mandado el aviso anterior (xAPIC: el bit 12)
+    función espera_envío()
+        variable i: nat32
+        si x2 entonces devolver fin
+        i := 0
+        mientras m32(lapic + 0x300) yb 0x1000 <> 0 y i < 1000000 hacer
+            pausa()
+            i := i + 1
+        fin
+    fin
+
+    ; manda un aviso (la parte baja del ICR: el vector y el modo) al APIC «a»
+    público función ipi(a: nat32, bajo: nat32)
+        variable b: nat64
+        b := sin_ints()
+        si x2 entonces
+            pon_msr(0x830, (nat64(a) << 32) ob bajo)
+        sino
+            espera_envío()
+            pon_m32(lapic + 0x310, a << 24)
+            pon_m32(lapic + 0x300, bajo)
+            espera_envío()
+        fin
+        restaura(b)
+    fin
+
+    ; a todos los demás procesadores (la abreviatura «todos menos yo»)
+    público función ipi_a_los_demás(bajo: nat32)
+        variable b: nat64
+        b := sin_ints()
+        si x2 entonces
+            pon_msr(0x830, nat64(bajo ob 0xC0000))
+        sino
+            espera_envío()
+            pon_m32(lapic + 0x310, 0)
+            pon_m32(lapic + 0x300, bajo ob 0xC0000)
+            espera_envío()
+        fin
+        restaura(b)
+    fin
+
+    función llama0(f: nat64)
+        ensamblador
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
     ; ---- lo que se atiende ----
     interrupción función tic()
         variable c: puntero a Cpu
         c := yo()
         c.tics := c.tics + 1
         eoi()
+        si al_tic <> 0 entonces llama0(al_tic) fin
     fin
 
     interrupción función espuria()

@@ -1,0 +1,922 @@
+; =============================================================================
+;  hilos64.cas - Hispa-64, etapa 3: los hilos del núcleo y el planificador
+;  (docs/64/HISPA-64.md, 2.5 y sección 9).
+;
+;  Un hilo es una pila (16 KB, en la zona de las pilas, con su guarda) y un
+;  bloque (Hilo) con lo que se guarda al dejarlo (su RSP: lo demás, en su
+;  pila). Cuatro prioridades (tiempo real, interactivo, normal, de fondo) y,
+;  dentro de cada una, por turnos (CUANTO tics cada uno). Expropiativo: el tic
+;  del APIC de cada procesador (al_tic) mira los dormidos que tocan y, si el
+;  hilo que corre ha gastado su turno o ha despertado uno de más prioridad,
+;  replanifica.
+;
+;  **Una cola por procesador, con robo de trabajo** (y no una sola con
+;  cerrojo): cada procesador toma de la suya sin estorbar a los demás (con
+;  una sola, el cerrojo sería de todos en cada tic y en cada cambio: con 8 o
+;  16 procesadores, lo que más se esperaría); el que se queda sin nada roba de
+;  la cola más larga de otro, con intenta() (sin esperar: dos que roben el uno
+;  del otro no se cruzan). Al despertar uno se pone en un procesador en reposo
+;  si lo hay (en los híbridos, los interactivos prefieren los núcleos P y los
+;  de fondo los E) o en el de la cola más corta, y se le avisa (IPI).
+;
+;  Lo delicado (como en Linux): el cerrojo de la cola del procesador se tiene
+;  durante el cambio de hilo y lo suelta el que entra (tras_cambio); así, un
+;  hilo que está en una cola ya ha dejado del todo su procesador (nadie puede
+;  robarlo a medio guardar). El que despierta a otro espera a que haya dejado
+;  su procesador (en_cpu = 0) antes de ponerlo en una cola. Entre ponerse a
+;  dormir (DURMIENDO) y cambiar, las interrupciones están quitadas.
+;
+;  La tarea ociosa de cada procesador (ocioso): recoge los hilos acabados,
+;  busca trabajo (planifica, que roba) y, si no hay, reposa: «hlt» o, donde es
+;  seguro (como la 0.8.9 de Hispa-Pentium: solo Intel, no Atom, con ARAT y TSC
+;  invariante, no en una máquina virtual), «mwait» con la pista más honda de
+;  cpuid 5; «ocioso=hlt» y «ocioso=mwait» en la línea de órdenes lo deciden a
+;  mano. La despierta una interrupción (su tic o el aviso de otro).
+;
+;  Esperas: duerme_ns (con la lista de los dormidos, por orden de cuándo
+;  despiertan), las colas de espera (Espera: duerme_en, despierta_uno,
+;  despierta_todos: Sinc64 hace encima los sucesos, los semáforos y los
+;  mutex) y une (esperar a que acabe un hilo y soltarlo).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Hilos64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Cpu64
+
+    público constante TIEMPO_REAL = 0
+    público constante INTERACTIVO = 1
+    público constante NORMAL = 2
+    público constante FONDO = 3
+    público constante LISTO = 1
+    público constante CORRIENDO = 2
+    público constante DURMIENDO = 3
+    público constante MUERTO = 4
+    público constante CUANTO = 2                ; tics de cada turno (20 ms)
+    público constante V_PLAN = 0xF2             ; el aviso de «replanifica»
+    público constante CUALQUIERA = 0xFFFFFFFF   ; (crea) en cualquier procesador
+
+    público tipo Hilo = estructura
+        rsp: nat64                  ; lo guardado al dejarlo (conmuta)
+        estado: nat64               ; LISTO, CORRIENDO, DURMIENDO, MUERTO (cambia_si)
+        en_cpu: nat64               ; 1 mientras está en un procesador (hasta que lo ha dejado del todo)
+        sig: nat64                  ; el siguiente en su cola de listos (o de acabados)
+        sig_espera: nat64           ; el siguiente en su cola de espera
+        en_espera: nat64            ; la Espera en la que está, o 0
+        sig_reloj: nat64            ; el siguiente en la lista de los dormidos
+        en_reloj: nat64             ; 1 si está en ella
+        despertar: nat64            ; cuándo (ns de ahora_ns)
+        qué_hace: nat64             ; lo que hace: la función qué_hace(arg)
+        arg: nat64
+        pila: nat64                 ; lo alto de su pila (0: el principal, que usa la del arranque)
+        cpus_vistas: nat64          ; un bit por procesador en el que ha corrido
+        rodajas: nat64              ; cuántas veces ha entrado
+        nombre: nat64
+        acabado: nat64              ; 1 cuando ha acabado (lo miran los de une)
+        e_cerrojo: nat64            ; la espera de los que le esperan (la forma de Espera)
+        e_primero: nat64
+        e_último: nat64
+        prioridad: nat32
+        cpu: nat32                  ; dónde está (o estuvo)
+        fija: nat32                 ; 0: en cualquiera; n + 1: solo en el procesador n
+        id: nat32
+        suelto: nat32               ; 1: nadie le espera (lo recoge la tarea ociosa)
+        nada: nat32
+    fin
+
+    público tipo Espera = estructura
+        cerrojo: nat64
+        primero: nat64
+        último: nat64
+    fin
+
+    ; las colas de listos: cola[cpu * 4 + prioridad]
+    variable cola_prim, cola_últ: arreglo [256] de nat64
+    variable cola_n: arreglo [64] de nat64
+    variable cola_cerrojo: arreglo [64] de nat64
+    ; los dormidos, por orden de cuándo despiertan
+    variable reloj_prim: nat64
+    variable reloj_cerrojo: nat64
+    ; los acabados sueltos, para recoger
+    variable difuntos: nat64
+    variable difuntos_cerrojo: nat64
+    variable próximo_id: nat64
+    público variable va: bool                   ; el planificador está en marcha
+    público variable creados, acabados_n, robados, expropiaciones: nat64
+    ; el reposo
+    público variable con_mwait: bool
+    público variable pista_mwait: nat32
+    público variable reposo: puntero a byte     ; por qué hlt o mwait (lo que se dice)
+
+    ; ---- lo de bajo nivel ----
+    función ceros(d: nat64, n: nat64)
+        variable p: puntero a nat64
+        variable i: nat64
+        i := 0
+        mientras i < n hacer
+            p := puntero(d + i)
+            valor(p) := 0
+            i := i + 8
+        fin
+    fin
+
+    función p64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    ; cambia de pila: guarda las banderas y los registros que se conservan en la
+    ; de ahora, deja su RSP en [de] y sigue con los de la pila «a» (como los
+    ; dejó otra llamada a conmuta, o como los prepara crea). Con RBP guardado y
+    ; recuperado, vale lo mismo si el final de la función es «pop rbp» que si
+    ; es «mov rsp, rbp; pop rbp».
+    función conmuta(de: nat64, a: nat64)
+        ensamblador
+            mov rdi, {de}
+            mov rsi, {a}
+            db 0x9C                     ; pushfq
+            push rbx
+            push r12
+            push r13
+            push r14
+            push r15
+            push rbp
+            mov [rdi], rsp
+            mov rsp, rsi
+            pop rbp
+            pop r15
+            pop r14
+            pop r13
+            pop r12
+            pop rbx
+            db 0x9D                     ; popfq
+        fin
+    fin
+
+    función llama1(f: nat64, a: nat64)
+        ensamblador
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    ; el hilo que corre en este procesador
+    público función actual(): puntero a Hilo
+        variable c: puntero a Cpu
+        c := yo()
+        devolver puntero(c.hilo)
+    fin
+
+    función hilo(d: nat64): puntero a Hilo
+        devolver puntero(d)
+    fin
+
+    ; ---- las colas de listos (con su cerrojo tomado) ----
+    función mete(n: nat32, h: puntero a Hilo)
+        variable k: nat32
+        k := n * 4 + h.prioridad
+        h.sig := 0
+        si cola_últ[k] = 0 entonces cola_prim[k] := nat64(h) sino hilo(cola_últ[k]).sig := nat64(h) fin
+        cola_últ[k] := nat64(h)
+        cola_n[n] := cola_n[n] + 1
+    fin
+
+    ; el primero de la prioridad más alta (robando: el primero que no esté fijo)
+    función saca(n: nat32, robando: bool): puntero a Hilo
+        variable p, k: nat32
+        variable x, antes: nat64
+        variable h: puntero a Hilo
+        p := 0
+        mientras p < 4 hacer
+            k := n * 4 + p
+            antes := 0
+            x := cola_prim[k]
+            mientras x <> 0 hacer
+                h := hilo(x)
+                si no robando o h.fija = 0 entonces
+                    si antes = 0 entonces cola_prim[k] := h.sig sino hilo(antes).sig := h.sig fin
+                    si cola_últ[k] = x entonces cola_últ[k] := antes fin
+                    h.sig := 0
+                    cola_n[n] := cola_n[n] - 1
+                    devolver h
+                fin
+                antes := x
+                x := h.sig
+            fin
+            p := p + 1
+        fin
+        devolver nulo
+    fin
+
+    ; robar de otro (el de la cola más larga), sin esperar por su cerrojo
+    función roba(yo_n: nat32): puntero a Hilo
+        variable k, mejor: nat32
+        variable más: nat64
+        variable h: puntero a Hilo
+        variable c: puntero a Cpu
+        mejor := CUALQUIERA
+        más := 0
+        k := 0
+        mientras k < n_cpus hacer
+            c := cpu(k)
+            si k <> yo_n y c.en_marcha <> 0 y cola_n[k] > más entonces
+                más := cola_n[k]
+                mejor := k
+            fin
+            k := k + 1
+        fin
+        si mejor = CUALQUIERA entonces devolver nulo fin
+        si no intenta(dirección(cola_cerrojo[mejor])) entonces devolver nulo fin
+        h := saca(mejor, cierto)
+        suelta_sin(dirección(cola_cerrojo[mejor]))
+        si h <> nulo entonces robados := robados + 1 fin
+        devolver h
+    fin
+
+    ; ---- el planificador ----
+    ; lo que hace el que entra, nada más cambiar: el que salía ya ha dejado del
+    ; todo el procesador (en_cpu = 0), y se suelta la cola (la tomó el que salía).
+    ; Si el que salía había acabado, ahora (y no antes) se despierta a los que le
+    ; esperan: ya no corre en ningún sitio y se puede soltar.
+    público función tras_cambio()
+        variable c: puntero a Cpu
+        variable p: puntero a Hilo
+        variable acabó: bool
+        c := yo()
+        p := nulo
+        acabó := falso
+        si c.anterior <> 0 entonces
+            p := hilo(c.anterior)
+            ; (lo de p, antes de soltarlo: uno suelto lo puede recoger otro en cuanto en_cpu = 0)
+            acabó := p.estado = MUERTO y p.suelto = 0
+            pon_atómico(dirección(p.en_cpu), 0)
+            c.anterior := 0
+        fin
+        suelta_sin(dirección(cola_cerrojo[c.número]))
+        si acabó entonces avisa_fin(p) fin
+    fin
+
+    ; (tras_cambio) p ha acabado y ha dejado su procesador: acabado := 1 y los que
+    ; le esperan (como mucho 64), despiertos; después, p ya no se toca (lo suelta une)
+    función avisa_fin(p: puntero a Hilo)
+        variable e: puntero a Espera
+        variable lista: arreglo [64] de nat64
+        variable n, i: nat32
+        variable x: nat64
+        e := su_espera(p)
+        toma_sin(dirección(e.cerrojo))
+        p.acabado := 1
+        n := 0
+        x := e.primero
+        mientras x <> 0 y n < 64 hacer
+            lista[n] := x
+            n := n + 1
+            hilo(x).en_espera := 0
+            x := hilo(x).sig_espera
+        fin
+        e.primero := 0
+        e.último := 0
+        suelta_sin(dirección(e.cerrojo))
+        i := 0
+        mientras i < n hacer
+            despierta(hilo(lista[i]))
+            i := i + 1
+        fin
+    fin
+
+    ; elige el siguiente hilo de este procesador y cambia a él (si es otro).
+    ; El que corre vuelve a la cola si sigue CORRIENDO (se le acaba el turno, o
+    ; cede); si duerme o ha acabado, no.
+    público función planifica()
+        variable b: nat64
+        variable c: puntero a Cpu
+        variable h, n: puntero a Hilo
+        b := sin_ints()
+        c := yo()
+        h := hilo(c.hilo)
+        toma_sin(dirección(cola_cerrojo[c.número]))
+        c.expropiar := 0
+        si h.estado = CORRIENDO y c.hilo <> c.ociosa entonces
+            h.estado := LISTO
+            mete(c.número, h)
+        fin
+        n := saca(c.número, falso)
+        si n = nulo entonces n := roba(c.número) fin
+        si n = nulo entonces
+            si h.estado = CORRIENDO entonces n := h sino n := hilo(c.ociosa) fin
+        fin
+        si n = h entonces
+            h.estado := CORRIENDO
+            c.cuanto := 0
+            suelta_sin(dirección(cola_cerrojo[c.número]))
+            restaura(b)
+            devolver
+        fin
+        n.estado := CORRIENDO
+        n.en_cpu := 1
+        n.cpu := c.número
+        si c.número < 64 entonces n.cpus_vistas := n.cpus_vistas ob (nat64(1) << c.número) fin
+        n.rodajas := n.rodajas + 1
+        c.cuanto := 0
+        c.cambios := c.cambios + 1
+        c.anterior := nat64(h)
+        c.hilo := nat64(n)
+        conmuta(nat64(dirección(h.rsp)), n.rsp)
+        tras_cambio()
+        restaura(b)
+    fin
+
+    ; el que corre deja el procesador a otro de su prioridad (o más), si lo hay
+    público función cede()
+        planifica()
+    fin
+
+    ; ¿prefiere este procesador un hilo de esa prioridad? (los híbridos)
+    función prefiere(k: nat32, prio: nat32): bool
+        variable c: puntero a Cpu
+        c := cpu(k)
+        si prio <= INTERACTIVO entonces devolver c.tipo_núcleo = 0x40 fin
+        si prio = FONDO entonces devolver c.tipo_núcleo = 0x20 fin
+        devolver falso
+    fin
+
+    ; en qué procesador poner un hilo que se despierta (o que se crea)
+    función elige_cpu(h: puntero a Hilo): nat32
+        variable k, cand: nat32
+        variable c: puntero a Cpu
+        variable carga, mín: nat64
+        si h.fija <> 0 entonces devolver h.fija - 1 fin
+        si h.cpu < n_cpus entonces
+            c := cpu(h.cpu)
+            si c.en_marcha <> 0 y c.ocioso <> 0 y cola_n[h.cpu] = 0 entonces devolver h.cpu fin
+        fin
+        ; uno en reposo (en los híbridos, del tipo que le va)
+        cand := CUALQUIERA
+        k := 0
+        mientras k < n_cpus hacer
+            c := cpu(k)
+            si c.en_marcha <> 0 y c.ocioso <> 0 y cola_n[k] = 0 entonces
+                si cand = CUALQUIERA entonces cand := k
+                sino si prefiere(k, h.prioridad) y no prefiere(cand, h.prioridad) entonces cand := k fin
+            fin
+            k := k + 1
+        fin
+        si cand <> CUALQUIERA entonces devolver cand fin
+        ; si no, el de menos trabajo (la cola, y el que corre)
+        cand := 0
+        mín := nob nat64(0)
+        k := 0
+        mientras k < n_cpus hacer
+            c := cpu(k)
+            si c.en_marcha <> 0 entonces
+                carga := cola_n[k] * 2
+                si c.ocioso = 0 entonces carga := carga + 1 fin
+                si k = h.cpu entonces
+                    si carga > 0 entonces carga := carga - 1 fin
+                fin
+                si carga < mín entonces
+                    mín := carga
+                    cand := k
+                fin
+            fin
+            k := k + 1
+        fin
+        devolver cand
+    fin
+
+    ; avisa al procesador t de que tiene un hilo nuevo en su cola
+    función avisa(t: nat32, h: puntero a Hilo)
+        variable c, m: puntero a Cpu
+        variable cur: puntero a Hilo
+        m := yo()
+        c := cpu(t)
+        si t = m.número entonces
+            cur := hilo(m.hilo)
+            si m.hilo = m.ociosa o h.prioridad < cur.prioridad entonces m.expropiar := 1 fin
+            devolver
+        fin
+        cur := hilo(c.hilo)
+        si c.ocioso <> 0 o c.hilo = c.ociosa o h.prioridad < cur.prioridad entonces
+            c.expropiar := 1
+            ipi(c.apic, 0x4000 ob V_PLAN)
+        fin
+    fin
+
+    ; pone en una cola un hilo LISTO que ha dejado del todo su procesador
+    función encola(h: puntero a Hilo)
+        variable b: nat64
+        variable t: nat32
+        variable m: puntero a Cpu
+        b := sin_ints()
+        t := elige_cpu(h)
+        toma_sin(dirección(cola_cerrojo[t]))
+        h.cpu := t
+        mete(t, h)
+        suelta_sin(dirección(cola_cerrojo[t]))
+        avisa(t, h)
+        restaura(b)
+        m := yo()
+        si encendidas() y m.expropiar <> 0 y m.hilo <> m.ociosa entonces
+            expropiaciones := expropiaciones + 1
+            planifica()
+        fin
+    fin
+
+    ; despierta un hilo que duerme (devuelve falso si no dormía)
+    público función despierta(h: puntero a Hilo): bool
+        si no cambia_si(dirección(h.estado), DURMIENDO, LISTO) entonces devolver falso fin
+        ; (puede estar aún dejando su procesador: hasta que lo deje, a nadie más)
+        mientras h.en_cpu <> 0 hacer pausa() fin
+        encola(h)
+        devolver cierto
+    fin
+
+    ; ---- crear, acabar, esperar a que acabe ----
+    función arranque_hilo()
+        variable h: puntero a Hilo
+        tras_cambio()
+        enciende()
+        h := actual()
+        llama1(h.qué_hace, h.arg)
+        termina()
+    fin
+
+    función arranque_ocioso()
+        tras_cambio()
+        ocioso()
+    fin
+
+    ; la pila del hilo, preparada como si hubiese llamado a conmuta: al
+    ; cambiar a él, vuelve a «entrada»
+    función prepara_pila(h: puntero a Hilo, entrada: nat64)
+        variable r: nat64
+        r := h.pila - 96
+        ceros(r, 96)
+        p64(r, r + 56)                  ; RBP (su marco: el de conmuta)
+        p64(r + 48, 2)                  ; RFLAGS: sin interrupciones
+        p64(r + 64, entrada)            ; adonde vuelve conmuta (ret 16)
+        h.rsp := r
+    fin
+
+    ; un hilo nuevo (sin ponerlo en marcha); nulo si no hay memoria
+    función nuevo(nombre: puntero a byte, prio: nat32, con_pila: bool): puntero a Hilo
+        variable h: puntero a Hilo
+        h := puntero(nat64(reserva(tamaño(Hilo))))
+        si h = nulo entonces devolver nulo fin
+        ceros(nat64(h), tamaño(Hilo))
+        si con_pila entonces
+            h.pila := pila_nueva()
+            si h.pila = 0 entonces
+                libera(puntero(nat64(h)))
+                devolver nulo
+            fin
+        fin
+        h.nombre := nat64(nombre)
+        h.prioridad := prio
+        si prio > FONDO entonces h.prioridad := FONDO fin
+        h.id := nat32(suma_atómica(dirección(próximo_id), 1))
+        devolver h
+    fin
+
+    ; crea un hilo que hará f(arg) (f, una función de Castel de un parámetro
+    ; nat64), con esa prioridad, en cualquier procesador (CUALQUIERA) o solo en
+    ; el procesador «fija»; y lo pone en marcha. nulo si no hay memoria.
+    público función crea(f: nat64, arg: nat64, nombre: puntero a byte, prio: nat32, fija: nat32): puntero a Hilo
+        variable h: puntero a Hilo
+        recoge()
+        h := nuevo(nombre, prio, cierto)
+        si h = nulo entonces devolver nulo fin
+        h.qué_hace := f
+        h.arg := arg
+        si fija <> CUALQUIERA y fija < n_cpus entonces
+            si cpu(fija).en_marcha <> 0 entonces h.fija := fija + 1 fin
+        fin
+        h.cpu := CUALQUIERA
+        prepara_pila(h, nat64(dirección(arranque_hilo)))
+        h.estado := LISTO
+        suma_atómica(dirección(creados), 1)
+        encola(h)
+        devolver h
+    fin
+
+    ; nadie le esperará: lo recoge la tarea ociosa cuando acabe
+    público función suéltalo(h: puntero a Hilo)
+        h.suelto := 1
+    fin
+
+    función su_espera(h: puntero a Hilo): puntero a Espera
+        devolver puntero(nat64(dirección(h.e_cerrojo)))
+    fin
+
+    ; el hilo que corre acaba (no vuelve); a los que le esperan los despierta el
+    ; que entre en su procesador (tras_cambio), cuando ya lo ha dejado del todo
+    público función termina()
+        variable h: puntero a Hilo
+        variable b: nat64
+        h := actual()
+        suma_atómica(dirección(acabados_n), 1)
+        b := sin_ints()
+        si h.suelto <> 0 entonces
+            toma_sin(dirección(difuntos_cerrojo))
+            h.sig := difuntos
+            difuntos := nat64(h)
+            suelta_sin(dirección(difuntos_cerrojo))
+        fin
+        h.estado := MUERTO
+        planifica()
+        detén_ini("un hilo acabado ha vuelto a correr")
+        detén_fin()
+    fin
+
+    ; su pila y su bloque, devueltos (ya ha dejado su procesador)
+    función suelta_hilo(h: puntero a Hilo)
+        si h.pila <> 0 entonces pila_suelta(h.pila) fin
+        libera(puntero(nat64(h)))
+    fin
+
+    ; espera a que acabe h y lo suelta (su pila y su bloque)
+    público función une(h: puntero a Hilo)
+        variable e: puntero a Espera
+        variable b: nat64
+        e := su_espera(h)
+        b := toma(dirección(e.cerrojo))
+        mientras h.acabado = 0 hacer
+            duerme_en(e)
+            toma_sin(dirección(e.cerrojo))
+        fin
+        sal_de(e)
+        suelta(dirección(e.cerrojo), b)
+        ; (acabado = 1 lo pone tras_cambio cuando ya ha dejado su procesador)
+        suelta_hilo(h)
+    fin
+
+    ; los acabados sueltos que ya han dejado su procesador: fuera
+    público función recoge()
+        variable b, x, quedan: nat64
+        variable h: puntero a Hilo
+        si difuntos = 0 entonces devolver fin
+        b := toma(dirección(difuntos_cerrojo))
+        x := difuntos
+        difuntos := 0
+        suelta(dirección(difuntos_cerrojo), b)
+        quedan := 0
+        mientras x <> 0 hacer
+            h := hilo(x)
+            x := h.sig
+            si h.estado = MUERTO y h.en_cpu = 0 entonces
+                suelta_hilo(h)
+            sino
+                h.sig := quedan
+                quedan := nat64(h)
+            fin
+        fin
+        mientras quedan <> 0 hacer
+            h := hilo(quedan)
+            quedan := h.sig
+            b := toma(dirección(difuntos_cerrojo))
+            h.sig := difuntos
+            difuntos := nat64(h)
+            suelta(dirección(difuntos_cerrojo), b)
+        fin
+    fin
+
+    ; ---- las colas de espera ----
+    ; (con e.cerrojo tomado, por toma: las interrupciones quitadas) el hilo que
+    ; corre se pone a dormir en e (si no estaba ya) y deja el procesador; vuelve
+    ; despierto, con las interrupciones aún quitadas y sin el cerrojo
+    público función duerme_en(e: puntero a Espera)
+        variable h: puntero a Hilo
+        h := actual()
+        h.estado := DURMIENDO
+        si h.en_espera = 0 entonces
+            h.sig_espera := 0
+            si e.último = 0 entonces e.primero := nat64(h) sino hilo(e.último).sig_espera := nat64(h) fin
+            e.último := nat64(h)
+            h.en_espera := nat64(e)
+        fin
+        suelta_sin(dirección(e.cerrojo))
+        planifica()
+    fin
+
+    ; (con e.cerrojo tomado) quita h de e
+    función quita_de(e: puntero a Espera, h: puntero a Hilo)
+        variable x, antes: nat64
+        antes := 0
+        x := e.primero
+        mientras x <> 0 y x <> nat64(h) hacer
+            antes := x
+            x := hilo(x).sig_espera
+        fin
+        si x = 0 entonces devolver fin
+        si antes = 0 entonces e.primero := h.sig_espera sino hilo(antes).sig_espera := h.sig_espera fin
+        si e.último = x entonces e.último := antes fin
+        h.sig_espera := 0
+        h.en_espera := 0
+    fin
+
+    ; (con e.cerrojo tomado) el hilo que corre, que ya no espera en e, sale de
+    ; ella si aún está (si lo despertó otra cosa)
+    público función sal_de(e: puntero a Espera)
+        variable h: puntero a Hilo
+        h := actual()
+        si h.en_espera = nat64(e) entonces quita_de(e, h) fin
+    fin
+
+    ; despierta al primero que espera en e; falso si no había ninguno
+    público función despierta_uno(e: puntero a Espera): bool
+        variable b: nat64
+        variable h: puntero a Hilo
+        b := toma(dirección(e.cerrojo))
+        h := nulo
+        si e.primero <> 0 entonces
+            h := hilo(e.primero)
+            quita_de(e, h)
+        fin
+        suelta(dirección(e.cerrojo), b)
+        si h = nulo entonces devolver falso fin
+        despierta(h)
+        devolver cierto
+    fin
+
+    ; despierta a todos los que esperan en e; cuántos
+    público función despierta_todos(e: puntero a Espera): nat32
+        variable n: nat32
+        n := 0
+        mientras despierta_uno(e) hacer n := n + 1 fin
+        devolver n
+    fin
+
+    ; ---- dormir un rato ----
+    ; (con reloj_cerrojo tomado) h, en su sitio de la lista de los dormidos
+    función al_reloj(h: puntero a Hilo)
+        variable x, antes: nat64
+        antes := 0
+        x := reloj_prim
+        mientras x <> 0 y hilo(x).despertar <= h.despertar hacer
+            antes := x
+            x := hilo(x).sig_reloj
+        fin
+        h.sig_reloj := x
+        si antes = 0 entonces reloj_prim := nat64(h) sino hilo(antes).sig_reloj := nat64(h) fin
+        h.en_reloj := 1
+    fin
+
+    función fuera_del_reloj(h: puntero a Hilo)
+        variable x, antes: nat64
+        antes := 0
+        x := reloj_prim
+        mientras x <> 0 y x <> nat64(h) hacer
+            antes := x
+            x := hilo(x).sig_reloj
+        fin
+        si x <> 0 entonces
+            si antes = 0 entonces reloj_prim := h.sig_reloj sino hilo(antes).sig_reloj := h.sig_reloj fin
+        fin
+        h.sig_reloj := 0
+        h.en_reloj := 0
+    fin
+
+    ; el hilo que corre duerme ns nanosegundos (lo despierta el tic: con 100 por
+    ; segundo, hasta 10 ms después)
+    público función duerme_ns(ns: nat64)
+        variable fin_, b: nat64
+        variable h: puntero a Hilo
+        h := actual()
+        fin_ := ahora_ns() + ns
+        mientras ahora_ns() < fin_ hacer
+            b := sin_ints()
+            h.estado := DURMIENDO
+            h.despertar := fin_
+            toma_sin(dirección(reloj_cerrojo))
+            al_reloj(h)
+            suelta_sin(dirección(reloj_cerrojo))
+            planifica()
+            toma_sin(dirección(reloj_cerrojo))
+            si h.en_reloj <> 0 entonces fuera_del_reloj(h) fin
+            suelta_sin(dirección(reloj_cerrojo))
+            restaura(b)
+        fin
+    fin
+
+    público función duerme_ms(ms: nat64)
+        duerme_ns(ms * 1000000)
+    fin
+
+    ; (en el tic) los dormidos a los que ya les toca, despiertos
+    función despierta_vencidos()
+        variable lista: arreglo [32] de nat64
+        variable n, i: nat32
+        variable ahora: nat64
+        variable h: puntero a Hilo
+        variable otra: bool
+        otra := cierto
+        mientras otra hacer
+            si no intenta(dirección(reloj_cerrojo)) entonces devolver fin
+            ahora := ahora_ns()
+            n := 0
+            mientras reloj_prim <> 0 y n < 32 y hilo(reloj_prim).despertar <= ahora hacer
+                h := hilo(reloj_prim)
+                reloj_prim := h.sig_reloj
+                h.sig_reloj := 0
+                h.en_reloj := 0
+                lista[n] := nat64(h)
+                n := n + 1
+            fin
+            otra := n = 32
+            suelta_sin(dirección(reloj_cerrojo))
+            i := 0
+            mientras i < n hacer
+                despierta(hilo(lista[i]))
+                i := i + 1
+            fin
+        fin
+    fin
+
+    ; ---- lo que hace cada tic (Apic64.al_tic: con las interrupciones quitadas) ----
+    función tic_hilos()
+        variable c: puntero a Cpu
+        c := yo()
+        c.cuanto := c.cuanto + 1
+        ; (el reloj de ACPI se va sumando: hay que leerlo antes de que dé la vuelta)
+        si c.número = 0 y c.tics yb 63 = 0 entonces ahora_ns() fin
+        si reloj_prim <> 0 entonces despierta_vencidos() fin
+        si c.hilo <> c.ociosa y (c.cuanto >= CUANTO o c.expropiar <> 0) entonces
+            si c.expropiar <> 0 entonces expropiaciones := expropiaciones + 1 fin
+            planifica()
+        fin
+    fin
+
+    ; el aviso de otro procesador: hay trabajo (o uno de más prioridad)
+    interrupción función aviso_plan()
+        variable c: puntero a Cpu
+        eoi()
+        c := yo()
+        si c.hilo <> c.ociosa entonces planifica() fin
+    fin
+
+    ; ---- la tarea ociosa ----
+    función reposa(c: puntero a Cpu)
+        variable d: nat64
+        variable p: nat32
+        si no con_mwait entonces
+            espera_int()
+            devolver
+        fin
+        d := nat64(dirección(c.ocioso))
+        p := pista_mwait
+        ensamblador
+            mov rax, {d}
+            xor ecx, ecx
+            xor edx, edx
+            db 0x0F, 0x01, 0xC8         ; monitor (rax, ecx, edx)
+            mov eax, {p}
+            xor ecx, ecx
+            sti                         ; (la interrupción llega tras la siguiente: no se pierde)
+            db 0x0F, 0x01, 0xC9         ; mwait (eax, ecx)
+        fin
+    fin
+
+    público función ocioso()
+        variable c: puntero a Cpu
+        variable b, t0: nat64
+        c := yo()
+        mientras cierto hacer
+            recoge()
+            b := sin_ints()
+            planifica()
+            pon_atómico(dirección(c.ocioso), 1)
+            si cola_n[c.número] = 0 y c.expropiar = 0 entonces
+                t0 := tsc()
+                reposa(c)
+                apaga()
+                c.tsc_ocioso := c.tsc_ocioso + (tsc() - t0)
+            fin
+            c.ocioso := 0
+            restaura(b)
+        fin
+    fin
+
+    ; ---- poner en marcha ----
+    ; el hilo ocioso de otro procesador: lo que corre ahora en él (su
+    ; arranque, con la pila de lo alto «pila»), que se queda en ocioso()
+    público función hazte_ocioso(c: puntero a Cpu, pila: nat64): bool
+        variable oc: puntero a Hilo
+        oc := nuevo("ocioso", FONDO, falso)
+        si oc = nulo entonces devolver falso fin
+        oc.pila := pila
+        oc.estado := CORRIENDO
+        oc.en_cpu := 1
+        oc.cpu := c.número
+        oc.fija := c.número + 1
+        c.ociosa := nat64(oc)
+        c.hilo := nat64(oc)
+        devolver cierto
+    fin
+
+    ; mira si la tarea ociosa puede usar mwait (como la 0.8.9 de Hispa-Pentium)
+    función es_atom(m: nat32): bool
+        según nat16(m)
+            caso 0x1C, 0x26, 0x27, 0x35, 0x36, 0x37, 0x4A, 0x4C, 0x4D, 0x5A, 0x5D, 0x5C, 0x5F, 0x7A, 0x86, 0x96, 0x9C, 0xBE, 0xAF, 0xB6: devolver cierto
+            si no: devolver falso
+        fin
+    fin
+
+    público función mira_reposo(forzar_hlt: bool, forzar_mwait: bool)
+        variable máx, fam, modelo_, ecx1, ecx5, edx5, k, sub: nat32
+        variable intel, atom, arat, inv, virtual: bool
+        con_mwait := falso
+        si forzar_hlt entonces
+            reposo := "hlt (lo dice la línea de órdenes: ocioso=hlt)"
+            devolver
+        fin
+        cpuid(0, 0)
+        máx := ra
+        intel := rb = 0x756E6547 y rd = 0x49656E69 y rc = 0x6C65746E
+        cpuid(1, 0)
+        ecx1 := rc
+        fam := (ra >> 8) yb 15
+        modelo_ := (ra >> 4) yb 15
+        si fam = 6 o fam = 15 entonces modelo_ := modelo_ + (((ra >> 16) yb 15) << 4) fin
+        atom := fam = 6 y es_atom(modelo_)
+        virtual := (ecx1 >> 31) = 1
+        arat := falso
+        si máx >= 6 entonces
+            cpuid(6, 0)
+            arat := ra yb 4 <> 0
+        fin
+        inv := tsc_invariante
+        pista_mwait := 0
+        ecx5 := 0
+        edx5 := 0
+        si máx >= 5 y ecx1 yb 8 <> 0 entonces
+            cpuid(5, 0)
+            ecx5 := rc
+            edx5 := rd
+            si ecx5 yb 1 <> 0 entonces
+                k := 7
+                mientras k >= 1 hacer
+                    sub := (edx5 >> (k * 4)) yb 15
+                    si sub <> 0 entonces
+                        pista_mwait := ((k - 1) << 4) + (sub - 1)
+                        romper
+                    fin
+                    k := k - 1
+                fin
+            fin
+        fin
+        reposo := nulo
+        si ecx1 yb 8 = 0 entonces reposo := "hlt (sin MONITOR/MWAIT)"
+        sino si no intel entonces reposo := "hlt (no es Intel: mwait sería C1, lo mismo)"
+        sino si atom entonces reposo := "hlt (un Atom: se cuelgan en C6)"
+        sino si virtual entonces reposo := "hlt (una máquina virtual)"
+        sino si máx < 5 o ecx5 yb 1 = 0 entonces reposo := "hlt (sin las pistas de cpuid 5)"
+        sino si no arat entonces reposo := "hlt (sin ARAT: el temporizador del APIC se pararía)"
+        sino si no inv entonces reposo := "hlt (sin TSC invariante)"
+        sino si pista_mwait < 0x10 entonces reposo := "hlt (solo C1: lo mismo que hlt)"
+        fin
+        si reposo <> nulo y no (forzar_mwait y ecx1 yb 8 <> 0) entonces devolver fin
+        con_mwait := cierto
+        si reposo <> nulo entonces reposo := "mwait, FORZADO (ocioso=mwait)" sino reposo := "mwait (la pista más honda de cpuid 5)" fin
+    fin
+
+    ; el planificador, en marcha en el que arranca: lo que corre ahora pasa a
+    ; ser el hilo «principal» (con la pila del arranque) y se hace su ocioso
+    público función arranca_planificador(): bool
+        variable c: puntero a Cpu
+        variable p, oc: puntero a Hilo
+        c := yo()
+        p := nuevo("principal", NORMAL, falso)
+        oc := nuevo("ocioso", FONDO, cierto)
+        si p = nulo o oc = nulo entonces devolver falso fin
+        p.estado := CORRIENDO
+        p.en_cpu := 1
+        p.cpu := c.número
+        p.cpus_vistas := 1
+        p.rodajas := 1
+        oc.estado := CORRIENDO
+        oc.cpu := c.número
+        oc.fija := c.número + 1
+        prepara_pila(oc, nat64(dirección(arranque_ocioso)))
+        c.hilo := nat64(p)
+        c.ociosa := nat64(oc)
+        pon_vector(V_PLAN, nat64(dirección(aviso_plan)))
+        va := cierto
+        al_tic := nat64(dirección(tic_hilos))
+        devolver cierto
+    fin
+
+    ; cuántos hilos hay en las colas de listos (para lo que se cuenta)
+    público función en_colas(): nat64
+        variable k: nat32
+        variable n: nat64
+        n := 0
+        k := 0
+        mientras k < n_cpus hacer
+            n := n + cola_n[k]
+            k := k + 1
+        fin
+        devolver n
+    fin
+
+fin Hilos64.

@@ -12,6 +12,10 @@
 ;                        pantalla con «escritura combinada» (PAT), los registros
 ;                        sin caché
 ;    0xFFFFC80000000000  los bloques grandes del montón (monton64.cas)
+;    0xFFFFE00000000000  [etapa 3] las pilas de los hilos y de los procesadores:
+;                        sitios de 32 KB, la pila en los 16 KB de arriba y los
+;                        de abajo sin poner (la guarda: quien se desborde
+;                        falla en el acto, y Excep64 lo dice)
 ;    0xFFFFFFFF80000000  el núcleo: el código, de solo leer; los datos y la
 ;                        pila, sin ejecutar; una página de guarda (sin poner)
 ;                        debajo de la pila
@@ -19,6 +23,14 @@
 ;  Con NX (EFER.NXE), WP (el núcleo tampoco escribe en lo de solo leer), las
 ;  páginas globales (CR4.PGE) y la PAT (entrada 1: escritura combinada; 3: sin
 ;  caché).
+;  [etapa 3] Con varios procesadores, quitar una página de las tablas no basta
+;  con «invlpg» en el que la quita: los demás pueden tenerla en su TLB. Por eso
+;  desmapea, después de soltar el cerrojo, llama a «derribo» (Smp64: un IPI a
+;  los demás, que vacían esa dirección de su TLB, y espera a que lo hayan
+;  hecho); solo entonces se puede dar el marco a otro. Quien llame a desmapea
+;  no debe tener ningún cerrojo tomado (los demás no podrían atender el aviso
+;  si esperasen por él con las interrupciones quitadas). desmapea_aquí no
+;  avisa: para lo que nadie más ha podido ver aún.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Pagina64
@@ -44,6 +56,11 @@ módulo Pagina64
     público variable quitado: nat64             ; el tamaño de lo último que ha quitado desmapea
     variable cerrojo: nat64
     variable hay_nx: bool
+    ; [etapa 3]
+    público variable derribo: nat64             ; derriba(v, n) de Smp64: vaciar la TLB de los demás
+    variable pilas: arreglo [64] de nat64       ; los sitios de la zona de las pilas en uso (MAX_PILAS bits)
+    variable pilas_cerrojo: nat64
+    público variable n_pilas: nat32             ; las pilas en uso
     variable próx_disp: nat64
     ; las etiquetas del núcleo (virtuales): el principio, los datos, las tablas
     ; del arranque, la guarda, la pila y el final
@@ -212,9 +229,10 @@ módulo Pagina64
     fin
 
     ; quita la página en la que está v (sea del tamaño que sea) y la quita de la
-    ; TLB; devuelve la física donde empezaba (y su tamaño en «quitado»), o
-    ; nob 0 si no había nada. Las tablas que se quedan vacías no se devuelven aún.
-    público función desmapea(v: nat64): nat64
+    ; TLB (de este procesador); devuelve la física donde empezaba (y su tamaño
+    ; en «quitado»), o nob 0 si no había nada. Las tablas que se quedan vacías
+    ; no se devuelven aún.
+    público función desmapea_aquí(v: nat64): nat64
         variable t: puntero a nat64
         variable n: nat32
         variable e, r, b, tam: nat64
@@ -239,6 +257,98 @@ módulo Pagina64
         fin
         suelta(dirección(cerrojo), b)
         devolver r
+    fin
+
+    función llama2(f: nat64, a: nat64, b: nat64)
+        ensamblador
+            push qword {b}
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    ; [etapa 3] los demás procesadores, que vacíen de su TLB las n páginas de 4
+    ; KB desde v (sin ningún cerrojo tomado)
+    público función avisa_tlb(v: nat64, n: nat64)
+        si derribo <> 0 entonces llama2(derribo, v, n) fin
+    fin
+
+    ; quita la página de v de las tablas y de la TLB de todos los procesadores
+    ; (sin ningún cerrojo tomado); devuelve su física (o nob 0), como desmapea_aquí
+    público función desmapea(v: nat64): nat64
+        variable r: nat64
+        r := desmapea_aquí(v)
+        si r <> nob nat64(0) entonces avisa_tlb(v, 1) fin
+        devolver r
+    fin
+
+    ; [etapa 3] una pila nueva de 16 KB en la zona de las pilas, con su guarda
+    ; debajo; devuelve lo alto (o 0 si no queda sitio o memoria)
+    público función pila_nueva(): nat64
+        variable b, base, f: nat64
+        variable i, k: nat32
+        b := toma(dirección(pilas_cerrojo))
+        i := 0
+        mientras i < MAX_PILAS y (pilas[i >> 6] >> (i yb 63)) yb 1 <> 0 hacer i := i + 1 fin
+        si i >= MAX_PILAS entonces
+            suelta(dirección(pilas_cerrojo), b)
+            devolver 0
+        fin
+        pilas[i >> 6] := pilas[i >> 6] ob (nat64(1) << (i yb 63))
+        n_pilas := n_pilas + 1
+        suelta(dirección(pilas_cerrojo), b)
+        base := ZONA_PILAS + nat64(i) * SITIO_PILA + SITIO_PILA div 2
+        k := 0
+        mientras k < 4 hacer
+            f := pide()
+            si f = 0 entonces
+                ; (nadie la ha visto aún: sin avisar a los demás)
+                mientras k > 0 hacer
+                    k := k - 1
+                    devuelve(desmapea_aquí(base + nat64(k) * K4))
+                fin
+                b := toma(dirección(pilas_cerrojo))
+                pilas[i >> 6] := pilas[i >> 6] yb (nob (nat64(1) << (i yb 63)))
+                n_pilas := n_pilas - 1
+                suelta(dirección(pilas_cerrojo), b)
+                devolver 0
+            fin
+            mapea(base + nat64(k) * K4, f, K4, datos())
+            k := k + 1
+        fin
+        devolver base + SITIO_PILA div 2
+    fin
+
+    ; [etapa 3] devuelve la pila de lo alto «cima» (de pila_nueva): fuera de las
+    ; tablas de todos (sin ningún cerrojo tomado) y sus marcos, a la memoria libre
+    público función pila_suelta(cima: nat64)
+        variable b, base: nat64
+        variable f: arreglo [4] de nat64
+        variable i, k: nat32
+        base := cima - SITIO_PILA div 2
+        si base < ZONA_PILAS o (base - ZONA_PILAS) yb (SITIO_PILA - 1) <> SITIO_PILA div 2 entonces
+            detén_ini("se suelta una pila que no es de la zona de las pilas")
+            hex16(cima)
+            escribir("\n")
+            detén_fin()
+        fin
+        i := nat32((base - ZONA_PILAS) div SITIO_PILA)
+        k := 0
+        mientras k < 4 hacer
+            f[k] := desmapea_aquí(base + nat64(k) * K4)
+            k := k + 1
+        fin
+        avisa_tlb(base, 4)
+        k := 0
+        mientras k < 4 hacer
+            si f[k] <> nob nat64(0) entonces devuelve(f[k]) fin
+            k := k + 1
+        fin
+        b := toma(dirección(pilas_cerrojo))
+        pilas[i >> 6] := pilas[i >> 6] yb (nob (nat64(1) << (i yb 63)))
+        n_pilas := n_pilas - 1
+        suelta(dirección(pilas_cerrojo), b)
     fin
 
     ; la física de v, o nob 0 si no está
@@ -392,6 +502,15 @@ módulo Pagina64
             fin
             v := v + K4
         fin
+    fin
+
+    ; [etapa 3] otro procesador (el trampolín ya le ha puesto NX y WP): la PAT,
+    ; las tablas de verdad y las páginas globales
+    público función prepara_este()
+        si hay_pat entonces pon_msr(0x277, 0x0407050600070106) fin
+        cr0_ob(0x10000)
+        carga_cr3(raíz)
+        cr4_ob(0x80)
     fin
 
     ; pasa a las tablas nuevas y devuelve las del arranque a la memoria libre

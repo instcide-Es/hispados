@@ -1,0 +1,483 @@
+; =============================================================================
+;  prsmp64.cas - Hispa-64, etapa 3: las pruebas de cada arranque de los
+;  procesadores y del planificador (docs/64/HISPA-64.md, sección 9):
+;    - cien hilos que suman a la vez (con un cerrojo, con «lock xadd» y con un
+;      mutex): el número exacto; y cuánto trabajo ha hecho cada procesador (el
+;      reparto: todos tienen que haber hecho algo);
+;    - dormir: hilos que duermen de 20 a 160 ms, medidos con el reloj (ni antes
+;      de tiempo ni mucho después);
+;    - un suceso que esperan veinte hilos; semáforos (productores y
+;      consumidores por un búfer de 16: la suma exacta);
+;    - las prioridades: en un mismo procesador, uno normal y tres de fondo sin
+;      parar: el normal hace casi todo;
+;    - la TLB de los demás (con dos procesadores o más): una página puesta en
+;      uno y leída en otro; quitada sin avisar, el otro aún la ve (su TLB);
+;      quitada con aviso (desmapea), al otro le falla la lectura;
+;    - y, a mano (prueba=...), los pánicos en otro procesador.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PrSmp64
+
+    importar Cifras64, Pant64, Es64, Cerrojo, Cpu64, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Smp64
+
+    constante N_SUMADORES = 100
+
+    variable salida: Suceso
+    variable cerrojo_c: nat64
+    variable cuenta_c, cuenta_a, cuenta_m, cuenta_s: nat64
+    variable un_mutex: Mutex
+    variable vueltas: nat64
+    variable hilos: arreglo [128] de nat64
+    público variable fallos: nat32              ; las pruebas de la etapa 3 que han salido mal
+
+    función mal(qué: puntero a byte)
+        fallos := fallos + 1
+        pon_color(12, 0)
+        escribir("  MAL: ", qué, "\n")
+        pon_color(7, 0)
+    fin
+
+    función hilo_de(d: nat64): puntero a Hilo
+        devolver puntero(d)
+    fin
+
+    ; el último procesador que está en marcha (para los hilos fijos de las pruebas)
+    público función último(): nat32
+        variable k: nat32
+        variable c: puntero a Cpu
+        k := n_cpus
+        mientras k > 1 hacer
+            k := k - 1
+            c := cpu(k)
+            si c.en_marcha <> 0 entonces devolver k fin
+        fin
+        devolver 0
+    fin
+
+    ; ---- cien hilos que suman ----
+    función sumador(arg: nat64)
+        variable i, b: nat64
+        variable c: puntero a Cpu
+        espera(dirección(salida))
+        i := 0
+        mientras i < vueltas hacer
+            b := toma(dirección(cerrojo_c))
+            cuenta_c := cuenta_c + 1
+            suelta(dirección(cerrojo_c), b)
+            suma_atómica(dirección(cuenta_a), 1)
+            cuenta_s := cuenta_s + 1                ; (sin cerrojo, a propósito)
+            c := yo()
+            suma_atómica(dirección(c.trabajo), 1)
+            i := i + 1
+        fin
+        i := 0
+        mientras i < vueltas div 20 hacer
+            cierra_mutex(dirección(un_mutex))
+            cuenta_m := cuenta_m + 1
+            abre_mutex(dirección(un_mutex))
+            i := i + 1
+        fin
+    fin
+
+    función tanto_por_ciento(a: nat64, total: nat64): nat64
+        si total = 0 entonces devolver 0 fin
+        devolver (a * 100 + total div 2) div total
+    fin
+
+    función prueba_sumas(n: nat32, v: nat64)
+        variable i: nat32
+        variable t0, t, total, p0, u0: nat64
+        variable c: puntero a Cpu
+        variable todos: bool
+        variable h: puntero a Hilo
+        vueltas := v
+        cuenta_c := 0
+        cuenta_a := 0
+        cuenta_m := 0
+        cuenta_s := 0
+        rearma(dirección(salida))
+        i := 0
+        mientras i < n_cpus hacer
+            c := cpu(i)
+            c.trabajo := 0
+            i := i + 1
+        fin
+        p0 := nat64(n_pilas)
+        u0 := en_uso
+        t0 := ahora_ns()
+        i := 0
+        mientras i < n hacer
+            h := crea(nat64(dirección(sumador)), nat64(i), "sumador", NORMAL, CUALQUIERA)
+            si h = nulo entonces
+                mal("no se puede crear un hilo")
+                romper
+            fin
+            hilos[i] := nat64(h)
+            i := i + 1
+        fin
+        n := i
+        señala(dirección(salida))
+        i := 0
+        mientras i < n hacer
+            une(hilo_de(hilos[i]))
+            i := i + 1
+        fin
+        t := ahora_ns() - t0
+        escribir("Hilos: ", n, " hilos que suman 1, ", v, " veces cada uno, a la vez: con un cerrojo, ", cuenta_c)
+        si cuenta_c = nat64(n) * v entonces escribir(" (exacto)") sino mal("con el cerrojo no sale el número exacto") fin
+        escribir("; con «lock xadd», ", cuenta_a)
+        si cuenta_a <> nat64(n) * v entonces mal("con «lock xadd» no sale el número exacto") fin
+        escribir("; con un mutex (", v div 20, " cada uno), ", cuenta_m)
+        si cuenta_m = nat64(n) * (v div 20) entonces escribir(" (exacto)") sino mal("con el mutex no sale el número exacto") fin
+        escribir("; en ", t div 1000000, " ms\n")
+        escribir("  sin cerrojo (a propósito): ", cuenta_s)
+        si cuenta_s < nat64(n) * v entonces escribir(": se pierden sumas, porque corren a la vez de verdad\n") sino escribir(": no se ha perdido ninguna\n") fin
+        si nat64(n_pilas) <> p0 o en_uso <> u0 entonces mal("al acabar los hilos no se han devuelto sus pilas o sus bloques") sino escribir("  al acabar, sus pilas y sus bloques, devueltos (pilas en uso: ", n_pilas, ", las de antes)\n") fin
+        ; el reparto
+        total := 0
+        i := 0
+        mientras i < n_cpus hacer
+            c := cpu(i)
+            total := total + c.trabajo
+            i := i + 1
+        fin
+        escribir("Reparto: el trabajo de los sumadores, por procesador:")
+        todos := cierto
+        i := 0
+        mientras i < n_cpus hacer
+            c := cpu(i)
+            si c.en_marcha <> 0 entonces
+                escribir(" ", i, ": ", tanto_por_ciento(c.trabajo, total), " %")
+                si c.trabajo = 0 entonces todos := falso fin
+            fin
+            i := i + 1
+        fin
+        si todos entonces escribir(" (todos han trabajado)\n") sino escribir("\n") fin
+        si no todos entonces mal("algún procesador no ha hecho nada") fin
+        escribir("  robos de trabajo: ", robados, "; expropiaciones: ", expropiaciones, "\n")
+    fin
+
+    ; ---- dormir ----
+    variable exceso_máx, antes_n: nat64
+    variable cerrojo_d: nat64
+
+    función dormilón(arg: nat64)
+        variable r: nat32
+        variable t0, d, b: nat64
+        r := 0
+        mientras r < 2 hacer
+            t0 := ahora_ns()
+            duerme_ms(arg)
+            d := ahora_ns() - t0
+            b := toma(dirección(cerrojo_d))
+            si d < arg * 1000000 entonces
+                antes_n := antes_n + 1
+            sino si d - arg * 1000000 > exceso_máx entonces
+                exceso_máx := d - arg * 1000000
+            fin
+            suelta(dirección(cerrojo_d), b)
+            r := r + 1
+        fin
+    fin
+
+    función prueba_dormir()
+        variable i: nat32
+        variable t0, d: nat64
+        exceso_máx := 0
+        antes_n := 0
+        i := 0
+        mientras i < 8 hacer
+            hilos[i] := nat64(crea(nat64(dirección(dormilón)), nat64(i + 1) * 20, "dormilón", INTERACTIVO, CUALQUIERA))
+            i := i + 1
+        fin
+        t0 := ahora_ns()
+        duerme_ms(100)
+        d := ahora_ns() - t0
+        i := 0
+        mientras i < 8 hacer
+            une(hilo_de(hilos[i]))
+            i := i + 1
+        fin
+        escribir("Dormir: 8 hilos, de 20 a 160 ms, dos veces: ninguno antes de tiempo (", antes_n, "); el que más se pasa, ")
+        escribir(exceso_máx div 1000000, ",", (exceso_máx div 100000) mod 10, " ms (el tic es de 10 ms); el principal, 100 ms: ")
+        escribir(d div 1000000, ",", (d div 100000) mod 10, " ms\n")
+        si antes_n > 0 o d < 100000000 entonces mal("alguno ha despertado antes de tiempo") fin
+    fin
+
+    ; ---- un suceso y semáforos ----
+    variable suceso: Suceso
+    variable despiertos: nat64
+
+    función esperador(arg: nat64)
+        espera(dirección(suceso))
+        suma_atómica(dirección(despiertos), 1)
+    fin
+
+    variable huecos, llenos: Semáforo
+    variable búfer: arreglo [16] de nat64
+    variable puestos, tomados: nat64
+    variable cerrojo_b: nat64
+    variable suma_b: nat64
+    constante COSAS = 2500
+
+    función productor(arg: nat64)
+        variable i, b: nat64
+        i := 1
+        mientras i <= COSAS hacer
+            baja(dirección(huecos))
+            b := toma(dirección(cerrojo_b))
+            búfer[puestos yb 15] := arg * COSAS + i
+            puestos := puestos + 1
+            suelta(dirección(cerrojo_b), b)
+            sube(dirección(llenos))
+            i := i + 1
+        fin
+    fin
+
+    función consumidor(arg: nat64)
+        variable i, b, v: nat64
+        i := 0
+        mientras i < COSAS hacer
+            baja(dirección(llenos))
+            b := toma(dirección(cerrojo_b))
+            v := búfer[tomados yb 15]
+            tomados := tomados + 1
+            suelta(dirección(cerrojo_b), b)
+            sube(dirección(huecos))
+            suma_atómica(dirección(suma_b), v)
+            i := i + 1
+        fin
+    fin
+
+    función prueba_esperas()
+        variable i: nat32
+        variable antes: nat64
+        despiertos := 0
+        rearma(dirección(suceso))
+        i := 0
+        mientras i < 20 hacer
+            hilos[i] := nat64(crea(nat64(dirección(esperador)), 0, "esperador", NORMAL, CUALQUIERA))
+            i := i + 1
+        fin
+        duerme_ms(50)
+        antes := despiertos
+        señala(dirección(suceso))
+        i := 0
+        mientras i < 20 hacer
+            une(hilo_de(hilos[i]))
+            i := i + 1
+        fin
+        escribir("Suceso: 20 hilos lo esperan; antes de señalarlo, despiertos ", antes, "; después, ", despiertos, "\n")
+        si antes <> 0 o despiertos <> 20 entonces mal("el suceso no despierta a los que lo esperan (o los despierta antes)") fin
+        pon_semáforo(dirección(huecos), 16)
+        pon_semáforo(dirección(llenos), 0)
+        puestos := 0
+        tomados := 0
+        suma_b := 0
+        i := 0
+        mientras i < 4 hacer
+            hilos[i] := nat64(crea(nat64(dirección(productor)), nat64(i), "productor", NORMAL, CUALQUIERA))
+            hilos[i + 4] := nat64(crea(nat64(dirección(consumidor)), nat64(i), "consumidor", NORMAL, CUALQUIERA))
+            i := i + 1
+        fin
+        i := 0
+        mientras i < 8 hacer
+            une(hilo_de(hilos[i]))
+            i := i + 1
+        fin
+        escribir("Semáforos: 4 productores y 4 consumidores, ", 4 * COSAS, " cosas por un búfer de 16: la suma, ", suma_b)
+        si suma_b = nat64(4 * COSAS) * (4 * COSAS + 1) div 2 entonces escribir(" (exacta)\n") sino mal("la suma de los semáforos no sale") fin
+    fin
+
+    ; ---- las prioridades ----
+    variable para_ya: nat64
+    variable hecho_p: arreglo [4] de nat64
+
+    función ocupado(arg: nat64)
+        mientras para_ya = 0 hacer
+            hecho_p[arg] := hecho_p[arg] + 1
+        fin
+    fin
+
+    función prueba_prioridades()
+        variable i, k: nat32
+        variable total: nat64
+        k := último()
+        para_ya := 0
+        i := 0
+        mientras i < 4 hacer
+            hecho_p[i] := 0
+            i := i + 1
+        fin
+        hilos[0] := nat64(crea(nat64(dirección(ocupado)), 0, "normal", NORMAL, k))
+        i := 1
+        mientras i < 4 hacer
+            hilos[i] := nat64(crea(nat64(dirección(ocupado)), nat64(i), "de fondo", FONDO, k))
+            i := i + 1
+        fin
+        duerme_ms(300)
+        para_ya := 1
+        i := 0
+        mientras i < 4 hacer
+            une(hilo_de(hilos[i]))
+            i := i + 1
+        fin
+        total := hecho_p[0] + hecho_p[1] + hecho_p[2] + hecho_p[3]
+        escribir("Prioridades: en el procesador ", k, ", uno normal y tres de fondo, sin parar, 300 ms: el normal hace el ", tanto_por_ciento(hecho_p[0], total), " % del trabajo\n")
+        si tanto_por_ciento(hecho_p[0], total) < 90 entonces mal("el hilo normal no pasa por delante de los de fondo") fin
+    fin
+
+    ; ---- la TLB de los demás ----
+    variable etapa_tlb: nat64                ; por dónde va la prueba (lo cambian los dos hilos)
+    variable leído1, leído2, leído3, fallo3: nat64
+    variable bien1, bien2, bien3, bien4: bool
+    variable leído4, avisos: nat64
+
+    función zona_tlb(): nat64
+        devolver (nat64(0xFFFFD000) << 32) + (nat64(4) << 30)
+    fin
+
+    función espera_paso(p: nat64)
+        mientras etapa_tlb < p hacer pausa() fin
+    fin
+
+    ; en el otro procesador: lee la página cuando se le dice
+    función lector(arg: nat64)
+        variable f: nat64
+        espera_paso(1)
+        bien1 := lee_con_red(zona_tlb(), leído1, f)
+        etapa_tlb := 2
+        espera_paso(3)
+        bien2 := lee_con_red(zona_tlb(), leído2, f)
+        ; (lo de la prueba sin aviso, fuera de su TLB; y otra vez dentro, con el marco nuevo)
+        invlpg(zona_tlb())
+        bien4 := lee_con_red(zona_tlb(), leído4, f)
+        etapa_tlb := 4
+        espera_paso(5)
+        bien3 := lee_con_red(zona_tlb(), leído3, fallo3)
+        etapa_tlb := 6
+    fin
+
+    función pon64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    ; en el primero: pone, quita sin avisar, cambia, quita avisando
+    función escritor(arg: nat64)
+        variable f1, f2, v: nat64
+        v := zona_tlb()
+        f1 := pide()
+        f2 := pide()
+        pon64(virt(f1), 0x1111)
+        pon64(virt(f2), 0x2222)
+        mapea(v, f1, K4, datos())
+        etapa_tlb := 1
+        espera_paso(2)
+        ; sin avisar: solo de su TLB (y otro marco detrás)
+        desmapea_aquí(v)
+        mapea(v, f2, K4, datos())
+        etapa_tlb := 3
+        espera_paso(4)
+        ; avisando: de la de todos
+        avisos := derribos
+        desmapea(v)
+        avisos := derribos - avisos
+        etapa_tlb := 5
+        espera_paso(6)
+        devuelve(f1)
+        devuelve(f2)
+    fin
+
+    función prueba_tlb()
+        variable a, b: puntero a Hilo
+        variable k: nat32
+        si n_en_marcha < 2 entonces
+            escribir("TLB de los demás: con un solo procesador no hay a quién avisar\n")
+            devolver
+        fin
+        k := último()
+        etapa_tlb := 0
+        b := crea(nat64(dirección(lector)), 0, "lector", NORMAL, k)
+        a := crea(nat64(dirección(escritor)), 0, "escritor", NORMAL, 0)
+        une(a)
+        une(b)
+        escribir("TLB de los demás: una página puesta en el procesador 0 y leída en el ", k, ": ")
+        si bien1 entonces escribir("lee ") sino escribir("no la lee ") fin
+        hex(leído1)
+        si no bien1 o leído1 <> 0x1111 entonces mal("el otro procesador no lee la página puesta") fin
+        escribir("\n  quitada sin avisar y puesta en otro marco (con 0x2222): el ", k)
+        si bien2 y leído2 = 0x1111 entonces
+            escribir(" aún lee 0x1111 (el de antes: su TLB no se ha vaciado)\n")
+        sino si bien2 entonces
+            escribir(" lee ")
+            hex(leído2)
+            escribir(" (su TLB se ha vaciado sola)\n")
+        sino
+            escribir(" no la lee\n")
+        fin
+        si no bien4 o leído4 <> 0x2222 entonces mal("el otro procesador no lee el marco nuevo") fin
+        escribir("  y, ya con el marco nuevo en su TLB (lee ")
+        hex(leído4)
+        escribir("), quitada con aviso (desmapea: ", avisos, " aviso por IPI): al ", k)
+        si no bien3 y fallo3 = zona_tlb() entonces
+            escribir(" le falla la lectura (fallo de página en ")
+            hex16(fallo3)
+            escribir(", con red), como debe\n")
+        sino
+            escribir(" no le falla: lee ")
+            hex(leído3)
+            escribir("\n")
+            mal("el aviso de vaciar la TLB no llega al otro procesador")
+        fin
+    fin
+
+    ; ---- lo de cada arranque ----
+    público función pruebas_smp()
+        prueba_sumas(N_SUMADORES, 10000)
+        prueba_dormir()
+        prueba_esperas()
+        prueba_prioridades()
+        prueba_tlb()
+    fin
+
+    ; ---- a mano ----
+    función hondo(n: nat64): nat64
+        variable relleno: arreglo [200] de byte
+        relleno[n yb 127] := byte(n)
+        devolver hondo(n + 1) + relleno[(n + 1) yb 127]
+    fin
+
+    función pánico(arg: nat64)
+        variable p: puntero a nat64
+        si arg = 1 entonces
+            p := puntero(nat64(0x5000) << 32)
+            escribir(valor(p), "\n")
+        sino si arg = 2 entonces
+            abre_mutex(dirección(un_mutex))
+        sino
+            escribir(hondo(0), "\n")
+        fin
+    fin
+
+    ; prueba=panicoap (un fallo de página en el último procesador), paradaap
+    ; (una parada del núcleo en él: abrir un mutex que no se ha cerrado) y
+    ; pilahilo (desbordar la pila de un hilo)
+    público función provoca_smp(qué: nat32)
+        variable h: puntero a Hilo
+        variable k: nat32
+        k := último()
+        si qué = 1 entonces escribir("Prueba: un fallo de página en un hilo del procesador ", k, "...\n") fin
+        si qué = 2 entonces escribir("Prueba: abrir un mutex sin haberlo cerrado, en un hilo del procesador ", k, "...\n") fin
+        si qué = 3 entonces escribir("Prueba: una función que se llama a sí misma sin fin, en un hilo (su pila es de 16 KB)...\n") fin
+        h := crea(nat64(dirección(pánico)), nat64(qué), "pánico", NORMAL, k)
+        une(h)
+        escribir("¡No se ha parado!\n")
+    fin
+
+    público función hecho_trabajo_de(k: nat32): nat64
+        devolver hecho_p[k yb 3]
+    fin
+
+fin PrSmp64.

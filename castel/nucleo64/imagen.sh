@@ -48,7 +48,7 @@ menuentry "Hispa-64 (prueba)" {
 CFG
 else
   cat > "$S/grub.cfg" <<'CFG'
-# Hispa-64 0.2.0 (etapa 2). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Hispa-64 0.3.0 (etapa 3). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -57,8 +57,23 @@ terminal_output console serial
 # la pantalla, tal cual la deja el firmware (su resolución de siempre)
 set gfxpayload=keep
 if cpuid -l; then
-  menuentry "Hispa-64 0.2.0 (etapa 2: ACPI, APIC, HPET y PCIe)" {
+  menuentry "Hispa-64 0.3.0 (etapa 3: varios procesadores y el planificador)" {
     multiboot2 /boot/HISPA64.BIN
+    module2 /boot/HISPA64.SIM HISPA64.SIM
+    boot
+  }
+  menuentry "Hispa-64: con un solo procesador (si se queda al encender los demás)" {
+    multiboot2 /boot/HISPA64.BIN sinsmp
+    module2 /boot/HISPA64.SIM HISPA64.SIM
+    boot
+  }
+  menuentry "Hispa-64: la tarea ociosa con hlt (si da problemas con mwait)" {
+    multiboot2 /boot/HISPA64.BIN ocioso=hlt
+    module2 /boot/HISPA64.SIM HISPA64.SIM
+    boot
+  }
+  menuentry "Hispa-64: prueba de un fallo en otro procesador (se paran todos y uno lo explica)" {
+    multiboot2 /boot/HISPA64.BIN prueba=panicoap
     module2 /boot/HISPA64.SIM HISPA64.SIM
     boot
   }

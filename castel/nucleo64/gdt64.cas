@@ -11,8 +11,9 @@
 ;  una para una excepción que no puede fiarse de la pila que haya: el doble
 ;  fallo (IST 1: si se ha desbordado la pila del núcleo, sin ella el
 ;  procesador se reiniciaría), el NMI (IST 2) y el fallo de máquina (IST 3).
-;  La de cada procesador irá aparte en la etapa 3 (PorCpu64 ya guarda dónde
-;  están las del que arranca).
+;  Desde la etapa 3, cada procesador tiene las suyas (monta: la GDT y la TSS
+;  en un bloque del montón, las pilas IST en la zona de las pilas, con su
+;  guarda); estas, las de aquí, son las del que arranca.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Gdt64
@@ -57,30 +58,52 @@ módulo Gdt64
         devolver nat64(dirección(tss))
     fin
 
-    ; pone la GDT nueva y la TSS, y las carga (lgdt, ltr)
-    público función pon_gdt()
-        variable b: nat64
-        gdt[0] := 0
-        gdt[1] := (nat64(0x00AF9A00) << 32) ob 0xFFFF
-        gdt[2] := (nat64(0x00CF9200) << 32) ob 0xFFFF
-        gdt[3] := (nat64(0x00CFF200) << 32) ob 0xFFFF
-        gdt[4] := (nat64(0x00AFFA00) << 32) ob 0xFFFF
-        b := nat64(dirección(tss))
+    función p64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    función p8(d: nat64, v: byte)
+        variable p: puntero a byte
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    ; [etapa 3] pone la GDT en g (56 octetos) y la TSS en t (104), con lo alto
+    ; de las tres pilas IST, y las carga (lgdt, ltr). Los procesadores se
+    ; encienden de uno en uno: gdtr se puede compartir.
+    público función monta(g: nat64, t: nat64, i1: nat64, i2: nat64, i3: nat64)
+        variable i: nat32
+        i := 0
+        mientras i < 104 hacer
+            p8(t + i, 0)
+            i := i + 1
+        fin
+        p64(g, 0)
+        p64(g + 8, (nat64(0x00AF9A00) << 32) ob 0xFFFF)
+        p64(g + 16, (nat64(0x00CF9200) << 32) ob 0xFFFF)
+        p64(g + 24, (nat64(0x00CFF200) << 32) ob 0xFFFF)
+        p64(g + 32, (nat64(0x00AFFA00) << 32) ob 0xFFFF)
         ; la TSS: límite 103, base, tipo 0x89 (TSS de 64 bits disponible, presente)
-        gdt[5] := 103 ob ((b yb 0xFFFFFF) << 16) ob (nat64(0x89) << 40) ob (((b >> 24) yb 0xFF) << 56)
-        gdt[6] := b >> 32
-        pon64(36, cima(nat64(dirección(pila_df))))
-        pon64(44, cima(nat64(dirección(pila_nmi))))
-        pon64(52, cima(nat64(dirección(pila_mc))))
-        tss[102] := 104                 ; sin mapa de puertos (detrás del final)
-        tss[103] := 0
-        gdtr.límite := tamaño(gdt) - 1
-        gdtr.base := nat64(dirección(gdt))
+        p64(g + 40, 103 ob ((t yb 0xFFFFFF) << 16) ob (nat64(0x89) << 40) ob (((t >> 24) yb 0xFF) << 56))
+        p64(g + 48, t >> 32)
+        p64(t + 36, i1)
+        p64(t + 44, i2)
+        p64(t + 52, i3)
+        p8(t + 102, 104)                ; sin mapa de puertos (detrás del final)
+        gdtr.límite := 55
+        gdtr.base := g
         ensamblador
             lgdt {gdtr}
             mov ax, 0x28
             ltr ax
         fin
+    fin
+
+    ; pone la GDT nueva y la TSS del que arranca, y las carga
+    público función pon_gdt()
+        monta(nat64(dirección(gdt)), nat64(dirección(tss)), cima(nat64(dirección(pila_df))), cima(nat64(dirección(pila_nmi))), cima(nat64(dirección(pila_mc))))
     fin
 
 fin Gdt64.

@@ -1,16 +1,24 @@
 ; =============================================================================
 ;  porcpu64.cas - Hispa-64: lo de cada procesador (docs/64/HISPA-64.md, 2.4;
-;  etapa 2, para la 3). Cada procesador tendrá su bloque (Cpu) y GS apuntando
-;  a él (el MSR IA32_GS_BASE; y KERNEL_GS_BASE, para el «swapgs» de cuando
-;  haya programas): yo() lo lee de gs:[0] sin cerrojos. En la etapa 2 solo
-;  está el del procesador que arranca (el BSP), en los datos del núcleo, con
-;  su número de APIC, sus tics y dónde están su GDT, su TSS y sus pilas IST
-;  (las de gdt64.cas); en la etapa 3, los demás se piden al montón (nueva).
+;  etapas 2 y 3). Cada procesador tiene su bloque (Cpu) y GS apuntando a él
+;  (el MSR IA32_GS_BASE; y KERNEL_GS_BASE, para el «swapgs» de cuando haya
+;  programas): yo() lo lee de gs:[0] sin cerrojos. El del procesador que
+;  arranca (el BSP) está en los datos del núcleo; los de los demás (etapa 3)
+;  los pide Smp64 al montón y los da de alta aquí (da_de_alta), por orden de la
+;  MADT. Lo que va en el bloque: su número y su APIC, sus tics, dónde están su
+;  GDT, su TSS y sus pilas IST, y lo del planificador (el hilo que corre, el
+;  ocioso, el que se acaba de dejar), los avisos entre procesadores (vaciar la
+;  TLB, replanificar, pararse) y lo que se cuenta (cambios de hilo, el tiempo
+;  en reposo, el trabajo de las pruebas).
+;  Este módulo no importa casi nada (las excepciones lo usan para decir en qué
+;  procesador ha pasado algo).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo PorCpu64
 
-    importar Es64, Gdt64, Monton64
+    importar Es64, Gdt64
+
+    público constante MAX_CPUS = 64             ; los que se encienden, como mucho
 
     público tipo Cpu = estructura
         mismo: nat64                ; su propia dirección (gs:[0])
@@ -19,15 +27,34 @@ módulo PorCpu64
         tics: nat64                 ; los del temporizador de su APIC
         gdt, tss: nat64             ; su GDT y su TSS
         ist1, ist2, ist3: nat64     ; lo alto de sus pilas IST (doble fallo, NMI, #MC)
-        pila: nat64                 ; lo alto de su pila del núcleo
+        pila: nat64                 ; lo alto de su pila del núcleo (la del arranque)
         nada: nat64
+        ; [etapa 3]
+        hilo: nat64                 ; el hilo que corre (Hilos64.Hilo)
+        ociosa: nat64               ; su hilo ocioso
+        anterior: nat64             ; el que se acaba de dejar (Hilos64.tras_cambio)
+        tlb_visto: nat64            ; el último aviso de vaciar la TLB que ha atendido
+        red: nat64                  ; (lee_con_red) adónde volver si falla la lectura
+        fallo: nat64                ; la dirección que ha fallado (CR2)
+        cambios: nat64              ; cambios de hilo
+        tsc_ocioso: nat64           ; el TSC pasado en reposo
+        trabajo: nat64              ; (pruebas) unidades de trabajo hechas aquí
+        en_marcha: nat32            ; 1: ya atiende (su IDT, su APIC, su tic)
+        tipo_núcleo: nat32          ; CPUID 1Ah: 0x40 de rendimiento (P), 0x20 eficiente (E), 0 no se sabe
+        parado: nat32               ; 1: se ha parado por el pánico de otro
+        expropiar: nat32            ; hay que replanificar en cuanto se pueda
+        cuanto: nat32               ; los tics que lleva el hilo que corre
+        nada2: nat32
+        ocioso: nat64               ; 1: en reposo (hlt o mwait), sin nada que hacer
     fin
 
     variable bsp: Cpu alineado 64           ; (en su línea de la caché)
     público variable n_cpus: nat32              ; cuántos bloques hay (en marcha o no)
+    público variable cpus: arreglo [MAX_CPUS] de nat64     ; los bloques, por número
+    variable listo: bool
 
     ; GS a ese bloque
-    función pon_gs(c: puntero a Cpu)
+    público función pon_gs(c: puntero a Cpu)
         pon_msr(0xC0000101, nat64(c))
         pon_msr(0xC0000102, nat64(c))
     fin
@@ -39,8 +66,20 @@ módulo PorCpu64
         fin
     fin
 
-    ; el del que arranca, con lo que ya tiene (la GDT, la TSS y sus IST)
-    público función prepara_bsp(pila: nat64)
+    ; el de este procesador, o nulo si aún no hay (lo primerísimo del arranque)
+    público función yo_si_hay(): puntero a Cpu
+        si no listo entonces devolver nulo fin
+        devolver yo()
+    fin
+
+    ; el del procesador n
+    público función cpu(n: nat32): puntero a Cpu
+        devolver puntero(cpus[n])
+    fin
+
+    ; el del que arranca, con lo que ya tiene (la GDT, la TSS y sus IST); lo
+    ; primero que se hace, detrás de la GDT
+    público función prepara_bsp()
         bsp.mismo := nat64(dirección(bsp))
         bsp.número := 0
         bsp.gdt := dir_gdt()
@@ -48,22 +87,26 @@ módulo PorCpu64
         bsp.ist1 := ist(1)
         bsp.ist2 := ist(2)
         bsp.ist3 := ist(3)
-        bsp.pila := pila
         pon_gs(dirección(bsp))
+        cpus[0] := nat64(dirección(bsp))
         n_cpus := 1
+        listo := cierto
     fin
 
-    ; [etapa 3] un bloque nuevo, del montón, para otro procesador (sin ponerlo:
-    ; lo pondrá él mismo, con pon_gs, al arrancar)
-    público función nueva(apic: nat32): puntero a Cpu
-        variable c: puntero a Cpu
-        c := puntero(nat64(reserva(tamaño(Cpu))))
+    público función pon_pila_bsp(pila: nat64)
+        bsp.pila := pila
+    fin
+
+    ; [etapa 3] da de alta un bloque nuevo (ya pedido, a cero) de otro
+    ; procesador, con el siguiente número; falso si ya hay MAX_CPUS
+    público función da_de_alta(c: puntero a Cpu, apic: nat32): bool
+        si n_cpus >= MAX_CPUS entonces devolver falso fin
         c.mismo := nat64(c)
         c.número := n_cpus
         c.apic := apic
-        c.tics := 0
+        cpus[n_cpus] := nat64(c)
         n_cpus := n_cpus + 1
-        devolver c
+        devolver cierto
     fin
 
 fin PorCpu64.

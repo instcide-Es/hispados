@@ -1,0 +1,424 @@
+; =============================================================================
+;  smp64.cas - Hispa-64, etapa 3: los demás procesadores (docs/64/HISPA-64.md,
+;  2.4 y sección 9).
+;    - Encenderlos (arranca_aps): los de la MADT (hasta MAX_CPUS), de uno en
+;      uno, con INIT-SIPI-SIPI y el trampolín de trampolin.asm (16 -> 32 -> 64
+;      bits) en una página por debajo de 1 MB; con unas tablas de páginas del
+;      trampolín (la identidad de los 2 primeros MB y la mitad alta del núcleo,
+;      la de las tablas de verdad). Cada uno, en ap_entra: las tablas de verdad
+;      (CR3, la PAT, las páginas globales; NX y WP ya los pone el trampolín),
+;      su bloque de PorCpu64 (GS), su GDT, su TSS y sus tres pilas IST (con
+;      guarda), la IDT de todos, su APIC local y su tic, qué núcleo es en los
+;      híbridos (CPUID 1Ah: de rendimiento o eficiente), y se queda en su tarea
+;      ociosa (Hilos64.ocioso), a esperar trabajo.
+;    - Vaciar la TLB de los demás (derriba, que llama Pagina64.desmapea): un
+;      IPI al vector V_TLB y esperar a que cada uno diga que lo ha hecho.
+;    - Pararlos a todos cuando uno se para (para_los_demás, que llama Excep64):
+;      un NMI a los demás, que se quedan quietos, y el que se para lo explica.
+;    - Leer «con red» (lee_con_red: si la página no está, no se para el
+;      núcleo; lo usan las pruebas de la TLB).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Smp64
+
+    importar Cifras64, Es64, Cerrojo, Cpu64, Fisica64, Pagina64, Monton64, Gdt64, PorCpu64, Excep64, Acpi64, Reloj64, Apic64, Hilos64
+
+    público constante V_TLB = 0xF1
+
+    ; las tablas de páginas del trampolín (en el núcleo: por debajo de 4 GB)
+    variable tr_pml4: arreglo [512] de nat64 alineado 4096
+    variable tr_pdpt: arreglo [512] de nat64 alineado 4096
+    variable tr_pd: arreglo [512] de nat64 alineado 4096
+    público variable trampolín: nat64           ; su página (física), o 0
+    público variable n_en_marcha: nat64         ; los procesadores que atienden (el que arranca, el primero)
+    público variable no_contestan: nat32        ; los que no han llegado
+    público variable de_más: nat32              ; los de la MADT que no se encienden (pasan de MAX_CPUS)
+    público variable n_p, n_e: nat32            ; en los híbridos, cuántos de cada tipo
+    público variable derribos: nat64            ; los avisos de vaciar la TLB mandados
+    variable ap_cpu: nat64                      ; el bloque del que se está encendiendo
+    variable ap_llegó: nat64
+    variable tlb_cerrojo, tlb_dir, tlb_n, tlb_gen: nat64
+
+    ; los octetos de trampolin.asm (NASM; pruebas.sh comprueba que son los mismos)
+    función octetos_trampolín(): nat64
+        ensamblador
+            mov rax, .ini
+            jmp .fin
+        .ini:
+            ; <trampolín>
+            db 0xEB, 0x46, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            db 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xAF, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00
+            db 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            db 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFA, 0xFC, 0x8C, 0xC8, 0x8E, 0xD8, 0x8E, 0xD0
+            db 0xBC, 0x00, 0x10, 0x66, 0x31, 0xDB, 0x89, 0xC3, 0x66, 0xC1, 0xE3, 0x04, 0x66, 0x0F, 0x01, 0x16
+            db 0x28, 0x00, 0x0F, 0x20, 0xC0, 0x0C, 0x01, 0x0F, 0x22, 0xC0, 0x66, 0x67, 0x8D, 0x83, 0x79, 0x00
+            db 0x00, 0x00, 0x66, 0x6A, 0x18, 0x66, 0x50, 0x66, 0xCB, 0x66, 0xB8, 0x10, 0x00, 0x8E, 0xD8, 0x8E
+            db 0xC0, 0x8E, 0xD0, 0x8E, 0xE0, 0x8E, 0xE8, 0x8D, 0xA3, 0x00, 0x10, 0x00, 0x00, 0x0F, 0x20, 0xE0
+            db 0x83, 0xC8, 0x20, 0x0F, 0x22, 0xE0, 0x8B, 0x83, 0x30, 0x00, 0x00, 0x00, 0x0F, 0x22, 0xD8, 0xB9
+            db 0x80, 0x00, 0x00, 0xC0, 0x0F, 0x32, 0x0B, 0x83, 0x34, 0x00, 0x00, 0x00, 0x0F, 0x30, 0x0F, 0x20
+            db 0xC0, 0x0D, 0x00, 0x00, 0x01, 0x80, 0x0F, 0x22, 0xC0, 0x8D, 0x83, 0xC3, 0x00, 0x00, 0x00, 0x6A
+            db 0x08, 0x50, 0xCB, 0x89, 0xDB, 0x66, 0xB8, 0x10, 0x00, 0x8E, 0xD8, 0x8E, 0xC0, 0x8E, 0xD0, 0x31
+            db 0xC0, 0x8E, 0xE0, 0x8E, 0xE8, 0x48, 0x8B, 0xA3, 0x38, 0x00, 0x00, 0x00, 0x48, 0x8B, 0x83, 0x40
+            db 0x00, 0x00, 0x00, 0x31, 0xED, 0xFF, 0xE0
+            ; </trampolín>
+        .fin:
+        fin
+    fin
+
+    constante LARGO_TRAMPOLÍN = 231
+
+    función p32(d: nat64, v: nat32)
+        variable p: puntero a nat32
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    función p64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    función l64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función ceros(d: nat64, n: nat64)
+        variable i: nat64
+        i := 0
+        mientras i < n hacer
+            p64(d + i, 0)
+            i := i + 8
+        fin
+    fin
+
+    ; espera ns nanosegundos (con el reloj del núcleo)
+    función espera_ns(ns: nat64)
+        variable t0: nat64
+        t0 := ahora_ns()
+        mientras ahora_ns() - t0 < ns hacer pausa() fin
+    fin
+
+    ; ---- vaciar la TLB de los demás ----
+    función invalida(v: nat64, n: nat64)
+        variable i: nat64
+        si n > 32 entonces
+            ; (todo, también lo global: apagar y encender CR4.PGE)
+            ensamblador
+                mov rax, cr4
+                mov rcx, rax
+                and rcx, -129
+                mov cr4, rcx
+                mov cr4, rax
+            fin
+            devolver
+        fin
+        i := 0
+        mientras i < n hacer
+            invlpg(v + (i << 12))
+            i := i + 1
+        fin
+    fin
+
+    ; (con las interrupciones quitadas) el aviso que haya pendiente, atendido
+    función atiende_tlb()
+        variable c: puntero a Cpu
+        variable g: nat64
+        c := yo()
+        g := tlb_gen
+        si c.tlb_visto < g entonces
+            invalida(tlb_dir, tlb_n)
+            c.tlb_visto := g
+        fin
+    fin
+
+    interrupción función aviso_tlb()
+        atiende_tlb()
+        eoi()
+    fin
+
+    ; las n páginas de 4 KB desde v, fuera de la TLB de los demás procesadores
+    ; (Pagina64.derribo: la de este ya lo está); sin ningún cerrojo tomado
+    función derriba(v: nat64, n: nat64)
+        variable b, g, t0: nat64
+        variable k: nat32
+        variable c, m: puntero a Cpu
+        si n_en_marcha <= 1 entonces devolver fin
+        b := sin_ints()
+        m := yo()
+        ; (si otro está avisando, se atiende lo suyo mientras se espera)
+        mientras no intenta(dirección(tlb_cerrojo)) hacer
+            atiende_tlb()
+            pausa()
+        fin
+        tlb_dir := v
+        tlb_n := n
+        g := tlb_gen + 1
+        pon_atómico(dirección(tlb_gen), g)
+        m.tlb_visto := g
+        ipi_a_los_demás(0x4000 ob V_TLB)
+        k := 0
+        mientras k < n_cpus hacer
+            c := cpu(k)
+            si k <> m.número y c.en_marcha <> 0 y c.parado = 0 entonces
+                t0 := tsc()
+                mientras c.tlb_visto < g hacer
+                    pausa()
+                    si tsc_hz > 0 y tsc() - t0 > tsc_hz * 2 entonces
+                        suelta_sin(dirección(tlb_cerrojo))
+                        detén_ini("un procesador no contesta al aviso de vaciar su TLB")
+                        escribir("El procesador ", k, " (APIC ", c.apic, ") lleva 2 s sin contestar.\n")
+                        detén_fin()
+                    fin
+                fin
+            fin
+            k := k + 1
+        fin
+        derribos := derribos + 1
+        suelta_sin(dirección(tlb_cerrojo))
+        restaura(b)
+    fin
+
+    ; ---- pararlos a todos (Excep64.al_parar) ----
+    función para_los_demás()
+        variable k, n, p: nat32
+        variable t0: nat64
+        variable c, m: puntero a Cpu
+        m := yo()
+        n := 0
+        k := 0
+        mientras k < n_cpus hacer
+            c := cpu(k)
+            si k <> m.número y c.en_marcha <> 0 entonces n := n + 1 fin
+            k := k + 1
+        fin
+        otros := n
+        si n = 0 entonces devolver fin
+        ipi_a_los_demás(0x4400)                         ; NMI
+        ; (hasta 100 ms, con el TSC: el reloj del núcleo podría tener su cerrojo tomado por otro)
+        t0 := tsc()
+        mientras cierto hacer
+            p := 0
+            k := 0
+            mientras k < n_cpus hacer
+                c := cpu(k)
+                si k <> m.número y c.parado <> 0 entonces p := p + 1 fin
+                k := k + 1
+            fin
+            parados := p
+            si p >= n o tsc() - t0 > tsc_hz div 10 entonces romper fin
+            pausa()
+        fin
+    fin
+
+    ; ---- leer con red ----
+    ; lee el nat64 de v; si la página no está (fallo de página), no se para:
+    ; devuelve falso (y en «fallo» la dirección que ha fallado)
+    público función lee_con_red(v: nat64, ref leído: nat64, ref fallo: nat64): bool
+        variable c: puntero a Cpu
+        variable r, ok, b: nat64
+        variable red: nat64
+        b := sin_ints()                 ; (que no cambie de procesador a medias)
+        c := yo()
+        c.fallo := 0
+        red := nat64(dirección(c.red))
+        ensamblador
+            mov rdi, {red}
+            mov rax, .falla
+            mov [rdi], rax
+            mov rsi, {v}
+            mov rax, [rsi]
+            mov qword [rdi], 0
+            mov ecx, 1
+            jmp .ya
+        .falla:
+            xor eax, eax
+            xor ecx, ecx
+        .ya:
+            mov {r}, rax
+            mov {ok}, rcx
+        fin
+        leído := r
+        fallo := c.fallo
+        restaura(b)
+        devolver ok = 1
+    fin
+
+    ; ---- encender los demás ----
+    ; el tipo de este núcleo en los híbridos (CPUID 1Ah, EAX 31:24)
+    función tipo_de_este(): nat32
+        variable t: nat32
+        si no híbrido o máx_hoja < 0x1A entonces devolver 0 fin
+        ensamblador
+            mov eax, 0x1A
+            xor ecx, ecx
+            cpuid
+            shr eax, 24
+            mov {t}, eax
+        fin
+        devolver t
+    fin
+
+    ; lo que hace cada uno nada más llegar a la mitad alta (desde el trampolín,
+    ; con su pila y las interrupciones quitadas); no vuelve
+    función ap_entra()
+        variable c: puntero a Cpu
+        c := puntero(ap_cpu)
+        prepara_este()
+        pon_gs(c)
+        monta(c.gdt, c.tss, c.ist1, c.ist2, c.ist3)
+        carga_idt()
+        c.tipo_núcleo := tipo_de_este()
+        pon_lapic()
+        si tic_va entonces pon_tic() fin
+        c.tlb_visto := tlb_gen
+        si no hazte_ocioso(c, c.pila) entonces
+            detén_ini("no hay memoria para la tarea ociosa de un procesador")
+            detén_fin()
+        fin
+        suma_atómica(dirección(n_en_marcha), 1)
+        c.en_marcha := 1
+        pon_atómico(dirección(ap_llegó), 1)
+        ocioso()
+    fin
+
+    ; las tablas del trampolín: la identidad de los 2 primeros MB (con una
+    ; página de 2 MB) y la mitad alta, la de las tablas de verdad
+    función prepara_tablas()
+        variable r: puntero a nat64
+        variable i: nat32
+        ceros(nat64(dirección(tr_pml4)), 4096)
+        ceros(nat64(dirección(tr_pdpt)), 4096)
+        ceros(nat64(dirección(tr_pd)), 4096)
+        tr_pml4[0] := (nat64(dirección(tr_pdpt)) - base_núcleo()) ob 3
+        tr_pdpt[0] := (nat64(dirección(tr_pd)) - base_núcleo()) ob 3
+        tr_pd[0] := 0x83
+        r := puntero(virt(raíz))
+        i := 256
+        mientras i < 512 hacer
+            tr_pml4[i] := r[i]
+            i := i + 1
+        fin
+    fin
+
+    ; enciende el procesador del APIC «a» con el bloque c; dice si ha llegado
+    función enciende_uno(c: puntero a Cpu, a: nat32): bool
+        variable t, efer: nat64
+        variable pág: nat32
+        ap_cpu := nat64(c)
+        ap_llegó := 0
+        prepara_tablas()
+        t := virt(trampolín)
+        p32(t + 42, nat32(trampolín + 8))                  ; la base de su GDT
+        p32(t + 48, nat32(nat64(dirección(tr_pml4)) - base_núcleo()))
+        efer := 0x100
+        si nx entonces efer := efer ob 0x800 fin
+        p32(t + 52, nat32(efer))
+        p64(t + 56, c.pila)
+        p64(t + 64, nat64(dirección(ap_entra)))
+        pág := nat32(trampolín >> 12)
+        ipi(a, 0x4500)                                     ; INIT
+        espera_ns(10000000)
+        ipi(a, 0x4600 ob pág)                              ; SIPI
+        espera_ns(200000)
+        si ap_llegó = 0 entonces ipi(a, 0x4600 ob pág) fin ; otro SIPI
+        t := ahora_ns()
+        mientras ap_llegó = 0 y ahora_ns() - t < 3000000000 hacer pausa() fin
+        si ap_llegó = 0 entonces
+            ipi(a, 0x4500)                                 ; (que no siga: otra vez en espera)
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; un bloque nuevo para otro procesador: con sus pilas (la del arranque,
+    ; que será la de su tarea ociosa, y las tres IST) y su GDT y su TSS
+    función bloque(a: nat32): puntero a Cpu
+        variable c: puntero a Cpu
+        variable g: nat64
+        c := puntero(nat64(reserva(tamaño(Cpu))))
+        g := nat64(reserva(256))
+        si c = nulo o g = 0 entonces devolver nulo fin
+        ceros(nat64(c), tamaño(Cpu))
+        c.gdt := (g + 15) yb (nob nat64(15))
+        c.tss := c.gdt + 64
+        c.pila := pila_nueva()
+        c.ist1 := pila_nueva()
+        c.ist2 := pila_nueva()
+        c.ist3 := pila_nueva()
+        si c.pila = 0 o c.ist1 = 0 o c.ist2 = 0 o c.ist3 = 0 entonces devolver nulo fin
+        si no da_de_alta(c, a) entonces devolver nulo fin
+        devolver c
+    fin
+
+    ; enciende los de la MADT (con el planificador ya en marcha en este); cuántos
+    ; hay en marcha al acabar (con este)
+    ; lo de este (el que arranca), con o sin los demás
+    público función arranca_solo()
+        variable m: puntero a Cpu
+        m := yo()
+        pon_vector(V_TLB, nat64(dirección(aviso_tlb)))
+        derribo := nat64(dirección(derriba))
+        al_parar := nat64(dirección(para_los_demás))
+        m.tipo_núcleo := tipo_de_este()
+        m.en_marcha := 1
+        n_en_marcha := 1
+        si m.tipo_núcleo = 0x40 entonces n_p := 1 fin
+        si m.tipo_núcleo = 0x20 entonces n_e := 1 fin
+    fin
+
+    público función arranca_aps(): nat32
+        variable i: nat32
+        variable m, c: puntero a Cpu
+        m := yo()
+        arranca_solo()
+        si no hay_madt o n_cpu < 2 entonces devolver nat32(n_en_marcha) fin
+        trampolín := pide_bajo()
+        si trampolín = 0 entonces devolver nat32(n_en_marcha) fin
+        copia_trampolín()
+        i := 0
+        mientras i < n_cpu hacer
+            si cpu_apic[i] <> m.apic entonces
+                si n_cpus >= MAX_CPUS entonces
+                    de_más := de_más + 1
+                sino
+                    c := bloque(cpu_apic[i])
+                    si c = nulo entonces
+                        de_más := de_más + 1
+                    sino si enciende_uno(c, cpu_apic[i]) entonces
+                        mientras c.en_marcha = 0 hacer pausa() fin
+                        si c.tipo_núcleo = 0x40 entonces n_p := n_p + 1 fin
+                        si c.tipo_núcleo = 0x20 entonces n_e := n_e + 1 fin
+                    sino
+                        no_contestan := no_contestan + 1
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver nat32(n_en_marcha)
+    fin
+
+    función copia_trampolín()
+        variable d, oc: nat64
+        variable i: nat32
+        variable p, q: puntero a byte
+        d := virt(trampolín)
+        oc := octetos_trampolín()
+        i := 0
+        mientras i < 4096 hacer
+            p := puntero(d + i)
+            si i < LARGO_TRAMPOLÍN entonces
+                q := puntero(oc + i)
+                valor(p) := valor(q)
+            sino
+                valor(p) := 0
+            fin
+            i := i + 1
+        fin
+    fin
+
+fin Smp64.

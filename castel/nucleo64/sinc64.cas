@@ -1,0 +1,142 @@
+; =============================================================================
+;  sinc64.cas - Hispa-64, etapa 3: lo que usan los hilos para entenderse
+;  (docs/64/HISPA-64.md, sección 9), encima de los cerrojos y de las colas de
+;  espera del planificador (Hilos64.Espera): quien espera duerme (deja el
+;  procesador a otro), no da vueltas.
+;    - Suceso: algo que pasa una vez (o que se rearma): espera() duerme hasta
+;      que alguien llame a señala(); los que lleguen después no esperan.
+;    - Semáforo: un contador; baja() espera a que sea mayor que 0 y le quita
+;      1; sube() le suma 1 y despierta a uno.
+;    - Mutex: cierra_mutex() espera a que esté abierto y se queda con él; lo
+;      suelta (abre_mutex) y despierta a uno. Solo lo abre quien lo cerró (si no, se para
+;      el núcleo y lo dice): para lo que dura (un cerrojo de espera activa, en
+;      cambio, solo para lo muy corto, con las interrupciones quitadas).
+;  Cada uno empieza con la forma de Espera (el cerrojo, el primero y el último
+;  que esperan), y detrás lo suyo. Todos, en memoria que no se mueva (una
+;  variable del módulo o un bloque del montón) y a cero antes de usarlos (o con
+;  su función «nuevo_...»).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sinc64
+
+    importar Cifras64, Cerrojo, Excep64, Monton64, Hilos64
+
+    público tipo Suceso = estructura
+        cerrojo: nat64
+        primero: nat64
+        último: nat64
+        señalado: nat64
+    fin
+
+    público tipo Semáforo = estructura
+        cerrojo: nat64
+        primero: nat64
+        último: nat64
+        valor: nat64
+    fin
+
+    público tipo Mutex = estructura
+        cerrojo: nat64
+        primero: nat64
+        último: nat64
+        dueño: nat64                ; el hilo que lo tiene cerrado, o 0
+        veces: nat64                ; cuántas veces se ha cerrado
+        esperas: nat64              ; cuántas veces ha habido que esperar
+    fin
+
+    función es(d: nat64): puntero a Espera
+        devolver puntero(d)
+    fin
+
+    ; ---- sucesos ----
+    público función espera(s: puntero a Suceso)
+        variable b: nat64
+        b := toma(dirección(s.cerrojo))
+        mientras s.señalado = 0 hacer
+            duerme_en(es(nat64(s)))
+            toma_sin(dirección(s.cerrojo))
+        fin
+        sal_de(es(nat64(s)))
+        suelta(dirección(s.cerrojo), b)
+    fin
+
+    público función señala(s: puntero a Suceso)
+        variable b: nat64
+        b := toma(dirección(s.cerrojo))
+        s.señalado := 1
+        suelta(dirección(s.cerrojo), b)
+        despierta_todos(es(nat64(s)))
+    fin
+
+    ; otra vez sin señalar (los que esperen desde ahora, esperan)
+    público función rearma(s: puntero a Suceso)
+        variable b: nat64
+        b := toma(dirección(s.cerrojo))
+        s.señalado := 0
+        suelta(dirección(s.cerrojo), b)
+    fin
+
+    ; ---- semáforos ----
+    público función pon_semáforo(s: puntero a Semáforo, v: nat64)
+        s.cerrojo := 0
+        s.primero := 0
+        s.último := 0
+        s.valor := v
+    fin
+
+    público función baja(s: puntero a Semáforo)
+        variable b: nat64
+        b := toma(dirección(s.cerrojo))
+        mientras s.valor = 0 hacer
+            duerme_en(es(nat64(s)))
+            toma_sin(dirección(s.cerrojo))
+        fin
+        s.valor := s.valor - 1
+        sal_de(es(nat64(s)))
+        suelta(dirección(s.cerrojo), b)
+    fin
+
+    público función sube(s: puntero a Semáforo)
+        variable b: nat64
+        b := toma(dirección(s.cerrojo))
+        s.valor := s.valor + 1
+        suelta(dirección(s.cerrojo), b)
+        despierta_uno(es(nat64(s)))
+    fin
+
+    ; ---- mutex ----
+    público función cierra_mutex(m: puntero a Mutex)
+        variable b: nat64
+        variable h: puntero a Hilo
+        h := actual()
+        b := toma(dirección(m.cerrojo))
+        si m.dueño = nat64(h) entonces
+            suelta(dirección(m.cerrojo), b)
+            detén_ini("un hilo cierra un mutex que ya tiene cerrado")
+            detén_fin()
+        fin
+        si m.dueño <> 0 entonces m.esperas := m.esperas + 1 fin
+        mientras m.dueño <> 0 hacer
+            duerme_en(es(nat64(m)))
+            toma_sin(dirección(m.cerrojo))
+        fin
+        m.dueño := nat64(h)
+        m.veces := m.veces + 1
+        sal_de(es(nat64(m)))
+        suelta(dirección(m.cerrojo), b)
+    fin
+
+    público función abre_mutex(m: puntero a Mutex)
+        variable b: nat64
+        b := toma(dirección(m.cerrojo))
+        si m.dueño <> nat64(actual()) entonces
+            suelta(dirección(m.cerrojo), b)
+            detén_ini("un hilo abre un mutex que no ha cerrado él")
+            detén_fin()
+        fin
+        m.dueño := 0
+        suelta(dirección(m.cerrojo), b)
+        despierta_uno(es(nat64(m)))
+    fin
+
+fin Sinc64.

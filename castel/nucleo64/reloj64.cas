@@ -14,7 +14,7 @@
 ; =============================================================================
 módulo Reloj64
 
-    importar Cifras64, Pagina64, Es64, Acpi64, Cpu64
+    importar Cifras64, Pagina64, Es64, Acpi64, Cpu64, Cerrojo
 
     público constante NINGUNO = 0
     público constante HPET = 1
@@ -31,6 +31,7 @@ módulo Reloj64
     variable pm_antes: nat32
     variable pm_suma: nat64
     variable cuenta0: nat64
+    variable cerrojo: nat64                 ; [etapa 3] el reloj de ACPI se suma en pm_suma: de uno en uno
 
     ; la frecuencia de la fuente, en Hz
     público función hz(): nat64
@@ -49,14 +50,18 @@ módulo Reloj64
     ; las cuentas de la fuente, sin dar la vuelta
     público función cuenta(): nat64
         variable v, d: nat32
+        variable b, s: nat64
         si fuente = HPET entonces devolver m64(hpet + 0xF0) fin
         si fuente = PM entonces
+            b := toma(dirección(cerrojo))
             v := lee_pm()
             d := v - pm_antes
             si no pm_32 entonces d := d yb 0xFFFFFF fin
             pm_suma := pm_suma + d
             pm_antes := v
-            devolver pm_suma
+            s := pm_suma
+            suelta(dirección(cerrojo), b)
+            devolver s
         fin
         devolver 0
     fin

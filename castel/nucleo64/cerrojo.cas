@@ -7,6 +7,11 @@
 ;  así una interrupción no puede pedir el mismo cerrojo y quedarse esperando
 ;  para siempre.
 ;    b := toma(dirección(c))   ... lo que se protege ...   suelta(dirección(c), b)
+;  [etapa 3] Con varios procesadores, además: intenta() (tomarlo solo si está
+;  libre, sin esperar: el planificador, al robar trabajo de otra cola, para no
+;  cruzarse con otro que robe de la suya), toma_sin() y suelta_sin() (sin
+;  tocar las interrupciones: quien llama ya las ha quitado) y las cuentas
+;  atómicas (suma_atómica: «lock xadd»; cambia_si: «lock cmpxchg»).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Cerrojo
@@ -40,6 +45,102 @@ módulo Cerrojo
             mov rdi, {c}
             xor ecx, ecx
             db 0x48, 0x87, 0x0F         ; xchg rcx, [rdi]
+            mov rax, {rf}
+            push rax
+            db 0x9D                     ; popfq
+        fin
+    fin
+
+    ; [etapa 3] lo toma sin tocar las interrupciones (ya quitadas)
+    público función toma_sin(c: puntero a nat64)
+        ensamblador
+            mov rdi, {c}
+        .otra:
+            mov ecx, 1
+            db 0x48, 0x87, 0x0F         ; xchg rcx, [rdi]
+            test rcx, rcx
+            jz .ya
+        .espera:
+            db 0xF3, 0x90               ; pause
+            cmp qword [rdi], 0
+            jne .espera
+            jmp .otra
+        .ya:
+        fin
+    fin
+
+    ; [etapa 3] lo suelta sin tocar las interrupciones
+    público función suelta_sin(c: puntero a nat64)
+        ensamblador
+            mov rdi, {c}
+            xor ecx, ecx
+            db 0x48, 0x87, 0x0F         ; xchg rcx, [rdi]
+        fin
+    fin
+
+    ; [etapa 3] lo toma si está libre (cierto) o no espera (falso); sin tocar
+    ; las interrupciones
+    público función intenta(c: puntero a nat64): bool
+        ensamblador
+            mov rdi, {c}
+            xor eax, eax
+            cmp qword [rdi], 0
+            jne .no
+            mov ecx, 1
+            db 0x48, 0x87, 0x0F         ; xchg rcx, [rdi]
+            test rcx, rcx
+            jnz .no
+            mov eax, 1
+        .no:
+        fin
+    fin
+
+    ; [etapa 3] suma v a [d] de una vez («lock xadd»); devuelve lo que había
+    público función suma_atómica(d: puntero a nat64, v: nat64): nat64
+        ensamblador
+            mov rdi, {d}
+            mov rax, {v}
+            db 0xF0, 0x48, 0x0F, 0xC1, 0x07     ; lock xadd [rdi], rax
+        fin
+    fin
+
+    ; [etapa 3] si [d] vale «antes», le pone «después» de una vez («lock
+    ; cmpxchg») y devuelve cierto; si no, no lo toca y devuelve falso
+    público función cambia_si(d: puntero a nat64, antes: nat64, después: nat64): bool
+        ensamblador
+            mov rdi, {d}
+            mov rax, {antes}
+            mov rcx, {después}
+            db 0xF0, 0x48, 0x0F, 0xB1, 0x0F     ; lock cmpxchg [rdi], rcx
+            mov eax, 0
+            jne .no
+            mov eax, 1
+        .no:
+        fin
+    fin
+
+    ; [etapa 3] lo pone a v de una vez, con barrera («xchg»): lo que se haya
+    ; escrito antes lo ven los demás antes que esto
+    público función pon_atómico(d: puntero a nat64, v: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rax, {v}
+            db 0x48, 0x87, 0x07         ; xchg rax, [rdi]
+        fin
+    fin
+
+    ; [etapa 3] las interrupciones, quitadas; devuelve las banderas de antes
+    público función sin_ints(): nat64
+        ensamblador
+            db 0x9C                     ; pushfq
+            pop rax
+            cli
+        fin
+    fin
+
+    ; [etapa 3] las banderas (y con ellas las interrupciones) como estaban
+    público función restaura(rf: nat64)
+        ensamblador
             mov rax, {rf}
             push rax
             db 0x9D                     ; popfq

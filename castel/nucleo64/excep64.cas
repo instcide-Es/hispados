@@ -11,11 +11,20 @@
 ;  ha pasado y quién la ha llamado; y las paradas del propio núcleo (detén_ini
 ;  y detén_fin: el montón estropeado, memoria soltada dos veces...), igual, con
 ;  el código 98 en QEMU.
+;  [etapa 3] Con varios procesadores: el primero que se para (por una
+;  excepción o una parada del núcleo) para a los demás (al_parar: Smp64 les
+;  manda un NMI) y lo explica él solo, diciendo en qué procesador ha pasado;
+;  los demás, al ver que ya hay uno parándose, se quedan quietos sin decir
+;  nada. Cada uno con sus pilas IST (las de su TSS, en su bloque de PorCpu64).
+;  Un fallo de página «con red» (lee_con_red de Smp64: las pruebas de vaciar
+;  la TLB de los demás) no para: vuelve adonde diga el bloque del procesador.
+;  Y un desbordamiento de la pila de un hilo (en la zona de las pilas, cada una
+;  con 16 KB sin poner debajo) se dice igual que el de la pila del núcleo.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Excep64
 
-    importar Cifras64, Nombre64, Gdt64
+    importar Cifras64, Nombre64, Gdt64, PorCpu64
 
     ; una puerta de la IDT de 64 bits: 16 octetos
     tipo Puerta = estructura
@@ -40,6 +49,16 @@ módulo Excep64
     variable dentro: nat32                  ; cuántas excepciones se están explicando
     público variable guarda_ini, guarda_fin: nat64   ; la página de guarda bajo la pila del núcleo
     público variable pila_ini, pila_fin: nat64       ; la pila del núcleo
+    ; [etapa 3]
+    público variable al_parar: nat64        ; la función que para a los demás procesadores (Smp64)
+    público variable parados: nat32         ; cuántos se han parado (lo dice al_parar)
+    público variable otros: nat32           ; a cuántos se ha mandado parar
+    variable parada_de: nat64               ; 0, o el número + 1 del procesador que se está parando
+    ; la zona de las pilas de los hilos y de los procesadores (Pagina64): cada
+    ; sitio, 32 KB; la pila, los 16 KB de arriba; los de abajo, sin poner
+    público constante ZONA_PILAS = 0xFFFFE00000000000
+    público constante SITIO_PILA = 32768
+    público constante MAX_PILAS = 4096
 
     ; el marco que deja una función de interrupción: los quince registros, de r15
     ; (el primero, en [rbp]) a rax (en [rbp+112]); detrás, lo del procesador
@@ -109,9 +128,74 @@ módulo Excep64
         fin
     fin
 
+    función pon64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    función llama0(f: nat64)
+        ensamblador
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    ; [etapa 3] ¿es d de la guarda de una pila de la zona de las pilas?
+    público función en_guarda(d: nat64): bool
+        si d < ZONA_PILAS o d >= ZONA_PILAS + nat64(SITIO_PILA) * MAX_PILAS entonces devolver falso fin
+        devolver (d - ZONA_PILAS) yb (SITIO_PILA - 1) < SITIO_PILA div 2
+    fin
+
+    ; [etapa 3] el primero que se para, se queda con la parada y para a los
+    ; demás (devuelve cierto: que lo explique); si ya se está parando otro, este
+    ; se queda quieto aquí mismo (y lo apunta en su bloque)
+    función toma_la_parada(): bool
+        variable c: puntero a Cpu
+        variable yo_mismo, antes: nat64
+        variable p: puntero a nat64
+        c := yo_si_hay()
+        si c = nulo entonces devolver cierto fin
+        yo_mismo := nat64(c.número) + 1
+        antes := yo_mismo
+        p := dirección(parada_de)
+        ensamblador
+            mov rdi, {p}
+            xor eax, eax
+            mov rcx, {yo_mismo}
+            db 0xF0, 0x48, 0x0F, 0xB1, 0x0F     ; lock cmpxchg [rdi], rcx
+            mov {antes}, rax
+        fin
+        si antes = 0 entonces
+            ; el primero: los demás, a pararse
+            si al_parar <> 0 entonces llama0(al_parar) fin
+            devolver cierto
+        fin
+        si antes = yo_mismo entonces devolver cierto fin      ; (otra, al explicar la primera)
+        c.parado := 1
+        quieto()
+        devolver falso
+    fin
+
+    ; [etapa 3] lo de los demás procesadores y en cuál ha pasado
+    función dónde()
+        variable c: puntero a Cpu
+        c := yo_si_hay()
+        si c = nulo o n_cpus < 2 entonces devolver fin
+        escribir("En el procesador ", c.número, " (APIC ", c.apic, ")")
+        si otros > 0 entonces
+            si parados >= otros y otros = 1 entonces escribir("; el otro se ha parado")
+            sino si parados >= otros entonces escribir("; los otros ", otros, " se han parado")
+            sino escribir("; de los otros ", otros, ", se han parado ", parados) fin
+        fin
+        escribir(".\n")
+    fin
+
     función explica(n: nat32, m: nat64, con_error: bool)
         variable d, err, c2: nat64
         variable k: nat32
+        variable c: puntero a Cpu
+        variable i: nat64
         d := m + 120
         err := 0
         si con_error entonces
@@ -119,6 +203,16 @@ módulo Excep64
             d := d + 8
         fin
         si n = 14 entonces c2 := cr2() fin
+        ; [etapa 3] un fallo de página con red: se vuelve adonde diga el procesador
+        c := yo_si_hay()
+        si n = 14 y c <> nulo entonces
+            si c.red <> 0 entonces
+                c.fallo := c2
+                pon64(d, c.red)
+                c.red := 0
+                devolver
+            fin
+        fin
         si n = 3 entonces
             paradas := paradas + 1
             escribir("Punto de parada (int3) número ", paradas, " en RIP=")
@@ -126,6 +220,7 @@ módulo Excep64
             escribir(": atendido, sigue.\n")
             devolver
         fin
+        si no toma_la_parada() entonces devolver fin
         ; una excepción al explicar otra (en la consola, por ejemplo): desde
         ; ahora, solo por el puerto serie
         dentro := dentro + 1
@@ -136,9 +231,14 @@ módulo Excep64
         fin
         escribir("\n*** Hispa-64 se ha parado: excepción ", n, " ***\n")
         escribir(nombre(n), "\n")
+        dónde()
         k := 1
         mientras k <= 3 hacer
-            si rsp_ahora() < ist(k) y rsp_ahora() + 16384 >= ist(k) entonces
+            i := ist(k)
+            si c <> nulo entonces
+                si k = 1 entonces i := c.ist1 sino si k = 2 entonces i := c.ist2 sino i := c.ist3 fin
+            fin
+            si rsp_ahora() < i y rsp_ahora() + 16384 >= i entonces
                 escribir("(Se atiende con su propia pila: la IST ", k, " de la TSS.)\n")
             fin
             k := k + 1
@@ -176,6 +276,14 @@ módulo Excep64
         fin
         si n = 14 y c2 >= guarda_ini y c2 < guarda_fin entonces
             escribir("(Esa dirección es la página de guarda de la pila del núcleo: la pila se ha desbordado.)\n")
+        fin
+        si n = 8 y en_guarda(lee64(d + 24) - 8) entonces
+            escribir("La pila de un hilo (o de un procesador) se ha desbordado: RSP=")
+            hex16(lee64(d + 24))
+            escribir(" está en la guarda de su pila (16 KB sin poner debajo de cada una).\n")
+        fin
+        si n = 14 y en_guarda(c2) entonces
+            escribir("(Esa dirección es de la guarda de la pila de un hilo: su pila se ha desbordado.)\n")
         fin
         si cuántos > 0 entonces
             escribir("En la función ")
@@ -227,7 +335,7 @@ módulo Excep64
         quieto()
     fin
 
-    función quieto()
+    público función quieto()
         ensamblador
             cli
         .para:
@@ -236,9 +344,13 @@ módulo Excep64
         fin
     fin
 
-    ; ¿puede ser rbp un marco de una función del núcleo? (en su pila o en una de las IST)
+    ; ¿puede ser rbp un marco de una función del núcleo? (en su pila, en la de un hilo o en una de las IST)
     función marco_bueno(r: nat64): bool
         si r yb 7 <> 0 entonces devolver falso fin
+        ; [etapa 3] o en la pila de un hilo (en la zona de las pilas, fuera de su guarda)
+        si r >= ZONA_PILAS y r < ZONA_PILAS + nat64(SITIO_PILA) * MAX_PILAS entonces
+            devolver no en_guarda(r) y no en_guarda(r + 8)
+        fin
         devolver r >= 0xFFFFFFFF80000000 y r < nob nat64(15)
     fin
 
@@ -274,7 +386,9 @@ módulo Excep64
     ; las excepciones; detrás de detén_ini, quien la llama escribe el porqué
     ; (lo que haga falta) y acaba con detén_fin
     público función detén_ini(qué: puntero a byte)
+        si no toma_la_parada() entonces devolver fin
         escribir("\n*** Hispa-64 se ha parado: ", qué, " ***\n")
+        dónde()
     fin
 
     público función detén_fin()
@@ -420,6 +534,13 @@ módulo Excep64
     ; [etapa 2] una interrupción más (del APIC, de un IOAPIC): el vector n a f
     público función pon_vector(n: nat32, f: nat64)
         pon_puerta(n, f, 0)
+    fin
+
+    ; [etapa 3] la IDT, en otro procesador (la misma para todos)
+    público función carga_idt()
+        ensamblador
+            lidt {idtr}
+        fin
     fin
 
     ; monta la IDT con las 32 excepciones y la carga

@@ -134,9 +134,10 @@ módulo Monton64
             f := pide()
             si f = 0 o no mapea(v + (i << 12), f, K4, datos()) entonces
                 ; (lo ya puesto se devuelve)
+                ; (nadie las ha visto aún: sin avisar a los demás procesadores)
                 mientras i > 0 hacer
                     i := i - 1
-                    devuelve(desmapea(v + (i << 12)))
+                    devuelve(desmapea_aquí(v + (i << 12)))
                 fin
                 si f <> 0 entonces devuelve(f) fin
                 devolver 0
@@ -237,12 +238,20 @@ módulo Monton64
                 estropeado(d, "se ha escrito más allá de su final (la guarda está pisada)")
             fin
             p32(d, LIBRE)
+            páginas := páginas - pág
+            en_uso := en_uso - 1
+            octetos := octetos - n
+            liberaciones := liberaciones + 1
+            suelta(dirección(cerrojo), b)
+            ; [etapa 3] fuera de las tablas sin el cerrojo tomado: desmapea avisa a
+            ; los demás procesadores, y espera a que vacíen su TLB (la zona de los
+            ; bloques grandes no se reutiliza: nadie más puede estar en ellas)
             i := 0
             mientras i < pág hacer
                 devuelve(desmapea(d - CABECERA + (i << 12)))
                 i := i + 1
             fin
-            páginas := páginas - pág
+            devolver
         sino
             si l32(d) <> USADO o l64(d + 8) <> sello(d) entonces
                 suelta(dirección(cerrojo), b)

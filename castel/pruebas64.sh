@@ -244,10 +244,10 @@ if command -v qemu-system-x86_64 > /dev/null; then
       fi
     fi
   else ko "nucleo64/hola.cas no se compila igual con ccastel.py y NASM que con CASTEL64 y ENSAMB64: $(head -2 $W/comp.txt | paste -sd ' ')"; fi
-  # [HISPA-64] el núcleo de verdad, etapas 0, 1 y 2 (docs/64/HISPA-64.md): sus pruebas,
+  # [HISPA-64] el núcleo de verdad, etapas 0 a 3 (docs/64/HISPA-64.md): sus pruebas,
   # con CASTEL64 y ENSAMB64 (que tienen que sacar lo mismo que ccastel.py y NASM)
   if CASTEL64=$W/castel64 ENSAMB64=$W/ensamb64 $AQUI/nucleo64/pruebas.sh $W/h64 > $W/h64.txt 2>&1; then
-    ok "Hispa-64, etapas 0, 1 y 2 (nucleo64/pruebas.sh): $(tail -1 $W/h64.txt | sed 's/^== Hispa-64: //; s/ ==$//') (en la mitad alta; multiboot con 128 MB, 3 GB y 8 GB; la memoria física, las páginas, el montón; excepciones, doble fallo y NMI con IST; UEFI con OVMF y GRUB; ACPI, el tic del APIC, el IOAPIC, el teclado, el botón y PCI con pc y q35, con y sin HPET; igual con CASTEL64 y ENSAMB64)"
-  else ko "Hispa-64, etapas 0, 1 y 2 (nucleo64/pruebas.sh): $(grep -a 'MAL:' $W/h64.txt | head -3 | paste -sd ' ')"; fi
+    ok "Hispa-64, etapas 0 a 3 (nucleo64/pruebas.sh): $(tail -1 $W/h64.txt | sed 's/^== Hispa-64: //; s/ ==$//') (en la mitad alta; multiboot con 128 MB, 3 GB y 8 GB; la memoria física, las páginas, el montón; excepciones, doble fallo y NMI con IST; UEFI con OVMF y GRUB; ACPI, el tic del APIC, el IOAPIC, el teclado, el botón y PCI con pc y q35, con y sin HPET; 1, 2, 4 y 8 procesadores, los hilos y el planificador, la TLB de los demás y los pánicos en otro procesador; igual con CASTEL64 y ENSAMB64)"
+  else ko "Hispa-64, etapas 0 a 3 (nucleo64/pruebas.sh): $(grep -a 'MAL:' $W/h64.txt | head -3 | paste -sd ' ')"; fi
 fi
 }

@@ -1,6 +1,6 @@
 ; =============================================================================
-;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 2 (ACPI, las
-;  interrupciones, el tiempo y PCIe).
+;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 3 (varios
+;  procesadores y el planificador).
 ;  Lo carga GRUB por multiboot2 (con UEFI de 64 bits: \EFI\BOOT\BOOTX64.EFI; o
 ;  con la BIOS) o QEMU con -kernel (multiboot), en 1 MB; corre en la mitad alta
 ;  (0xFFFFFFFF80100000: «modelo hispa64», que también pasa al modo largo con
@@ -17,7 +17,11 @@
 ;   - [etapa 2] las tablas de ACPI (acpi64.cas), los relojes (reloj64.cas: el
 ;     HPET o el de ACPI, el TSC, el CMOS), el APIC local y los IOAPIC
 ;     (apic64.cas: el tic del núcleo, el teclado PS/2, la SCI y el botón de
-;     encendido), PCI y PCIe (pci64.cas) y lo de cada procesador (porcpu64.cas).
+;     encendido), PCI y PCIe (pci64.cas) y lo de cada procesador (porcpu64.cas);
+;   - [etapa 3] los demás procesadores (smp64.cas: encenderlos, vaciar su TLB,
+;     pararlos), los hilos del núcleo y el planificador (hilos64.cas), los
+;     sucesos, los semáforos y los mutex (sinc64.cas), y sus pruebas
+;     (prsmp64.cas); desde ahí, lo que sigue corre en el hilo «principal».
 ;  Línea de órdenes: «apagar» (acaba en QEMU por el puerto 0xF4: las pruebas) y
 ;  «prueba=X», que provoca algo para ver lo que dice: pagina, division, gp, ud
 ;  (las excepciones de siempre), doble (un doble fallo: desbordar la pila del
@@ -27,7 +31,11 @@
 ;  dosveces (liberar un bloque dos veces); y de la etapa 2: teclado (esperar
 ;  teclas), boton (esperar el botón de encendido: apaga por ACPI), acpiapagar
 ;  (apagar por ACPI, ya), sintic (sin el temporizador del APIC); y «sinmedir»
-;  (no se cuentan los tics de un segundo: las pruebas de las excepciones).
+;  (no se cuentan los tics de un segundo: las pruebas de las excepciones); de
+;  la etapa 3: panicoap (un fallo de página en otro procesador), paradaap (una
+;  parada del núcleo en otro procesador), pilahilo (desbordar la pila de un
+;  hilo), «sinsmp» (sin encender los demás procesadores), «sinpruebas» (sin
+;  las pruebas de los hilos) y «ocioso=hlt» u «ocioso=mwait» (el reposo).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Hispa64
@@ -35,9 +43,9 @@ módulo Hispa64
     modelo hispa64
 
     importar Cifras64, Cpu64, Pant64, Excep64, Gdt64, Fisica64, Pagina64, Monton64, Nombre64, PrMem64
-    importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64
+    importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64, Cerrojo, Hilos64, Smp64, PrSmp64
 
-    constante VERSIÓN = "0.2.0"
+    constante VERSIÓN = "0.3.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 8
@@ -444,6 +452,92 @@ módulo Hispa64
                 db 0x0F, 0x0B
             fin
         fin
+        ; [etapa 3] en otro procesador
+        si tiene("prueba=panicoap") entonces provoca_smp(1) fin
+        si tiene("prueba=paradaap") entonces provoca_smp(2) fin
+        si tiene("prueba=pilahilo") entonces provoca_smp(3) fin
+    fin
+
+    ; ---- [etapa 3] los demás procesadores y el planificador ----
+    función lista_apic(tipo_: nat32)
+        variable i, n: nat32
+        variable c: puntero a Cpu
+        n := 0
+        i := 0
+        mientras i < n_cpus hacer
+            c := cpu(i)
+            si c.en_marcha <> 0 y (tipo_ = 0 o c.tipo_núcleo = tipo_) entonces
+                si n > 0 entonces escribir(",") fin
+                si n < 16 entonces escribir(" ", c.apic) fin
+                si n = 16 entonces escribir(" ...") fin
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función etapa3()
+        variable n: nat32
+        tsc_antes := tsc()
+        mira_reposo(tiene("ocioso=hlt"), tiene("ocioso=mwait"))
+        si no arranca_planificador() entonces para_ya("no hay memoria para el planificador") fin
+        si tiene("sinsmp") entonces
+            arranca_solo()
+        sino
+            arranca_aps()
+        fin
+        n := nat32(n_en_marcha)
+        pon_color(14, 0)
+        escribir("Procesadores: ", n)
+        si n = 1 entonces escribir(" en marcha (APIC") sino escribir(" en marcha (APIC") fin
+        lista_apic(0)
+        escribir(")")
+        pon_color(7, 0)
+        si no_contestan > 0 entonces escribir("; ", no_contestan, " no contestan (INIT-SIPI-SIPI, 3 s)") fin
+        si de_más > 0 entonces escribir("; ", de_más, " más en la MADT, sin encender (como mucho ", MAX_CPUS, ")") fin
+        si tiene("sinsmp") entonces escribir(" (sinsmp: los demás, apagados)") fin
+        escribir("\n")
+        si n_p + n_e > 0 entonces
+            escribir("  híbrido: ", n_p, " de rendimiento (P: APIC")
+            lista_apic(0x40)
+            escribir(") y ", n_e, " eficientes (E: APIC")
+            lista_apic(0x20)
+            escribir(")\n")
+        fin
+        si trampolín <> 0 entonces
+            escribir("  con INIT-SIPI-SIPI y el trampolín en ")
+            hex(trampolín)
+            escribir(" (16, 32 y 64 bits); cada uno con su GDT, su TSS y sus pilas IST, la PAT, NX y WP, su APIC local y su tic\n")
+        fin
+        escribir("Planificador: una cola por procesador, con robo de trabajo; 4 prioridades; turnos de ", CUANTO * 10, " ms; la tarea ociosa, con ", reposo, "\n")
+        si no tiene("sinpruebas") entonces pruebas_smp() fin
+        carga()
+    fin
+
+    ; lo ocupado que ha estado cada procesador desde que se encendió (o desde la última vez)
+    variable tsc_antes: nat64
+    variable ocioso_antes: arreglo [64] de nat64
+
+    función carga()
+        variable i: nat32
+        variable t, d, oc: nat64
+        variable c: puntero a Cpu
+        t := tsc()
+        d := t - tsc_antes
+        escribir("Carga (ocupado):")
+        i := 0
+        mientras i < n_cpus hacer
+            c := cpu(i)
+            si c.en_marcha <> 0 entonces
+                oc := c.tsc_ocioso - ocioso_antes[i]
+                ocioso_antes[i] := c.tsc_ocioso
+                si oc > d entonces oc := d fin
+                si d > 0 entonces escribir(" ", i, ": ", ((d - oc) * 100) div d, " %") fin
+            fin
+            i := i + 1
+        fin
+        escribir("\n")
+        tsc_antes := t
     fin
 
     ; ---- [etapa 2] ACPI, los relojes, las interrupciones y PCI ----
@@ -499,7 +593,7 @@ módulo Hispa64
             si n_cpu > 16 entonces escribir("...") fin
             escribir(")")
             si n_cpu_más > 0 entonces escribir(", y ", n_cpu_más, " que se pueden encender") fin
-            si híbrido entonces escribir("; híbrido: cuáles son P y cuáles E se sabrá al arrancarlos (etapa 3)") fin
+            si híbrido entonces escribir("; híbrido: cuáles son P y cuáles E, al encenderlos (más abajo)") fin
             escribir("\n  APIC local en ")
             hex(lapic_fís)
             si con_8259 entonces escribir("; con 8259 (se tapa)") fin
@@ -662,7 +756,7 @@ módulo Hispa64
         variable t0, k0, k1, t1: nat64
         variable s0, s1, i: nat32
         variable c: puntero a Cpu
-        prepara_bsp(k_pila_fin)
+        pon_pila_bsp(k_pila_fin)
         lee_acpi(rsdp)
         prepara_apic()
         cuenta_acpi()
@@ -832,11 +926,35 @@ módulo Hispa64
                     s0 := s
                     escribir("\rReloj: ")
                     escribe_hora()
-                    escribir(" (tics: ", mis_tics(), ")")
+                    escribir(" (tics: ", mis_tics(), "; ")
+                    carga_corta()
+                    escribir(")   ")
                 fin
             fin
-            si tic_va entonces espera_int() sino pausa() fin
+            si va y tic_va entonces duerme_ms(10) sino si tic_va entonces espera_int() sino pausa() fin
         fin
+    fin
+
+    ; lo ocupado de cada procesador en el último rato, corto (para la línea del reloj)
+    función carga_corta()
+        variable i: nat32
+        variable t, d, oc: nat64
+        variable c: puntero a Cpu
+        t := tsc()
+        d := t - tsc_antes
+        escribir("ocupados:")
+        i := 0
+        mientras i < n_cpus y i < 16 hacer
+            c := cpu(i)
+            si c.en_marcha <> 0 entonces
+                oc := c.tsc_ocioso - ocioso_antes[i]
+                ocioso_antes[i] := c.tsc_ocioso
+                si oc > d entonces oc := d fin
+                si d > 0 entonces escribir(" ", ((d - oc) * 100) div d, "%") fin
+            fin
+            i := i + 1
+        fin
+        tsc_antes := t
     fin
 
     función pon_sci_con_botón(): bool
@@ -853,6 +971,7 @@ módulo Hispa64
             mov {info}, eax
         fin
         pon_gdt()
+        prepara_bsp()
         prepara()
         si magia = MB2 entonces lee_mb2() sino si magia = MB1 entonces lee_mb1() fin
         apagar_al_fallar := tiene("apagar")
@@ -866,7 +985,7 @@ módulo Hispa64
         pon_color(14, 0)
         escribir("Hispa-64 ", VERSIÓN, " \xC4 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n")
         pon_color(7, 0)
-        escribir("Etapa 2: ACPI, las interrupciones (APIC), el tiempo (HPET) y PCIe, en Castel de 64 bits.\n\n")
+        escribir("Etapa 3: varios procesadores y el planificador, en Castel de 64 bits.\n\n")
         ; el cargador
         escribir("Cargador: ")
         si cargador[0] <> 0 entonces escribir(cargador, ", ") fin
@@ -937,6 +1056,8 @@ módulo Hispa64
         prueba_páginas()
         prueba_montón(2000, 64)
         si tiene("prueba=monton") entonces prueba_montón(100000, 1000) fin
+        ; [etapa 3] los demás procesadores y el planificador
+        etapa3()
         ; las excepciones: un punto de parada, que se atiende y se sigue
         escribir("Excepciones: las 32 en la IDT, explicadas en español. Una int3 de prueba:\n  ")
         ensamblador
@@ -944,9 +1065,16 @@ módulo Hispa64
         fin
         provoca()
         pruebas2()
-        pon_color(10, 0)
-        escribir("Hispa-64 etapa 2: todo en orden.\n")
-        pon_color(7, 0)
+        si fallos > 0 entonces
+            pon_color(12, 0)
+            escribir("Hispa-64 etapa 3: con fallos (los «MAL» de arriba).\n")
+            pon_color(7, 0)
+            si apagar_al_fallar entonces devolver 43 fin
+        sino
+            pon_color(10, 0)
+            escribir("Hispa-64 etapa 3: todo en orden.\n")
+            pon_color(7, 0)
+        fin
         si apagar_al_fallar entonces devolver 42 fin
         en_marcha()
         devolver 0
