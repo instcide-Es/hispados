@@ -9584,6 +9584,13 @@ de ese color, en claro y en oscuro), el tamaño enorme, para zurdos;
 comprueba que sobre el asa sale la doble en diagonal y sobre el lienzo la
 cruz (en Linux, `so_anfitrion.c` dice la forma).
 
+**Pasadas** (23/11/2026; PC de Albinyana, -j 2, y aquí): punteros 136/0,
+06 168/0, panel 108/0, iconos 95/0, menu 95/0, rueda 71/0, programas 92/0,
+pantalla 98/0, pintura 73/0, correo 189/0; bloc 119/0, pluma 79/0 y
+navegador 98/0 aquí (en el PC faltan qpdf, poppler e ImageMagick: dan
+fallos que no son de esto). En el Bloc, la captura de las pestañas (bl7)
+aparta antes el ratón: la «I» tapaba su pie.
+
 ### Lo que falta
 
 - La forma que pide un programa de Windows (`SetCursor`, `LoadCursor` con
