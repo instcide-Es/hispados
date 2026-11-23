@@ -1,0 +1,79 @@
+Hispa-Pentium: arrancar por UEFI
+================================
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Esta memoria USB (y el CD) arranca de dos maneras:
+
+  - por la BIOS de siempre (o el modo «Legacy» / «CSM» de un equipo UEFI),
+    como hasta ahora;
+  - por UEFI, el arranque de los equipos de 2012 en adelante, también los
+    que no tienen BIOS de siempre (los Atom «Bay Trail» como el Acer One 10,
+    con UEFI de 32 bits, y los de 64 bits).
+
+Lo elige el equipo solo: no hay que hacer nada distinto con la memoria.
+
+
+1. Hay que apagar el «Secure Boot» (arranque seguro)
+----------------------------------------------------
+
+Hispa-Pentium no está firmado por Microsoft, así que con el «Secure Boot»
+encendido el equipo no lo arranca (dice «Secure Boot Violation», «Invalid
+signature» o se salta la memoria sin decir nada). Hay que apagarlo en la
+configuración del firmware (lo que se suele llamar «la BIOS» del equipo):
+
+  1. Encienda el equipo y pulse enseguida, varias veces, la tecla de la
+     configuración. Suele ser F2 (Acer, Asus, Dell, Toshiba, Medion), Supr
+     (los de sobremesa), F10 (HP), F1 (Lenovo ThinkPad) o Esc.
+  2. Busque la pestaña «Security» (Seguridad) o «Boot» (Arranque).
+  3. Ponga «Secure Boot» en «Disabled» (Desactivado).
+     - En los Acer (y otros con Insyde), «Secure Boot» sale en gris hasta
+       que se pone una contraseña de supervisor: «Set Supervisor Password»,
+       en «Security». Póngala, apague el Secure Boot y, si quiere, quite
+       luego la contraseña dejándola en blanco.
+     - Si pregunta por «OS Type», elija «Other OS» (no «Windows UEFI»).
+  4. Guarde y salga: F10, o «Exit Saving Changes».
+  5. Arranque de la memoria con el menú de arranque: F12 (Acer, Dell,
+     Lenovo, Toshiba), F9 (HP), F8 o F11 (Asus, Medion, MSI), Esc...
+     La memoria sale como «UEFI: <su nombre>» (y, si el equipo tiene
+     también BIOS de siempre, otra vez sin «UEFI»: cualquiera de las dos vale).
+
+Se puede volver a encender el Secure Boot cuando se quiera (para arrancar
+Windows, por ejemplo): a Windows no le pasa nada por apagarlo un rato, y
+con él encendido simplemente no arranca esta memoria.
+
+
+2. Lo que cambia arrancando por UEFI
+------------------------------------
+
+  - La pantalla: se queda en la medida que deja el firmware (casi siempre la
+    del panel). Las entradas del menú «(1024 x 600)», «(1366 x 768)»... y la
+    medida elegida en Configuración se le piden al firmware al arrancar.
+    En Configuración, Pantalla, la medida no se puede cambiar en marcha
+    (no hay BIOS): se guarda y se pone al arrancar otra vez.
+  - El modo texto (el intérprete de órdenes, la consola, INSTALAR): no hay
+    modo texto de verdad; se pinta en la pantalla gráfica, igual que se veía.
+  - Apagar, reiniciar y la batería (ACPI): igual (el núcleo le da a ACPI la
+    tabla que le pasa el firmware).
+  - El teclado: en muchos portátiles y 2 en 1 modernos el teclado de dentro
+    no es PS/2 sino USB (va) o I2C (el de algunas tabletas y 2 en 1: NO va
+    todavía). Si el teclado de dentro no responde, enchufe uno USB.
+  - El reloj del sistema (el 8254) y las interrupciones de siempre (8259):
+    casi todos los equipos UEFI los tienen. En algunos Intel de 2015 en
+    adelante el firmware para el reloj de siempre para ahorrar: si el
+    equipo se queda parado al arrancar, pruebe por la BIOS de siempre
+    (Legacy/CSM) si la tiene, y cuéntelo.
+  - Instalar en el disco duro: se puede hacer arrancando por UEFI, pero el
+    disco instalado arranca, de momento, SOLO por la BIOS de siempre
+    (Legacy/CSM). En un equipo sin Legacy/CSM, use la memoria USB.
+
+
+3. Si no arranca por UEFI
+-------------------------
+
+  - Si el equipo tiene «Legacy», «CSM» o «Launch CSM»: enciéndalo y arranque
+    por la BIOS de siempre.
+  - Con «Ver los modos de video que da el firmware (GOP)» del menú se ve qué
+    medidas da la pantalla.
+  - Con «Volver a la configuración del firmware (UEFI)» se entra en ella sin
+    tener que pulsar la tecla a tiempo.

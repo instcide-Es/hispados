@@ -1,0 +1,818 @@
+; =============================================================================
+;  termo.cas - (TERMO) lo que el núcleo de Hispa-Pentium le da a TERMO.BIN, el
+;  Termómetro (nucleo32/termo/): leer las temperaturas del procesador y lo
+;  que el servicio de ACPI ha leído de las zonas térmicas. SOLO LEE: ni un
+;  registro del procesador, ni del controlador embebido, se escribe desde
+;  aquí (lo único que se escribe es el registro índice del SMN de AMD, que
+;  no cambia nada: dice qué se va a leer). Las llamadas (usuario.cas):
+;
+;   220  un registro del procesador (MSR) de la lista de abajo: EBX el
+;        registro, ECX dónde dejarlo (8 octetos: lo bajo y lo alto)
+;        -> 1; 0 si el procesador no lo tiene (la lectura da la excepción 13
+;        y se recoge: rdmsr «seguro»); NO_VALE si no está en la lista
+;          19Ch IA32_THERM_STATUS (Intel, el núcleo que corre)
+;          1B1h IA32_PACKAGE_THERM_STATUS (Intel, todo el procesador)
+;          1A2h MSR_TEMPERATURE_TARGET (Intel: la TjMax)
+;          E7h, E8h IA32_MPERF, IA32_APERF (la frecuencia de verdad)
+;          198h IA32_PERF_STATUS, CEh MSR_PLATFORM_INFO, 17h IA32_PLATFORM_ID
+;          y EEh (Core 2: el bit de la TjMax de los de portátil)
+;   221  la configuración PCI, para leer, de la lista: el bus 0, aparato
+;        18h, función 3 (el «control varios» de los AMD de K8 a la familia
+;        16h: sus registros 00h, 08h, A4h, E4h y FCh) y el 00h del 0:0.0
+;        (quién es el puente) -> lo leído (4 octetos); NO_VALE si no vale
+;   222  el SMN de AMD: EBX la dirección, solo 00059800h (familia 17h en
+;        adelante: la temperatura, por 0:0.0 60h/64h, como amd_smn_read de
+;        Linux) y D8200CA4h (familia 15h modelos 60h-7Fh, Carrizo y
+;        Bristol Ridge: por 0:0.0 B8h/BCh, como amd_nb_index_read; antes,
+;        por error, D8200C64h, que en el ThinkPad A275 daba 114,3 °C fijos);
+;        solo con un procesador AMD y su puente (1022h) en 0:0.0 -> lo leído
+;   223  las zonas térmicas: ECX = 0 (cualquiera), EBX dónde dejar lo último
+;        que dio el servicio (1024 octetos) -> 1, o 0 si aún no hay; ECX = 1
+;        (solo el servicio de ACPI) lo da él, desde EBX -> 1 si alguien lo ha
+;        pedido en los últimos 10 s (si no, no hace falta que lo lea)
+;   225  (TERMO) la temperatura de las gráficas NVIDIA Maxwell: «Las
+;        gráficas NVIDIA», abajo
+;   224  la prueba de esfuerzo: EBX = 1, ECX 1 o 0 (cargar o parar); EBX = 0
+;        -> 1 si hay que seguir cargando (y el Termómetro ha preguntado por
+;        las zonas hace menos de 6 s: si se cuelga o se cierra, la carga para);
+;        (con la carga, también los demás procesadores: «Los otros
+;        procesadores», abajo; EBX = 4, su tabla)
+;        EBX = 5: el registro del arranque (ECX octetos como mucho, en EDX)
+;        EBX = 2: los tics que ha corrido la tarea ociosa (el «hlt»); 3: los
+;        del reloj (con los dos, lo ocupado que está el procesador)
+;        En la 220, también (Intel de Nehalem en adelante) 3F8h, 3F9h, 3FAh,
+;        3FCh, 3FDh y 3FEh: lo que lleva el paquete y el núcleo en C3, C6 y C7;
+;        y 690h, 6B0h, 6B1h: por qué se frena (PROCHOT, térmico, la alarma
+;        del regulador de tensión, los límites de potencia y de corriente)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Termo
+
+    importar Cpu, Tareas, Paginas, Mem32, Energia, Multiboot, Formato, Registro
+
+    constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
+    constante TAM_BLOQUE = 1024
+
+    variable bloque: arreglo [1024] de byte
+    variable hay_bloque: bool
+    variable visto: nat32                       ; los tics de la última vez que se pidió (223)
+    variable carga: nat32
+    variable r_cpu: arreglo [4] de nat32        ; lo que da cpuid
+    ; el rdmsr que puede fallar: dónde está y dónde se sigue (semilla.cas,
+    ; la excepción 13, mira «recupera»)
+    variable msr_ins, msr_sigue, msr_lo, msr_hi: nat32
+    variable en_msr, msr_falló: bool
+
+    función cpuid(hoja: nat32)
+        ensamblador
+            push ebx
+            mov eax, {hoja}
+            xor ecx, ecx
+            db 0x0F, 0xA2               ; cpuid
+            mov {r_cpu}, eax
+            mov {r_cpu+4}, ebx
+            mov {r_cpu+8}, ecx
+            mov {r_cpu+12}, edx
+            pop ebx
+        fin
+    fin
+
+    ; 1 Intel, 2 AMD, 0 otro
+    función fabricante(): nat32
+        cpuid(0)
+        si r_cpu[1] = 0x756E6547 y r_cpu[3] = 0x49656E69 y r_cpu[2] = 0x6C65746E entonces devolver 1 fin   ; GenuineIntel
+        si r_cpu[1] = 0x68747541 y r_cpu[3] = 0x69746E65 y r_cpu[2] = 0x444D4163 entonces devolver 2 fin   ; AuthenticAMD
+        devolver 0
+    fin
+
+    ; (semilla.cas, la excepción 13 en el núcleo) si ha sido el rdmsr de
+    ; aquí, se apunta que ha fallado y se da dónde seguir; si no, 0
+    público función recupera(eip: nat32): nat32
+        si en_msr y eip = msr_ins entonces
+            msr_falló := cierto
+            devolver msr_sigue
+        fin
+        devolver 0
+    fin
+
+    función rdmsr_seguro(m: nat32): bool
+        variable b: nat32
+        b := sin_interrupciones()
+        msr_falló := falso
+        msr_lo := 0
+        msr_hi := 0
+        en_msr := cierto
+        ensamblador
+            lea eax, [.ins]
+            mov {msr_ins}, eax
+            lea eax, [.sigue]
+            mov {msr_sigue}, eax
+            mov ecx, {m}
+        .ins:
+            db 0x0F, 0x32               ; rdmsr
+            mov {msr_lo}, eax
+            mov {msr_hi}, edx
+        .sigue:
+        fin
+        en_msr := falso
+        reponer(b)
+        devolver no msr_falló
+    fin
+
+    función msr_de_la_lista(m: nat32): bool
+        según m
+            caso 0x19C, 0x1B1, 0x1A2, 0xE7, 0xE8, 0x198, 0xCE, 0x17, 0xEE: devolver cierto
+            ; (TERMO) la residencia en los estados de reposo (Intel de Nehalem en
+            ; adelante): el paquete en C3, C6 y C7, el núcleo en C3, C6 y C7
+            caso 0x3F8, 0x3F9, 0x3FA, 0x3FC, 0x3FD, 0x3FE: devolver cierto
+            ; (TERMO) por qué se frena (Intel de Haswell en adelante): el
+            ; núcleo, la gráfica integrada y el anillo (MSR_*_PERF_LIMIT_REASONS)
+            caso 0x690, 0x6B0, 0x6B1: devolver cierto
+        fin
+        devolver falso
+    fin
+
+    función lee_pci(d: nat32): nat32
+        variable b, r: nat32
+        b := sin_interrupciones()
+        escribe_puerto(0xCF8, 4, 0x80000000 ob (d yb 0x00FFFFFC))
+        r := lee_puerto(0xCFC, 4)
+        reponer(b)
+        devolver r
+    fin
+
+    función pci_de_la_lista(d: nat32): bool
+        si d yb 3 <> 0 entonces devolver falso fin
+        si d = 0 entonces devolver cierto fin                   ; 0:0.0, quién es
+        si d yb 0xFFFFFF00 <> (0x18 << 11) ob (3 << 8) entonces devolver falso fin
+        según d yb 0xFF
+            caso 0x00, 0x08, 0xA4, 0xE4, 0xFC: devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; el SMN, por el índice y el dato del 0:0.0, de una vez
+    función lee_smn(dir: nat32): nat32
+        variable b, r, ind: nat32
+        si dir = 0x00059800 entonces ind := 0x60 sino ind := 0xB8 fin
+        b := sin_interrupciones()
+        escribe_puerto(0xCF8, 4, 0x80000000 ob ind)
+        escribe_puerto(0xCFC, 4, dir)
+        escribe_puerto(0xCF8, 4, 0x80000000 ob (ind + 4))
+        r := lee_puerto(0xCFC, 4)
+        reponer(b)
+        devolver r
+    fin
+
+
+    ; =========================================================================
+    ;  (TERMO) Los otros procesadores, solo para la prueba de esfuerzo
+    ; =========================================================================
+    ;  Hispa-Pentium usa un procesador (el «BSP»); los demás (los «AP»: los
+    ;  otros núcleos y sus hilos) se quedan como los deja la BIOS, dormidos
+    ;  esperando una señal de arranque. Para que la prueba caliente de verdad
+    ;  un portátil de 4 núcleos (el MSI GT80), al empezar la carga se les
+    ;  despierta (INIT, SIPI, SIPI a todos menos a este, como hace cualquier
+    ;  sistema) en un trampolín de dos páginas de la memoria baja (libres
+    ;  según el mapa de multiboot y lejos de lo del cargador; lo que había se
+    ;  guarda y se repone al acabar). Allí pasan a modo protegido con su GDT,
+    ;  su IDT (cualquier excepción: «hlt», nunca un triple fallo) y su pila, y
+    ;  solo hacen esto, con las interrupciones cerradas: cuentas de coma
+    ;  flotante mientras la bandera lo pida, y de vez en cuando leen su propio
+    ;  MSR 19Ch (la temperatura de su núcleo) y lo dejan en una tabla. No tocan
+    ;  nada del núcleo. Se paran: cuando se baja la bandera, o si el latido
+    ;  (cada llamada 223/224 del Termómetro) no cambia en unos 10 s (unos
+    ;  20.000 millones de ciclos); entonces «hlt». Al acabar, otro INIT los
+    ;  deja como estaban y se repone la memoria. Si algo no está (sin APIC,
+    ;  APIC apagado, sin sitio en la memoria baja), no se despierta a nadie y
+    ;  se dice por qué (224 con 4: el motivo).
+    ;  El trampolín (las dos páginas, desde B):
+    ;    +000h el código (16 bits y luego 32), +400h la GDT, +420h su GDTR,
+    ;    +430h el IDTR, +440h ORDEN (1: cargar), +444h cuántos han llegado,
+    ;    +448h el latido, +500h la IDT (32 puertas, todas a «hlt»), +800h la
+    ;    tabla (16 x 32 octetos: el APIC ID, el estado (1 cargando, 2 parado),
+    ;    las vueltas, el último 19Ch y cuántas lecturas), +1000h las pilas
+    constante AP_MAX = 16
+    variable ap_base, ap_activos, ap_motivo, ap_lapic: nat32
+    variable ap_x2: bool
+    variable ap_guardado: arreglo [8192] de byte
+
+    ; el código del trampolín: dónde empieza y acaba, y su «hlt»
+    función trampolín(ref ini: nat32, ref fin_: nat32, ref alto: nat32)
+        variable a, b, c: nat32
+        ensamblador
+            lea eax, [termo_ap_inicio]
+            mov {a}, eax
+            lea eax, [termo_ap_fin]
+            mov {b}, eax
+            lea eax, [termo_ap_alto]
+            mov {c}, eax
+            jmp termo_ap_sigue
+        termo_ap_inicio:
+            bits 16
+            cli
+            mov ax, cs
+            mov ds, ax
+            o32 lgdt [0x420]
+            mov eax, cr0
+            or al, 1
+            mov cr0, eax
+            jmp dword 0x08:(termo_ap_32 - termo_ap_inicio)
+            bits 32
+        termo_ap_32:
+            mov ax, 0x10
+            mov ds, ax
+            mov es, ax
+            mov ss, ax
+            mov fs, ax
+            mov gs, ax
+            lidt [0x430]
+            mov eax, 1
+            db 0xF0, 0x0F, 0xC1, 0x05, 0x44, 0x04, 0x00, 0x00   ; lock xadd [0x444], eax (486: a mano, el núcleo es «cpu 386»)
+            cmp eax, 16
+            jae termo_ap_alto
+            mov esp, eax
+            shl esp, 8
+            add esp, 0x1100
+            mov edi, eax
+            shl edi, 5
+            add edi, 0x800
+            mov eax, 1
+            db 0x0F, 0xA2               ; cpuid: el APIC ID, arriba de EBX
+            shr ebx, 24
+            mov [edi], ebx
+            xor ebp, ebp
+            xor eax, eax
+            db 0x0F, 0xA2
+            cmp eax, 6
+            jb termo_ap_sin_dts
+            mov eax, 6
+            db 0x0F, 0xA2
+            and eax, 1
+            mov ebp, eax                ; 1: tiene sensor (Intel: 19Ch)
+        termo_ap_sin_dts:
+            mov dword [edi+4], 1
+            fninit
+            mov eax, [0x448]
+            mov [edi+20], eax
+            db 0x0F, 0x31               ; rdtsc
+            mov [edi+24], edx
+        termo_ap_vuelta:
+            cmp dword [0x440], 1
+            jne termo_ap_para
+            mov ecx, 100000
+            fld1
+        termo_ap_carga:
+            fsqrt
+            fadd st0, st0
+            fsqrt
+            dec ecx
+            jnz termo_ap_carga
+            fstp st0
+            inc dword [edi+8]
+            mov eax, [0x448]
+            cmp eax, [edi+20]
+            je termo_ap_igual
+            mov [edi+20], eax
+            db 0x0F, 0x31
+            mov [edi+24], edx
+            jmp termo_ap_temp
+        termo_ap_igual:
+            db 0x0F, 0x31
+            sub edx, [edi+24]
+            cmp edx, 5
+            jae termo_ap_para
+        termo_ap_temp:
+            test ebp, ebp
+            jz termo_ap_vuelta
+            mov eax, [edi+8]
+            and eax, 15
+            jnz termo_ap_vuelta
+            mov ecx, 0x19C
+            db 0x0F, 0x32               ; rdmsr
+            mov [edi+12], eax
+            inc dword [edi+16]
+            jmp termo_ap_vuelta
+        termo_ap_para:
+            mov dword [edi+4], 2
+        termo_ap_alto:
+            cli
+            hlt
+            jmp termo_ap_alto
+        termo_ap_fin:
+        termo_ap_sigue:
+        fin
+        ini := a
+        fin_ := b
+        alto := c
+    fin
+    ; esperar, por el reloj del núcleo (las interrupciones van en las
+    ; llamadas): n microsegundos, de 10 ms en 10 ms (lo corto, un tic entero:
+    ; esperar de más no estorba). Por el puerto 80h (lo de siempre) en QEMU con
+    ; KVM eran más de 6 s; con tope de vueltas por si el reloj no corre
+    función espera_us(n: nat32)
+        variable t0, ticks, i: nat32
+        ticks := (n + 9999) div 10000 + 1
+        t0 := tics
+        i := 0
+        mientras tics - t0 < ticks y i < 200000000 hacer
+            i := i + 1
+        fin
+    fin
+
+    función wrmsr(m: nat32, lo: nat32, hi: nat32)
+        ensamblador
+            mov ecx, {m}
+            mov eax, {lo}
+            mov edx, {hi}
+            db 0x0F, 0x30               ; wrmsr
+        fin
+    fin
+
+    ; un IPI a todos menos a este (v: el ICR de abajo)
+    función ipi_todos(v: nat32)
+        variable p: puntero a nat32
+        variable n: nat32
+        si ap_x2 entonces
+            wrmsr(0x830, v, 0)
+            devolver
+        fin
+        p := puntero(ap_lapic + 0x310)
+        p[0] := 0
+        p := puntero(ap_lapic + 0x300)
+        p[0] := v
+        n := 0
+        mientras p[0] yb 0x1000 <> 0 y n < 100000 hacer
+            n := n + 1
+        fin
+    fin
+
+    ; ¿se solapa [a, a + n) con las dos páginas de b?
+    función solapa(b: nat32, a: nat32, n: nat32): bool
+        si a = 0 entonces devolver falso fin
+        devolver a < b + 0x2000 y a + n > b
+    fin
+
+    ; las dos páginas del trampolín: libres en el mapa, por debajo de 640 K,
+    ; y sin nada del cargador (su información, el mapa, la línea, los módulos)
+    función elige_páginas(): nat32
+        variable b, i, k, n: nat32
+        variable r: puntero a Región
+        variable dentro: bool
+        n := regiones()
+        si n = 0 entonces devolver 0 fin
+        b := 0x8F000
+        mientras b >= 0x2000 hacer
+            dentro := falso
+            para i desde 0 hasta n - 1 hacer
+                r := región(i)
+                si r <> nulo y r.clase = Multiboot.LIBRE y r.base_alta = 0 y r.base <= b y r.base + r.largo >= b + 0x2000 entonces dentro := cierto fin
+            fin
+            si dentro y (solapa(b, dirección_info(), 0x100) o solapa(b, dirección_mapa(), largo_mapa())) entonces dentro := falso fin
+            si dentro y (solapa(b, nat32(línea_del_cargador()), 0x400) o solapa(b, dirección_módulos(), módulos() * 16)) entonces dentro := falso fin
+            si dentro entonces
+                k := 0
+                mientras k < módulos() y no solapa(b, nat32(módulo_texto(k)), 0x100) hacer
+                    k := k + 1
+                fin
+                si k = módulos() entonces devolver b fin
+            fin
+            b := b - 0x1000
+        fin
+        devolver 0
+    fin
+
+    ; pone un descriptor de 8 octetos en p: la base, el límite (4 K), «clase»
+    función descriptor(p: puntero a nat32, base: nat32, clase: nat32)
+        p[0] := 0x0000FFFF ob ((base yb 0xFFFF) << 16)
+        p[1] := ((base >> 16) yb 0xFF) ob (clase << 8) ob 0x00CF0000 ob (base yb 0xFF000000)
+    fin
+
+    ; los para y los deja como estaban (INIT), y repone la memoria baja
+    función duerme_ap()
+        variable p: puntero a nat32
+        variable i, n, parados, b, x: nat32
+        ; (la llaman el Termómetro y su tarea de carga, quizá a la vez: solo una)
+        x := sin_interrupciones()
+        b := ap_base
+        ap_base := 0
+        reponer(x)
+        si b = 0 entonces devolver fin
+        p := puntero(b + 0x440)
+        p[0] := 0
+        n := 0
+        parados := 0
+        mientras n < 30 hacer
+            parados := 0
+            para i desde 0 hasta AP_MAX - 1 hacer
+                p := puntero(b + 0x800 + i * 32 + 4)
+                si p[0] <> 1 entonces parados := parados + 1 fin
+            fin
+            si parados = AP_MAX entonces n := 30 sino espera_us(5000) fin
+            n := n + 1
+        fin
+        ipi_todos(0x000C4500)                   ; INIT: esperando otra vez, como los deja la BIOS
+        espera_us(10000)
+        copiar_memoria(puntero(b), puntero(dirección(ap_guardado)), 8192)
+        imprimir2("termo: AP: dormidos otra vez (%u; parados %u)\n", ap_activos, parados)
+        ap_activos := 0
+    fin
+
+    ; el latido: mientras el Termómetro pregunte, siguen
+    función late()
+        variable p: puntero a nat32
+        si ap_base = 0 entonces devolver fin
+        p := puntero(ap_base + 0x448)
+        p[0] := p[0] + 1
+    fin
+
+    ; despierta a los demás: cuántos han llegado (0: nadie; ap_motivo dice por qué)
+    función despierta_ap(): nat32
+        variable ini, fin_, alto, b, i, n, ant: nat32
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        si ap_base <> 0 entonces devolver ap_activos fin
+        ap_activos := 0
+        cpuid(1)
+        si r_cpu[3] yb 0x200 = 0 o r_cpu[3] yb 0x20 = 0 entonces
+            ap_motivo := 1                      ; sin APIC (o sin MSR)
+            devolver 0
+        fin
+        si no rdmsr_seguro(0x1B) o msr_lo yb 0x800 = 0 entonces
+            ap_motivo := 2                      ; el APIC, apagado
+            devolver 0
+        fin
+        ap_x2 := msr_lo yb 0x400 <> 0
+        si ap_x2 entonces
+            si no rdmsr_seguro(0x80F) o msr_lo yb 0x100 = 0 entonces
+                ap_motivo := 2
+                devolver 0
+            fin
+        sino
+            si ap_lapic = 0 entonces ap_lapic := mapear_aparato(msr_lo yb 0xFFFFF000, 4096) fin
+            si ap_lapic = 0 entonces
+                ap_motivo := 3                  ; no se puede ver el APIC
+                devolver 0
+            fin
+            p := puntero(ap_lapic + 0xF0)
+            si p[0] yb 0x100 = 0 entonces
+                ap_motivo := 2
+                devolver 0
+            fin
+        fin
+        b := elige_páginas()
+        si b = 0 entonces
+            ap_motivo := 4                      ; sin sitio en la memoria baja
+            devolver 0
+        fin
+        trampolín(ini, fin_, alto)
+        si fin_ - ini > 0x400 entonces
+            ap_motivo := 5
+            devolver 0
+        fin
+        ; lo que había, guardado; y el trampolín, puesto
+        copiar_memoria(puntero(dirección(ap_guardado)), puntero(b), 8192)
+        llenar(puntero(b), 8192, 0)
+        copiar_memoria(puntero(b), puntero(ini), fin_ - ini)
+        descriptor(puntero(b + 0x408), b, 0x9A)         ; el código (base b)
+        descriptor(puntero(b + 0x410), b, 0x92)         ; los datos
+        q := puntero(b + 0x420)
+        q[0] := 23
+        q[1] := 0
+        p := puntero(b + 0x422)
+        p[0] := b + 0x400
+        q := puntero(b + 0x430)
+        q[0] := 255
+        q[1] := 0
+        p := puntero(b + 0x432)
+        p[0] := b + 0x500
+        para i desde 0 hasta 31 hacer
+            p := puntero(b + 0x500 + i * 8)
+            p[0] := 0x00080000 ob ((alto - ini) yb 0xFFFF)
+            p[1] := 0x00008E00
+        fin
+        p := puntero(b + 0x440)
+        p[0] := 1                                       ; ORDEN: cargar
+        p[1] := 0
+        p[2] := 1
+        ap_base := b
+        ; INIT, y dos SIPI al trampolín (el vector: la página)
+        ipi_todos(0x000C4500)
+        espera_us(10000)
+        ipi_todos(0x000C4600 ob (b >> 12))
+        espera_us(300)
+        ipi_todos(0x000C4600 ob (b >> 12))
+        ; los que lleguen en 200 ms (a cada uno, se le espera; el que no, no está)
+        p := puntero(b + 0x444)
+        ant := 0
+        n := 0
+        mientras n < 20 hacer
+            espera_us(10000)
+            n := n + 1
+        fin
+        ap_activos := p[0]
+        si ap_activos > AP_MAX entonces ap_activos := AP_MAX fin
+        si ap_activos = 0 entonces
+            ap_motivo := 6                      ; nadie ha contestado (un solo procesador)
+            duerme_ap()
+            devolver 0
+        fin
+        ap_motivo := 0
+        imprimir2("termo: AP: el trampolín en %xh; han llegado %u procesadores más\n", b, ap_activos)
+        devolver ap_activos
+    fin
+
+    ; =========================================================================
+    ;  (TERMO) La temperatura de las gráficas NVIDIA Maxwell (GM204: GTX
+    ;  970M/980M del MSI GT80; y GM107), SOLO LEER, como nouveau y envytools
+    ;  (ptherm.xml): de cada aparato 10DE de clase 03, las comprobaciones de
+    ;  antes (encendida en D0, la memoria activada, BAR0 de memoria de 32 bits,
+    ;  PMC_BOOT_0 de un GM204 o GM107, el fusible del sensor calibrado y el
+    ;  sensor encendido y sin forzar) y solo entonces la temperatura
+    ;  (BAR0+20400h). Nunca se escribe en la tarjeta: si el sensor está apagado
+    ;  o forzado, se dice. Solo se leen estos desplazamientos del BAR0: 0,
+    ;  212A8h, 20008h, 20400h, 20408h, 20074h, 20414h, 204C0h y 20480h; y, en
+    ;  las Pascal (GP10x, 13xh: la GTX 1050 del ASUS GL553V), 20460h (válida
+    ;  si el bit 29). Antes de nada, el puerto del que cuelga: si su enlace
+    ;  está apagado o no activo (Optimus: la gráfica dormida), no se toca
+    ;  nada (ni se la despierta: ni _PS0 ni _DSM ni PMCSR).
+    ;  La llamada 225: EBX el número de la gráfica (0, 1...), ECX dónde dejar
+    ;  32 octetos (Ficha_gpu: el bus/aparato/función, el fabricante y el
+    ;  modelo, el estado (0 bien; 1 apagada (D3), 2 sin la memoria activada,
+    ;  3 BAR0 raro, 4 no es un GM204/GM107 ni una Pascal, 5 sin fusible, 6
+    ;  sensor apagado, 7 sensor forzado, 8 lectura imposible, 9 dormida (el
+    ;  enlace del puerto, apagado: Optimus)), PMC_BOOT_0, el sensor (20008h), la
+    ;  temperatura, el crítico (20408h) y el frenado (20074h)) -> 1, o 0 si no
+    ;  hay tantas
+    ; =========================================================================
+    constante GPU_MAX = 4
+    variable gpu_bdf: arreglo [4] de nat32
+    variable gpu_pag0, gpu_pag20, gpu_pag21: arreglo [4] de nat32     ; las páginas del BAR0, vistas (0: sin ver)
+    variable gpu_cuantas: nat32
+    variable gpu_puerto: arreglo [4] de nat32     ; el puente del que cuelga (bus/aparato/función; 0: ninguno)
+    variable gpu_buscado: bool
+
+    ; el puente del bus 0 cuyo bus de detrás es «bus» (0 si no hay)
+    función puerto_de(bus: nat32): nat32
+        variable ap, f, d: nat32
+        para ap desde 0 hasta 31 hacer
+            para f desde 0 hasta 7 hacer
+                d := (ap << 11) ob (f << 8)
+                si lee_pci(d) yb 0xFFFF <> 0xFFFF y (lee_pci(d ob 0x0C) >> 16) yb 0x7F = 1 y (lee_pci(d ob 0x18) >> 8) yb 0xFF = bus entonces devolver d ob 0x80000000 fin
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; ¿está despierto el enlace del puerto? (su capacidad PCI Express, la 10h:
+    ; Link Disable apagado y, si sabe decirlo, el enlace de datos activo)
+    función enlace_vivo(p: nat32): bool
+        variable d, cap, n, v: nat32
+        si p = 0 entonces devolver cierto fin
+        d := p yb 0x00FFFFFF
+        si lee_pci(d ob 4) yb 0x00100000 = 0 entonces devolver cierto fin
+        cap := lee_pci(d ob 0x34) yb 0xFC
+        n := 0
+        mientras cap >= 0x40 y n < 48 hacer
+            v := lee_pci(d ob cap)
+            si v yb 0xFF = 0x10 entonces
+                si lee_pci(d ob (cap + 0x10)) yb 0x10 <> 0 entonces devolver falso fin      ; Link Disable
+                si lee_pci(d ob (cap + 0x0C)) yb 0x00100000 <> 0 y lee_pci(d ob (cap + 0x10)) yb 0x20000000 = 0 entonces devolver falso fin   ; DLL Link Active
+                devolver cierto
+            fin
+            cap := (v >> 8) yb 0xFC
+            n := n + 1
+        fin
+        devolver cierto
+    fin
+
+    ; las NVIDIA de clase 03 de los buses 0 a 63 (función 0)
+    función busca_gpu()
+        variable bus, ap, v, c: nat32
+        gpu_buscado := cierto
+        gpu_cuantas := 0
+        para bus desde 0 hasta 63 hacer
+            para ap desde 0 hasta 31 hacer
+                v := lee_pci((bus << 16) ob (ap << 11))
+                si v yb 0xFFFF = 0x10DE y gpu_cuantas < GPU_MAX entonces
+                    c := lee_pci((bus << 16) ob (ap << 11) ob 8)
+                    si c >> 24 = 3 entonces
+                        gpu_bdf[gpu_cuantas] := (bus << 16) ob (ap << 11)
+                        si bus <> 0 entonces gpu_puerto[gpu_cuantas] := puerto_de(bus) sino gpu_puerto[gpu_cuantas] := 0 fin
+                        gpu_cuantas := gpu_cuantas + 1
+                    fin
+                fin
+            fin
+        fin
+    fin
+
+    ; una palabra del BAR0 (de la lista), con sus páginas ya vistas
+    función gpu_lee(i: nat32, des: nat32): nat32
+        variable p: puntero a nat32
+        si des < 0x1000 entonces
+            p := puntero(gpu_pag0[i] + des)
+        sino si des >= 0x21000 entonces
+            p := puntero(gpu_pag21[i] + (des - 0x21000))
+        sino
+            p := puntero(gpu_pag20[i] + (des - 0x20000))
+        fin
+        devolver p[0]
+    fin
+
+    función atender_gpu(i: nat32, dest: nat32): nat32
+        variable p: puntero a nat32
+        variable d, v, cap, n, bar, boot, chip: nat32
+        si no usuario_puede(actual.cr3, dest, 32, cierto) entonces devolver NO_VALE fin
+        si no gpu_buscado entonces busca_gpu() fin
+        si i >= gpu_cuantas entonces devolver 0 fin
+        p := puntero(dest)
+        llenar(puntero(dest), 32, 0)
+        d := gpu_bdf[i]
+        p[0] := d
+        ; 1. (Optimus) el enlace del puerto, despierto; y la gráfica, contestando
+        si no enlace_vivo(gpu_puerto[i]) o lee_pci(d) yb 0xFFFF = 0xFFFF entonces
+            p[2] := 9
+            devolver 1
+        fin
+        p[1] := lee_pci(d)
+        ; 2. encendida (D0), por su capacidad de energía (la 01)
+        si lee_pci(d ob 4) yb 0x00100000 <> 0 entonces
+            cap := lee_pci(d ob 0x34) yb 0xFC
+            n := 0
+            mientras cap >= 0x40 y n < 48 hacer
+                v := lee_pci(d ob cap)
+                si v yb 0xFF = 1 entonces
+                    si lee_pci(d ob (cap + 4)) yb 3 <> 0 entonces
+                        p[2] := 1
+                        devolver 1
+                    fin
+                    n := 48
+                sino
+                    cap := (v >> 8) yb 0xFC
+                    n := n + 1
+                fin
+            fin
+        fin
+        ; 3. la memoria, activada (no se activa)
+        si lee_pci(d ob 4) yb 2 = 0 entonces
+            p[2] := 2
+            devolver 1
+        fin
+        ; 4. BAR0: de memoria, 32 bits, sin «prefetch», alineado a 16 MB
+        bar := lee_pci(d ob 0x10)
+        si bar yb 0xF <> 0 o bar yb 0x00FFFFFF <> 0 o bar = 0 entonces
+            p[2] := 3
+            devolver 1
+        fin
+        si gpu_pag0[i] = 0 entonces
+            gpu_pag0[i] := mapear_aparato(bar, 4096)
+            gpu_pag20[i] := mapear_aparato(bar + 0x20000, 4096)
+            gpu_pag21[i] := mapear_aparato(bar + 0x21000, 4096)
+        fin
+        si gpu_pag0[i] = 0 o gpu_pag20[i] = 0 o gpu_pag21[i] = 0 entonces
+            p[2] := 3
+            devolver 1
+        fin
+        ; 5. PMC_BOOT_0: un GM204 (124h) o un GM107 (117h)
+        boot := gpu_lee(i, 0)
+        p[3] := boot
+        chip := (boot yb 0x1FF00000) >> 20
+        si boot <> 0xFFFFFFFF y chip >= 0x130 y chip <= 0x13B entonces
+            ; las Pascal (GP10x): 20460h, válida si el bit 29; (v y 1FFF8h) >> 8, °C
+            v := gpu_lee(i, 0x20460)
+            p[4] := v
+            si v yb 0x20000000 = 0 entonces
+                p[2] := 6
+                devolver 1
+            fin
+            v := (v yb 0x1FFF8) >> 8
+            p[5] := v
+            si v > 130 entonces p[2] := 8 fin
+            devolver 1
+        fin
+        si boot = 0xFFFFFFFF o (chip <> 0x124 y chip <> 0x117) entonces
+            p[2] := 4
+            devolver 1
+        fin
+        ; 6. el fusible del sensor calibrado
+        si gpu_lee(i, 0x212A8) <> 1 entonces
+            p[2] := 5
+            devolver 1
+        fin
+        ; 7. el sensor: encendido (bit 31) y sin forzar (bit 15)
+        v := gpu_lee(i, 0x20008)
+        p[4] := v
+        si v yb 0x80000000 = 0 entonces
+            p[2] := 6
+            devolver 1
+        fin
+        si v yb 0x8000 <> 0 entonces
+            p[2] := 7
+            devolver 1
+        fin
+        v := gpu_lee(i, 0x20400) yb 0xFF
+        p[5] := v
+        si v > 130 entonces p[2] := 8 fin
+        p[6] := gpu_lee(i, 0x20408)
+        p[7] := gpu_lee(i, 0x20074)
+        devolver 1
+    fin
+
+    ; las llamadas 220 a 224 (usuario.cas)
+    público función atender_termo(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        variable p: puntero a nat32
+        variable k: nat32
+        según n
+            caso 220:
+                si no msr_de_la_lista(a) entonces devolver NO_VALE fin
+                si no usuario_puede(actual.cr3, b, 8, cierto) entonces devolver NO_VALE fin
+                si fabricante() = 0 entonces devolver 0 fin
+                cpuid(1)
+                si r_cpu[3] yb 0x20 = 0 entonces devolver 0 fin    ; sin MSR
+                si no rdmsr_seguro(a) entonces devolver 0 fin
+                p := puntero(b)
+                p[0] := msr_lo
+                p[1] := msr_hi
+                devolver 1
+            caso 221:
+                si no pci_de_la_lista(a) entonces devolver NO_VALE fin
+                devolver lee_pci(a)
+            caso 222:
+                si a <> 0x00059800 y a <> 0xD8200CA4 entonces devolver NO_VALE fin
+                si fabricante() <> 2 entonces devolver NO_VALE fin
+                si lee_pci(0) yb 0xFFFF <> 0x1022 entonces devolver NO_VALE fin
+                devolver lee_smn(a)
+            caso 223:
+                si c = 1 entonces
+                    si actual.id <> servicio_acpi() entonces devolver NO_VALE fin
+                    si no usuario_puede(actual.cr3, a, TAM_BLOQUE, falso) entonces devolver NO_VALE fin
+                    copiar_memoria(puntero(dirección(bloque)), puntero(a), TAM_BLOQUE)
+                    hay_bloque := cierto
+                    si visto <> 0 y tics - visto < 10 * HZ entonces devolver 1 fin
+                    devolver 0
+                fin
+                si no usuario_puede(actual.cr3, a, TAM_BLOQUE, cierto) entonces devolver NO_VALE fin
+                visto := tics
+                si visto = 0 entonces visto := 1 fin
+                late()                                  ; (TERMO) los otros procesadores siguen
+                si no hay_bloque entonces devolver 0 fin
+                copiar_memoria(puntero(a), puntero(dirección(bloque)), TAM_BLOQUE)
+                devolver 1
+            caso 225:
+                devolver atender_gpu(a, b)              ; (TERMO) las gráficas NVIDIA, solo leer
+            caso 224:
+                ; (TERMO) 2: los tics de la tarea ociosa; 3: los del reloj (la
+                ; ocupación del procesador: lo que no ha corrido la ociosa)
+                si a = 2 entonces devolver tics_de_la_ociosa() fin
+                si a = 3 entonces devolver tics fin
+                ; (TERMO) 4: lo de los otros procesadores (528 octetos: cuántos,
+                ; el motivo si no, la página del trampolín, 0, y su tabla)
+                si a = 4 entonces
+                    si no usuario_puede(actual.cr3, b, 528, cierto) entonces devolver NO_VALE fin
+                    p := puntero(b)
+                    p[0] := ap_activos
+                    p[1] := ap_motivo
+                    p[2] := ap_base
+                    p[3] := 0
+                    si ap_base <> 0 entonces
+                        copiar_memoria(puntero(b + 16), puntero(ap_base + 0x800), 512)
+                    sino
+                        llenar(puntero(b + 16), 512, 0)
+                    fin
+                    devolver ap_activos
+                fin
+                ; (TERMO) 5: el registro del arranque (lo de ARRANQUE.TXT: el
+                ; USB, los discos, las unidades), hasta c octetos en b -> los
+                ; copiados. Para enseñarlo en pantalla si la memoria USB no
+                ; aparece (y entonces no hay ARRANQUE.TXT que leer)
+                si a = 5 entonces
+                    k := registro_largo
+                    si k > c entonces k := c fin
+                    si k = 0 entonces devolver 0 fin
+                    si no usuario_puede(actual.cr3, b, k, cierto) entonces devolver NO_VALE fin
+                    copiar_memoria(puntero(b), puntero(dirección(registro)), k)
+                    devolver k
+                fin
+                si a = 1 entonces
+                    carga := b yb 1
+                    si carga = 1 entonces
+                        despierta_ap()                  ; (TERMO) los demás procesadores, a cargar también
+                        visto := tics
+                    sino
+                        duerme_ap()
+                    fin
+                    devolver carga
+                fin
+                si carga = 1 y tics - visto < 6 * HZ entonces
+                    late()
+                    devolver 1
+                fin
+                si carga = 1 entonces imprimir2("termo: la carga se para: el Termómetro no pregunta (tics %u, la última vez %u)\n", tics, visto) fin
+                carga := 0
+                duerme_ap()
+                devolver 0
+        fin
+        devolver NO_VALE
+    fin
+
+fin Termo.

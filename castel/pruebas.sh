@@ -252,6 +252,11 @@
 #  42. (CORREO, SOLO=correo) Correo, el cliente de correo (CORREO.BIN; pruebas_correo.sh): el
 #      núcleo MIME/HTML/vCard y el IMAP con ASan y fuzz, el servidor de pruebas propio
 #      (IMAP, SMTP, POP3 con TLS), las órdenes y la ventana en QEMU, y lo que tarda en un Atom.
+#  48. (UEFI, SOLO=uefi) Arrancar por UEFI (pruebas_uefi.sh): la memoria USB con
+#      BOOTX64.EFI (GRUB EFI, multiboot2) en OVMF de 64 bits (y de 32, si hay su
+#      GRUB): el escritorio a la medida del GOP, ACPI.BIN con la RSDP de GRUB y la
+#      batería de prueba, los discos SATA y USB, la consola de texto pintada en la
+#      pantalla del firmware; la misma memoria por la BIOS; y el CD por UEFI.
 #  47. (ICONOS, SOLO=iconos) Los iconos del tapiz (pruebas_iconos.sh): 30 a 1024 x 600 y
 #      a 800 x 600, ninguno en la barra ni en el dock (mira_iconos.py); organizar por
 #      nombre, tipo, tamaño y fecha; arrastrar; la cuadrícula, la automática, el teclado,
@@ -321,6 +326,14 @@
 #      ventana a pantalla completa con el ratón de los juegos y DirectInput,
 #      UDP de cliente y de servidor, y el sonido (la mezcla en su hilo,
 #      waveOut, el CD de sonido por MCI).
+#  46. (TERMO, SOLO=termo) El Termómetro (TERMO.BIN, nucleo32/termo/; pruebas_termo.sh): en el
+#      anfitrión, el veredicto con los registros de equipos de verdad (HP Mini, Toshiba, ThinkPad),
+#      la TjMax, el terminal de SSH.BIN (vt.c, con htop, vim y less de verdad) y el receptor de
+#      «Enviar a Carlos» (subir.php); en QEMU, la memoria USB que lo abre al arrancar, la zona
+#      térmica de mentira de ACPI, la parada de seguridad, el registro cada 2 s, lo ocupado, sin
+#      repintar por el ratón, el apagón a mitad de la carga (FAT sana, .LOG y .CSV al día), el aviso
+#      al volver, «Enviar a Carlos» por HTTPS y «Terminal» (SSH con la llave de la memoria contra un
+#      sshd propio: xterm-256color, htop, vim, less, las teclas y window-change).
 #  39. (JUEGOS, SOLO=juegos) Los juegos (el paquete «juegos», nucleo32/juegos/;
 #      pruebas_juegos.sh): la física del pinball en el anfitrión (no atraviesa,
 #      conserva, el flipper golpea), los niveles de Almacén, el paquete, el
@@ -395,6 +408,7 @@
 #   SOLO=pluma ./pruebas.sh       la primera y la 41 (PLUMA32: Pluma 2; pruebas_pluma.sh)
 #   SOLO=oficina ./pruebas.sh     la primera y la 40 (OFICINA2: la oficina 1.1 en HVPRUN; pruebas_oficina.sh)
 #   SOLO=correo ./pruebas.sh      la primera y la 42 (CORREO: el cliente de correo; pruebas_correo.sh)
+#   SOLO=termo ./pruebas.sh       la primera y la 46 (TERMO: el Termómetro y su memoria USB; pruebas_termo.sh)
 #   SOLO=agenda ./pruebas.sh      la primera y la 43 (AGENDA: la Agenda; pruebas_agenda.sh)
 #   SOLO=cuentas ./pruebas.sh     la primera y la 44 (CUENTAS32: Cuentas 2; pruebas_cuentas.sh)
 #   SOLO=pintura ./pruebas.sh     la primera y la 45 (PINTURA32: Pintura 2; pruebas_pintura.sh)
@@ -458,6 +472,8 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_pluma.sh           # (PLUMA32) la parte 41, como parte_pluma
 . $AQUI/pruebas_oficina.sh         # (OFICINA2) la parte 40, como parte_oficina
 . $AQUI/pruebas_correo.sh          # (CORREO) la parte 42, como parte_correo
+. $AQUI/pruebas_termo.sh           # (TERMO) la parte 46, como parte_termo
+. $AQUI/pruebas_uefi.sh            # (UEFI) la parte 48, como parte_uefi
 . $AQUI/pruebas_agenda.sh          # (AGENDA) la parte 43, como parte_agenda
 . $AQUI/pruebas_cuentas.sh         # (CUENTAS32) la parte 44, como parte_cuentas
 . $AQUI/pruebas_pintura.sh         # (PINTURA32) la parte 45, como parte_pintura
@@ -487,7 +503,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|touchpad|i2chid) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|touchpad|i2chid|uefi|termo) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5916,6 +5932,8 @@ if parte08 pluma; then parte_pluma; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Plu
 # ---------------------------------------- 40. (OFICINA2) la oficina 1.1 en HVPRUN
 if parte08 oficina; then parte_oficina; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la oficina 1.1)"; fi
 if parte08 correo; then parte_correo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Correo)"; fi   # (CORREO)
+if parte08 termo; then parte_termo; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Termómetro)"; fi   # (TERMO) la 46
+if parte08 uefi; then parte_uefi; else echo "  (SOLO=${SOLO08:-$SOLO}: sin UEFI)"; fi   # (UEFI) la 48
 if parte08 agenda; then parte_agenda; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la Agenda)"; fi   # (AGENDA) la parte 43
 if parte08 cuentas; then parte_cuentas; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Cuentas 2)"; fi   # (CUENTAS32) la 44
 if parte08 pintura; then parte_pintura; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Pintura 2)"; fi   # (PINTURA32) la 45

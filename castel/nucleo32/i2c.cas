@@ -32,8 +32,9 @@
 ;     el estado: cada orden de la cola de salida es un octeto que escribir o
 ;     uno que leer, con «STOP» en la última y «RESTART» en la primera
 ;     lectura.
-;  La zona por encima de los 4 GB (la mueve pci.cas en la rama termometro):
-;  aquí, si la hay, se dice y no se usa.
+;  La zona por encima de los 4 GB (la del ThinkPad E14, el Monovate, OVMF):
+;  la mueve debajo pci_memoria (pci.cas, baja_zona), como la del xHCI, y se
+;  dice en el registro; si no se puede, se dice por qué y no se usa.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo I2c
@@ -190,7 +191,7 @@ módulo I2c
 
     ; una controladora del PCI: se mira y, si es de la tabla, se pone en marcha
     función mira(a: nat32)
-        variable id, k, base, v, pm, rel: nat32
+        variable id, k, base, v, pm, rel, alta: nat32
         variable nombre: arreglo [12] de byte
         id := pci_leer(a, 0)
         si id yb 0xFFFF <> 0x8086 entonces devolver fin
@@ -205,17 +206,28 @@ módulo I2c
             apunta("i2c: controladora %s 8086:%04X: no se usa («sini2c» en la línea del cargador)\n", dd)
             devolver
         fin
+        ; la zona 0; si es de 64 bits y está por encima de los 4 GB, la mueve
+        ; debajo pci_memoria (pci.cas, baja_zona), como la del xHCI
+        v := pci_leer(a, PCI_BAR0)
+        alta := 0
+        si v yb 7 = 4 entonces alta := pci_leer(a, PCI_BAR0 + 4) fin
         base := pci_memoria(a, 0)
         si base = 0 entonces
-            v := pci_leer(a, PCI_BAR0)
-            si v yb 6 = 4 y pci_leer(a, PCI_BAR0 + 4) <> 0 entonces
-                dd[2] := pci_leer(a, PCI_BAR0 + 4)
+            si alta <> 0 entonces
+                dd[2] := alta
                 dd[3] := v yb 0xFFFFFFF0
-                apunta("i2c: controladora %s 8086:%04X: su zona está por encima de los 4 GB (%X%08Xh) y aún no se mueve: no se usa\n", dd)
+                dd[4] := sin_mover_por
+                apunta("i2c: controladora %s 8086:%04X: su zona está por encima de los 4 GB (%X%08Xh) y no se ha podido mover debajo (motivo %u: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja): no se usa\n", dd)
             sino
                 apunta("i2c: controladora %s 8086:%04X: sin zona de memoria: no se usa\n", dd)
             fin
             devolver
+        fin
+        si alta <> 0 entonces
+            dd[2] := alta
+            dd[3] := v yb 0xFFFFFFF0
+            dd[4] := base
+            apunta("i2c: controladora %s 8086:%04X: su zona estaba por encima de los 4 GB (%X%08Xh): movida a %08Xh\n", dd)
         fin
         ; que esté encendida (D0) y atienda en la memoria y en el bus
         pm := pci_capacidad(a, 1)

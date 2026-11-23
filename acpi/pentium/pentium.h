@@ -15,6 +15,7 @@
 #define SC_ARGUMENTOS 14
 #define SC_MAS_MEMORIA 17
 #define SC_ESCRIBIR_ARCHIVO 18
+#define SC_CREAR_CARPETA 23	/* (TERMO) \\TERMO\\EQUIPO */
 #define SC_CORTE 29		/* Ctrl+C: lo atiende el programa (no se le acaba) */
 #define SC_SERIE 61		/* solo al puerto serie */
 #define SC_PUERTO 150		/* EBX puerto, ECX valor, EDX octetos | ES_ESCRIBE -> lo leído */
@@ -25,6 +26,10 @@
 #define SC_I2CHID 159		/* (I2CHID) EBX struct pe_i2chid; 0: ya están todas */
 #define ES_ESCRIBE 0x100
 #define ES_ERROR(r) ((r) >= 0xFFFFFFF0u)
+
+void mq_pon_rsdp(u32 d);
+void mq_pon_smbios(u32 d);	/* (UEFI) el SMBIOS que dice el núcleo («smbios=») */
+u32 mq_smbios(void);		/* (UEFI) su punto de entrada: el dicho o el de F0000h-FFFFFh (0: no hay) */	/* (UEFI) la RSDP que dice el núcleo («rsdp=»): maquina.c */
 
 /* las órdenes del núcleo (SC_SERVICIO) */
 #define ORDEN_NADA 0

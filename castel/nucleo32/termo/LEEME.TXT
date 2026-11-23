@@ -1,0 +1,280 @@
+TERMÓMETRO DE HISPA-PENTIUM - memoria USB para medir la temperatura de un portátil
+==================================================================================
+
+Qué es: una memoria USB que arranca sola en Hispa-Pentium y abre el Termómetro.
+Mide la temperatura del procesador y la de las zonas térmicas de la BIOS (ACPI),
+hace una prueba de esfuerzo («Calentar») que se para sola si se calienta de más,
+y lo apunta todo en la propia memoria. NO toca el disco duro del portátil: no
+escribe nada en él (Windows y los datos se quedan como están).
+
+Lo que hace falta: una memoria USB de 32 MB o más (se borra entera) y un PC con
+Windows o Linux para grabarla.
+
+
+1. GRABAR LA MEMORIA
+--------------------
+El archivo es termometro-usb.img (dentro del ZIP).
+
+Con Windows (Rufus, https://rufus.ie):
+  1. Enchufe la memoria y abra Rufus.
+  2. «Dispositivo»: la memoria (¡fíjese bien en que sea la memoria!).
+  3. «Elección de arranque»: SELECCIONAR -> termometro-usb.img.
+  4. Pulse EMPEZAR. Si pregunta el modo, elija «Escribir en modo Imagen DD».
+  5. Acepte el aviso de que se borra la memoria. Al acabar, CERRAR.
+
+Con Linux:
+  sudo dd if=termometro-usb.img of=/dev/sdX bs=4M conv=fsync status=progress
+  (sdX es la memoria: mírelo antes con «lsblk»; si se equivoca, borra otro disco.)
+
+
+2. ARRANCAR EL PORTÁTIL DESDE LA MEMORIA
+----------------------------------------
+  1. Con el portátil apagado y ENCHUFADO a la corriente, ponga la memoria.
+  2. Enciéndalo y pulse enseguida, varias veces, la tecla del menú de arranque.
+     Depende de la marca:
+       Acer, Asus (algunos), Dell, Lenovo, Toshiba, MSI (algunos) ...... F12
+       Asus .......................................................... Esc o F8
+       HP ............................................................ F9 (o Esc y luego F9)
+       Sony Vaio ..................................................... F11 (o el botón ASSIST)
+       Samsung, MSI .................................................. F10 o F11
+       Lenovo con botón «Novo» (el agujerito) ........................ ese botón con el equipo apagado
+     Si no sale, al encender suele poner abajo «Press F_ for Boot Menu».
+  3. En el menú, elija la memoria (USB, «USB HDD», o su marca: Kingston,
+     SanDisk...). Si hay dos con el mismo nombre, la que NO diga «UEFI».
+  4. Sale un menú negro (GRUB); a los 5 segundos arranca solo la primera
+     línea: «Termometro: medir la temperatura». A los pocos segundos se abre el
+     escritorio y, en él, el Termómetro, solo.
+  MSI GT80 TITAN (el de 2015, con dos gráficas NVIDIA): el menú de arranque es
+  F11. Ese equipo es UEFI: si la memoria no sale en el menú, entre en la BIOS
+  (pulse Supr varias veces al encender), busque «Boot mode» / «CSM» y ponga
+  «Legacy» o «UEFI with CSM» (y «Secure Boot» en «Disabled» si lo pide);
+  guarde con F10. Al acabar se puede dejar como estaba. Las dos gráficas
+  NVIDIA (GTX 970M o 980M) salen como «GPU 1» y «GPU 2» si están encendidas
+  (si el interruptor de gráficos las tiene apagadas, lo dice). La prueba
+  calienta el procesador (todos sus núcleos), no las gráficas.
+  Para Windows: el último controlador oficial de NVIDIA para esas gráficas
+  (Maxwell, ya solo de seguridad: el 582.78) está en nvidia.com/Download,
+  «GeForce 900M Series (Notebooks)»; y lo de MSI, en
+  msi.com/Laptop/support/GT80-Titan-2QE.
+  ASUS ROG GL553V (y otros ASUS de 2016-2018): el menú de arranque es Esc al
+  encender; la BIOS, F2. Si la memoria no sale: en la BIOS, «Security» >
+  «Secure Boot» en «Disabled», «Boot» > «Fast Boot» en «Disabled» y «Launch
+  CSM» en «Enabled»; F10 para guardar. La gráfica NVIDIA (GTX 1050) es
+  «Optimus»: si está dormida, el Termómetro lo dice y no la despierta; los
+  ventiladores y la temperatura de ASUS salen por su WMI si la BIOS los da
+  («parado» si el ventilador no gira todavía; «no disponible» si la BIOS no
+  lo da, como el de la gráfica en el GL553VD).
+  Un portátil de la época de Windows 7 arranca así sin tocar nada más (no hace
+  falta quitar el «Secure Boot»: esos equipos no lo tienen o lo traen apagado).
+  Si se queda colgado al arrancar, apáguelo (botón 5 s) y elija en el menú
+  «Termometro SIN ACPI» (mide el procesador, pero no las zonas ni la batería).
+  Si la pantalla sale rara, elija «Termometro (1024 x 600)» o «(800 x 600)».
+
+
+  La memoria arranca también por UEFI (los equipos de 2012 en adelante): en
+  el menú de arranque sale como «UEFI: <su nombre>»; su primera línea es
+  «Termometro (UEFI)». Por UEFI hay que apagar antes el «Secure Boot»:
+
+
+2 BIS. POR UEFI: APAGAR EL «SECURE BOOT» (ARRANQUE SEGURO)
+-----------------------------------------------------------
+
+Hispa-Pentium no está firmado por Microsoft, así que con el «Secure Boot»
+encendido el equipo no lo arranca (dice «Secure Boot Violation», «Invalid
+signature» o se salta la memoria sin decir nada). Hay que apagarlo en la
+configuración del firmware (lo que se suele llamar «la BIOS» del equipo):
+
+  1. Encienda el equipo y pulse enseguida, varias veces, la tecla de la
+     configuración. Suele ser F2 (Acer, Asus, Dell, Toshiba, Medion), Supr
+     (los de sobremesa), F10 (HP), F1 (Lenovo ThinkPad) o Esc.
+  2. Busque la pestaña «Security» (Seguridad) o «Boot» (Arranque).
+  3. Ponga «Secure Boot» en «Disabled» (Desactivado).
+     - En los Acer (y otros con Insyde), «Secure Boot» sale en gris hasta
+       que se pone una contraseña de supervisor: «Set Supervisor Password»,
+       en «Security». Póngala, apague el Secure Boot y, si quiere, quite
+       luego la contraseña dejándola en blanco.
+     - Si pregunta por «OS Type», elija «Other OS» (no «Windows UEFI»).
+  4. Guarde y salga: F10, o «Exit Saving Changes».
+  5. Arranque de la memoria con el menú de arranque: F12 (Acer, Dell,
+     Lenovo, Toshiba), F9 (HP), F8 o F11 (Asus, Medion, MSI), Esc...
+     La memoria sale como «UEFI: <su nombre>» (y, si el equipo tiene
+     también BIOS de siempre, otra vez sin «UEFI»: cualquiera de las dos vale).
+
+Se puede volver a encender el Secure Boot cuando se quiera (para arrancar
+Windows, por ejemplo): a Windows no le pasa nada por apagarlo un rato, y
+con él encendido simplemente no arranca esta memoria.
+
+  SI POR UEFI SE QUEDA LA PANTALLA NEGRA (o no va el teclado o el ratón
+  táctil): apague (botón 5 s), arranque otra vez de la memoria y elija en el
+  menú «Diagnostico (UEFI)». Haga fotos con el móvil de lo que salga en la
+  pantalla y, al acabar, mándeme el archivo ARRANQUE.TXT de la memoria (con
+  «Enviar a Carlos» si llega a abrirse, o copiándolo desde otro PC): lo que
+  importa son las líneas que empiezan por «arranque:», «reloj:», «ps2:» y
+  «usb:» (las del código xHCI). Mientras tanto, por la BIOS de siempre
+  (Legacy/CSM) suele ir.
+
+3. QUÉ SE VE
+------------
+  Arriba: el procesador, su frecuencia y el modelo del portátil.
+  La tabla: cada sensor con su temperatura ahora, la mínima, la máxima, el
+  límite (el del procesador o el de la BIOS) y una barra con el estado ESCRITO:
+  «bien», «templado», «caliente» o «peligro». Cada estado tiene además su
+  dibujo en la barra (liso, puntos, rayas, cuadros), no solo su color.
+  Debajo: la batería (carga, si está enchufado y su salud) y el ventilador si
+  la BIOS lo da. La gráfica: los últimos 10 minutos; cada sensor con su color,
+  su trazo (seguido, a rayas o de puntos) y su marca (círculo, cuadrado,
+  triángulo...), y el límite con una raya.
+  La tarjeta gráfica (NVIDIA o AMD/ATI) no se puede leer sin su controlador:
+  solo sale si la BIOS la da como zona térmica. Si el procesador no deja leer
+  su temperatura, lo dice en rojo.
+  Arriba a la derecha, lo ocupado que está el procesador («ocupado: 2 %»).
+  Nota: Hispa-Pentium usa un solo núcleo del procesador. En los Intel, el
+  sensor «Procesador entero (paquete)» es el del núcleo más caliente de todos.
+
+
+4. LA PRUEBA DE ESFUERZO
+------------------------
+  1. Déjelo 2 o 3 minutos en reposo y mire las temperaturas.
+  2. Elija el tiempo: 5, 10 o 15 minutos (botones o teclas 1, 2, 3).
+  3. Pulse «Calentar» (o la tecla C). El procesador se pone a trabajar al
+     máximo (en pantalla: «solo 1 núcleo cargado»).
+  4. Se para sola al acabar el tiempo, si algún sensor llega a 10 °C de su
+     límite (PARADA DE SEGURIDAD) o si pulsa Esc.
+  5. Después mide cómo se enfría (hasta 3 minutos; Esc lo acaba antes) y
+     enseña el resultado: cuánto subió, cuánto bajó en el primer minuto y qué
+     le parece (por ejemplo, «el ventilador y el disipador sacan bien el
+     calor» o «baja muy despacio: polvo o pasta seca»).
+
+  QUÉ ES NORMAL
+    En reposo: entre 40 y 55 °C (hasta 60 °C en un portátil «gamer» es pasable).
+    En carga: un Intel de portátil puede llegar a 85-90 °C (su límite, la
+    «TjMax», suele ser 100 o 105 °C); un AMD de la época, hasta unos 80-90 °C.
+    Al parar debe bajar deprisa: 15 o 20 °C en el primer minuto.
+  MALA SEÑAL
+    - En reposo pasa de 65-70 °C.
+    - Se para por seguridad, o el portátil se apaga solo durante la prueba.
+    - Al parar casi no baja.
+    Entonces: limpiar el polvo del ventilador y de las rejillas (aire a presión,
+    con el ventilador sujeto para que no gire loco) y cambiar la pasta térmica
+    del procesador (y de la gráfica, si la tiene aparte).
+
+
+5. LO QUE SE GUARDA (para mandármelo)
+-------------------------------------
+  Todo va a la carpeta TERMO de la propia memoria. Los nombres son el mes, el
+  día, la hora y el minuto en que se abrió el Termómetro (MMDDHHMM), porque el
+  sistema de archivos solo deja 8 letras: 11221830 = 22 de noviembre, 18:30.
+    MMDDHHMM.CSV   una línea cada 2 s con todas las temperaturas (se abre con
+                   Excel o LibreOffice: separado por punto y coma, coma decimal)
+    MMDDHHMM.LOG   el registro de TODO lo que pasa: el arranque, cada suceso
+                   (empieza y acaba la prueba, cambios de «bien» a «caliente»,
+                   el ventilador, el enchufe) y cada 2 s la fase y las
+                   temperaturas. Cada línea se escribe en la memoria al
+                   momento: si el portátil se apaga de golpe, queda hasta el
+                   último par de segundos.
+    MMDDHHMM.TXT   el resumen de cada prueba de esfuerzo
+    DDHHMMSS.BMP   la pantalla, si se pulsa F12 o el botón «Captura»
+    INFORME.TXT    EL INFORME DE LA ÚLTIMA PRUEBA, PARA EL TÉCNICO: el equipo,
+                   la fecha, cada sensor (en reposo, lo más alto y al acabar),
+                   lo que no era de fiar, si se paró por seguridad y lo que
+                   indican los datos. Con INFORME.BMP, la pantalla con la
+                   gráfica. Si hay que llevar el portátil a un técnico,
+                   llévele (o mándele) el archivo INFORME.TXT y el INFORME.BMP:
+                   no llevan datos personales.
+  Al empezar, el Termómetro escribe un archivo de prueba en la memoria, lo lee
+  de vuelta y lo borra. Si no puede guardar (la memoria no aparece, es de
+  solo lectura, está llena o el USB falla), sale abajo una FRANJA ROJA GRANDE
+  «NO se puede guardar en X: ...» con el motivo (el disco del portátil, C:,
+  no se toca nunca) y, encima, «Qué ha encontrado el sistema al arrancar»
+  (el USB, los discos, las unidades). Al acabar la prueba, la línea
+  de abajo dice dónde ha quedado el informe («guardado y comprobado»). Si
+  sale la franja roja, haga una foto de la pantalla y mándemela.
+  Si el portátil se apaga solo: vuelva a arrancar desde la memoria. El
+  Termómetro avisa de que «la última vez no se cerró bien» y dice durante qué
+  fase se apagó, a qué hora y a qué temperatura estaba.
+
+  Cómo mandármelo: lo más fácil es el botón «Enviar a Carlos» (punto 7), sin
+  sacar la memoria. Si no hay red, a mano:
+    1. Cierre el Termómetro (la X de la ventana: así apunta que acabó bien) y
+       apague desde Inicio > Apagar el equipo. Quite la memoria.
+    2. Póngala en su PC con Windows: sale como unidad «HISPAPENT».
+    3. Copie la carpeta TERMO entera (o comprímala: botón derecho > Enviar a >
+       Carpeta comprimida) y mándemela por el FTP (Pruebas/Completas/
+       Portatil-gamer/Termometro/) o por correo. Si puede, ponga en una nota la
+       marca y el modelo del portátil (lo pone debajo, en la pegatina).
+
+  BATERÍA: si la tapa de abajo o el ratón táctil abomban, puede ser la batería
+  hinchada: no lo cargue y llévelo al técnico cuanto antes.
+  AUTONOMÍA: si quiere saber cuánto le dura la batería, quite el cargador
+  antes de empezar y déjelo así al menos 3 minutos (mejor 10). En INFORME.TXT
+  saldrá lo que gasta (en vatios, si la batería lo dice), lo que ha bajado el
+  porcentaje y cuánto duraría a ese ritmo. Con la prueba de esfuerzo gasta
+  mucho más que con un uso normal: lo pone al lado.
+  FRENOS Y ALIMENTACIÓN: el Termómetro apunta también si el procesador se
+  frena y por qué (temperatura, límite de potencia, una señal de la placa o
+  la alarma del regulador de tensión) y, si el portátil se apagó solo con el
+  procesador lejos de su límite, lo dice: entonces el apagado no parece por
+  temperatura y conviene revisar la alimentación (cargador, batería, placa).
+  Si una cifra no es de fiar, lo dice en vez de inventar: «sin lectura fiable»
+  (un sensor que no se mueve ni con la carga), una lectura imposible (no
+  cuenta para la parada ni para el veredicto: «no se puede juzgar»), o, en
+  los Atom N2xx/N4xx, «la medida es aproximada». Si la fecha del portátil está
+  mal (pila del reloj gastada), lo avisa y, con red, la pone por Internet.
+
+
+6. CONECTAR LA RED (CABLE O WI-FI)
+----------------------------------
+  Con cable: enchúfelo antes o después de arrancar; se conecta solo.
+  Con Wi-Fi: Inicio > Configuración > Red: elija la red, escriba la contraseña
+  y Conectar. O en la Consola (Inicio > Consola):
+      REDWIFI /REDES                 las redes que se ven
+      REDWIFI /CONECTAR NombreDeRed  (pregunta la contraseña)
+      REDWIFI /ESTADO                si está conectado y con qué dirección
+  OJO: el Wi-Fi solo va con las tarjetas Broadcom (BCM43xx) y Atheros (AR9xxx)
+  de esa época. Con otra (Intel, Realtek...), use el cable (casi todos los
+  portátiles de entonces lo tienen) o un adaptador USB de red por cable.
+
+
+7. «ENVIAR A CARLOS» (SIN SACAR LA MEMORIA)
+-------------------------------------------
+  Con red (punto 6), pulse el botón «Enviar a Carlos» (o la tecla E). Manda
+  por Internet, cifrado (HTTPS), lo de la carpeta TERMO (los .CSV, .LOG, .TXT
+  y .BMP) y lo que el sistema apuntó al arrancar, a mi servidor. Abajo dice
+  cómo va («Enviando ... (3 de 7)», «Hecho: 7 archivos enviados»). Se puede
+  pulsar las veces que haga falta: solo manda lo nuevo. Si se corta, lo
+  intenta otra vez solo; si sigue sin ir, dice por qué.
+  No manda nada más del portátil (ni del disco duro, ni contraseñas). La
+  memoria lleva su propio «testigo» para que el servidor sepa que es ella;
+  si se pierde la memoria, lo anulo y ya no sirve.
+  Desde la Consola también vale: TERMO /ENVIAR
+
+
+8. «TERMINAL» (HABLAR CON CLAUDE, EL AYUDANTE)
+----------------------------------------------
+  El botón «Terminal» (o la tecla T) abre una ventana de terminal por SSH al
+  equipo que diga TERMO\SSH.INI (equipo, puerto y usuario; se puede cambiar
+  con el Bloc de notas de Windows), con la llave propia de la memoria (en
+  TERMO\SSH: no lleva ninguna contraseña mía ni de nadie). Allí se puede
+  usar Claude Code como en cualquier terminal: los colores, los recuadros, las
+  flechas, Esc, Ctrl+C, Mayús+Tab y Mayús+Intro (línea nueva) van como en un
+  terminal de Linux. Para pegar: Ctrl+Mayús+V o Mayús+Insert. Para cortar la
+  conexión: cerrar la ventana (o «~.» al principio de una línea).
+  La ventana ocupa la pantalla y, si se cambia de tamaño, el otro lado se
+  entera. La primera vez con un equipo nuevo enseña su huella y pregunta.
+
+
+
+9. «RENDIMIENTO» (CUÁNTO CORRE)
+-------------------------------
+  El botón «Rendimiento» (o la tecla R) mide en menos de 2 minutos: el
+  procesador (un núcleo, con enteros y con coma flotante, y todos a la vez),
+  la memoria (leer, escribir, copiar y la latencia), la memoria USB (con un
+  archivo de prueba propio que se borra; el disco del portátil NO se toca) y
+  lo rápido que pinta la CPU (sin la tarjeta gráfica: sin su controlador no
+  hay aceleración). Mientras, vigila la temperatura: si al final corre menos
+  que al principio, dice «puntuación bajada por calor». Esc lo para.
+  Todo queda en TERMO\RENDIMIE.TXT, con la fecha, el equipo y una tabla con
+  los equipos ya medidos con esta memoria (la referencia, 100, es el HP Mini
+  5103, cuando se haya medido).
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

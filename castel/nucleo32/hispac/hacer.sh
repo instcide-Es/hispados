@@ -26,7 +26,7 @@ HC=$N/hispac
 CF="-m32 -std=gnu11 -march=i586 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
     -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections -Wall -Wno-unused
     -I$HC -Iterceros/monocypher -I$N/ssh -I$N/wg -I$N/tailscale"
-CABECERAS="$HC/hispa.h $HC/cripto.h $N/ssh/ssh.h $N/wg/wg.h"
+CABECERAS="$HC/hispa.h $HC/cripto.h $N/ssh/ssh.h $N/ssh/vt.h $N/wg/wg.h"
 [ -f $N/tailscale/ts.h ] && CABECERAS="$CABECERAS $N/tailscale/ts.h"
 # objeto(fuente, objeto, opciones de más): solo si ha cambiado (o alguna cabecera)
 objeto() {
@@ -45,6 +45,9 @@ objeto terceros/monocypher/monocypher-ed25519.c $O/monocypher-ed25519.o -Wno-all
 objeto $N/tls/libc.c $O/libc.o -I$N/tls
 objeto $HC/hispa.c $O/hispa.o -fexec-charset=CP437
 objeto $HC/cripto.c $O/cripto.o
+# (TERMO) el terminal de la ventana de SSH.BIN (ssh/vt.c), con la letra de 8x16 del escritorio
+python3 -I $N/juegos/datos386.py $O/datos386.h $O/letra.h
+objeto $N/ssh/vt.c $O/vt.o -I$O
 for f in ssh/ssh ssh/sshd ssh/sshc wg/wg wg/wgmain; do
   objeto $N/$f.c $O/$(basename $f).o -fexec-charset=CP437
 done
@@ -60,7 +63,7 @@ enlaza() {
   objcopy -O binary $O/$nombre.elf "$SAL/$nombre.BIN"
 }
 enlaza SSHD $O/ssh.o $O/sshd.o
-enlaza SSH $O/ssh.o $O/sshc.o
+enlaza SSH $O/ssh.o $O/sshc.o $O/vt.o
 enlaza WG $O/wg.o $O/wgmain.o
 enlaza ARGON2 $O/argon2.o                                   # (USUARIOS)
 if [ -f $N/tailscale/ts.c ]; then

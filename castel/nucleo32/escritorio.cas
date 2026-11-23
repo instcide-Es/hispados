@@ -1601,6 +1601,9 @@ módulo Escritorio
         rectángulo(valor(l), 16, 104, 408, 1, 0xA9C6EC)
         texto(valor(l), 16, 114, "Copyright (C) 2026 Carlos Sanz y contribuidores.", TINTA)
         texto(valor(l), 16, 134, "Software libre: GPL-2.0 o posterior.", TINTA_SUAVE)
+        Textos32.copiar(renglón, "Arrancado ")                  ; (UEFI) por dónde
+        concatenar(renglón, modo_arranque)
+        texto(valor(l), 16, 152, renglón, TINTA_SUAVE)
         pulsador(v_acerca, 324, 168, 100, 32, "Aceptar", 0x5AA6F4, 0x2468C8, AC_CERRAR_ACERCA)
         repintada(v_acerca, 0, 0, 440, 214)
     fin
@@ -2010,6 +2013,14 @@ módulo Escritorio
         si en_marcha entonces
             texto(valor(l), 20, 60, "Elija una y pruébela: se pone en el momento, y si no", TINTA)
             texto(valor(l), 20, 78, "se ve bien, vuelve sola a la de antes en 15 segundos.", TINTA)
+        sino si arrancado_por_uefi() entonces
+            ; (UEFI) sin BIOS, la medida la pone el firmware (GOP) al arrancar
+            texto(valor(l), 20, 60, "Arrancado por UEFI: no se cambia en marcha, la pone el", TINTA)
+            si guarda entonces
+                texto(valor(l), 20, 78, "firmware al arrancar. Se guarda para el próximo arranque.", TINTA)
+            sino
+                texto(valor(l), 20, 78, "firmware al arrancar; sin instalar, «a la medida», en GRUB.", TINTA)
+            fin
         sino si guarda entonces
             texto(valor(l), 20, 60, "Esta tarjeta no deja cambiarla en marcha: se guarda y", TINTA)
             texto(valor(l), 20, 78, "se pone al arrancar otra vez (con 15 s para probarla).", TINTA)
@@ -4435,6 +4446,8 @@ módulo Escritorio
             lanza_vigilante_agenda()
         fin
         arranque_hecho := cierto      ; (USUARIOS) ya se puede entrar (atiende_usuarios): lo de arriba es del sistema
+        ; (TERMO) la memoria del Termómetro: con «termo» en la línea del cargador, se abre solo
+        si buscar(línea_del_cargador(), "termo") <> nulo entonces lanza("\\TERMO.BIN", "/ARRANQUE") fin
         devolver 1
     fin
 

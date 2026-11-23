@@ -1,0 +1,49 @@
+(TERMO) EL RECEPTOR DE «ENVIAR A CARLOS» - CÓMO SE PONE EN EL SERVIDOR
+======================================================================
+
+Lo que hay aquí (tools/termo-subida/):
+  subir.php             el receptor (un POST por archivo; contesta OK/ERROR)
+  hispados-termo.conf   su pool de PHP-FPM, con un usuario propio (hispatermo)
+  nginx-location.txt    el bloque «location» para nginx
+  termo-mover.sh        el cron de root que lo pasa al FTP
+
+Por qué así: PHP corre con un usuario propio sin permisos (hispatermo, como
+el pool de jubilats) y solo puede escribir en /www/hispados-subidas (fuera de
+cualquier web); no puede escribir en /root/FTP (de root). Un cron de root,
+cada 5 min, mueve lo que lleva quieto más de 2 min a
+/root/FTP/HispaDOS/Pruebas/Pendientes/<EQUIPO>/Termometro/subidas/<lote>/,
+de root y 0644. Así, un fallo en subir.php no da acceso ni al FTP ni a
+ClicGest. Los testigos (solo su SHA-256) van en /etc/hispados-termo/testigos.txt,
+fuera de /www, legible por hispatermo y no escribible.
+
+Las órdenes (como root):
+
+  useradd --system --no-create-home --shell /usr/sbin/nologin hispatermo
+  install -d -o root -g root -m 0755 /www/hispados-termo
+  install -o root -g root -m 0644 subir.php /www/hispados-termo/subir.php
+  install -d -o hispatermo -g hispatermo -m 0700 /www/hispados-subidas \
+      /www/hispados-subidas/entrantes /www/hispados-subidas/cuotas /www/hispados-subidas/registro
+  install -d -o root -g hispatermo -m 0750 /etc/hispados-termo
+  install -o root -g hispatermo -m 0640 /dev/null /etc/hispados-termo/testigos.txt   (*)
+  install -o root -g root -m 0644 hispados-termo.conf /www/server/php/83/etc/php-fpm.d/hispados-termo.conf
+  /etc/init.d/php-fpm-83 reload        (o desde aaPanel: PHP 8.3 > Recargar)
+  (nginx: añadir los dos «location» de nginx-location.txt al server de 443
+   que se elija; nginx -t && nginx -s reload)
+  install -o root -g root -m 0755 termo-mover.sh /root/hispados-tareas/termo-mover.sh
+  echo '*/5 * * * * root /root/hispados-tareas/termo-mover.sh >> /root/hispados-tareas/termo-mover.log 2>&1' > /etc/cron.d/termo-mover
+
+  (*) crea el archivo vacío: es la forma de install para un archivo nuevo;
+      si se prefiere: touch /etc/hispados-termo/testigos.txt && chown root:hispatermo ... && chmod 0640 ...
+
+Registrar el testigo de una memoria (lo da usb.sh con TERMO=1 una sola vez;
+aquí solo su SHA-256, con el nombre de la carpeta del equipo):
+  echo 'SHA256 Portatil-gamer memoria del 22/11/2026' >> /etc/hispados-termo/testigos.txt
+Revocarlo: borrar esa línea (no hace falta recargar nada).
+
+Probar desde fuera (con un testigo de prueba registrado):
+  printf 'a;b\r\n' > /tmp/PRUEBA.CSV
+  curl -s --form-string testigo=EL_TESTIGO --form-string lote=20261122-120000-ABCD \
+       -F archivo=@/tmp/PRUEBA.CSV https://hispados.es/termo/subir.php
+  -> «OK PRUEBA.CSV 5»; el registro: /www/hispados-subidas/registro/subidas.log
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
