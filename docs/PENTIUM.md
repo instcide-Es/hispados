@@ -9676,7 +9676,7 @@ vacía, una tarea del núcleo, por cada touchpad (primero los presentes):
 El registro: `i2c-hid: touchpad \_SB_.PCI0.I2C0.TPD0 (ELAN1200, dirección
 15h, 400 kHz; controladora 00:15.0, la dirección de su ResourceTemplate,
 _DSM: 0001h)`, `i2c-hid:   el descriptor HID (15h, registro 0001h): bien:
-04F3:3022, ...` (o «mal: ...» con sus 30 octetos), `RESET: contestado en
+04F3:xxxx, ...` (o «mal: ...» con sus 30 octetos), `RESET: contestado en
 30 ms`, los octetos del descriptor de informe, `el ratón: informe 1, 2
 botones, X e Y de 8 bits, rueda de 8 bits`, `el modo de entrada (informe 3)
 a 0, ratón: bien` y `en marcha`; y al medio minuto, cuántos informes han

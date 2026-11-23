@@ -376,11 +376,8 @@ módulo I2c
         si diez entonces v := v ob 0x1000 fin
         pon(i2cs[c], IC_TAR, v)
         lee(i2cs[c], IC_CLR_INTR)
+        ; (encenderla no se espera: como Linux, solo se espera al apagarla)
         pon(i2cs[c], IC_ENABLE, 1)
-        si no espera_enable(i2cs[c], 1) entonces
-            i2cs[c].fallos := i2cs[c].fallos + 1
-            devolver I2C_TIEMPO
-        fin
         total := n_esc + n_lee
         tope := 100000 + 4000 * total
         tx := 0
