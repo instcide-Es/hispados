@@ -861,6 +861,11 @@ módulo Usb
             d[2] := xhcis[c].puertos
             apunta("usb: controladora xHCI %04X:%04X, %u puertos", d)
             si Xhci.traspaso[c] = 2 entonces apunta0(" (la BIOS no la soltaba: se le ha quitado)") fin
+            ; (TERMO) sus SMI tras el traspaso (USBLEGCTLSTS: los bits 0-15, a 0)
+            ; y, en las Intel, a quién van los puertos (XUSB2PR D0h y
+            ; USB3_PSSEN D8h; por la BIOS/CSM suelen quedar en el EHCI)
+            si Xhci.traspaso[c] <> 0 entonces apunta1("; traspaso de la BIOS hecho, SMI %08Xh", Xhci.legctl[c]) fin
+            si d[0] = 0x8086 entonces apunta2("; puertos USB 2 al xHCI %Xh, USB 3 %Xh", pci_leer(xhcis[c].pci, 0xD0), pci_leer(xhcis[c].pci, 0xD8)) fin
             apunta0("\n")
             c := c + 1
         fin
@@ -923,6 +928,8 @@ módulo Usb
             d[2] := ehcis[c].puertos
             apunta("usb: controladora EHCI %04X:%04X, %u puertos", d)
             si ehcis[c].cedidos <> 0 entonces apunta1(" (%u cedidos a las compañeras: aparatos de USB 1.x)", ehcis[c].cedidos) fin
+            si Ehci.traspaso[c] = 2 entonces apunta0(" (la BIOS no la soltaba: se le ha quitado)") fin
+            si Ehci.traspaso[c] <> 0 entonces apunta1("; traspaso de la BIOS hecho, SMI %08Xh", Ehci.legctl[c]) fin
             apunta0("\n")
             c := c + 1
         fin

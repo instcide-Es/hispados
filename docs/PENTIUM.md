@@ -9666,6 +9666,39 @@ la ventana con window-change), lo bastante para Claude Code, htop, vim y less.
 | **ThinkPad E14 Gen 5** (real, 23/11 por UEFI) | i7-1355U Raptor Lake (híbrido: 2 de rendimiento con 2 hilos + 8 eficientes) | «12 procesadores (10 núcleos, 2 hilos por núcleo)»; «equipo  , placa  , BIOS » vacíos | los hilos de cada núcleo (CPUID 07h EDX[15] y 1Ah): «10 núcleos: 2 de rendimiento (2 hilos cada uno) y 8 eficientes», también en el INFORME; el suceso de ACPI espera a su primera lectura (salía con el bloque a cero); SMBIOS 3 por encima de 4 GB: el de SMBIOS 2 |
 | **Medion S2217** (batería muerta) | — | sin nada de la batería | «batería: no la encuentro o no está (va con el cable)» y el porqué, en el .LOG y en el INFORME |
 
+**El MSI GT80 2QD de verdad (23/11, por la BIOS/CSM).** i7-5700HQ (Broadwell,
+4/8), BIOS E1812IMS.117. El contador se quedaba congelado 3-4 s y saltaba; en
+el .LOG, «leer y apuntar ha tardado 8640 ms» a los 18 s de carga y luego
+2020-2030 ms cada pocos segundos; desde ahí, los núcleos 1-3 a «--» para
+siempre, lo ocupado entre el 52 y el 67 % (también en reposo) y las líneas
+DATOS «de dos en dos». Lo que dice el código (seguro): con el Termómetro más
+de 6 s sin preguntar, el núcleo (termo.cas, la 224 con 0 que hace la hija)
+**para la carga y duerme a los demás procesadores**; la hija acaba, y nadie lo
+decía (la carga quedaba rota hasta el final y el veredicto la daba por
+buena). Las líneas dobles no son dos bucles (solo hay uno, `pulso`): con un
+apunte cada ~3 s (cada pulso de 2 s tardaba 2 s) y la hora de la CMOS de 2 en
+2 s (DATO_FECHA), dos líneas seguidas salen con la misma hora; ahora llevan
+`seg=` (por los tics). Lo que se deduce: los 8640 ms los midió el tic del
+sistema, que en un SMI no cuenta (sus interrupciones esperan), y la carga de
+300 s duró 302 s de CMOS: el equipo **no** estuvo parado entero (no fue un SMI
+largo); fue el Termómetro el que se quedó sin poder correr (lo más probable,
+dentro de una llamada: escribir en la memoria USB). Lo arreglado: MSR_SMI_COUNT
+(34h) en la lista de la 220 y `smi=` en cada línea; el equipo entero parado
+por el TSC frente a los tics (`parado=`, y la CMOS frente a los tics); en el
+AVISO, en qué parte se ha ido el rato (los sensores, ACPI, escribir), los SMI,
+quién ha tenido el procesador (la 224 con 7: los tics de cada tarea y las
+órdenes lentas de la memoria USB, usbalm.cas); la carga rota se vuelve a poner
+en marcha (la 224 con 6 despierta otra vez a los que se han parado solos) y,
+si no se puede, el veredicto dice desde cuándo no es completa y no da la
+temperatura por buena; en el INFORME, «PARONES DEL EQUIPO» y qué quiere decir
+el «ya estaba anotado al abrir» de PL1/PL2. En el USB: el traspaso del EHCI
+quita la BIOS si no suelta en 1 s (como Linux) y ARRANQUE.TXT dice cómo quedan
+los SMI del USB (USBLEGCTLSTS) y, en las Intel, a quién van los puertos
+(XUSB2PR, USB3_PSSEN). Por la BIOS, la primera entrada del menú pide 1920 x
+1080, 1366 x 768 o 1024 x 768 (con «auto», la VBE de GRUB sin EDID da
+640 x 480: así salió). La prueba: `PARON.PRU` en `\TERMO` («a b»: a los a s de
+carga, b s sin poder correr) y QEMU parado con `stop`/`cont`.
+
 Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
 
 ## 15. Las pruebas

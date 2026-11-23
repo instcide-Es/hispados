@@ -263,6 +263,8 @@ módulo Xhci
     ; y lo del traspaso desde la BIOS de cada una que va (1: la soltó; 2: no la
     ; soltó en 1 s y se le quitó; 0: no tiene esa capacidad)
     público variable traspaso: arreglo [MAX_XHCI] de nat32
+    ; (TERMO) y cómo quedan sus SMI (USBLEGCTLSTS, después del traspaso)
+    público variable legctl: arreglo [MAX_XHCI] de nat32
 
     función falla(pci: nat32, qué: puntero a byte, dato: nat32): nat32
         si fallidas < MAX_FALLIDAS entonces
@@ -337,6 +339,7 @@ módulo Xhci
                     tr := 2
                 fin
                 x[1] := (x[1] yb nob 0x0000E011) ob 0xE0000000
+                legctl[c] := x[1]
             fin
             si ((x[0] >> 8) yb 0xFF) = 0 entonces
                 d := 0
@@ -346,6 +349,7 @@ módulo Xhci
             n := n + 1
         fin
         traspaso[c] := tr
+        si tr = 0 entonces legctl[c] := 0 fin
         ; parar y reiniciar (antes, que esté lista: CNR a 0)
         espera(c, USBSTS, 0x800, 0, 100)
         pon(c, USBCMD, lee(c, USBCMD) yb nob 1)

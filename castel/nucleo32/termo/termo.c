@@ -51,6 +51,11 @@ static char ruta_log[64], anterior[700];
 static int log_malo;
 static u32 cuenta_s;
 static int fecha_mala, pidio_hora;
+/* (TERMO) los parones: los SMI (MSR 34h: -1 sin mirar, 0 no, 1 sí; los de
+ * los últimos 2 s) y lo que el equipo entero ha estado parado en ellos (ms) */
+static int smi_hay = -1, parado_dos;
+static int carga_vueltas, carga_rota, ap_relanzados;	/* (TERMO) la carga rota por un parón */
+static u32 smi_dos;
 static int ap_cargados;		/* (TERMO) los otros procesadores que cargan */	/* (TERMO) el año del reloj, si parece mal */
 /* (TERMO) lo ocupado (mide_ocupacion) */
 static int ocup_pct = -1, c0_pct = -1, c6_pct = -1;
@@ -592,7 +597,19 @@ static u32 ult_error;
  * todo a la memoria (la entrada, la FAT y SYNCHRONIZE CACHE), así que un
  * apagado a lo bruto no pierde lo ya escrito. Desde la 0.8.9, el cierre dice
  * también si esa escritura a la memoria ha fallado. */
+static u32 tics_escribe;	/* (TERMO) los tics que se han ido escribiendo (los parones) */
+static int escribe_de_verdad(const char *ruta, const void *b, u32 n, int crear);
+
 static int escribe(const char *ruta, const void *b, u32 n, int crear)
+{
+	u32 t = jg_tics();
+	int r = escribe_de_verdad(ruta, b, n, crear);
+
+	tics_escribe += jg_tics() - t;
+	return r;
+}
+
+static int escribe_de_verdad(const char *ruta, const void *b, u32 n, int crear)
 {
 	u32 m = sc(SC_ABRIR, (u32)ruta, crear ? PARA_CREAR : PARA_ESCRIBIR, 0), r, c;
 
@@ -956,6 +973,14 @@ static void log_datos(void)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | C0=%d%%", c0_pct);
 	if (c6_pct >= 0)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | C6=%d%%", c6_pct);
+	/* (TERMO) los segundos desde que se abrió, por el reloj del sistema: la
+	 * hora de la línea es la de la CMOS, de 2 en 2 s (en el MSI GT80, con
+	 * un apunte cada 3 s, salían dos líneas con la misma hora) */
+	m += snprintf(b + m, sizeof b - (size_t)m, " | seg=%u", (jg_tics() - t_inicio) / jg_hz);
+	if (smi_hay == 1)
+		m += snprintf(b + m, sizeof b - (size_t)m, " | smi=%u", smi_dos);
+	if (parado_dos)
+		m += snprintf(b + m, sizeof b - (size_t)m, " | parado=%d ms", parado_dos);
 	if (hay_bateria && en.pct <= 100)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | bateria=%u%% %s", en.pct, en.ca == 1 ? "enchufado" : en.ca == 0 ? "sin enchufar" : "");
 	if (hay_bateria && hay_zonas && za.t.bat_mw != NO && (za.t.bat_estado & 3)) {
@@ -1700,6 +1725,23 @@ static void lee_ap(void)
 	}
 }
 
+/* la tarea hija de la carga (TERMO.BIN /CARGA=s): su número en «hija», o -1 */
+static void lanza_hija(int segundos)
+{
+	static const char *const donde[] = { "\\TERMO.BIN", "TERMO.BIN", "\\HISPA\\TERMO.BIN" };
+	char a[40];
+	int i;
+
+	snprintf(a, sizeof a, "/CARGA=%d", segundos);
+	hija = -1;
+	for (i = 0; i < 3 && hija < 0; i++) {
+		u32 r = sc(SC_LANZAR_SUELTO, (u32)donde[i], (u32)a, 0);
+
+		if (!ES_ERROR(r))
+			hija = (int)r;
+	}
+}
+
 static void empieza(void)
 {
 	char a[40];
@@ -1708,6 +1750,7 @@ static void empieza(void)
 		return;
 	fase = F_CARGA;
 	t_fase = jg_tics();
+	carga_vueltas = carga_rota = 0;
 	t_ini = mas_caliente();
 	pico = t_ini;
 	por_seguridad = por_esc = 0;
@@ -1751,20 +1794,9 @@ static void empieza(void)
 	}
 	/* la carga: un programa hijo (este mismo, con /CARGA) que no suelta el
 	 * procesador; si no se puede lanzar, aquí, entre pulso y pulso */
-	snprintf(a, sizeof a, "/CARGA=%d", dura_s + 60);
+	(void)a;
 	solo_aqui = 0;
-	hija = -1;
-	{
-		static const char *const donde[] = { "\\TERMO.BIN", "TERMO.BIN", "\\HISPA\\TERMO.BIN" };
-		int i;
-
-		for (i = 0; i < 3 && hija < 0; i++) {
-			u32 r = sc(SC_LANZAR_SUELTO, (u32)donde[i], (u32)a, 0);
-
-			if (!ES_ERROR(r))
-				hija = (int)r;
-		}
-	}
+	lanza_hija(dura_s + 60);
 	if (hija < 0)
 		solo_aqui = 1;
 	serie("termo: calentar %d s (%s); empieza a %d décimas\n", dura_s, solo_aqui ? "la carga en esta misma tarea" : "la carga en una tarea hija", t_ini);
@@ -1817,6 +1849,268 @@ static void para_carga(int seguridad, int esc)
 	      seguridad ? "PARADA DE SEGURIDAD" : esc ? "Esc" : "se acabó el tiempo", grados(a, pico), grados(b, VP.t_parada), grados(c, t_ini));
 	suceso_log("ACABA la carga a los %d s: %s%s; llegó a %s, al empezar %s. Empieza el enfriamiento", seg_carga,
 		   seguridad ? "PARADA DE SEGURIDAD: " : esc ? "parada con Esc" : "se acabó el tiempo", seguridad ? motivo : "", grados(a, pico), grados(c, t_ini));
+}
+
+/* ---------------------------------------------------------------- los parones
+ * (TERMO) El MSI GT80 (23/11/2026, por la BIOS/CSM): «leer y apuntar ha
+ * tardado 8640 ms» a los 18 s de carga, y luego 2 s cada pocos segundos; los
+ * núcleos 1-3 a «--» para siempre y la carga, sin decirlo, rota (el núcleo
+ * para la carga y duerme a los demás procesadores si el Termómetro no
+ * pregunta en 6 s; y los otros procesadores se paran solos si su latido no
+ * cambia en unos 8 s). Aquí, lo que hace falta para saber qué ha sido:
+ *  - los SMI (MSR_SMI_COUNT, 34h, Intel de Nehalem en adelante): cuántas
+ *    veces el firmware se ha quedado el procesador (cada línea DATOS: smi=);
+ *  - el equipo entero parado: el reloj del procesador (TSC) sigue contando
+ *    en un SMI, el tic del sistema no (sus interrupciones esperan): lo que
+ *    el TSC cuenta de más es el tiempo que nadie ha podido correr (parado=);
+ *    y, por si el TSC no sirve, el reloj de la CMOS frente a los tics;
+ *  - en qué se ha ido el rato: cada parte de leer y apuntar (los sensores,
+ *    ACPI, escribir en la memoria USB), lo que ha corrido cada tarea (la
+ *    llamada 224 con 7) y lo que han tardado las órdenes de la memoria USB.
+ * Y si la carga se ha roto, se vuelve a poner en marcha (y se dice); si no
+ * se puede, el veredicto lo dice (VP.carga_cortada). */
+struct uso_tarea { u32 id, tics, estado; char nombre[12]; };
+struct uso_tabla { u32 usb_ordenes, usb_lentas, usb_peor, usb_reinicios, usb_fallos, tics, ociosa, r; struct uso_tarea t[32]; };
+static struct uso_tabla uso_ini;	/* al empezar el pulso */
+static int uso_n_ini, uso_hay = 1;
+static u32 smi_ult, smi_total;	/* el contador la última vez; los de la prueba */
+static u64 blk_tsc;			/* el TSC y los tics de los últimos 2 s */
+static u32 blk_tics;
+static int parones, paron_peor_ms, parado_total_ms, parones_smi;	/* para el informe: el equipo entero parado */
+static int bloqueos, bloqueo_peor_ms;	/* y el Termómetro sin poder correr (con el equipo en marcha) */
+static int cmos_atras, cmos_atras_dicho;	/* (s) lo que el reloj del sistema se ha quedado atrás de golpe; cuántas veces */
+static u32 cmos_s0, cmos_t0;
+static int paron_a, paron_b;		/* (las pruebas: TERMO\\PARON.PRU) */
+
+static void lee_paron_prueba(void)
+{
+	char r[120], t[32];
+	u32 m, n;
+	int i = 0, *v = &paron_a;
+
+	snprintf(r, sizeof r, "%s\\PARON.PRU", carpeta);
+	m = sc(SC_ABRIR, (u32)r, PARA_LEER, 0);
+	if (ES_ERROR(m))
+		return;
+	n = sc(SC_LEER, m, (u32)t, sizeof t - 1);
+	sc(SC_CERRAR, m, 0, 0);
+	if (ES_ERROR(n))
+		return;
+	t[n] = 0;
+	for (; t[i]; i++)
+		if (t[i] >= '0' && t[i] <= '9')
+			*v = *v * 10 + t[i] - '0';
+		else if (v == &paron_a && paron_a)
+			v = &paron_b;
+	if (paron_b <= 0 || paron_b > 60)
+		paron_a = paron_b = 0;
+	else
+		serie("termo: (prueba) PARON.PRU: a los %d s de carga, %d s parado\n", paron_a, paron_b);
+}
+
+static u32 lee_smi(void)
+{
+	u32 lo, hi;
+
+	if (smi_hay < 0)
+		smi_hay = cpu.intel && cpu.fam == 6 && cpu.modelo >= 0x1A && lee_msr(0x34, &lo, &hi) ? 1 : 0;
+	if (smi_hay != 1 || !lee_msr(0x34, &lo, &hi))
+		return 0;
+	return lo;
+}
+
+static u32 ms_de_tsc(u64 d)
+{
+	return tsc_hz ? (u32)(d * 1000 / tsc_hz) : 0;
+}
+
+static int uso_lee(struct uso_tabla *u)
+{
+	u32 r;
+
+	if (!uso_hay)
+		return -1;
+	r = sc(SC_CARGA, 7, (u32)u, sizeof *u);
+	if (ES_ERROR(r) || r > 32 || u->tics == 0) {
+		uso_hay = 0;	/* (un núcleo de antes: la 224 con 7 es otra cosa) */
+		return -1;
+	}
+	return (int)r;
+}
+
+/* lo que ha corrido cada tarea entre a (na) y b (nb): las que más, a d */
+static void uso_texto(char *d, int cabe, const struct uso_tabla *a, int na, const struct uso_tabla *b, int nb, u32 dt)
+{
+	int i, j, m = 0, dichas = 0;
+	u32 hecho[32];
+	int nh = 0;
+
+	d[0] = 0;
+	if (na < 0 || nb < 0 || !dt)
+		return;
+	while (dichas < 4) {
+		int mejor = -1;
+		u32 mt = 0;
+
+		for (i = 0; i < nb && i < 32; i++) {
+			u32 t0 = 0, dtt;
+			int k, ya = 0;
+
+			for (k = 0; k < nh; k++)
+				if (hecho[k] == b->t[i].id)
+					ya = 1;
+			if (ya)
+				continue;
+			for (j = 0; j < na && j < 32; j++)
+				if (a->t[j].id == b->t[i].id)
+					t0 = a->t[j].tics;
+			dtt = b->t[i].tics - t0;
+			if (dtt > mt)
+				mt = dtt, mejor = i;
+		}
+		if (mejor < 0 || mt * 100 < dt * 5)	/* (menos del 5 %: no se dice) */
+			break;
+		hecho[nh++] = b->t[mejor].id;
+		{
+			char nom[13];
+
+			memcpy(nom, b->t[mejor].nombre, 12);
+			nom[12] = 0;
+			m += snprintf(d + m, (size_t)(cabe > m ? cabe - m : 0), "%s%s %u,%u s", dichas ? ", " : "", nom[0] ? nom : "?", mt / jg_hz, mt * 10 / jg_hz % 10);
+		}
+		if (m >= cabe - 1)
+			break;
+		dichas++;
+	}
+}
+
+static void hora_texto(char *d, int cabe)
+{
+	u32 a, me, dd, h, mi, s;
+
+	fecha_hora(&a, &me, &dd, &h, &mi, &s);
+	snprintf(d, (size_t)cabe, "%02u:%02u:%02u", h, mi, s);
+}
+
+/* cada 2 s: los SMI, el equipo parado (TSC frente a los tics) y la CMOS
+ * frente a los tics */
+static void mira_parones(void)
+{
+	u32 s = lee_smi(), t = jg_tics();
+	u64 x = rdtsc();
+
+	if (smi_hay == 1 && smi_ult)
+		smi_dos = s - smi_ult, smi_total += smi_dos;
+	smi_ult = s ? s : 1;
+	parado_dos = 0;
+	if (blk_tsc && tsc_hz && x > blk_tsc) {
+		int ms_tsc = (int)ms_de_tsc(x - blk_tsc), ms_tics = (int)((t - blk_tics) * 1000 / jg_hz);
+
+		if (ms_tsc - ms_tics >= 700 && ms_tsc - ms_tics < 3600000) {
+			parado_dos = ms_tsc - ms_tics;
+			parado_total_ms += parado_dos;
+		}
+	}
+	blk_tsc = x, blk_tics = t;
+	/* la CMOS (de 2 en 2 s) frente a los tics, por si el TSC no lo ve: un
+	 * salto de golpe de 4 s o más entre dos apuntes (lo que se va
+	 * atrasando poco a poco, una máquina emulada lenta, no) */
+	{
+		u32 a, me, d, h, mi, se, cs;
+
+		fecha_hora(&a, &me, &d, &h, &mi, &se);
+		cs = d * 86400 + h * 3600 + mi * 60 + se;
+		if (cmos_t0 && cs >= cmos_s0) {
+			int salto = (int)(cs - cmos_s0) - (int)((t - cmos_t0) / jg_hz);
+
+			if (salto >= 4 && salto < 3600) {
+				cmos_atras += salto;
+				if (++cmos_atras_dicho <= 10)
+					suceso_log("AVISO: el reloj del sistema se ha quedado %d s atrás de golpe frente al de la CMOS: el equipo entero ha estado parado (nadie corría, ni el reloj del sistema; %s)",
+						   salto, smi_hay == 1 ? (smi_dos ? "con SMI del firmware en ese rato" : "sin SMI del firmware en ese rato: ¿un hipervisor?") : "este procesador no cuenta los SMI");
+			}
+		}
+		cmos_s0 = cs, cmos_t0 = t;
+	}
+	if (parado_dos) {
+		char sm[80];
+
+		if (smi_hay == 1 && smi_dos)
+			snprintf(sm, sizeof sm, "%u SMI en ese rato: ha sido el firmware", smi_dos);
+		else if (smi_hay == 1)
+			snprintf(sm, sizeof sm, "0 SMI en ese rato: no ha sido el firmware (¿un hipervisor?)");
+		else
+			snprintf(sm, sizeof sm, "este procesador no cuenta los SMI");
+		parones++;
+		if (smi_dos)
+			parones_smi++;
+		if (parado_dos > paron_peor_ms)
+			paron_peor_ms = parado_dos;
+		if (parones <= 20 && smi_dos)
+			suceso_log("AVISO: el firmware (SMI) se ha quedado el procesador %d,%d s (%u SMI en estos 2 s): el equipo entero, parado (el reloj del procesador ha seguido y el del sistema no)",
+				   parado_dos / 1000, parado_dos % 1000 / 100, smi_dos);
+		else if (parones <= 20)
+			suceso_log("AVISO: el equipo entero ha estado parado %d,%d s en estos 2 s (el reloj del procesador ha seguido y el del sistema no; %s)", parado_dos / 1000,
+				   parado_dos % 1000 / 100, sm);
+	}
+}
+
+/* (TERMO) la carga, con un parón por medio: si el núcleo la ha parado (el
+ * Termómetro no preguntaba) o los otros procesadores se han parado solos (su
+ * latido no cambiaba), se vuelve a poner en marcha; si no se puede, la prueba
+ * deja de ser completa desde ahora (VP.carga_cortada) */
+static void mira_carga(void)
+{
+	int seg = (int)((jg_tics() - t_fase) / jg_hz), parados = 0, n_ap = 0;
+	u32 i, r;
+	char h[12];
+
+	if (fase != F_CARGA || !carga_on || carga_rota)
+		return;
+	r = sc(SC_CARGA, 0, 0, 0);
+	if (sc(SC_CARGA, 4, (u32)&apt, 0) <= 16 && apt.base)
+		for (i = 0; i < apt.n && i < 16; i++)
+			if (apt.e[i].estado == 2)
+				parados++;
+	if (r == 1 && !parados)
+		return;
+	hora_texto(h, sizeof h);
+	if (carga_vueltas >= 5) {
+		carga_rota = 1;
+		VP.carga_cortada = seg + 1;
+		snprintf(VP.carga_cortada_hora, sizeof VP.carga_cortada_hora, "%s", h);
+		suceso_log("AVISO: la carga se ha vuelto a romper (ya van %d) y no se pone en marcha otra vez: desde las %s (a los %d s) NO es completa", carga_vueltas + 1, h, seg);
+		return;
+	}
+	carga_vueltas++;
+	if (r != 1) {
+		/* el núcleo la ha parado y ha dormido a los demás: otra vez, y la hija */
+		sc(SC_CARGA, 1, 1, 0);
+		if (!solo_aqui) {
+			lanza_hija(dura_s - seg + 60);
+			if (hija < 0)
+				solo_aqui = 1;
+		}
+		n_ap = sc(SC_CARGA, 4, (u32)&apt, 0) <= 16 ? (int)apt.n : 0;
+	} else {
+		/* los demás se han parado solos (su vigía): se duermen y despiertan */
+		u32 k = sc(SC_CARGA, 6, 0, 0);
+
+		n_ap = ES_ERROR(k) || k > 16 ? 0 : (int)k;
+		ap_relanzados += parados;
+	}
+	VP.carga_vuelta = carga_vueltas;
+	if (n_ap < ap_cargados || (r != 1 && hija < 0 && !solo_aqui)) {
+		carga_rota = 1;
+		VP.carga_cortada = seg + 1;
+		snprintf(VP.carga_cortada_hora, sizeof VP.carga_cortada_hora, "%s", h);
+		suceso_log("AVISO: la carga se había parado (%s) y solo vuelve en %d de los %d procesadores: desde las %s (a los %d s) NO es completa",
+			   r != 1 ? "el núcleo la para si el Termómetro no puede preguntar en 6 s" : "los demás procesadores se paran solos si no les llega el latido en unos 8 s",
+			   n_ap + 1, ap_cargados + 1, h, seg);
+	} else
+		suceso_log("AVISO: la carga se había parado (%s%s) y se vuelve a poner en marcha a las %s (a los %d s), en %d procesadores%s", r != 1 ? "el núcleo la para si el Termómetro no puede preguntar en 6 s" : "",
+			   r != 1 ? "" : parados == 1 ? "1 de los demás procesadores se había parado solo: no le llegaba el latido" : "varios de los demás procesadores se habían parado solos: no les llegaba el latido",
+			   h, seg, n_ap + 1, solo_aqui ? " (este, en la tarea del Termómetro)" : "");
 }
 
 /* (TERMO) INFORME.TXT: lo de la última prueba, para enseñárselo a un técnico
@@ -1877,7 +2171,7 @@ static void escribe_informe(void)
 	IN("Procesador: %s (TjMax %d °C, %s)\r\n", cpu.marca, cpu.tjmax, cpu.tj_de_msr ? "la que dice el procesador" : "de tabla");
 	if (ap_cargados)
 		IN("Núcleos: %s (%d procesadores)\r\n", topologia_texto(), ap_cargados + 1);
-	IN("Prueba de esfuerzo: %s, %d s%s; carga de coma flotante en %d %s\r\n", por_seguridad ? "PARADA DE SEGURIDAD" : por_esc ? "parada a mano (Esc)" : "completa",
+	IN("Prueba de esfuerzo: %s, %d s%s; carga de coma flotante en %d %s\r\n", por_seguridad ? "PARADA DE SEGURIDAD" : por_esc ? "parada a mano (Esc)" : VP.carga_cortada ? "con la carga rota (ver abajo)" : "completa",
 	   seg_carga, por_seguridad ? "" : "", 1 + ap_cargados, ap_cargados ? "procesadores (hilos)" : "núcleo (Hispa-Pentium usa uno)");
 	if (por_seguridad)
 		IN("Motivo de la parada: %s\r\n", motivo);
@@ -1905,6 +2199,27 @@ static void escribe_informe(void)
 			IN("%s", fr);
 		else
 			IN("  Ninguno visto.\r\n");
+	}
+	/* (TERMO) los parones (el MSI GT80): para el técnico */
+	if (parones || bloqueos || cmos_atras_dicho || smi_total || carga_vueltas) {
+		int pt = parado_total_ms > cmos_atras * 1000 ? parado_total_ms : cmos_atras * 1000;
+
+		IN("\r\nPARONES DEL EQUIPO\r\n");
+		if (smi_hay == 1)
+			IN("  Interrupciones del firmware (SMI) contadas durante la prueba: %u.\r\n", smi_total);
+		if (pt)
+			IN("  El equipo entero ha estado parado (nadie podía correr, ni el reloj del sistema) %d,%d s en total%s%s. %s\r\n", pt / 1000, pt % 1000 / 100,
+			   cmos_atras_dicho ? "; el reloj del sistema se ha quedado atrás de golpe " : "", cmos_atras_dicho ? "frente al de la CMOS (el de la placa)" : "",
+			   smi_hay == 1 && smi_total ? "Con SMI contados a la vez: es el firmware (la BIOS o el controlador embebido) el que se queda el procesador. Es una pista para el técnico: "
+						     "en este equipo, el firmware (BIOS/EC) para todo el sistema durante ratos largos; puede ser la emulación del teclado y el ratón USB de la BIOS, "
+						     "el controlador embebido (ventiladores, batería) o un fallo de la placa. Conviene probar con la BIOS al día y, en Windows, mirar si hay tirones (latencia DPC)." :
+			   smi_hay == 1 ? "Sin SMI contados: no ha sido el firmware." : "Este procesador no cuenta los SMI: no se sabe si ha sido el firmware.");
+		if (bloqueos)
+			IN("  El Termómetro se ha quedado sin poder leer y apuntar, con el equipo en marcha, %d %s (la peor, %d,%d s): el .LOG dice en qué parte y quién tenía el procesador.\r\n", bloqueos,
+			   bloqueos == 1 ? "vez" : "veces", bloqueo_peor_ms / 1000, bloqueo_peor_ms % 1000 / 100);
+		if (carga_vueltas)
+			IN("  La carga se paró por eso y se volvió a poner en marcha %d %s%s.\r\n", carga_vueltas, carga_vueltas == 1 ? "vez" : "veces",
+			   VP.carga_cortada ? "; al final NO quedó entera: el resultado no da por buena la temperatura en carga" : "");
 	}
 	if (hay_bateria && en.pct <= 100) {
 		IN("\r\nBatería: %u %%, %s", en.pct, en.ca == 1 ? "enchufado a la corriente" : en.ca == 0 ? "sin enchufar" : "");
@@ -2206,6 +2521,7 @@ static const struct freno frenos[] = {
 #define NFRENOS (int)(sizeof frenos / sizeof frenos[0])
 static int frenos_hay[3];		/* 19Ch, 1B1h, 690h: ¿se pueden leer? (-1 no) */
 static u32 frenos_cuenta[NFRENOS][3], frenos_log_dicho[NFRENOS];
+static u32 frenos_al_abrir[NFRENOS];	/* (TERMO) anotado ya al abrir el Termómetro: de antes */
 static int freno_frio;			/* por la placa con el procesador fresco */
 
 static void mira_frenos(void)
@@ -2243,6 +2559,7 @@ static void mira_frenos(void)
 			char g[24];
 
 			frenos_log_dicho[i] = 1;
+			frenos_al_abrir[i] = cuenta_s <= 4;
 			suceso_log("el procesador se ha frenado (o está anotado que se frenó) por: %s%s; ahora, %s%s", frenos[i].texto,
 				   cuenta_s <= 4 ? " (ya estaba anotado al abrir el Termómetro)" : "", grados(g, cpu_max),
 				   frenos[i].placa && cpu_max != NO && cpu_max < cpu.tjmax * 10 - 200 ? ": con el procesador fresco, apunta a la alimentación o a la placa (regulador de tensión), no a la temperatura" : "");
@@ -2278,11 +2595,32 @@ static int informe_frenos(char *d, int cabe)
 			for (j = 0; j < 3; j++)
 				if (frenos_cuenta[i][j])
 					n += snprintf(d + n, (size_t)(cabe - n), " %s %u", nf[j], frenos_cuenta[i][j]);
-		} else
+		} else if (frenos_al_abrir[i])
+			n += snprintf(d + n, (size_t)(cabe - n), "ya estaba anotado al abrir el Termómetro (de antes: lo anotó el procesador desde que se encendió el equipo), no visto en la prueba");
+		else
 			n += snprintf(d + n, (size_t)(cabe - n), "anotado por el procesador (desde que se encendió), no visto en la prueba");
 		n += snprintf(d + n, (size_t)(cabe - n), "\r\n");
 		if (n >= cabe - 200)
 			break;
+	}
+	/* (TERMO) el MSI GT80: «límite de potencia del núcleo / del procesador /
+	 * PL1 / PL2 (ya estaba anotado al abrir)»: qué quiere decir */
+	{
+		int potencia = 0, visto = 0;
+
+		for (i = 0; i < NFRENOS; i++)
+			if ((frenos[i].msr != 0x690 && frenos[i].bit == 10) || (frenos[i].msr == 0x690 && (frenos[i].bit == 10 || frenos[i].bit == 11))) {
+				if (frenos_al_abrir[i])
+					potencia = 1;
+				if (frenos_cuenta[i][0] + frenos_cuenta[i][1] + frenos_cuenta[i][2])
+					visto = 1;
+			}
+		if (potencia)
+			n += snprintf(d + n, (size_t)(cabe - n), "  Lo de «límite de potencia» (PL1, PL2) que «ya estaba anotado al abrir»: lo anotó el procesador ANTES de arrancar el Termómetro "
+				      "(con el sistema de antes, p. ej. Windows si se reinició desde él, o al arrancar; estas marcas solo se borran al apagar). Quiere decir que en algún momento "
+				      "se frenó porque llegó al límite de potencia (los vatios que le deja la BIOS), no por temperatura. En un portátil para juegos con mucha carga es lo normal; "
+				      "si pasa con poca carga, o junto a PROCHOT o a la alarma del regulador, apunta a la alimentación (el cargador, la batería o el regulador de la placa).%s\r\n",
+				      visto ? "" : " En esta prueba no se ha visto frenarse por eso.");
 	}
 	if (freno_frio)
 		n += snprintf(d + n, (size_t)(cabe - n), "  Se ha frenado por una señal de la placa o del regulador de tensión con el procesador lejos de su límite: "
@@ -2346,7 +2684,8 @@ static void estado_serie(void)
 static void pulso(void)
 {
 	static u32 proximo, lento_dicho;
-	u32 ahora = jg_tics(), t0;
+	u32 ahora = jg_tics(), t0, t_lee = 0, t_zon = 0, esc0, smi0;
+	u64 x0;
 
 	if (solo_aqui && carga_on)
 		carga_aqui();
@@ -2358,12 +2697,21 @@ static void pulso(void)
 	if ((int)(ahora - proximo) >= 0)
 		proximo = ahora + jg_hz;
 	t0 = ahora;
+	x0 = rdtsc();
+	esc0 = tics_escribe;
+	smi0 = lee_smi();
+	uso_n_ini = uso_lee(&uso_ini);
 	cuenta_s++;
 	bmp_trozo();		/* (la pantalla que se está guardando: 32 K por segundo) */
 	lee_todo();
+	t_lee = jg_tics() - t0;
 	if (cuenta_s % 2 == 0) {
+		u32 tz = jg_tics();
+
 		lee_zonas();
+		t_zon = jg_tics() - tz;
 		mide_ocupacion();
+		mira_parones();
 		mira_frenos();
 		mira_envio();
 		mira_mide();
@@ -2376,13 +2724,49 @@ static void pulso(void)
 		if (cuenta_s % 10 == 0)
 			estado_serie();
 	}
+	/* (las pruebas: TERMO\\PARON.PRU con «a b»: a los a s de carga, el
+	 * Termómetro se queda b s sin poder hacer nada, como en el MSI GT80; el
+	 * equipo sigue: los tics, la hija y los demás procesadores) */
+	if (paron_a && fase == F_CARGA && (int)((jg_tics() - t_fase) / jg_hz) >= paron_a) {
+		u32 h = jg_tics() + (u32)paron_b * jg_hz;
+
+		serie("termo: (prueba) parón de %d s a los %d s de carga\n", paron_b, paron_a);
+		paron_a = 0;
+		while ((int)(jg_tics() - h) < 0)
+			;
+	}
+	mira_carga();
 	prueba_segundo();
 	jg_cambio = 1;
 	motivo_pinta = 1;
 	ahora = jg_tics() - t0;
-	if (ahora * 1000 / jg_hz >= 900 && lento_dicho < 5) {
+	/* (TERMO) un parón: cuánto, en qué parte, los SMI y quién ha tenido el
+	 * procesador; los 5 primeros enteros, y luego uno de cada 10 */
+	if (ahora * 1000 / jg_hz >= 900) {
+		static struct uso_tabla u2;
+		char quien[160], usb[120], sm[120];
+		int n2 = uso_lee(&u2), ms = (int)(ahora * 1000 / jg_hz), ms_tsc = (int)ms_de_tsc(rdtsc() - x0);
+		u32 es = (tics_escribe - esc0) * 1000 / jg_hz, smi = lee_smi() - smi0;
+
 		lento_dicho++;
-		suceso_log("AVISO: leer y apuntar ha tardado %u ms (la lectura de ACPI, la última: %u ms)", ahora * 1000 / jg_hz, hay_zonas ? za.t.ms_lectura : 0);
+		bloqueos++;
+		if (ms > bloqueo_peor_ms)
+			bloqueo_peor_ms = ms;
+		uso_texto(quien, sizeof quien, &uso_ini, uso_n_ini, &u2, n2, ahora);
+		usb[0] = 0;
+		if (n2 >= 0 && uso_n_ini >= 0 && u2.usb_ordenes != uso_ini.usb_ordenes)
+			snprintf(usb, sizeof usb, "; la memoria USB: %u órdenes, %u de más de 0,5 s%s%s", u2.usb_ordenes - uso_ini.usb_ordenes, u2.usb_lentas - uso_ini.usb_lentas,
+				 u2.usb_reinicios != uso_ini.usb_reinicios ? ", con reinicios" : "", u2.usb_peor != uso_ini.usb_peor ? " (la más lenta, nueva)" : "");
+		if (smi_hay == 1)
+			snprintf(sm, sizeof sm, "%u SMI del firmware", smi);
+		else
+			snprintf(sm, sizeof sm, "los SMI, este procesador no los cuenta");
+		if (lento_dicho <= 5 || lento_dicho % 10 == 0)
+			suceso_log("AVISO: leer y apuntar ha tardado %u ms%s: los sensores %u ms, ACPI %u ms (su lectura, la última: %u ms), escribir en la memoria %u ms; en ese rato, %s; "
+				   "el equipo entero parado: %d ms (el reloj del procesador frente al del sistema)%s%s%s%s",
+				   (u32)ms, lento_dicho > 5 ? " (otra vez)" : "", t_lee * 1000 / jg_hz, t_zon * 1000 / jg_hz, hay_zonas ? za.t.ms_lectura : 0, es, sm,
+				   ms_tsc - ms > 0 ? ms_tsc - ms : 0, quien[0] ? "; el procesador lo han tenido: " : "", quien, usb,
+				   lento_dicho == 5 ? " (de los siguientes, uno de cada 10)" : "");
 	}
 }
 
@@ -3338,6 +3722,7 @@ int principal(void)
 		return 1;
 	mide_tsc();
 	prepara_archivos();
+	lee_paron_prueba();
 	t_inicio = jg_tics();
 	lee_todo();
 	lee_zonas();

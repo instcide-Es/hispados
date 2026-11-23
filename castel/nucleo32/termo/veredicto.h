@@ -37,6 +37,13 @@ struct ve_prueba {
 	 * (PROCHOT, temperatura, potencia) durante la carga: lo pone quien llama,
 	 * después de ve_empieza */
 	int mhz_suma, mhz_n, mhz_nominal, procesadores, frenado;
+	/* (TERMO) si la carga se ha roto por un parón del equipo (el MSI GT80:
+	 * 8,6 s sin que el Termómetro pudiera correr, y el núcleo paró la carga
+	 * y los demás procesadores): cuántas veces se ha vuelto a poner en
+	 * marcha y, si no ha quedado entera, desde cuándo (1 + los segundos de
+	 * carga; 0: siempre entera) y a qué hora («hh:mm:ss») */
+	int carga_vuelta, carga_cortada;
+	char carga_cortada_hora[12];
 };
 
 void ve_empieza(struct ve_prueba *p, int ns, const struct ve_sensor *s, const int *t);

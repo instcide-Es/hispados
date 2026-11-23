@@ -68,7 +68,8 @@ Con Linux:
   falta quitar el «Secure Boot»: esos equipos no lo tienen o lo traen apagado).
   Si se queda colgado al arrancar, apáguelo (botón 5 s) y elija en el menú
   «Termometro SIN ACPI» (mide el procesador, pero no las zonas ni la batería).
-  Si la pantalla sale rara, elija «Termometro (1024 x 600)» o «(800 x 600)».
+  Si la pantalla sale rara (o muy grande), elija «Termometro (la medida que
+  diga la pantalla...)», «Termometro (1024 x 600)» o «(800 x 600)».
 
 
   La memoria arranca también por UEFI (los equipos de 2012 en adelante): en

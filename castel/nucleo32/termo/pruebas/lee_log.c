@@ -49,7 +49,8 @@ static void datos(char *l, int *t)
 		if (!ig || (sig && ig > sig))
 			break;
 		*ig = 0;
-		if (strcmp(n, "MHz") && strcmp(n, "bateria") && strcmp(n, "ocupado") && strncmp(n, "C0", 2) && strncmp(n, "C6", 2)) {
+		if (strcmp(n, "MHz") && strcmp(n, "bateria") && strcmp(n, "ocupado") && strncmp(n, "C0", 2) && strncmp(n, "C6", 2) && strcmp(n, "seg") && strcmp(n, "smi") &&
+		    strcmp(n, "parado") && strcmp(n, "vent_cpu") && strcmp(n, "gasta") && strcmp(n, "carga")) {
 			for (k = 0; k < ns; k++)
 				if (!strcmp(csv[k], n))
 					break;
@@ -117,6 +118,16 @@ int main(int argc, char **argv)
 		}
 		if (strstr(l, "el procesador se ha frenado") && fase == 1) {
 			frenado = 1;
+			continue;
+		}
+		/* (TERMO) la carga rota por un parón (el MSI GT80): vuelta a poner, o no */
+		if (strstr(l, "SUCESO AVISO: la carga se ") && fase == 1) {
+			if ((q = strstr(l, "(a los ")) && strstr(l, "NO es completa") && !p.carga_cortada) {
+				p.carga_cortada = atoi(q + 7) + 1;
+				if ((s = strstr(l, "desde las ")))
+					snprintf(p.carga_cortada_hora, sizeof p.carga_cortada_hora, "%.8s", s + 10);
+			} else if (strstr(l, "se vuelve a poner en marcha"))
+				p.carga_vuelta++;
 			continue;
 		}
 		if ((s = strstr(l, "ACABA la carga a los "))) {

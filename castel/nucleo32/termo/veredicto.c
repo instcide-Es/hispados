@@ -241,6 +241,14 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 		PON("PARADA DE SEGURIDAD a los %s: %s. ", tiempo(a, seg_carga), motivo);
 	else
 		PON("Prueba de %s%s. ", tiempo(a, seg_carga), esc ? " (parada con Esc)" : "");
+	/* (TERMO) la carga rota por un parón (el MSI GT80) */
+	if (p->carga_cortada) {
+		PON("OJO: la carga dejó de ser completa a los %s", tiempo(a, p->carga_cortada - 1));
+		if (p->carga_cortada_hora[0])
+			PON(" (a las %s)", p->carga_cortada_hora);
+		PON(" y no se ha podido poner entera otra vez: lo medido desde entonces no es con todos los procesadores al 100 %%. ");
+	} else if (p->carga_vuelta)
+		PON("La carga se paró %d %s por un parón del equipo y se volvió a poner en marcha (lo dice el .LOG). ", p->carga_vuelta, p->carga_vuelta == 1 ? "vez" : "veces");
 	if (r < 0) {
 		int nf = 0;
 
@@ -329,6 +337,9 @@ void ve_resumen(const struct ve_prueba *p, char *d, int cabe, int seg_carga, int
 		PON("La subida en carga es normal. ");
 	else if (lim != VE_NO && p->pico_ref >= lim - 200)
 		PON("Se calienta bastante: en carga es normal en un portátil, pero queda cerca del límite (%s); conviene revisar la limpieza del ventilador y de las rejillas. ", ve_grados(a, lim));
+	else if (p->carga_cortada)
+		PON("No se puede dar por buena la temperatura en carga: la carga no ha sido completa desde los %s (llegó a %s). Conviene repetir la prueba. ", tiempo(a, p->carga_cortada - 1),
+		    ve_grados(b, p->pico_ref));
 	else if (ve_lento(p, a2, (int)sizeof a2) && sube < 100) {
 		PON("%s", a2);
 		lento_dicho = 1;

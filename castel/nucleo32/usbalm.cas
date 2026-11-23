@@ -41,6 +41,10 @@ módulo Usbalm
     público variable cuántas: nat32
     público variable escritura: bool
     público variable sectores_leídos, sectores_escritos, fallos_de_disco: nat32
+    ; (TERMO) lo que tardan: cuántas órdenes, las de más de 500 ms, la que más
+    ; (en tics) y los reinicios de la clase (para el Termómetro: si lo que lo
+    ; frena es la memoria USB)
+    público variable órdenes, lentas, la_más_lenta, reinicios: nat32
 
     variable cerrojo: Cerrojo
     variable datos: nat32                       ; la página de los datos
@@ -51,6 +55,7 @@ módulo Usbalm
 
     ; reinicia la clase: la orden propia del transporte, y fuera las paradas
     función reinicia(m: nat32)
+        reinicios := reinicios + 1
         control(memorias[m].aparato, 0x21, 0xFF, 0, memorias[m].interfaz, nulo, 0)
         quita_parada(memorias[m].aparato, memorias[m].entra)
         quita_parada(memorias[m].aparato, memorias[m].sale)
@@ -59,7 +64,7 @@ módulo Usbalm
     ; manda la orden SCSI que hay en «scsi» (de «largo» octetos) a la
     ; memoria m, con n octetos de datos que entran o salen por la página de
     ; datos. Cierto si la memoria dice que ha ido bien.
-    función orden(m: nat32, largo: nat32, n: nat32, entra: bool): bool
+    función orden_sin_medir(m: nat32, largo: nat32, n: nat32, entra: bool): bool
         variable c: puntero a nat32
         variable b: puntero a byte
         variable r: ent32
@@ -106,6 +111,19 @@ módulo Usbalm
             devolver falso
         fin
         devolver b[12] = 0
+    fin
+
+    ; (TERMO) la misma, midiendo lo que tarda
+    función orden(m: nat32, largo: nat32, n: nat32, entra: bool): bool
+        variable t0, d: nat32
+        variable bien: bool
+        t0 := tics
+        bien := orden_sin_medir(m, largo, n, entra)
+        d := tics - t0
+        órdenes := órdenes + 1
+        si d >= 50 entonces lentas := lentas + 1 fin
+        si d > la_más_lenta entonces la_más_lenta := d fin
+        devolver bien
     fin
 
     función prepara_orden(código: nat32)
