@@ -27,6 +27,8 @@ módulo Salida
     variable escrito: nat32                     ; lo que se lleva escrito en él
     ; la etiqueta del final de la función que se genera (X_nombre): el destino 0
     público variable fin_func: arreglo [120] de byte
+    ; [HISPA-64] las líneas de un bloque «ensamblador» van tal cual (sin a_lea_alto)
+    público variable tal_cual: bool
 
     ; -------------------------------------------------------------------------
     ;  Montar una línea, a trozos
@@ -69,9 +71,59 @@ módulo Salida
         fin
     fin
 
+    ; [HISPA-64] el «modelo de núcleo» de direcciones (a_lea_alto de ccastel.py,
+    ; docs/64/HISPA-64.md 2.1): en «modelo hispa64» el núcleo está en los últimos
+    ; 2 GB, y «mov esi, T_3» (una etiqueta en un registro de 32 bits) perdería la
+    ; parte alta: pasa a «lea rsi, [T_3]» (la dirección de 32 bits con signo).
+    ; Una etiqueta empieza por una mayúscula o «_» y puede llevar +n o -n.
+    función a_lea_alto()
+        variable j, k, n: nat16
+        variable r1, r2, c: byte
+        variable op: arreglo [MAX_LN] de byte
+        si n_ln < 14 o ln[4] <> 'm' o ln[5] <> 'o' o ln[6] <> 'v' o ln[7] <> ' ' o ln[8] <> 'e' entonces devolver fin
+        r1 := ln[9]
+        r2 := ln[10]
+        si no ((r2 = 'x' y r1 >= 'a' y r1 <= 'd') o (r2 = 'i' y (r1 = 's' o r1 = 'd'))) entonces devolver fin
+        si ln[11] <> ',' o ln[12] <> ' ' entonces devolver fin
+        c := ln[13]
+        si no ((c >= 'A' y c <= 'Z') o c = '_') entonces devolver fin
+        j := 13
+        mientras j < n_ln y ln[j] <> ' ' y ln[j] <> ',' y ln[j] <> '[' y ln[j] <> ']' y ln[j] <> '+' y ln[j] <> '-' hacer
+            j := j + 1
+        fin
+        si j < n_ln entonces
+            si ln[j] <> '+' y ln[j] <> '-' entonces devolver fin
+            k := j + 1
+            si k >= n_ln entonces devolver fin
+            mientras k < n_ln hacer
+                si ln[k] < '0' o ln[k] > '9' entonces devolver fin
+                k := k + 1
+            fin
+        fin
+        n := 0
+        k := 13
+        mientras k < n_ln hacer
+            op[n] := ln[k]
+            n := n + 1
+            k := k + 1
+        fin
+        n_ln := 0
+        l("    lea r")
+        l_car(r1)
+        l_car(r2)
+        l(", [")
+        k := 0
+        mientras k < n hacer
+            l_car(op[k])
+            k := k + 1
+        fin
+        l_car(']')
+    fin
+
     ; guarda la línea montada, tal cual
     público función cruda()
         variable i, n: nat16
+        si es_hispa64 y no tal_cual entonces a_lea_alto() fin
         si n_lineas >= MAX_LINEAS o libre_lin >= MAX_TEXTO - n_ln entonces
             m("la función es demasiado grande (su ensamblador no cabe en memoria): pártala en dos")
             falla_archivo()

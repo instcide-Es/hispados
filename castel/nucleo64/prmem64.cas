@@ -1,0 +1,165 @@
+; =============================================================================
+;  prmem64.cas - Hispa-64: las pruebas de la memoria que hace el núcleo al
+;  arrancar (docs/64/HISPA-64.md, etapa 1), y la larga del montón:
+;   - prueba_páginas: poner una página de 4 KB, leerla, quitarla y ponerla en
+;     otro marco (si la TLB no se vaciase, se leería lo de antes); una de 2 MB
+;     (512 marcos seguidos); una de 1 GB (si el procesador las tiene); las
+;     banderas del núcleo (el código sin escribir, los datos sin ejecutar).
+;   - prueba_montón(n, k): n reservas y liberaciones al azar (de 1 a 20.000
+;     octetos, con k vivos a la vez), cada bloque marcado al principio y al
+;     final y comprobado al liberarlo; al acabar, nada en uso y la memoria
+;     física, la de antes (salvo las páginas que el montón se queda para
+;     volver a usar y las tablas de páginas nuevas: se cuentan).
+;  Si algo no sale, se para el núcleo y lo dice.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PrMem64
+
+    importar Cifras64, Cpu64, Excep64, Fisica64, Pagina64, Monton64
+
+    constante MAX_VIVOS = 1000
+
+    variable azar: nat64
+    variable vivos: arreglo [MAX_VIVOS] de puntero a byte
+    variable largos: arreglo [MAX_VIVOS] de nat64
+
+    función l64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función p64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    ; xorshift64
+    función otro(): nat64
+        azar := azar xob (azar << 13)
+        azar := azar xob (azar >> 7)
+        azar := azar xob (azar << 17)
+        devolver azar
+    fin
+
+    función mal(qué: puntero a byte)
+        detén_ini("la prueba de la memoria no sale")
+        escribir(qué, "\n")
+        detén_fin()
+    fin
+
+    ; la zona de las pruebas (en la mitad alta, fuera de todo lo demás)
+    función zona(): nat64
+        devolver nat64(0xFFFFD000) << 32
+    fin
+
+    público función prueba_páginas()
+        variable f1, f2, f, v: nat64
+        escribir("Páginas: ")
+        f1 := pide()
+        f2 := pide()
+        si f1 = 0 o f2 = 0 entonces mal("no hay marcos libres") fin
+        p64(virt(f1), 0x11111111)
+        p64(virt(f2), 0x22222222)
+        v := zona()
+        si no mapea(v, f1, K4, datos()) entonces mal("no se puede poner una página de 4 KB") fin
+        si l64(v) <> 0x11111111 o traduce(v + 8) <> f1 + 8 entonces mal("la página de 4 KB no se lee bien") fin
+        si desmapea(v) <> f1 o quitado <> K4 o traduce(v) <> nob nat64(0) entonces mal("la página de 4 KB no se quita bien") fin
+        si no mapea(v, f2, K4, datos()) entonces mal("no se puede volver a poner la página de 4 KB") fin
+        si l64(v) <> 0x22222222 entonces mal("después de cambiar la página de marco se lee el de antes: la TLB no se ha vaciado") fin
+        desmapea(v)
+        devuelve(f1)
+        devuelve(f2)
+        escribir("de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día)")
+        ; 2 MB: 512 marcos seguidos, alineados
+        f := pide_seguidos(512, 512)
+        si f <> 0 entonces
+            p64(virt(f) + 0x1238, 0x33333333)
+            p64(virt(f) + 0x1FFFF8, 0x44444444)
+            v := zona() + G1
+            si no mapea(v, f, M2, datos()) entonces mal("no se puede poner una página de 2 MB") fin
+            si l64(v + 0x1238) <> 0x33333333 o l64(v + 0x1FFFF8) <> 0x44444444 entonces mal("la página de 2 MB no se lee bien") fin
+            si desmapea(v + 0x5000) <> f o quitado <> M2 entonces mal("la página de 2 MB no se quita bien") fin
+            suelta_seguidos(f, 512)
+            escribir("; de 2 MB, también")
+        sino
+            escribir("; de 2 MB, no (no hay 2 MB seguidos libres)")
+        fin
+        ; 1 GB: el primero de la memoria física, otra vez, en la zona de las pruebas
+        si pag1g entonces
+            v := zona() + 2 * nat64(G1)
+            si no mapea(v, 0, G1, datos()) entonces mal("no se puede poner una página de 1 GB") fin
+            si l64(v + núcleo_fís_ini()) <> l64(k_ini) entonces mal("la página de 1 GB no se lee bien") fin
+            desmapea(v)
+            si quitado <> G1 entonces mal("la página de 1 GB no se quita bien") fin
+            escribir("; de 1 GB, también")
+        sino
+            escribir("; de 1 GB, no (el procesador no las tiene)")
+        fin
+        escribir("\n")
+        ; las banderas del núcleo
+        escribir("  el código del núcleo, sin escribir: ")
+        si marcas_de(k_ini) yb ESCRIBIR = 0 entonces escribir("sí") sino mal("el código del núcleo se puede escribir") fin
+        escribir("; los datos, sin ejecutar: ")
+        si nx entonces
+            si marcas_de(k_datos) yb bit_nx() <> 0 y marcas_de(virt(0x100000)) yb bit_nx() <> 0 entonces escribir("sí") sino mal("los datos se pueden ejecutar") fin
+        sino
+            escribir("no (el procesador no tiene NX)")
+        fin
+        escribir("; la guarda de la pila, sin poner: ")
+        si traduce(k_guarda) = nob nat64(0) entonces escribir("sí\n") sino mal("la página de guarda está puesta") fin
+    fin
+
+    público función prueba_montón(n: nat64, k: nat64)
+        variable i, j, largo, l0, p0, t0, grandes: nat64
+        variable q: puntero a byte
+        si k > MAX_VIVOS entonces k := MAX_VIVOS fin
+        azar := (nat64(0x9E3779B9) << 32) ob 0x7F4A7C15
+        l0 := libres
+        p0 := páginas
+        t0 := nat64(tablas)
+        grandes := 0
+        i := 0
+        mientras i < k hacer
+            vivos[i] := nulo
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n hacer
+            j := otro() mod k
+            si vivos[j] <> nulo entonces
+                q := vivos[j]
+                largo := largos[j]
+                si q[0] <> byte(largo) o (largo > 1 y q[largo - 1] <> byte(largo >> 3) xob 0x5A) o tamaño_de(q) <> largo entonces
+                    mal("un bloque del montón no tiene lo que se le puso")
+                fin
+                libera(q)
+                vivos[j] := nulo
+            sino
+                largo := 1 + otro() mod 2000
+                si otro() mod 16 = 0 entonces
+                    largo := 2025 + otro() mod 18000
+                    grandes := grandes + 1
+                fin
+                q := reserva(largo)
+                si q = nulo entonces mal("el montón no da memoria") fin
+                q[0] := byte(largo)
+                si largo > 1 entonces q[largo - 1] := byte(largo >> 3) xob 0x5A fin
+                vivos[j] := q
+                largos[j] := largo
+            fin
+            i := i + 1
+        fin
+        i := 0
+        mientras i < k hacer
+            si vivos[i] <> nulo entonces libera(vivos[i]) fin
+            i := i + 1
+        fin
+        si en_uso <> 0 o octetos <> 0 entonces mal("al acabar quedan bloques en uso") fin
+        si l0 - libres <> (páginas - p0) + (nat64(tablas) - t0) entonces mal("al acabar falta memoria física (se pierde)") fin
+        escribir("Montón: ", n, " reservas y liberaciones al azar (de 1 a 20025 octetos, ", grandes, " grandes; ", k, " a la vez), ")
+        escribir("comprobadas; al acabar, 0 en uso y la memoria física, la de antes (el montón se queda ", páginas, " páginas)\n")
+    fin
+
+fin PrMem64.

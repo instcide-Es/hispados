@@ -1,0 +1,408 @@
+; =============================================================================
+;  pagina64.cas - Hispa-64: la memoria virtual (docs/64/HISPA-64.md, 2.3 y
+;  etapa 1). Las tablas de páginas de cuatro niveles (PML4, PDPT, PD, PT), por
+;  función: mapea (páginas de 4 KB, 2 MB o 1 GB), desmapea y traduce, con la
+;  TLB al día (invlpg). Las tablas se piden a Fisica64 y se tocan por el mapa
+;  directo. Y el espacio del núcleo de verdad, que sustituye al provisional del
+;  arranque:
+;    0xFFFF800000000000  el mapa directo: solo la RAM y lo de ACPI (y lo que
+;                        haya dado el cargador), con las páginas más grandes
+;                        que se pueda (1 GB, 2 MB, 4 KB); sin ejecutar (NX)
+;    0xFFFFC00000000000  los dispositivos, mapeados a propósito (mapea_disp): la
+;                        pantalla con «escritura combinada» (PAT), los registros
+;                        sin caché
+;    0xFFFFC80000000000  los bloques grandes del montón (monton64.cas)
+;    0xFFFFFFFF80000000  el núcleo: el código, de solo leer; los datos y la
+;                        pila, sin ejecutar; una página de guarda (sin poner)
+;                        debajo de la pila
+;  y sin la identidad de abajo (la mitad baja queda para los programas).
+;  Con NX (EFER.NXE), WP (el núcleo tampoco escribe en lo de solo leer), las
+;  páginas globales (CR4.PGE) y la PAT (entrada 1: escritura combinada; 3: sin
+;  caché).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Pagina64
+
+    importar Cifras64, Cerrojo, Fisica64, Cpu64, Excep64
+
+    público constante PRESENTE = 1
+    público constante ESCRIBIR = 2
+    público constante USUARIO = 4
+    público constante PWT = 8
+    público constante PCD = 16
+    público constante GRANDE = 128
+    público constante GLOBAL = 256
+    público constante K4 = 0x1000
+    público constante M2 = 0x200000
+    público constante G1 = 0x40000000
+    constante TABLAS_ARRANQUE = 274432          ; las de C_tablas (ARRANQUE64 de ccastel.py)
+
+    público variable raíz: nat64                ; la PML4 en uso (física)
+    público variable tablas: nat32              ; las tablas de páginas pedidas
+    público variable hay_pat: bool
+    público variable dm_1g, dm_2m, dm_4k: nat32 ; las páginas del mapa directo, por tamaños
+    público variable quitado: nat64             ; el tamaño de lo último que ha quitado desmapea
+    variable cerrojo: nat64
+    variable hay_nx: bool
+    variable próx_disp: nat64
+    ; las etiquetas del núcleo (virtuales): el principio, los datos, las tablas
+    ; del arranque, la guarda, la pila y el final
+    público variable k_ini, k_datos, k_tablas, k_guarda, k_pila, k_pila_fin, k_fin: nat64
+
+    público función bit_nx(): nat64
+        si hay_nx entonces devolver nat64(1) << 63 fin
+        devolver 0
+    fin
+
+    ; las banderas de cada clase de página
+    público función datos(): nat64
+        devolver ESCRIBIR ob GLOBAL ob bit_nx()
+    fin
+
+    público función código(): nat64
+        devolver GLOBAL
+    fin
+
+    público función combinada(): nat64      ; la PAT 1: escritura combinada (la pantalla)
+        devolver ESCRIBIR ob GLOBAL ob PWT ob bit_nx()
+    fin
+
+    público función sin_caché(): nat64      ; la PAT 3: sin caché (los registros)
+        devolver ESCRIBIR ob GLOBAL ob PWT ob PCD ob bit_nx()
+    fin
+
+    ; de virtual del núcleo a física
+    público función base_núcleo(): nat64
+        devolver (nat64(0xFFFFFFFF) << 32) + 0x80000000
+    fin
+
+    función máscara(): nat64
+        devolver (nat64(0x000FFFFF) << 32) ob 0xFFFFF000
+    fin
+
+    función tabla(f: nat64): puntero a nat64
+        devolver puntero(virt(f))
+    fin
+
+    público función invlpg(v: nat64)
+        ensamblador
+            mov rax, {v}
+            db 0x0F, 0x01, 0x38         ; invlpg [rax]
+        fin
+    fin
+
+    función carga_cr3(f: nat64)
+        ensamblador
+            mov rax, {f}
+            mov cr3, rax
+        fin
+    fin
+
+    función lee_msr(n: nat32): nat64
+        ensamblador
+            mov ecx, {n}
+            rdmsr
+            shl rdx, 32
+            or rax, rdx
+        fin
+    fin
+
+    función pon_msr(n: nat32, v: nat64)
+        ensamblador
+            mov ecx, {n}
+            mov rax, {v}
+            mov rdx, rax
+            shr rdx, 32
+            wrmsr
+        fin
+    fin
+
+    función cr0_ob(b: nat64)
+        ensamblador
+            mov rax, cr0
+            or rax, {b}
+            mov cr0, rax
+        fin
+    fin
+
+    función cr4_ob(b: nat64)
+        ensamblador
+            mov rax, cr4
+            or rax, {b}
+            mov cr4, rax
+        fin
+    fin
+
+    ; una tabla nueva, a cero (física); si no hay memoria, se para
+    función nueva(): nat64
+        variable f: nat64
+        variable t: puntero a nat64
+        variable i: nat32
+        f := pide()
+        si f = 0 entonces
+            detén_ini("no queda memoria para las tablas de páginas")
+            detén_fin()
+        fin
+        t := tabla(f)
+        i := 0
+        mientras i < 512 hacer
+            t[i] := 0
+            i := i + 1
+        fin
+        tablas := tablas + 1
+        devolver f
+    fin
+
+    función índice(v: nat64, nivel: nat32): nat64
+        devolver (v >> (12 + 9 * (nivel - 1))) yb 511
+    fin
+
+    ; el sitio de la entrada de v en el nivel «nivel» (1 la PT, 2 la PD, 3 la
+    ; PDPT); con «crea», pone las tablas que falten; nulo si no está (o si hay
+    ; una página grande por medio)
+    función entrada(v: nat64, nivel: nat32, crea: bool): puntero a nat64
+        variable t: puntero a nat64
+        variable n: nat32
+        variable e: nat64
+        t := tabla(raíz)
+        n := 4
+        mientras n > nivel hacer
+            e := t[índice(v, n)]
+            si e yb PRESENTE = 0 entonces
+                si no crea entonces devolver nulo fin
+                e := nueva() ob PRESENTE ob ESCRIBIR
+                t[índice(v, n)] := e
+            sino si e yb GRANDE <> 0 entonces
+                devolver nulo
+            fin
+            t := tabla(e yb máscara())
+            n := n - 1
+        fin
+        devolver dirección(t[índice(v, nivel)])
+    fin
+
+    ; pone v -> f, de tam octetos (K4, M2 o G1), con esas banderas; dice si ha
+    ; podido (no, si no están alineadas, si ya había algo, si no hay páginas
+    ; de 1 GB)
+    público función mapea(v: nat64, f: nat64, tam: nat64, fl: nat64): bool
+        variable nivel: nat32
+        variable p: puntero a nat64
+        variable b: nat64
+        variable bien: bool
+        nivel := 1
+        si tam = M2 entonces nivel := 2 fin
+        si tam = G1 entonces nivel := 3 fin
+        si nivel = 1 y tam <> K4 entonces devolver falso fin
+        si v yb (tam - 1) <> 0 o f yb (tam - 1) <> 0 entonces devolver falso fin
+        si nivel = 3 y no pag1g entonces devolver falso fin
+        b := toma(dirección(cerrojo))
+        p := entrada(v, nivel, cierto)
+        bien := p <> nulo
+        si bien entonces bien := valor(p) yb PRESENTE = 0 fin
+        si bien entonces
+            si nivel > 1 entonces
+                valor(p) := f ob fl ob PRESENTE ob GRANDE
+            sino
+                valor(p) := f ob fl ob PRESENTE
+            fin
+            invlpg(v)
+        fin
+        suelta(dirección(cerrojo), b)
+        devolver bien
+    fin
+
+    ; quita la página en la que está v (sea del tamaño que sea) y la quita de la
+    ; TLB; devuelve la física donde empezaba (y su tamaño en «quitado»), o
+    ; nob 0 si no había nada. Las tablas que se quedan vacías no se devuelven aún.
+    público función desmapea(v: nat64): nat64
+        variable t: puntero a nat64
+        variable n: nat32
+        variable e, r, b, tam: nat64
+        b := toma(dirección(cerrojo))
+        r := nob nat64(0)
+        quitado := 0
+        t := tabla(raíz)
+        n := 4
+        mientras n >= 1 hacer
+            e := t[índice(v, n)]
+            si e yb PRESENTE = 0 entonces romper fin
+            si n = 1 o e yb GRANDE <> 0 entonces
+                tam := nat64(1) << (12 + 9 * (n - 1))
+                r := (e yb máscara()) yb (nob (tam - 1))
+                t[índice(v, n)] := 0
+                quitado := tam
+                invlpg(v)
+                romper
+            fin
+            t := tabla(e yb máscara())
+            n := n - 1
+        fin
+        suelta(dirección(cerrojo), b)
+        devolver r
+    fin
+
+    ; la física de v, o nob 0 si no está
+    público función traduce(v: nat64): nat64
+        variable t: puntero a nat64
+        variable n: nat32
+        variable e, tam: nat64
+        t := tabla(raíz)
+        n := 4
+        mientras n >= 1 hacer
+            e := t[índice(v, n)]
+            si e yb PRESENTE = 0 entonces devolver nob nat64(0) fin
+            si n = 1 o e yb GRANDE <> 0 entonces
+                tam := nat64(1) << (12 + 9 * (n - 1))
+                devolver ((e yb máscara()) yb (nob (tam - 1))) + (v yb (tam - 1))
+            fin
+            t := tabla(e yb máscara())
+            n := n - 1
+        fin
+        devolver nob nat64(0)
+    fin
+
+    ; las banderas de la página de v (las de la entrada que la pone), o 0
+    público función marcas_de(v: nat64): nat64
+        variable t: puntero a nat64
+        variable n: nat32
+        variable e: nat64
+        t := tabla(raíz)
+        n := 4
+        mientras n >= 1 hacer
+            e := t[índice(v, n)]
+            si e yb PRESENTE = 0 entonces devolver 0 fin
+            si n = 1 o e yb GRANDE <> 0 entonces devolver e yb (nob máscara()) fin
+            t := tabla(e yb máscara())
+            n := n - 1
+        fin
+        devolver 0
+    fin
+
+    ; [a, b) de memoria física, en el mapa directo: con las páginas más grandes
+    ; que se pueda; lo que ya esté puesto se deja
+    público función mapea_directo(a: nat64, b: nat64)
+        a := abajo(a)
+        b := arriba(b)
+        mientras a < b hacer
+            si pag1g y a yb (G1 - 1) = 0 y b - a >= G1 y mapea(virt(a), a, G1, datos()) entonces
+                dm_1g := dm_1g + 1
+                a := a + G1
+            sino si a yb (M2 - 1) = 0 y b - a >= M2 y mapea(virt(a), a, M2, datos()) entonces
+                dm_2m := dm_2m + 1
+                a := a + M2
+            sino
+                si mapea(virt(a), a, K4, datos()) entonces dm_4k := dm_4k + 1 fin
+                a := a + K4
+            fin
+        fin
+    fin
+
+    ; un dispositivo (la pantalla, unos registros): [f, f + largo) de física, en
+    ; la zona de los dispositivos, con esas banderas (combinada(), sin_caché());
+    ; devuelve dónde se ve f. Cada uno empieza en un GB nuevo, en el mismo sitio
+    ; dentro del GB que la física: así valen las páginas de 2 MB.
+    público función mapea_disp(f: nat64, largo: nat64, fl: nat64): nat64
+        variable a, b, v, v0: nat64
+        a := abajo(f)
+        b := arriba(f + largo)
+        v0 := próx_disp + (a yb (G1 - 1))
+        v := v0
+        mientras a < b hacer
+            si a yb (M2 - 1) = 0 y b - a >= M2 y mapea(v, a, M2, fl) entonces
+                a := a + M2
+                v := v + M2
+            sino
+                si no mapea(v, a, K4, fl) entonces
+                    detén_ini("no se puede poner un dispositivo en las tablas de páginas")
+                    hex16(a)
+                    escribir("\n")
+                    detén_fin()
+                fin
+                a := a + K4
+                v := v + K4
+            fin
+        fin
+        próx_disp := (v + G1 - 1) yb (nob nat64(G1 - 1))
+        devolver v0 + (f yb 4095)
+    fin
+
+    función toma_etiquetas()
+        ensamblador
+            mov rax, C_ini
+            mov {k_ini}, rax
+            mov rax, C_datos
+            mov {k_datos}, rax
+            mov rax, C_tablas
+            mov {k_tablas}, rax
+            mov rax, C_guarda
+            mov {k_guarda}, rax
+            mov rax, C_pila
+            mov {k_pila}, rax
+            mov rax, C_pila_fin
+            mov {k_pila_fin}, rax
+            mov rax, _vacio_fin
+            mov {k_fin}, rax
+        fin
+    fin
+
+    ; dónde está el núcleo en la memoria física: [núcleo_fís_ini, núcleo_fís_fin)
+    público función núcleo_fís_ini(): nat64
+        toma_etiquetas()
+        devolver abajo(k_ini) - base_núcleo()
+    fin
+
+    público función núcleo_fís_fin(): nat64
+        toma_etiquetas()
+        devolver arriba(k_fin) - base_núcleo()
+    fin
+
+    ; prepara el procesador: NX, la PAT, WP (antes de poner nada)
+    público función prepara_páginas()
+        toma_etiquetas()
+        hay_nx := nx
+        si hay_nx entonces pon_msr(0xC0000080, lee_msr(0xC0000080) ob 0x800) fin
+        cpuid(1, 0)
+        hay_pat := rd yb 0x10000 <> 0
+        si hay_pat entonces
+            ensamblador
+                db 0x0F, 0x09           ; wbinvd
+            fin
+            ; WB, WC, UC-, UC, WB, WP, UC-, WT
+            pon_msr(0x277, (nat64(0x04070506) << 32) ob 0x00070106)
+        fin
+        cr0_ob(0x10000)
+        próx_disp := nat64(0xFFFFC000) << 32
+    fin
+
+    ; las tablas nuevas, con el núcleo (sin las tablas del arranque ni la página
+    ; de guarda): se deja en raíz; el mapa directo lo pone después quien llama
+    ; (mapea_directo con cada trozo de RAM)
+    público función empieza_núcleo()
+        variable v, fl: nat64
+        raíz := nueva()
+        v := abajo(k_ini)
+        mientras v < arriba(k_fin) hacer
+            si (v < k_tablas o v >= k_tablas + TABLAS_ARRANQUE) y (v < k_guarda o v >= k_pila) entonces
+                fl := datos()
+                si v < k_datos entonces fl := código() fin
+                si no mapea(v, v - base_núcleo(), K4, fl) entonces
+                    detén_ini("no se puede poner el núcleo en las tablas de páginas")
+                    detén_fin()
+                fin
+            fin
+            v := v + K4
+        fin
+    fin
+
+    ; pasa a las tablas nuevas y devuelve las del arranque a la memoria libre
+    público función cambia()
+        carga_cr3(raíz)
+        cr4_ob(0x80)                    ; las páginas globales
+        suelta_seguidos(k_tablas - base_núcleo(), TABLAS_ARRANQUE div 4096)
+        guarda_ini := k_guarda
+        guarda_fin := k_pila
+        pila_ini := k_pila
+        pila_fin := k_pila_fin
+    fin
+
+fin Pagina64.

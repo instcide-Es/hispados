@@ -1093,6 +1093,7 @@ módulo Programa
         s(t)
         sl(". NO editar a mano.")
         s(l64_arranque())
+        s(l64_arranque2())
         sl("    call F_principal")
         si f_tret(pr) = T_NADA entonces sl("    xor eax, eax") fin
         sl("    jmp castel_salir")
@@ -1105,6 +1106,10 @@ módulo Programa
         apoyo_de(1)
         sl("")
         sl("; ---- datos ----")
+        si es_hispa64 entonces                  ; [HISPA-64] los datos, en otra página (sin ejecutar)
+            sl("    align 4096, db 0")
+            sl("C_datos:")
+        fin
         destino := A_SALIDA
         i := 0
         mientras i < n_datos hacer

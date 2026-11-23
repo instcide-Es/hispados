@@ -16,7 +16,7 @@ módulo Pant64
 
     constante CASILLAS = 65000
 
-    variable base: nat64                ; dónde está la pantalla (física = virtual, de 0 a 64 GB)
+    variable base: nat64                ; dónde se ve la pantalla (su dirección virtual)
     variable ancho, alto, salto: nat32   ; puntos de ancho y de alto; octetos por línea
     variable escala: nat32
     variable octetos: nat32             ; por punto: 4 o 3
@@ -57,13 +57,24 @@ módulo Pant64
     fin
 
     ; la casilla (xc, yc), pintada con su letra y su color
+    ; dónde están las 16 filas de la letra c (la dibujo_letra de letra.cas, que
+    ; es de 32 bits, en 64: el núcleo está en la mitad alta)
+    función dibujo(c: nat32): puntero a byte
+        ensamblador
+            mov eax, {c}
+            and eax, 255
+            shl eax, 4
+            lea rax, [rax+HP_letra8x16]
+        fin
+    fin
+
     función pinta(xc: nat32, yc: nat32)
         variable dib: puntero a byte
         variable fila, sy, col, sx, px, py, t, f, c: nat32
         variable bits: byte
         variable p: puntero a nat32
         variable q: puntero a byte
-        dib := dibujo_letra(texto[yc * columnas + xc])
+        dib := dibujo(texto[yc * columnas + xc])
         si texto[yc * columnas + xc] = 0xC4 entonces dib := dirección(raya[0]) fin
         t := punto(colores[yc * columnas + xc])
         f := punto(colores[yc * columnas + xc] >> 4)
@@ -201,6 +212,12 @@ módulo Pant64
             cx := cx + 1
             si cx >= columnas entonces nueva_línea() fin
         fin
+    fin
+
+    ; la pantalla pasa a verse en otra dirección virtual (la misma física): al
+    ; cambiar de tablas de páginas (pagina64.cas)
+    público función mueve(b: nat64)
+        base := b
     fin
 
     ; la que llama el arranque (C_consola) con cada letra que se escribe

@@ -354,7 +354,34 @@ modelo, **`modelo hispa64`**, que es `núcleo64` con otro arranque
   de un parámetro, que recibe la letra; la consola del GOP).
 - El texto del arranque sale entero en una línea `db` del compilador escrito en
   Castel: no debe pasar de unos 2.900 octetos (ENSAMB64 no lee líneas de más de
-  12.000 letras).
+  12.000 letras). Desde la etapa 1 va en dos trozos (`'hispa64'` y `'hispa64_2'`;
+  `l64_arranque2()` en Gen64).
+
+### El «modelo de núcleo» de direcciones (etapa 1, 23/11/2026)
+
+Desde la etapa 1 de Hispa-64, `modelo hispa64` enlaza el núcleo **en la mitad alta**,
+en los últimos 2 GB del espacio de direcciones (el `-mcmodel=kernel` de gcc):
+`org 0xFFFFFFFF80100000`, cargado en 1 MB (física = virtual − `0xFFFFFFFF80000000`).
+Toda etiqueta, vista como número de 32 bits **con signo**, es su dirección de verdad;
+así que:
+
+- `[G_x]`, `[rsi+G_x]`, `push T_3`, `mov qword [x], T_3`, `call`/`jmp` y `dq G_x` valen
+  tal cual (el procesador alarga los 32 bits con su signo, o son relativos, o de 64).
+- Lo único que no vale es **una etiqueta en un registro de 32 bits** (`mov esi, T_3`,
+  que la alargaría con ceros): el compilador la cambia por **`lea rsi, [T_3]`**
+  (`a_lea_alto` en ccastel.py, en `Generador64.em`; `a_lea_alto` en `salida.cas`, en
+  `cruda()`; los dos solo con `es_hispa64`, y no en las líneas de un bloque
+  `ensamblador`, que van tal cual: ahí, `mov rax, ETIQUETA`, con los 64 bits).
+- El arranque, de 32 bits, usa la física: `X-0xFFFFFFFF80000000`; salta a la mitad
+  alta con `mov rax, C_alto` / `jmp rax`.
+- Detrás del código, `align 4096` y `C_datos:` (los datos, en otra página: el núcleo
+  pone el código de solo leer y los datos sin ejecutar). `C_consola` pasa a lo que
+  empieza a cero (en la página del código no se puede escribir).
+- Los ensambladores: el `org` se cuenta en 64 bits aunque vaya detrás de `bits 32`
+  (ensambla.py y Montador); Montador guarda su palabra alta (`pc_alto`) y se la pone
+  a todas las etiquetas en `bits 64` (sus etiquetas son de 32 bits).
+
+Lo que sale para los demás modelos (16, 32 y 64 bits) no cambia ni un octeto.
 
 ## 11. Probar y comprobar
 
@@ -388,6 +415,10 @@ mismo: lo que sale para Hispa-8086 e Hispa-Pentium no ha cambiado.
   tipos y fichas de 32 octetos con campos de 32 bits en 64 (con `Ref = nat16`, el
   CASTEL de 16 y el de 32 saldrían iguales). Se hará cuando un programa lo pida.
 - **Números escritos de 64 bits** (y constantes de 64 que se calculen al compilar).
+  La etapa 1 de Hispa-64 se ha hecho sin ellos (`nat64(0xFFFF8000) << 32`); hará
+  falta sobre todo con ACPI y los BAR de PCIe (etapa 2).
+- **Variables alineadas** (`alineado 4096`): la etapa 1 no las ha necesitado (las
+  tablas de páginas y lo que va alineado se piden a la memoria física).
 - **Llamar a C** (System V AMD64): `externa función`, con su puente (§4).
 - **Los programas del anillo 3 de Hispa-64** (un `modelo usuario64`, con su llamada
   al sistema por `syscall`), y el núcleo de verdad: memoria, tareas, discos...

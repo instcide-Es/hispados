@@ -1,0 +1,49 @@
+; =============================================================================
+;  cerrojo.cas - Hispa-64: los cerrojos de espera activa (docs/64/HISPA-64.md,
+;  2.4). Aunque en la etapa 1 solo corre un procesador, lo que se comparte (la
+;  memoria física, las tablas de páginas, el montón) va ya con cerrojo, para
+;  que en la etapa 3 (varios procesadores) no haya que repasarlo todo. Mientras
+;  se tiene un cerrojo, las interrupciones están quitadas (en este procesador):
+;  así una interrupción no puede pedir el mismo cerrojo y quedarse esperando
+;  para siempre.
+;    b := toma(dirección(c))   ... lo que se protege ...   suelta(dirección(c), b)
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cerrojo
+
+    ; espera a que el cerrojo (un nat64: 0 libre, 1 tomado) esté libre y lo
+    ; toma, con las interrupciones quitadas; devuelve las banderas de antes
+    ; (RFLAGS), que se le dan a suelta()
+    público función toma(c: puntero a nat64): nat64
+        ensamblador
+            db 0x9C                     ; pushfq
+            pop rax
+            cli
+            mov rdi, {c}
+        .otra:
+            mov ecx, 1
+            db 0x48, 0x87, 0x0F         ; xchg rcx, [rdi] (con «lock» sin decirlo)
+            test rcx, rcx
+            jz .ya
+        .espera:
+            db 0xF3, 0x90               ; pause
+            cmp qword [rdi], 0
+            jne .espera
+            jmp .otra
+        .ya:
+        fin
+    fin
+
+    ; lo suelta y deja las interrupciones como estaban al tomarlo
+    público función suelta(c: puntero a nat64, rf: nat64)
+        ensamblador
+            mov rdi, {c}
+            xor ecx, ecx
+            db 0x48, 0x87, 0x0F         ; xchg rcx, [rdi]
+            mov rax, {rf}
+            push rax
+            db 0x9D                     ; popfq
+        fin
+    fin
+
+fin Cerrojo.

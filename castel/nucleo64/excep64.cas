@@ -5,11 +5,17 @@
 ;  registros y, en un fallo de página, la dirección (CR2) y por qué. Un punto
 ;  de parada (int3) se cuenta y se sigue; las demás paran el procesador (con
 ;  «apagar» en la línea de órdenes, apagan QEMU con el código 99: las pruebas).
+;  Desde la etapa 1: el doble fallo, el NMI y el fallo de máquina van con su
+;  propia pila (IST, de la TSS de gdt64.cas), y un doble fallo por desbordar la
+;  pila del núcleo se dice; con los nombres de nombre64.cas, en qué función
+;  ha pasado y quién la ha llamado; y las paradas del propio núcleo (detén_ini
+;  y detén_fin: el montón estropeado, memoria soltada dos veces...), igual, con
+;  el código 98 en QEMU.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Excep64
 
-    importar Cifras64
+    importar Cifras64, Nombre64, Gdt64
 
     ; una puerta de la IDT de 64 bits: 16 octetos
     tipo Puerta = estructura
@@ -31,6 +37,9 @@ módulo Excep64
     variable idtr: Idtr
     público variable paradas: nat32         ; cuántas int3 se han atendido
     público variable apagar_al_fallar: bool
+    variable dentro: nat32                  ; cuántas excepciones se están explicando
+    público variable guarda_ini, guarda_fin: nat64   ; la página de guarda bajo la pila del núcleo
+    público variable pila_ini, pila_fin: nat64       ; la pila del núcleo
 
     ; el marco que deja una función de interrupción: los quince registros, de r15
     ; (el primero, en [rbp]) a rax (en [rbp+112]); detrás, lo del procesador
@@ -82,10 +91,10 @@ módulo Excep64
         fin
     fin
 
-    función pon_puerta(n: nat32, f: nat64)
+    función pon_puerta(n: nat32, f: nat64, ist: byte)
         idt[n].bajo := nat16(f)
         idt[n].selector := 0x08
-        idt[n].ist := 0
+        idt[n].ist := ist
         idt[n].tipo_ := 0x8E            ; presente, anillo 0, puerta de interrupción de 64 bits
         idt[n].medio := nat16(f >> 16)
         idt[n].alto := nat32(f >> 32)
@@ -94,8 +103,15 @@ módulo Excep64
 
     ; lo que se dice de la excepción n; m es el marco; con_error, si el procesador
     ; ha dejado un número de error (entonces RIP va 8 octetos más allá)
+    función rsp_ahora(): nat64
+        ensamblador
+            mov rax, rsp
+        fin
+    fin
+
     función explica(n: nat32, m: nat64, con_error: bool)
         variable d, err, c2: nat64
+        variable k: nat32
         d := m + 120
         err := 0
         si con_error entonces
@@ -110,8 +126,23 @@ módulo Excep64
             escribir(": atendido, sigue.\n")
             devolver
         fin
+        ; una excepción al explicar otra (en la consola, por ejemplo): desde
+        ; ahora, solo por el puerto serie
+        dentro := dentro + 1
+        si dentro > 1 entonces
+            ensamblador
+                mov qword [C_consola], 0
+            fin
+        fin
         escribir("\n*** Hispa-64 se ha parado: excepción ", n, " ***\n")
         escribir(nombre(n), "\n")
+        k := 1
+        mientras k <= 3 hacer
+            si rsp_ahora() < ist(k) y rsp_ahora() + 16384 >= ist(k) entonces
+                escribir("(Se atiende con su propia pila: la IST ", k, " de la TSS.)\n")
+            fin
+            k := k + 1
+        fin
         si n = 14 entonces
             escribir("Al ")
             si err yb 16 <> 0 entonces escribir("ejecutar en ")
@@ -132,6 +163,23 @@ módulo Excep64
                 si err yb 2 <> 0 entonces escribir(", de la IDT") fin
                 escribir(")")
             fin
+            escribir("\n")
+        fin
+        si n = 8 y lee64(d + 24) >= guarda_ini y lee64(d + 24) < guarda_fin + 256 entonces
+            escribir("La pila del núcleo se ha desbordado: RSP=")
+            hex16(lee64(d + 24))
+            escribir(" está en la página de guarda (")
+            hex16(guarda_ini)
+            escribir(" - ")
+            hex16(guarda_fin - 1)
+            escribir("),\nque no está en las tablas a propósito.\n")
+        fin
+        si n = 14 y c2 >= guarda_ini y c2 < guarda_fin entonces
+            escribir("(Esa dirección es la página de guarda de la pila del núcleo: la pila se ha desbordado.)\n")
+        fin
+        si cuántos > 0 entonces
+            escribir("En la función ")
+            si no nombra(lee64(d)) entonces escribir("(ninguna: no es código del núcleo)") fin
             escribir("\n")
         fin
         escribir("RIP=")
@@ -172,14 +220,73 @@ módulo Excep64
         hex16(lee64(m + 8))
         escribir(" R15=")
         hex16(lee64(m))
-        escribir("\nEl procesador queda parado. Apunte lo de arriba (o hágale una foto) y reinicie el equipo.\n")
+        escribir("\n")
+        llamadas(lee64(m + 80))
+        escribir("El procesador queda parado. Apunte lo de arriba (o hágale una foto) y reinicie el equipo.\n")
         si apagar_al_fallar entonces salir(99) fin
+        quieto()
+    fin
+
+    función quieto()
         ensamblador
             cli
         .para:
             hlt
             jmp .para
         fin
+    fin
+
+    ; ¿puede ser rbp un marco de una función del núcleo? (en su pila o en una de las IST)
+    función marco_bueno(r: nat64): bool
+        si r yb 7 <> 0 entonces devolver falso fin
+        devolver r >= (nat64(0xFFFFFFFF) << 32) + 0x80000000 y r < nob nat64(15)
+    fin
+
+    ; quién ha llamado a quién, siguiendo los RBP desde r (con los nombres, si se saben)
+    público función llamadas(r: nat64)
+        variable n, otra: nat32
+        variable vuelta, antes: nat64
+        si cuántos = 0 entonces devolver fin
+        n := 0
+        otra := 0
+        antes := 1
+        mientras n < 40 y marco_bueno(r) hacer
+            vuelta := lee64(r + 8)
+            si vuelta < (nat64(0xFFFFFFFF) << 32) + 0x80000000 entonces romper fin
+            si inicio(vuelta - 1) = antes entonces
+                ; (la misma función otra vez: una que se llama a sí misma)
+                otra := otra + 1
+            sino
+                si otra > 0 entonces escribir(" (y ", otra, " veces más)") fin
+                otra := 0
+                si n = 0 entonces escribir("Llamada desde: ") sino escribir(" <- ") fin
+                si no nombra(vuelta - 1) entonces hex(vuelta) fin
+                antes := inicio(vuelta - 1)
+            fin
+            n := n + 1
+            r := lee64(r)
+        fin
+        si otra > 0 entonces escribir(" (y ", otra, " veces más, por lo menos)") fin
+        si n > 0 entonces escribir("\n") fin
+    fin
+
+    ; una parada del propio núcleo (algo que no puede seguir): lo dice como
+    ; las excepciones; detrás de detén_ini, quien la llama escribe el porqué
+    ; (lo que haga falta) y acaba con detén_fin
+    público función detén_ini(qué: puntero a byte)
+        escribir("\n*** Hispa-64 se ha parado: ", qué, " ***\n")
+    fin
+
+    público función detén_fin()
+        variable r: nat64
+        ; (con una variable, detén_fin tiene su marco: desde él, quién la ha llamado)
+        ensamblador
+            mov {r}, rbp
+        fin
+        llamadas(r)
+        escribir("El procesador queda parado. Apunte lo de arriba (o hágale una foto) y reinicie el equipo.\n")
+        si apagar_al_fallar entonces salir(98) fin
+        quieto()
     fin
 
     interrupción función e0()
@@ -313,38 +420,38 @@ módulo Excep64
     ; monta la IDT con las 32 excepciones y la carga
     público función prepara()
 
-        pon_puerta(0, nat64(dirección(e0)))
-        pon_puerta(1, nat64(dirección(e1)))
-        pon_puerta(2, nat64(dirección(e2)))
-        pon_puerta(3, nat64(dirección(e3)))
-        pon_puerta(4, nat64(dirección(e4)))
-        pon_puerta(5, nat64(dirección(e5)))
-        pon_puerta(6, nat64(dirección(e6)))
-        pon_puerta(7, nat64(dirección(e7)))
-        pon_puerta(8, nat64(dirección(e8)))
-        pon_puerta(9, nat64(dirección(e9)))
-        pon_puerta(10, nat64(dirección(e10)))
-        pon_puerta(11, nat64(dirección(e11)))
-        pon_puerta(12, nat64(dirección(e12)))
-        pon_puerta(13, nat64(dirección(e13)))
-        pon_puerta(14, nat64(dirección(e14)))
-        pon_puerta(15, nat64(dirección(e15)))
-        pon_puerta(16, nat64(dirección(e16)))
-        pon_puerta(17, nat64(dirección(e17)))
-        pon_puerta(18, nat64(dirección(e18)))
-        pon_puerta(19, nat64(dirección(e19)))
-        pon_puerta(20, nat64(dirección(e20)))
-        pon_puerta(21, nat64(dirección(e21)))
-        pon_puerta(22, nat64(dirección(e22)))
-        pon_puerta(23, nat64(dirección(e23)))
-        pon_puerta(24, nat64(dirección(e24)))
-        pon_puerta(25, nat64(dirección(e25)))
-        pon_puerta(26, nat64(dirección(e26)))
-        pon_puerta(27, nat64(dirección(e27)))
-        pon_puerta(28, nat64(dirección(e28)))
-        pon_puerta(29, nat64(dirección(e29)))
-        pon_puerta(30, nat64(dirección(e30)))
-        pon_puerta(31, nat64(dirección(e31)))
+        pon_puerta(0, nat64(dirección(e0)), 0)
+        pon_puerta(1, nat64(dirección(e1)), 0)
+        pon_puerta(2, nat64(dirección(e2)), 2)
+        pon_puerta(3, nat64(dirección(e3)), 0)
+        pon_puerta(4, nat64(dirección(e4)), 0)
+        pon_puerta(5, nat64(dirección(e5)), 0)
+        pon_puerta(6, nat64(dirección(e6)), 0)
+        pon_puerta(7, nat64(dirección(e7)), 0)
+        pon_puerta(8, nat64(dirección(e8)), 1)
+        pon_puerta(9, nat64(dirección(e9)), 0)
+        pon_puerta(10, nat64(dirección(e10)), 0)
+        pon_puerta(11, nat64(dirección(e11)), 0)
+        pon_puerta(12, nat64(dirección(e12)), 0)
+        pon_puerta(13, nat64(dirección(e13)), 0)
+        pon_puerta(14, nat64(dirección(e14)), 0)
+        pon_puerta(15, nat64(dirección(e15)), 0)
+        pon_puerta(16, nat64(dirección(e16)), 0)
+        pon_puerta(17, nat64(dirección(e17)), 0)
+        pon_puerta(18, nat64(dirección(e18)), 3)
+        pon_puerta(19, nat64(dirección(e19)), 0)
+        pon_puerta(20, nat64(dirección(e20)), 0)
+        pon_puerta(21, nat64(dirección(e21)), 0)
+        pon_puerta(22, nat64(dirección(e22)), 0)
+        pon_puerta(23, nat64(dirección(e23)), 0)
+        pon_puerta(24, nat64(dirección(e24)), 0)
+        pon_puerta(25, nat64(dirección(e25)), 0)
+        pon_puerta(26, nat64(dirección(e26)), 0)
+        pon_puerta(27, nat64(dirección(e27)), 0)
+        pon_puerta(28, nat64(dirección(e28)), 0)
+        pon_puerta(29, nat64(dirección(e29)), 0)
+        pon_puerta(30, nat64(dirección(e30)), 0)
+        pon_puerta(31, nat64(dirección(e31)), 0)
         idtr.límite := tamaño(idt) - 1
         idtr.base := nat64(dirección(idt))
         ensamblador

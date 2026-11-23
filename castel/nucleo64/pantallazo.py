@@ -4,6 +4,7 @@
 #   pantallazo.py captura MONITOR.sock SALIDA.ppm   pide a QEMU la pantalla (screendump) y lo apaga
 #   pantallazo.py mira SALIDA.ppm SALIDA.png          cuenta los puntos de cada color, la pasa a PNG
 #                                                    y dice «ancho alto amarillos grises verdes»
+#   pantallazo.py orden MONITOR.sock ORDEN            le da una orden al monitor de QEMU (p. ej. «nmi»)
 import socket
 import struct
 import sys
@@ -19,6 +20,16 @@ def captura(sock, ppm):
     s.sendall(f'screendump {ppm}\n'.encode())
     time.sleep(1.5)
     s.sendall(b'quit\n')
+    time.sleep(0.5)
+    s.close()
+
+
+def orden(sock, o):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(sock)
+    s.settimeout(5)
+    time.sleep(0.3)
+    s.sendall(f'{o}\n'.encode())
     time.sleep(0.5)
     s.close()
 
@@ -68,5 +79,7 @@ def mira(ppm, sal):
 if __name__ == '__main__':
     if sys.argv[1] == 'captura':
         captura(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] == 'orden':
+        orden(sys.argv[2], sys.argv[3])
     else:
         mira(sys.argv[2], sys.argv[3])

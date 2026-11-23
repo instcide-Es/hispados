@@ -1,0 +1,274 @@
+; =============================================================================
+;  monton64.cas - Hispa-64: el montón del núcleo (docs/64/HISPA-64.md, 2.3 y
+;  etapa 1): reserva(n) y libera(p), de cualquier tamaño, con cerrojo.
+;   - Los pequeños (hasta 2.024 octetos), en casillas de tamaño fijo (32, 64,
+;     128 ... 2.048), sacadas de páginas de 4 KB que se piden a Fisica64 y se
+;     ven por el mapa directo; las libres de cada tamaño, en una lista.
+;   - Los grandes, en páginas propias en la zona del montón (0xFFFFC80000000000),
+;     con una página sin poner detrás (quien escriba de más, falla en el acto);
+;     al liberarlos se quitan de las tablas y sus marcos vuelven a Fisica64.
+;  Cada bloque lleva delante una cabecera de 16 octetos (la marca, el tamaño
+;  pedido y una comprobación que depende de su dirección) y detrás del tamaño
+;  pedido, 8 octetos de guarda; lo liberado se llena con 0xDD (los primeros 16
+;  octetos). Al liberar se comprueba todo: liberar dos veces, liberar algo que
+;  no es del montón, escribir más allá del final o en un bloque ya liberado;
+;  si algo no cuadra, el núcleo se para y lo dice (con quién ha llamado).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Monton64
+
+    importar Cifras64, Cerrojo, Fisica64, Pagina64, Excep64
+
+    constante CLASES = 7                    ; 32, 64, 128, 256, 512, 1024, 2048
+    constante CABECERA = 16
+    constante USADO = 0x4F444153            ; «SADO»
+    constante LIBRE = 0x5242494C            ; «LIBR»
+    constante GRANDE = 0x444E5247           ; «GRND»
+    constante VENENO = 0xDD
+
+    variable listas: arreglo [CLASES] de nat64   ; la primera libre de cada clase (0: ninguna)
+    variable cerrojo: nat64
+    variable próx_grande: nat64
+    público variable en_uso: nat64          ; bloques reservados ahora
+    público variable octetos: nat64         ; octetos pedidos ahora
+    público variable páginas: nat64         ; páginas de 4 KB que tiene el montón ahora
+    público variable reservas, liberaciones: nat64
+
+    función l32(d: nat64): nat32
+        variable p: puntero a nat32
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función p32(d: nat64, v: nat32)
+        variable p: puntero a nat32
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    función l8(d: nat64): byte
+        variable p: puntero a byte
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función p8(d: nat64, v: byte)
+        variable p: puntero a byte
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    función l64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función p64(d: nat64, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(d)
+        valor(p) := v
+    fin
+
+    ; lo que va en la cabecera de un bloque en uso, según su dirección
+    función sello(d: nat64): nat64
+        devolver (d xob (nat64(0x5EC0DE15) << 32)) xob 0x2A2A2A2A
+    fin
+
+    ; lo que va detrás de lo pedido (8 octetos), según la dirección
+    función guarda(d: nat64): nat64
+        devolver (nob d) xob (nat64(0xCA5717E1) << 32)
+    fin
+
+    función tamaño_clase(c: nat32): nat64
+        devolver nat64(32) << c
+    fin
+
+    público función prepara_montón()
+        próx_grande := nat64(0xFFFFC800) << 32
+    fin
+
+    función estropeado(d: nat64, qué: puntero a byte)
+        detén_ini("el montón del núcleo está estropeado")
+        escribir("En el bloque ")
+        hex16(d + CABECERA)
+        escribir(": ", qué, "\n")
+        detén_fin()
+    fin
+
+    ; una página nueva para la clase c, partida en casillas libres
+    función rellena(c: nat32): bool
+        variable f, d, t: nat64
+        variable i: nat32
+        f := pide()
+        si f = 0 entonces devolver falso fin
+        páginas := páginas + 1
+        t := tamaño_clase(c)
+        d := virt(f) + 4096 - t
+        mientras d >= virt(f) hacer
+            p32(d, LIBRE)
+            p32(d + 4, 0)
+            p64(d + 8, listas[c])
+            i := 0
+            mientras i < 16 y CABECERA + i < t hacer
+                p8(d + CABECERA + i, VENENO)
+                i := i + 1
+            fin
+            listas[c] := d
+            si d = virt(f) entonces romper fin
+            d := d - t
+        fin
+        devolver cierto
+    fin
+
+    ; un bloque grande: en páginas propias, con una sin poner detrás. En la
+    ; primera, el tamaño pedido (8 octetos), 8 sin usar y la cabecera; devuelve
+    ; dónde está la cabecera (o 0)
+    función reserva_grande(n: nat64): nat64
+        variable pág, i, f, v: nat64
+        pág := (n + 2 * CABECERA + 8 + 4095) >> 12
+        v := próx_grande
+        próx_grande := próx_grande + ((pág + 1) << 12)
+        i := 0
+        mientras i < pág hacer
+            f := pide()
+            si f = 0 o no mapea(v + (i << 12), f, K4, datos()) entonces
+                ; (lo ya puesto se devuelve)
+                mientras i > 0 hacer
+                    i := i - 1
+                    devuelve(desmapea(v + (i << 12)))
+                fin
+                si f <> 0 entonces devuelve(f) fin
+                devolver 0
+            fin
+            i := i + 1
+        fin
+        páginas := páginas + pág
+        p64(v, n)
+        p32(v + CABECERA, GRANDE)
+        p32(v + CABECERA + 4, nat32(pág))
+        p64(v + CABECERA + 8, sello(v + CABECERA))
+        p64(v + 2 * CABECERA + n, guarda(v + CABECERA))
+        devolver v + CABECERA
+    fin
+
+    ; n octetos (de 1 en adelante); 0 si no hay memoria
+    público función reserva(n: nat64): puntero a byte
+        variable b, d, t: nat64
+        variable c: nat32
+        variable i: nat32
+        variable q: puntero a byte
+        si n = 0 entonces n := 1 fin
+        b := toma(dirección(cerrojo))
+        c := 0
+        mientras c < CLASES y tamaño_clase(c) < n + CABECERA + 8 hacer c := c + 1 fin
+        si c < CLASES entonces
+            si listas[c] = 0 y no rellena(c) entonces
+                suelta(dirección(cerrojo), b)
+                devolver nulo
+            fin
+            d := listas[c]
+            si l32(d) <> LIBRE entonces
+                suelta(dirección(cerrojo), b)
+                estropeado(d, "en la lista de los libres, pero sin la marca de libre (se ha escrito en él estando libre)")
+            fin
+            t := tamaño_clase(c)
+            i := 0
+            mientras i < 16 y CABECERA + i < t hacer
+                si l8(d + CABECERA + i) <> VENENO entonces
+                    suelta(dirección(cerrojo), b)
+                    estropeado(d, "se ha escrito en él después de liberarlo")
+                fin
+                i := i + 1
+            fin
+            listas[c] := l64(d + 8)
+            p32(d, USADO)
+            p32(d + 4, nat32(n))
+            p64(d + 8, sello(d))
+            p64(d + CABECERA + n, guarda(d))
+        sino
+            d := reserva_grande(n)
+            si d = 0 entonces
+                suelta(dirección(cerrojo), b)
+                devolver nulo
+            fin
+        fin
+        en_uso := en_uso + 1
+        octetos := octetos + n
+        reservas := reservas + 1
+        suelta(dirección(cerrojo), b)
+        q := puntero(d + CABECERA)
+        devolver q
+    fin
+
+    ; cuántos octetos se pidieron para el bloque p (para las pruebas y realloc)
+    público función tamaño_de(p: puntero a byte): nat64
+        variable d: nat64
+        d := nat64(p) - CABECERA
+        si l32(d) = USADO entonces devolver nat64(l32(d + 4)) fin
+        si l32(d) = GRANDE entonces devolver l64(d - CABECERA) fin
+        devolver 0
+    fin
+
+    ; devuelve el bloque p (de reserva)
+    público función libera(p: puntero a byte)
+        variable b, d, n, pág, i: nat64
+        variable c: nat32
+        si p = nulo entonces devolver fin
+        d := nat64(p) - CABECERA
+        b := toma(dirección(cerrojo))
+        si d yb 15 <> 0 entonces
+            suelta(dirección(cerrojo), b)
+            estropeado(d, "no es un bloque del montón (no está donde empiezan los bloques)")
+        fin
+        si l32(d) = LIBRE entonces
+            suelta(dirección(cerrojo), b)
+            estropeado(d, "se libera dos veces")
+        fin
+        si l32(d) = GRANDE entonces
+            si l64(d + 8) <> sello(d) entonces
+                suelta(dirección(cerrojo), b)
+                estropeado(d, "la cabecera de un bloque grande está pisada")
+            fin
+            pág := nat64(l32(d + 4))
+            n := l64(d - CABECERA)
+            si l64(d + CABECERA + n) <> guarda(d) entonces
+                suelta(dirección(cerrojo), b)
+                estropeado(d, "se ha escrito más allá de su final (la guarda está pisada)")
+            fin
+            p32(d, LIBRE)
+            i := 0
+            mientras i < pág hacer
+                devuelve(desmapea(d - CABECERA + (i << 12)))
+                i := i + 1
+            fin
+            páginas := páginas - pág
+        sino
+            si l32(d) <> USADO o l64(d + 8) <> sello(d) entonces
+                suelta(dirección(cerrojo), b)
+                estropeado(d, "no es un bloque del montón, o su cabecera está pisada")
+            fin
+            n := nat64(l32(d + 4))
+            si l64(d + CABECERA + n) <> guarda(d) entonces
+                suelta(dirección(cerrojo), b)
+                estropeado(d, "se ha escrito más allá de su final (la guarda está pisada)")
+            fin
+            c := 0
+            mientras c < CLASES y tamaño_clase(c) < n + CABECERA + 8 hacer c := c + 1 fin
+            p32(d, LIBRE)
+            p32(d + 4, 0)
+            p64(d + 8, listas[c])
+            i := 0
+            mientras i < 16 y CABECERA + i < tamaño_clase(c) hacer
+                p8(d + CABECERA + i, VENENO)
+                i := i + 1
+            fin
+            listas[c] := d
+        fin
+        en_uso := en_uso - 1
+        octetos := octetos - n
+        liberaciones := liberaciones + 1
+        suelta(dirección(cerrojo), b)
+    fin
+
+fin Monton64.

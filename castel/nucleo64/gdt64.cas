@@ -1,0 +1,76 @@
+; =============================================================================
+;  gdt64.cas - Hispa-64: la tabla de descriptores (GDT) del núcleo y la TSS
+;  (docs/64/HISPA-64.md, etapa 1). La GDT del arranque está en su dirección
+;  física (en 1 MB, por debajo); esta, en la mitad alta, y con lo que hará falta
+;  para los programas (etapa 4: `syscall` quiere el código y los datos del
+;  anillo 3 justo detrás de los del núcleo) y la TSS:
+;    0x08 código del núcleo (64 bits)   0x10 datos del núcleo
+;    0x18 datos del anillo 3            0x20 código del anillo 3 (64 bits)
+;    0x28 la TSS (16 octetos)
+;  La TSS de 64 bits ya no cambia de tarea: da las pilas. Tres pilas IST, cada
+;  una para una excepción que no puede fiarse de la pila que haya: el doble
+;  fallo (IST 1: si se ha desbordado la pila del núcleo, sin ella el
+;  procesador se reiniciaría), el NMI (IST 2) y el fallo de máquina (IST 3).
+;  La de cada procesador irá aparte en la etapa 3.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Gdt64
+
+    constante PILA_IST = 16384
+
+    tipo Gdtr = estructura
+        límite: nat16
+        base: nat64
+    fin
+
+    variable gdt: arreglo [7] de nat64
+    variable gdtr: Gdtr
+    variable tss: arreglo [104] de byte
+    variable pila_df: arreglo [PILA_IST] de byte
+    variable pila_nmi: arreglo [PILA_IST] de byte
+    variable pila_mc: arreglo [PILA_IST] de byte
+
+    función pon64(en: nat32, v: nat64)
+        variable p: puntero a nat64
+        p := puntero(nat64(dirección(tss[en])))
+        valor(p) := v
+    fin
+
+    ; lo alto de una pila, alineado a 16
+    función cima(d: nat64): nat64
+        devolver (d + PILA_IST) yb (nob nat64(15))
+    fin
+
+    público función ist(n: nat32): nat64
+        variable p: puntero a nat64
+        p := puntero(nat64(dirección(tss[36 + (n - 1) * 8])))
+        devolver valor(p)
+    fin
+
+    ; pone la GDT nueva y la TSS, y las carga (lgdt, ltr)
+    público función pon_gdt()
+        variable b: nat64
+        gdt[0] := 0
+        gdt[1] := (nat64(0x00AF9A00) << 32) ob 0xFFFF
+        gdt[2] := (nat64(0x00CF9200) << 32) ob 0xFFFF
+        gdt[3] := (nat64(0x00CFF200) << 32) ob 0xFFFF
+        gdt[4] := (nat64(0x00AFFA00) << 32) ob 0xFFFF
+        b := nat64(dirección(tss))
+        ; la TSS: límite 103, base, tipo 0x89 (TSS de 64 bits disponible, presente)
+        gdt[5] := 103 ob ((b yb 0xFFFFFF) << 16) ob (nat64(0x89) << 40) ob (((b >> 24) yb 0xFF) << 56)
+        gdt[6] := b >> 32
+        pon64(36, cima(nat64(dirección(pila_df))))
+        pon64(44, cima(nat64(dirección(pila_nmi))))
+        pon64(52, cima(nat64(dirección(pila_mc))))
+        tss[102] := 104                 ; sin mapa de puertos (detrás del final)
+        tss[103] := 0
+        gdtr.límite := tamaño(gdt) - 1
+        gdtr.base := nat64(dirección(gdt))
+        ensamblador
+            lgdt {gdtr}
+            mov ax, 0x28
+            ltr ax
+        fin
+    fin
+
+fin Gdt64.

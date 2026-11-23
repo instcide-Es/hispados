@@ -4273,6 +4273,20 @@ def con_signo32(c):
     return c - 0x100000000 if c >= 0x80000000 else c
 
 
+def a_lea_alto(ln):
+    """[HISPA-64] El «modelo de núcleo» de direcciones (docs/64/HISPA-64.md, 2.1):
+    en «modelo hispa64» el núcleo está en los últimos 2 GB (0xFFFFFFFF80000000),
+    y una etiqueta en un registro de 32 bits («mov esi, T_3») perdería la parte
+    alta: pasa a «lea rsi, [T_3]», con la dirección de 32 bits con signo (que el
+    procesador alarga con unos). Lo de «[G_x]», «push T_3» y «mov qword [x], T_3»
+    ya va con signo y vale tal cual. Una etiqueta es lo que empieza por una
+    mayúscula o «_» (los registros van en minúsculas); puede llevar +n o -n."""
+    m = re.match(r'mov e(ax|bx|cx|dx|si|di), ([A-Z_][^ ,\[\]+\-]*(?:[+-][0-9]+)?)$', ln)
+    if m:
+        return f'lea r{m.group(1)}, [{m.group(2)}]'
+    return ln
+
+
 class Generador64(Generador32):
     def em(self, ln):
         # lo que se aprovecha de Generador32 (las cuentas de 32 bits) apila con los
@@ -4280,6 +4294,8 @@ class Generador64(Generador32):
         m = re.match(r'(push|pop) (e(?:ax|bx|cx|dx|si|di))$', ln)
         if m:
             ln = f'{m.group(1)} {R64[m.group(2)]}'
+        if self.modelo == 'hispa64':
+            ln = a_lea_alto(ln)
         self.lineas.append('    ' + ln)
 
     def declara_func32(self, d):
@@ -5164,12 +5180,17 @@ class Generador64(Generador32):
             f'; Generado por ccastel desde el módulo {prog.nombre}. NO editar a mano.',
         ]
         sal += ARRANQUE64[self.modelo].strip('\n').split('\n')
+        if self.modelo + '_2' in ARRANQUE64:    # (en dos trozos: el texto de cada uno, por debajo de 2.900 octetos)
+            sal += ARRANQUE64[self.modelo + '_2'].strip('\n').split('\n')
         sal.append('    call F_principal')
         if pr.tret is T_NADA:
             sal.append('    xor eax, eax')
         sal.append('    jmp castel_salir')
         sal += vivos(codigo) + vivos(apoyo)
-        sal += ['', '; ---- datos ----'] + vivos(self.datos)
+        sal += ['', '; ---- datos ----']
+        if self.modelo == 'hispa64':            # [HISPA-64] los datos, en otra página (sin ejecutar)
+            sal += ['    align 4096, db 0', 'C_datos:']
+        sal += vivos(self.datos)
         sal += ARRANQUE64[self.modelo + '_datos'].strip('\n').split('\n')
         sal += bss + ['_vacio_fin:']
         if '_fin_programa' in palabras:
@@ -5632,21 +5653,28 @@ C_pila_fin:
 """,
     # [HISPA-64] el núcleo de Hispa-64 (docs/64/HISPA-64.md). Lo carga GRUB por
     # multiboot2 (UEFI de 64 bits o BIOS) o QEMU con -kernel (multiboot), en modo
-    # protegido de 32 bits; pide a GRUB la pantalla gráfica. El arranque mira que
-    # haya modo largo (si no, lo dice por el puerto serie y se para), pone sus
-    # tablas de páginas (en C_tablas: los 64 primeros GB tal cual y otra vez en la
-    # mitad alta, desde 0xFFFF800000000000, con páginas de 2 MB) y pasa al modo
-    # largo. Lo que se escribe va al puerto serie y a C_consola (la consola del
-    # núcleo). Ojo: el texto entero sale en una línea «db» del compilador en
-    # Castel, y ENSAMB64 no lee líneas de más de 12.000 letras (Montador,
-    # MAX_LINEA): este texto, por debajo de 2.900 octetos.
+    # protegido de 32 bits, en 1 MB; pide a GRUB la pantalla gráfica. Desde la
+    # etapa 1 está enlazado en la mitad alta: en 0xFFFFFFFF80100000 (la física +
+    # 0xFFFFFFFF80000000, el «modelo de núcleo» de direcciones), y lo de 32 bits
+    # (las cabeceras y el arranque) usa la física: «X-0xFFFFFFFF80000000». El
+    # arranque mira que haya modo largo (si no, lo dice por el puerto serie y se
+    # para), pone sus tablas de páginas provisionales (en C_tablas: los 64
+    # primeros GB tal cual y en el mapa directo, desde 0xFFFF800000000000, con
+    # páginas de 2 MB, y el primer GB otra vez en 0xFFFFFFFF80000000, para el
+    # núcleo), pasa al modo largo y salta a la mitad alta. Las tablas de verdad
+    # las pone el núcleo (nucleo64/virtual64.cas). Lo que se escribe va al
+    # puerto serie y a C_consola (la consola del núcleo). Ojo: cada texto sale
+    # en una línea «db» del compilador en Castel, y ENSAMB64 no lee líneas de
+    # más de 12.000 letras (Montador, MAX_LINEA): por eso va en dos trozos
+    # ('hispa64' y 'hispa64_2'), cada uno por debajo de 2.900 octetos.
     'hispa64': r"""
 ; Ensamblar:  nasm -f bin ESTE.asm -o HISPA64.BIN
 ; -----------------------------------------------------------------
 cpu x64
 bits 32
-org 0x100000
-; Hispa-64 (docs/64/HISPA-64.md): multiboot2 (GRUB) o multiboot (QEMU -kernel)
+org 0xFFFFFFFF80100000
+; Hispa-64 (docs/64/HISPA-64.md): multiboot2 (GRUB) o multiboot (QEMU -kernel);
+; cargado en 1 MB y enlazado en la mitad alta (virtual = física + 0xFFFFFFFF80000000)
 C_ini:
     jmp C_arranque
     align 4, db 0
@@ -5654,11 +5682,11 @@ C_multiboot:
     dd 0x1BADB002
     dd 0x00010000
     dd 0xE4514FFE
-    dd C_multiboot
-    dd C_ini
-    dd _datos_fin
-    dd _vacio_fin
-    dd C_arranque
+    dd C_multiboot-0xFFFFFFFF80000000
+    dd C_ini-0xFFFFFFFF80000000
+    dd _datos_fin-0xFFFFFFFF80000000
+    dd _vacio_fin-0xFFFFFFFF80000000
+    dd C_arranque-0xFFFFFFFF80000000
     align 8, db 0
 C_multiboot2:
     dd 0xE85250D6, 0
@@ -5666,15 +5694,18 @@ C_multiboot2:
     dd 0x100000000-0xE85250D6-(C_mb2_fin-C_multiboot2)
     dw 2, 0
     dd 24
-    dd C_multiboot2, C_ini, _datos_fin, _vacio_fin
+    dd C_multiboot2-0xFFFFFFFF80000000, C_ini-0xFFFFFFFF80000000
+    dd _datos_fin-0xFFFFFFFF80000000, _vacio_fin-0xFFFFFFFF80000000
     dw 3, 0
     dd 12
-    dd C_arranque
+    dd C_arranque-0xFFFFFFFF80000000
     dd 0
     dw 5, 1
     dd 20
     dd 0, 0, 32
     dd 0
+    dw 6, 0
+    dd 8
     dw 0, 0
     dd 8
 C_mb2_fin:
@@ -5684,13 +5715,11 @@ C_gdt:
     dd 0x0000FFFF, 0x00CF9200
 C_gdtr:
     dw 23
-    dq C_gdt
+    dq C_gdt-0xFFFFFFFF80000000
 C_mb_magia:
     dd 0
 C_mb_info:
     dd 0
-C_consola:
-    dq 0
 C_no64:
     db 13, 10, 'Hispa-64: el procesador no es de 64 bits. Use Hispa-Pentium.', 13, 10, 0
 C_com1:
@@ -5698,14 +5727,14 @@ C_com1:
 C_arranque:
     cli
     cld
-    mov [C_mb_magia], eax
-    mov [C_mb_info], ebx
-    mov edi, _vacio
+    mov [C_mb_magia-0xFFFFFFFF80000000], eax
+    mov [C_mb_info-0xFFFFFFFF80000000], ebx
+    mov edi, _vacio-0xFFFFFFFF80000000
     mov ecx, _vacio_fin-_vacio
     xor eax, eax
     rep stosb
 ; COM1 a 115200, 8N1 (C_com1: registro + 1 y valor)
-    mov esi, C_com1
+    mov esi, C_com1-0xFFFFFFFF80000000
 .com1:
     movzx edx, byte [esi]
     test edx, edx
@@ -5716,6 +5745,8 @@ C_arranque:
     add esi, 2
     jmp .com1
 .com1_ya:
+""",
+    'hispa64_2': r"""
 ; ¿hay modo largo? (CPUID 80000001h, EDX bit 29)
     mov eax, 0x80000000
     cpuid
@@ -5726,7 +5757,7 @@ C_arranque:
     test edx, 0x20000000
     jnz .si64
 .no64:
-    mov esi, C_no64
+    mov esi, C_no64-0xFFFFFFFF80000000
 .letra:
     mov ah, [esi]
     test ah, ah
@@ -5748,14 +5779,18 @@ C_arranque:
 .para:
     hlt
     jmp .para
-; las tablas: 64 GB tal cual y en la mitad alta (PML4 0 y 256), páginas de 2 MB
+; las tablas provisionales: 64 GB tal cual y en el mapa directo (PML4 0 y 256),
+; con páginas de 2 MB; y el primer GB en 0xFFFFFFFF80000000 (PML4 511, PDPT 510)
 .si64:
-    mov edi, C_tablas
+    mov edi, C_tablas-0xFFFFFFFF80000000
     lea eax, [edi+0x1003]
     mov [edi], eax
     mov [edi+2048], eax
-    lea ebx, [edi+0x1000]
+    lea eax, [edi+0x42003]
+    mov [edi+4088], eax
     lea eax, [edi+0x2003]
+    mov [edi+0x42FF0], eax
+    lea ebx, [edi+0x1000]
     mov ecx, 64
 .pdpt:
     mov [ebx], eax
@@ -5776,7 +5811,7 @@ C_arranque:
     mov eax, cr4
     or eax, 0x20
     mov cr4, eax
-    mov eax, C_tablas
+    mov eax, edi
     mov cr3, eax
     mov ecx, 0xC0000080
     rdmsr
@@ -5785,8 +5820,8 @@ C_arranque:
     mov eax, cr0
     or eax, 0x80000001
     mov cr0, eax
-    lgdt [C_gdtr]
-    jmp 0x08:C_largo
+    lgdt [C_gdtr-0xFFFFFFFF80000000]
+    jmp 0x08:C_largo-0xFFFFFFFF80000000
 bits 64
 C_largo:
     mov ax, 0x10
@@ -5795,7 +5830,11 @@ C_largo:
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    mov esp, C_pila_fin
+    mov rax, C_alto
+    jmp rax
+C_alto:
+    mov rsp, C_pila_fin
+    xor ebp, ebp
 """,
     'hispa64_datos': r"""
     align 4096, db 0
@@ -5805,10 +5844,14 @@ _datos_fin:
 _vacio:
     absolute _vacio
 C_tablas:
-    resb 270336
+    resb 274432
+C_guarda:
+    resb 4096
 C_pila:
     resb 65536
 C_pila_fin:
+C_consola:
+    resb 8
 """,
 }
 

@@ -1534,6 +1534,12 @@ módulo Gen64
         devolver ARRANQUE_NUCLEO64
     fin
 
+    ; [HISPA-64] la segunda parte de lo que va delante (en hispa64, que es largo), o nada
+    público función l64_arranque2(): puntero a byte
+        si es_hispa64 entonces devolver ARRANQUE_HISPA64_2 fin
+        devolver ""
+    fin
+
     ; lo que va detrás de los datos
     público función l64_arranque_datos(): puntero a byte
         si es_linux entonces devolver ARRANQUE_LINUX64_DATOS fin

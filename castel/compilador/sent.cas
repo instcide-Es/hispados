@@ -715,6 +715,7 @@ módulo Sent
         tx := na(s)
         largo_ := tx_largo(tx)
         lin := nb(s)
+        tal_cual := cierto
         i := 0
         mientras i < largo_ hacer
             ; una línea: de i hasta su \n (todas acaban en uno)
@@ -766,6 +767,7 @@ módulo Sent
             lin := lin + 1
             i := i + 1
         fin
+        tal_cual := falso
     fin
 
     ; -------------------------------------------------------------------------

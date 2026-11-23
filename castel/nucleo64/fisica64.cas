@@ -1,0 +1,304 @@
+; =============================================================================
+;  fisica64.cas - Hispa-64: la memoria física, por marcos de 4 KB (docs/64/
+;  HISPA-64.md, 2.3 y etapa 1). Un mapa de bits (1 bit por marco: 32 KB por
+;  GB; un 1 es «ocupado») hecho con el mapa de memoria del firmware (el de UEFI
+;  o el de la BIOS, que pasa el cargador): solo es libre lo que el firmware da
+;  por disponible, y aun de eso se guarda lo que no se puede dar:
+;    - el primer MB (las tablas de la BIOS y, en la etapa 3, el trampolín de los
+;      demás procesadores);
+;    - lo que se le diga con aparta() antes de prepara_marcos(): el núcleo, la
+;      información del cargador, sus módulos, la pantalla;
+;    - el propio mapa de bits.
+;  Lo de ACPI (tipos 3 y 4 del mapa) no es «disponible»: no se toca (la etapa
+;  2 lo leerá). El mapa de bits va donde haya sitio, y se ve por el mapa
+;  directo (física + 0xFFFF800000000000). Se piden marcos de uno en uno (pide)
+;  o seguidos y alineados (pide_seguidos: para las páginas de 2 MB y, más
+;  adelante, las colas de NVMe y xHCI); al soltar uno que ya estaba libre, se
+;  para el núcleo (es un error de quien lo suelta). Todo con cerrojo.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Fisica64
+
+    importar Cifras64, Cerrojo, Excep64
+
+    público constante PÁGINA = 4096
+    constante MAX_RAM = 256
+    constante MAX_RES = 32
+
+    público variable ram_ini, ram_fin: arreglo [MAX_RAM] de nat64    ; lo disponible, en páginas enteras
+    público variable n_ram: nat32
+    variable res_ini, res_fin: arreglo [MAX_RES] de nat64
+    variable n_res: nat32
+
+    variable mb: puntero a nat64            ; el mapa de bits (por el mapa directo)
+    público variable mapa_fís: nat64        ; dónde está (física)
+    público variable mapa_largo: nat64      ; cuánto ocupa (octetos, múltiplo de 4 KB)
+    variable palabras: nat64                ; nat64 del mapa
+    público variable marcos: nat64          ; los marcos que cubre (hasta la RAM más alta)
+    público variable libres: nat64          ; los marcos libres ahora
+    público variable disponible: nat64      ; los octetos que el firmware da por disponibles
+    variable pista: nat64                   ; la palabra por la que empezar a buscar
+    variable cerrojo: nat64
+
+    ; el mapa directo: toda la memoria física, a partir de 0xFFFF800000000000
+    público función dm(): nat64
+        devolver nat64(0xFFFF8000) << 32
+    fin
+
+    público función virt(f: nat64): nat64
+        devolver f + dm()
+    fin
+
+    público función abajo(d: nat64): nat64
+        devolver d yb (nob nat64(4095))
+    fin
+
+    público función arriba(d: nat64): nat64
+        devolver (d + 4095) yb (nob nat64(4095))
+    fin
+
+    ; un trozo de memoria disponible del mapa del firmware (antes de prepara)
+    público función añade(base: nat64, largo: nat64)
+        variable a, b: nat64
+        disponible := disponible + largo
+        a := arriba(base)
+        b := abajo(base + largo)
+        si b <= a o n_ram >= MAX_RAM entonces devolver fin
+        ram_ini[n_ram] := a
+        ram_fin[n_ram] := b
+        n_ram := n_ram + 1
+    fin
+
+    ; algo que no se puede dar nunca (antes de prepara): [ini, fin_)
+    público función aparta(ini: nat64, fin_: nat64)
+        si fin_ <= ini o n_res >= MAX_RES entonces devolver fin
+        res_ini[n_res] := abajo(ini)
+        res_fin[n_res] := arriba(fin_)
+        n_res := n_res + 1
+    fin
+
+    ; ¿se pisa [a, b) con algo reservado? Devuelve dónde acaba lo pisado, o 0
+    función pisa(a: nat64, b: nat64): nat64
+        variable i: nat32
+        si a < 0x100000 entonces devolver 0x100000 fin
+        i := 0
+        mientras i < n_res hacer
+            si a < res_fin[i] y res_ini[i] < b entonces devolver res_fin[i] fin
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; marca el marco m: ocupado (cierto) o libre; dice si estaba ocupado
+    función marca(m: nat64, ocupado: bool): bool
+        variable w, bit: nat64
+        variable antes: bool
+        w := mb[m >> 6]
+        bit := nat64(1) << (m yb 63)
+        antes := w yb bit <> 0
+        si ocupado entonces
+            mb[m >> 6] := w ob bit
+            si no antes entonces libres := libres - 1 fin
+        sino
+            mb[m >> 6] := w yb (nob bit)
+            si antes entonces libres := libres + 1 fin
+        fin
+        devolver antes
+    fin
+
+    ; [a, b) (de marcos): libres u ocupados; de 64 en 64 donde se puede
+    función marca_trozo(a: nat64, b: nat64, ocupado: bool)
+        variable w: nat64
+        variable n: nat32
+        mientras a < b hacer
+            si a yb 63 = 0 y b - a >= 64 entonces
+                w := mb[a >> 6]
+                ; cuántos cambian: los que no estaban como se quiere
+                n := 0
+                mientras w <> 0 hacer
+                    w := w yb (w - 1)
+                    n := n + 1
+                fin
+                si ocupado entonces
+                    libres := libres - (64 - n)
+                    mb[a >> 6] := nob nat64(0)
+                sino
+                    libres := libres + n
+                    mb[a >> 6] := 0
+                fin
+                a := a + 64
+            sino
+                marca(a, ocupado)
+                a := a + 1
+            fin
+        fin
+    fin
+
+    ; hace el mapa de bits; dice si ha podido (si no hay sitio para él, no)
+    público función prepara_marcos(): bool
+        variable i: nat32
+        variable alto, c, p: nat64
+        alto := 0
+        i := 0
+        mientras i < n_ram hacer
+            si ram_fin[i] > alto entonces alto := ram_fin[i] fin
+            i := i + 1
+        fin
+        si alto = 0 entonces devolver falso fin
+        marcos := alto >> 12
+        palabras := (marcos + 63) >> 6
+        mapa_largo := arriba(palabras * 8)
+        ; dónde ponerlo: el primer hueco de la RAM que no pise nada
+        mapa_fís := 0
+        i := 0
+        mientras i < n_ram y mapa_fís = 0 hacer
+            c := ram_ini[i]
+            mientras c + mapa_largo <= ram_fin[i] y mapa_fís = 0 hacer
+                p := pisa(c, c + mapa_largo)
+                si p = 0 entonces mapa_fís := c sino c := arriba(p) fin
+            fin
+            i := i + 1
+        fin
+        si mapa_fís = 0 entonces devolver falso fin
+        mb := puntero(virt(mapa_fís))
+        p := 0
+        mientras p < palabras hacer
+            mb[p] := nob nat64(0)
+            p := p + 1
+        fin
+        libres := 0
+        i := 0
+        mientras i < n_ram hacer
+            marca_trozo(ram_ini[i] >> 12, ram_fin[i] >> 12, falso)
+            i := i + 1
+        fin
+        marca_trozo(0, 0x100, cierto)
+        i := 0
+        mientras i < n_res hacer
+            si res_ini[i] < alto entonces
+                p := res_fin[i]
+                si p > alto entonces p := alto fin
+                marca_trozo(res_ini[i] >> 12, p >> 12, cierto)
+            fin
+            i := i + 1
+        fin
+        marca_trozo(mapa_fís >> 12, (mapa_fís + mapa_largo) >> 12, cierto)
+        pista := 0
+        devolver cierto
+    fin
+
+    ; un marco libre (su dirección física), o 0 si no queda ninguno
+    público función pide(): nat64
+        variable b, i, n, w, m: nat64
+        b := toma(dirección(cerrojo))
+        i := pista
+        n := 0
+        mientras n < palabras hacer
+            w := mb[i]
+            si w <> nob nat64(0) entonces
+                m := 0
+                mientras (w >> m) yb 1 <> 0 hacer m := m + 1 fin
+                m := (i << 6) + m
+                si m < marcos entonces
+                    marca(m, cierto)
+                    pista := i
+                    suelta(dirección(cerrojo), b)
+                    devolver m << 12
+                fin
+            fin
+            i := i + 1
+            si i >= palabras entonces i := 0 fin
+            n := n + 1
+        fin
+        suelta(dirección(cerrojo), b)
+        devolver 0
+    fin
+
+    ; n marcos seguidos, el primero en un múltiplo de «alinea» marcos (1, 512...); 0 si no hay
+    público función pide_seguidos(n: nat64, alinea: nat64): nat64
+        variable b, m, k: nat64
+        b := toma(dirección(cerrojo))
+        m := 0
+        mientras m + n <= marcos hacer
+            si mb[m >> 6] = nob nat64(0) y m yb 63 = 0 entonces
+                m := m + 64
+            sino
+                k := 0
+                mientras k < n y (mb[(m + k) >> 6] >> ((m + k) yb 63)) yb 1 = 0 hacer k := k + 1 fin
+                si k = n entonces
+                    marca_trozo(m, m + n, cierto)
+                    suelta(dirección(cerrojo), b)
+                    devolver m << 12
+                fin
+                ; el siguiente candidato: alineado, detrás del ocupado
+                m := ((m + k) div alinea + 1) * alinea
+            fin
+        fin
+        suelta(dirección(cerrojo), b)
+        devolver 0
+    fin
+
+    función mal_soltado(f: nat64, por: puntero a byte)
+        detén_ini("se suelta mal un marco de memoria física")
+        escribir("El marco ")
+        hex16(f)
+        escribir(por, "\n")
+        detén_fin()
+    fin
+
+    ; devuelve los n marcos desde f (física, de 4 KB); soltar uno libre para el núcleo
+    público función suelta_seguidos(f: nat64, n: nat64)
+        variable b, m: nat64
+        si f yb 4095 <> 0 entonces mal_soltado(f, " no empieza en un múltiplo de 4 KB.") fin
+        si (f >> 12) + n > marcos o f < 0x100000 entonces mal_soltado(f, " no es de la memoria que se da.") fin
+        b := toma(dirección(cerrojo))
+        m := 0
+        mientras m < n hacer
+            si no marca((f >> 12) + m, falso) entonces
+                suelta(dirección(cerrojo), b)
+                mal_soltado(f + (m << 12), " ya estaba libre (se suelta dos veces).")
+            fin
+            m := m + 1
+        fin
+        si (f >> 18) < pista entonces pista := f >> 18 fin
+        suelta(dirección(cerrojo), b)
+    fin
+
+    público función devuelve(f: nat64)
+        suelta_seguidos(f, 1)
+    fin
+
+    ; ¿está libre el marco de f? (para las pruebas)
+    público función está_libre(f: nat64): bool
+        si (f >> 12) >= marcos entonces devolver falso fin
+        devolver (mb[f >> 18] >> ((f >> 12) yb 63)) yb 1 = 0
+    fin
+
+    ; en cuántos trozos seguidos está lo libre
+    público función trozos(): nat32
+        variable m, w: nat64
+        variable n: nat32
+        variable dentro: bool
+        n := 0
+        dentro := falso
+        m := 0
+        mientras m < marcos hacer
+            w := mb[m >> 6]
+            si m yb 63 = 0 y (w = 0 o w = nob nat64(0)) y m + 64 <= marcos entonces
+                si w = 0 y no dentro entonces n := n + 1 fin
+                dentro := w = 0
+                m := m + 64
+            sino
+                si (w >> (m yb 63)) yb 1 = 0 entonces
+                    si no dentro entonces n := n + 1 fin
+                    dentro := cierto
+                sino
+                    dentro := falso
+                fin
+                m := m + 1
+            fin
+        fin
+        devolver n
+    fin
+
+fin Fisica64.

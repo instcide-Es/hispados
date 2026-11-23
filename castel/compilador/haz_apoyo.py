@@ -142,7 +142,7 @@ for letra, tabla in (('L', LINUX64), ('N', NUCLEO64), ('H', HISPA64)):
 for nombre, txt in ccastel.ARRANQUE64.items():
     clave = {'linux64': 'LINUX64', 'linux64_datos': 'LINUX64_DATOS', 'núcleo64': 'NUCLEO64',
              'núcleo64_datos': 'NUCLEO64_DATOS', 'hispa64': 'HISPA64',
-             'hispa64_datos': 'HISPA64_DATOS'}[nombre]
+             'hispa64_2': 'HISPA64_2', 'hispa64_datos': 'HISPA64_DATOS'}[nombre]
     l64.append('    público constante ARRANQUE_%s = "%s"' % (clave, literal(txt.strip('\n') + '\n')))
 l64 += [
     "",

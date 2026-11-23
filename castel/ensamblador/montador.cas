@@ -132,6 +132,8 @@ módulo Montador
     variable e_sim, e_falta: bool       ; de la última cuenta
     variable e_alto: nat32              ; [CASTEL64] y su palabra alta (0, salvo en «bits 64»)
     variable esc64: bool                ; [CASTEL64] el último registro de escalado() era de 64 bits
+    variable pc_alto: nat32             ; [HISPA-64] la palabra alta del «org» (0xFFFFFFFF en el núcleo
+                                        ; de la mitad alta): la de todas las etiquetas, en «bits 64»
     ; el resumen de la primera pasada (ver más abajo)
     constante R_FIN = 0                 ; las marcas del resumen: el final,
     constante R_FIJO = 1                ; un tramo fijo largo: n (2),
@@ -701,6 +703,7 @@ módulo Montador
             e_falta := cierto
             devolver 0
         fin
+        si bits = 64 entonces e_alto := pc_alto fin
         devolver v
     fin
 
@@ -1899,7 +1902,14 @@ módulo Montador
                 fin
                 devolver
             caso C_ORG:
-                pon_pc(cuenta(p, fin_))
+                ; [HISPA-64] el «org» se cuenta en 64 bits (el núcleo de la mitad
+                ; alta: «org 0xFFFFFFFF80100000» con «bits 32» delante)
+                t := bits
+                bits := 64
+                veces := cuenta(p, fin_)
+                bits := t
+                pc_alto := e_alto
+                pon_pc(veces)
                 devolver
             caso C_ABSOLUTE:
                 absoluto := cierto

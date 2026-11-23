@@ -109,6 +109,10 @@ módulo Gen64
         devolver nulo
     fin
 
+    público función l64_arranque2(): puntero a byte
+        devolver nulo
+    fin
+
     público función l64_arranque_datos(): puntero a byte
         devolver nulo
     fin

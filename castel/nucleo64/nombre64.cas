@@ -1,0 +1,109 @@
+; =============================================================================
+;  nombre64.cas - Hispa-64: los nombres de las funciones del núcleo, para
+;  decir en qué función ha pasado algo (una excepción, una parada) y quién la
+;  ha llamado. Vienen en un módulo del cargador (HISPA64.SIM, que hace
+;  nucleo64/simbolos.py con el mapa de NASM): una línea por función, en orden,
+;  «FFFFFFFF80101234 Módulo.función», en la página 437. Si no está, no se dice
+;  el nombre (todo lo demás sigue igual).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Nombre64
+
+    importar Cifras64
+
+    variable ini, fin_: nat64               ; el texto (dirección virtual)
+    público variable cuántos: nat32
+
+    función car(d: nat64): byte
+        variable p: puntero a byte
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función cifra(c: byte): nat64
+        si c >= '0' y c <= '9' entonces devolver nat64(c - '0') fin
+        si c >= 'A' y c <= 'F' entonces devolver nat64(c - 'A' + 10) fin
+        devolver 16
+    fin
+
+    ; la dirección de la línea que empieza en d (16 cifras), o 0 si no lo es
+    función dir_de(d: nat64): nat64
+        variable v, x: nat64
+        variable i: nat32
+        si d + 18 > fin_ entonces devolver 0 fin
+        v := 0
+        i := 0
+        mientras i < 16 hacer
+            x := cifra(car(d + i))
+            si x > 15 entonces devolver 0 fin
+            v := (v << 4) ob x
+            i := i + 1
+        fin
+        si car(d + 16) <> ' ' entonces devolver 0 fin
+        devolver v
+    fin
+
+    ; el texto de los nombres está en [d, d + largo) (ya en virtual); dice cuántos hay
+    público función pon(d: nat64, largo: nat64)
+        variable p: nat64
+        ini := d
+        fin_ := d + largo
+        cuántos := 0
+        p := ini
+        mientras p < fin_ hacer
+            si dir_de(p) = 0 entonces
+                ini := 0
+                fin_ := 0
+                cuántos := 0
+                devolver
+            fin
+            cuántos := cuántos + 1
+            mientras p < fin_ y car(p) <> '\n' hacer p := p + 1 fin
+            p := p + 1
+        fin
+    fin
+
+    ; la línea de la función en la que cae d (la última que empieza antes), o 0
+    función busca(d: nat64): nat64
+        variable p, mejor, a: nat64
+        mejor := 0
+        p := ini
+        mientras p < fin_ hacer
+            a := dir_de(p)
+            si a > d entonces romper fin
+            mejor := p
+            mientras p < fin_ y car(p) <> '\n' hacer p := p + 1 fin
+            p := p + 1
+        fin
+        devolver mejor
+    fin
+
+    ; dónde empieza la función en la que cae d (0 si no se sabe)
+    público función inicio(d: nat64): nat64
+        variable p: nat64
+        si cuántos = 0 entonces devolver 0 fin
+        p := busca(d)
+        si p = 0 entonces devolver 0 fin
+        devolver dir_de(p)
+    fin
+
+    ; escribe «Módulo.función+0x1C» si d cae en el núcleo y se sabe; dice si lo ha escrito
+    público función nombra(d: nat64): bool
+        variable p: nat64
+        si cuántos = 0 entonces devolver falso fin
+        p := busca(d)
+        si p = 0 entonces devolver falso fin
+        p := p + 17
+        mientras p < fin_ y car(p) <> '\n' y car(p) <> '\r' hacer
+            escribir_car(car(p))
+            p := p + 1
+        fin
+        p := busca(d)
+        si d > dir_de(p) entonces
+            escribir("+")
+            hex(d - dir_de(p))
+        fin
+        devolver cierto
+    fin
+
+fin Nombre64.

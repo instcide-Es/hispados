@@ -16,8 +16,9 @@
 #      paso 3, idénticos. Y el primer ladrillo de Hispa-64 (nucleo64/hola.cas):
 #      arranca en QEMU x86_64 (multiboot, y multiboot2 con GRUB si está
 #      grub-mkrescue), pasa al modo largo y saluda por el puerto serie. Y el
-#      núcleo de la etapa 0 de Hispa-64 (nucleo64/hispa64.cas, «modelo hispa64»):
-#      sus pruebas (nucleo64/pruebas.sh), por multiboot y por UEFI (OVMF + GRUB).
+#      núcleo de Hispa-64 (nucleo64/hispa64.cas, «modelo hispa64», en la mitad
+#      alta desde la etapa 1): sus pruebas (nucleo64/pruebas.sh), por multiboot
+#      y por UEFI (OVMF + GRUB), con la memoria (física, virtual, el montón).
 
 parte23() {
 echo "== CASTEL64: Castel para x86-64 (Linux de 64 bits y el primer ladrillo de Hispa-64) =="
@@ -243,10 +244,10 @@ if command -v qemu-system-x86_64 > /dev/null; then
       fi
     fi
   else ko "nucleo64/hola.cas no se compila igual con ccastel.py y NASM que con CASTEL64 y ENSAMB64: $(head -2 $W/comp.txt | paste -sd ' ')"; fi
-  # [HISPA-64] el núcleo de verdad, etapa 0 (docs/64/HISPA-64.md): sus pruebas,
+  # [HISPA-64] el núcleo de verdad, etapas 0 y 1 (docs/64/HISPA-64.md): sus pruebas,
   # con CASTEL64 y ENSAMB64 (que tienen que sacar lo mismo que ccastel.py y NASM)
   if CASTEL64=$W/castel64 ENSAMB64=$W/ensamb64 $AQUI/nucleo64/pruebas.sh $W/h64 > $W/h64.txt 2>&1; then
-    ok "Hispa-64, etapa 0 (nucleo64/pruebas.sh): $(tail -1 $W/h64.txt | sed 's/^== Hispa-64: //; s/ ==$//') (multiboot, excepciones, UEFI con OVMF y GRUB, la pantalla del GOP; igual con CASTEL64 y ENSAMB64)"
-  else ko "Hispa-64, etapa 0 (nucleo64/pruebas.sh): $(grep -a 'MAL:' $W/h64.txt | head -3 | paste -sd ' ')"; fi
+    ok "Hispa-64, etapas 0 y 1 (nucleo64/pruebas.sh): $(tail -1 $W/h64.txt | sed 's/^== Hispa-64: //; s/ ==$//') (en la mitad alta; multiboot con 128 MB, 3 GB y 8 GB; la memoria física, las páginas, el montón; excepciones, doble fallo y NMI con IST; UEFI con OVMF y GRUB; igual con CASTEL64 y ENSAMB64)"
+  else ko "Hispa-64, etapas 0 y 1 (nucleo64/pruebas.sh): $(grep -a 'MAL:' $W/h64.txt | head -3 | paste -sd ' ')"; fi
 fi
 }

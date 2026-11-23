@@ -971,7 +971,11 @@ class Ensamblador:
             if self.bits not in (16, 32, 64):
                 self.error("«bits» es 16, 32 o 64")
         elif nem == 'org':
+            # [HISPA-64] en 64 bits aunque vaya en «bits 32» (el núcleo de la
+            # mitad alta: «org 0xFFFFFFFF80100000» con el arranque de 32 bits)
+            b, self.bits = self.bits, 64
             self.pc = self.fijo(resto, nem)
+            self.bits = b
         elif nem == 'absolute':
             self.absoluto = True
             self.pc = self.fijo(resto, nem)
