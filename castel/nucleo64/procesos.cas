@@ -30,10 +30,10 @@
 ; =============================================================================
 módulo Procesos
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64, Vfs64
 
     público constante MAX_REG = 48
-    público constante MAX_FD = 16
+    público constante MAX_FD = 32               ; (16 hasta la etapa 4)
     público constante LEER = 1                  ; los permisos (los PROT_ de Linux)
     público constante ESCRIBE = 2
     público constante EJECUTAR = 4
@@ -42,7 +42,7 @@ módulo Procesos
     público constante R_MONTÓN = 3
     público constante R_MMAP = 4
     público constante F_CONSOLA = 1             ; las clases de archivo abierto
-    público constante F_UNIDAD = 2
+    público constante F_ARCHIVO = 2             ; [etapa 5] uno del VFS (Vfs64.Abierto)
     público constante PILA_PROG = 0x800000           ; 8 MB de pila
     público constante MÍNIMO = 0x10000          ; nada por debajo de 64 KB (el puntero nulo)
     público constante SIGILL = 4
@@ -68,11 +68,12 @@ módulo Procesos
         n_reg: nat64
         reg_ini, reg_fin: arreglo [MAX_REG] de nat64
         reg_prot, reg_clase: arreglo [MAX_REG] de nat32
-        fd_clase, fd_arch: arreglo [MAX_FD] de nat32
-        fd_pos: arreglo [MAX_FD] de nat64
+        fd_clase: arreglo [MAX_FD] de nat32
+        fd_obj: arreglo [MAX_FD] de nat64       ; [etapa 5] lo abierto (Vfs64.Abierto)
         fpu_bloque: nat64           ; el bloque del montón de sus registros x87 y SSE
         nombre: arreglo [32] de byte
         línea: arreglo [256] de byte
+        dir_actual: arreglo [256] de byte       ; [etapa 5] la carpeta actual (chdir), absoluta
     fin
 
     público variable motivo: puntero a byte     ; por qué no se ha podido arrancar
@@ -418,6 +419,18 @@ módulo Procesos
     fin
 
     ; ---- salir ----
+    ; [etapa 5] cierra todos los archivos del proceso
+    público función cierra_todos(p: puntero a Proceso)
+        variable i: nat32
+        i := 0
+        mientras i < MAX_FD hacer
+            si p.fd_clase[i] = F_ARCHIVO y p.fd_obj[i] <> 0 entonces vfs_cierra(puntero(p.fd_obj[i])) fin
+            p.fd_clase[i] := 0
+            p.fd_obj[i] := 0
+            i := i + 1
+        fin
+    fin
+
     ; el programa que corre acaba (con ese código, o cerrado por la señal); no vuelve
     público función sal(código: nat64, señal: nat64)
         variable h: puntero a Hilo
@@ -429,6 +442,8 @@ módulo Procesos
         p.código := código yb 255
         p.señal := señal
         e := espacio_de(p)
+        ; [etapa 5] sus archivos, cerrados
+        cierra_todos(p)
         ; el espacio del núcleo, ya (y que el planificador no vuelva a poner el suyo)
         b := sin_ints()
         h.espacio := 0
@@ -572,13 +587,11 @@ módulo Procesos
         devolver cierto
     fin
 
-    función carga_elf(p: puntero a Proceso, k: nat32): bool
-        variable d, tam, phoff, ph, off, va, fsz, msz, a, b: nat64
+    función carga_elf(p: puntero a Proceso, d: nat64, tam: nat64): bool
+        variable phoff, ph, off, va, fsz, msz, a, b: nat64
         variable phnum, i, tipo_, fl: nat32
         variable prot: nat32
         variable hay_carga: bool
-        d := dónde(k)
-        tam := cuánto(k)
         al_dir := 0
         si tam < 64 entonces devolver mal_elf("no es un programa (es demasiado corto para ser un ELF)") fin
         si l32(d) <> 0x464C457F entonces devolver mal_elf("no es un programa ELF") fin
@@ -780,29 +793,68 @@ módulo Procesos
     público función lanza(línea: puntero a byte): puntero a Proceso
         variable p: puntero a Proceso
         variable nombre_: arreglo [32] de byte
-        variable i, j: nat32
+        variable i, j, ini: nat32
         variable k: ent32
         variable e: puntero a Espacio
         variable h: puntero a Hilo
         variable fpu: nat64
+        variable ruta: arreglo [256] de byte
+        variable con_ruta: bool
+        variable buf, tam: nat64
+        variable err: ent64
         motivo := nulo
         i := 0
         mientras línea[i] = ' ' hacer i := i + 1 fin
+        ; [etapa 5] con una ruta («/nvme0p1/HOLA»): del VFS; si no, de la unidad
+        ini := i
+        con_ruta := falso
         j := 0
-        mientras línea[i] <> 0 y línea[i] <> ' ' y j < 31 hacer
-            nombre_[j] := línea[i]
+        mientras línea[i] <> 0 y línea[i] <> ' ' hacer
+            si línea[i] = '/' entonces con_ruta := cierto fin
+            si j < 255 entonces
+                ruta[j] := línea[i]
+                j := j + 1
+            fin
             i := i + 1
-            j := j + 1
+        fin
+        ruta[j] := 0
+        ; el nombre: el último trozo
+        i := ini
+        j := 0
+        mientras línea[i] <> 0 y línea[i] <> ' ' hacer
+            si línea[i] = '/' entonces
+                j := 0
+            sino si j < 31 entonces
+                nombre_[j] := línea[i]
+                j := j + 1
+            fin
+            i := i + 1
         fin
         nombre_[j] := 0
-        k := busca_archivo(dirección(nombre_[0]))
-        si k < 0 entonces
-            motivo := "no está en la unidad"
-            devolver nulo
+        buf := 0
+        tam := 0
+        si con_ruta entonces
+            buf := vfs_entero(dirección(ruta[0]), tam, err)
+            si buf = 0 entonces
+                si err = -2 entonces motivo := "no está (en esa ruta)"
+                sino si err = -21 entonces motivo := "es una carpeta"
+                sino motivo := "no se puede leer del disco"
+                fin
+                devolver nulo
+            fin
+        sino
+            k := busca_archivo(dirección(nombre_[0]))
+            si k < 0 entonces
+                motivo := "no está en la unidad"
+                devolver nulo
+            fin
+            buf := dónde(nat32(k))
+            tam := cuánto(nat32(k))
         fin
         p := puntero(nat64(reserva(tamaño(Proceso))))
         si p = nulo entonces
             motivo := "no queda memoria"
+            si con_ruta entonces libera(puntero(buf)) fin
             devolver nulo
         fin
         ceros_mem(nat64(p), tamaño(Proceso))
@@ -824,17 +876,22 @@ módulo Procesos
         p.fd_clase[0] := F_CONSOLA
         p.fd_clase[1] := F_CONSOLA
         p.fd_clase[2] := F_CONSOLA
+        p.dir_actual[0] := '/'
+        p.dir_actual[1] := 0
         e := crea_espacio()
         si e = nulo entonces
             libera(puntero(nat64(p)))
             motivo := "no queda memoria"
+            si con_ruta entonces libera(puntero(buf)) fin
             devolver nulo
         fin
         p.espacio := nat64(e)
-        si no carga_elf(p, nat32(k)) entonces
+        si no carga_elf(p, buf, tam) entonces
+            si con_ruta entonces libera(puntero(buf)) fin
             suelta_proceso(p)
             devolver nulo
         fin
+        si con_ruta entonces libera(puntero(buf)) fin
         si no pon_pila(p) entonces
             motivo := "no queda memoria para su pila"
             suelta_proceso(p)

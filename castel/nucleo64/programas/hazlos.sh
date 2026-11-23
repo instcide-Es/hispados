@@ -18,7 +18,7 @@ S=$1
 mkdir -p "$S"
 HECHOS=""
 if command -v gcc > /dev/null; then
-  for p in hola memoria cuenta malo; do
+  for p in hola memoria cuenta malo archivos; do
     gcc -static -nostdlib -ffreestanding -fno-stack-protector -fno-pie -no-pie -O2 -fno-builtin \
         -fcf-protection=none -fno-asynchronous-unwind-tables -o "$S/$(echo $p | tr a-z A-Z)" "$AQUI/$p.c"
     HECHOS="$HECHOS $(echo $p | tr a-z A-Z)"

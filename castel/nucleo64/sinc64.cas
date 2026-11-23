@@ -19,7 +19,7 @@
 ; =============================================================================
 módulo Sinc64
 
-    importar Cifras64, Cerrojo, Excep64, Monton64, Hilos64
+    importar Cifras64, Cerrojo, Excep64, Monton64, Hilos64, Reloj64, Apic64
 
     público tipo Suceso = estructura
         cerrojo: nat64
@@ -66,6 +66,27 @@ módulo Sinc64
         s.señalado := 1
         suelta(dirección(s.cerrojo), b)
         despierta_todos(es(nat64(s)))
+    fin
+
+    ; [etapa 5] espera a que se señale s, como mucho ns nanosegundos (el tic
+    ; lo mira: con 100 por segundo, hasta 10 ms más); falso si se acaba el plazo
+    público función espera_plazo(s: puntero a Suceso, ns: nat64): bool
+        variable b, límite: nat64
+        variable bien: bool
+        límite := ahora_ns() + ns
+        si no tic_va entonces
+            mientras s.señalado = 0 y ahora_ns() < límite hacer cede() fin
+            devolver s.señalado <> 0
+        fin
+        b := toma(dirección(s.cerrojo))
+        mientras s.señalado = 0 y ahora_ns() < límite hacer
+            duerme_en_hasta(es(nat64(s)), límite)
+            toma_sin(dirección(s.cerrojo))
+        fin
+        bien := s.señalado <> 0
+        sal_de(es(nat64(s)))
+        suelta(dirección(s.cerrojo), b)
+        devolver bien
     fin
 
     ; otra vez sin señalar (los que esperen desde ahora, esperan)

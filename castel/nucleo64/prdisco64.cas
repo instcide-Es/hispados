@@ -1,0 +1,257 @@
+; =============================================================================
+;  prdisco64.cas - Hispa-64, etapa 5: las pruebas de los discos y los archivos
+;  de cada arranque (docs/64/HISPA-64.md, sección 11):
+;   - cada disco se lee igual por la caché que a pelo (los 8 primeros sectores);
+;   - en un disco «crudo» de pruebas (el que empieza por «HISPA64 CRUDO»; en
+;     ningún otro se escribe a pelo): escribir y leer trozos de 1 sector, 8,
+;     256 (128 KB: la lista de PRP), 1000 (varias órdenes) y los del final, y
+;     comprobarlos; leerlo entero de 128 KB en 128 KB (cuánto tarda); y
+;     cuatro hilos a la vez, cada uno en su procesador (en NVMe, cada uno por
+;     su cola);
+;   - el programa ARCHIVOS (programas/archivos.c), que prueba los archivos
+;     desde el anillo 3 en los discos de prueba (los que llevan HISPA64.PRB);
+;   - y que, después, no queda nada abierto (nodos, abiertos) ni de más en
+;     el montón.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PrDisco64
+
+    importar Cifras64, Es64, Fisica64, Monton64, PorCpu64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64, Bloques64, Archivos64, Vfs64, Unidad64, Procesos
+
+    constante TROZO = 64                        ; páginas de la memoria de prueba (256 KB)
+
+    público variable fallos_disco: nat64
+    variable crudo: nat32
+    variable mem: nat64                         ; la memoria de prueba (física, seguida)
+    variable hechos: arreglo [8] de nat64
+    variable bien_hilo: arreglo [8] de bool
+
+    función mal(qué: puntero a byte)
+        escribir("  MAL: ", qué, "\n")
+        fallos_disco := fallos_disco + 1
+    fin
+
+    función patrón(semilla: nat64, i: nat64): nat32
+        devolver nat32((i * 2654435761 + semilla * 97 + (i >> 9)) >> 3) yb 0xFF
+    fin
+
+    función llena(a: nat64, n: nat64, semilla: nat64)
+        variable i: nat64
+        i := 0
+        mientras i < n hacer
+            pon_m8(a + i, patrón(semilla, i))
+            i := i + 1
+        fin
+    fin
+
+    función mira_patrón(a: nat64, n: nat64, semilla: nat64): bool
+        variable i: nat64
+        i := 0
+        mientras i < n hacer
+            si m8(a + i) <> patrón(semilla, i) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; escribe n sectores en lba con un patrón, los lee y los compara
+    función ida_y_vuelta(lba: nat64, n: nat64, semilla: nat64): bool
+        variable oct: nat64
+        oct := n * sector_dk(crudo)
+        llena(virt(mem), oct, semilla)
+        si no es_directo(crudo, lba, n, mem, cierto) entonces devolver falso fin
+        ceros_k(virt(mem), oct)
+        si no es_directo(crudo, lba, n, mem, falso) entonces devolver falso fin
+        devolver mira_patrón(virt(mem), oct, semilla)
+    fin
+
+    ; un hilo que lee su trozo del disco crudo 8 veces (128 KB cada vez)
+    función lector(arg: nat64)
+        variable k, f: nat64
+        variable bien: bool
+        bien := cierto
+        f := pide_seguidos(32, 1)
+        si f = 0 entonces
+            bien_hilo[nat32(arg)] := falso
+            devolver
+        fin
+        k := 0
+        mientras k < 32 hacer
+            si no es_directo(crudo, arg * 2048 + (k yb 7) * 256, 256, f, falso) entonces bien := falso fin
+            k := k + 1
+        fin
+        suelta_seguidos(f, 32)
+        hechos[nat32(arg)] := k
+        bien_hilo[nat32(arg)] := bien
+    fin
+
+    función prueba_crudo()
+        variable t0, t, oct, n, lba, colas_antes: nat64
+        variable i, nh, usadas: nat32
+        variable h: arreglo [8] de nat64
+        variable antes: arreglo [9] de nat64
+        variable bien: bool
+        escribir("Disco crudo de pruebas: ", nombre_dk(crudo), " (")
+        tamaño_legible(octetos_dk(crudo))
+        escribir(")\n")
+        si no escribible(crudo) entonces
+            escribir("  no se escribe en él (sin «escribir» en la línea de órdenes)\n")
+            devolver
+        fin
+        mem := pide_seguidos(TROZO, 1)
+        si mem = 0 entonces
+            mal("sin memoria para la prueba del disco crudo")
+            devolver
+        fin
+        bien := ida_y_vuelta(1, 1, 1) y ida_y_vuelta(8, 8, 2) y ida_y_vuelta(100, 256, 3) y ida_y_vuelta(2000, 500, 4)
+        n := sectores_dk(crudo)
+        bien := bien y ida_y_vuelta(n - 300, 300, 5)
+        ; más allá del final: no
+        si es_directo(crudo, n - 1, 2, mem, falso) entonces bien := falso fin
+        si bien entonces
+            escribir("  escribir y leer a pelo: 1 sector, 8, 256 (128 KB), 500 (varias órdenes) y los 300 del final: iguales; más allá del final, no\n")
+        sino
+            mal("lo leído a pelo no es lo escrito")
+        fin
+        ; leerlo entero, de 128 KB en 128 KB
+        t0 := ahora_ns()
+        oct := 0
+        lba := 0
+        mientras lba + 256 <= n hacer
+            si no es_directo(crudo, lba, 256, mem, falso) entonces romper fin
+            lba := lba + 256
+            oct := oct + 256 * nat64(sector_dk(crudo))
+        fin
+        t := (ahora_ns() - t0) div 1000
+        si t = 0 entonces t := 1 fin
+        escribir("  leerlo entero (de 128 KB en 128 KB): ", oct div 1048576, " MB en ", t div 1000, " ms (", oct div t, " MB/s)\n")
+        suelta_seguidos(mem, TROZO)
+        ; cuatro a la vez, cada uno en su procesador
+        nh := n_cpus
+        si nh > 4 entonces nh := 4 fin
+        i := 0
+        mientras i < 9 hacer
+            antes[i] := nv_por_cola[i]
+            i := i + 1
+        fin
+        i := 0
+        mientras i < nh hacer
+            bien_hilo[i] := falso
+            hechos[i] := 0
+            h[i] := nat64(crea(nat64(dirección(lector)), nat64(i), "lector", NORMAL, i))
+            i := i + 1
+        fin
+        bien := cierto
+        i := 0
+        mientras i < nh hacer
+            si h[i] <> 0 entonces une(puntero(h[i])) fin
+            si no bien_hilo[i] o hechos[i] <> 32 entonces bien := falso fin
+            i := i + 1
+        fin
+        usadas := 0
+        i := 1
+        mientras i < 9 hacer
+            si nv_por_cola[i] <> antes[i] entonces usadas := usadas + 1 fin
+            i := i + 1
+        fin
+        si bien entonces
+            escribir("  ", nh, " hilos a la vez, cada uno en su procesador, 32 lecturas de 128 KB cada uno: bien")
+            si clase_dk(crudo) = D_NVME entonces escribir("; colas de NVMe usadas: ", usadas) fin
+            escribir("\n")
+        sino
+            mal("los hilos que leen a la vez")
+        fin
+    fin
+
+    ; lo de cada disco: igual por la caché que a pelo
+    función prueba_caché()
+        variable d, n: nat32
+        variable a, f: nat64
+        a := nat64(reserva(4096))
+        f := pide()
+        si a = 0 o f = 0 entonces devolver fin
+        n := 0
+        d := 0
+        mientras d < n_dk hacer
+            si no es_parte(d) entonces
+                si cb_lee(d, 0, a, 4096) y es_directo(d, 0, 4096 div sector_dk(d), f, falso) entonces
+                    si mira_igual(a, virt(f), 4096) entonces n := n + 1 sino mal("por la caché no se lee lo mismo que a pelo") fin
+                sino
+                    mal("no se lee el principio de un disco")
+                fin
+            fin
+            d := d + 1
+        fin
+        libera(puntero(a))
+        devuelve(f)
+        escribir("La caché: los primeros 4 KB de los ", n, " discos, iguales por la caché y a pelo\n")
+    fin
+
+    función mira_igual(a: nat64, b: nat64, n: nat64): bool
+        variable i: nat64
+        i := 0
+        mientras i < n hacer
+            si m8(a + i) <> m8(b + i) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    función corre(línea: puntero a byte, esperado: nat64): bool
+        variable p: puntero a Proceso
+        variable r, t0: nat64
+        t0 := ahora_ns()
+        p := lanza(línea)
+        si p = nulo entonces
+            escribir("Programa «", línea, "»: no se ha podido arrancar: ", motivo, "\n")
+            mal("no arranca")
+            devolver falso
+        fin
+        r := espera_proceso(p)
+        escribir("Programa «", línea, "»: acaba con el código ", r)
+        si r = esperado entonces
+            escribir(", como debe (en ", (ahora_ns() - t0) div 1000000, " ms)\n")
+            devolver cierto
+        fin
+        escribir("\n")
+        mal("no acaba con el código que debe")
+        devolver falso
+    fin
+
+    público función pruebas_discos(con_programas: bool, línea_dir: puntero a byte)
+        variable d: nat32
+        variable b: arreglo [64] de byte
+        variable nodos_antes, montón_antes: nat64
+        prueba_caché()
+        crudo := 0xFFFFFFFF
+        d := 0
+        mientras d < n_dk hacer
+            si no es_parte(d) y tabla_dk(d) = 0 entonces
+                si cb_lee(d, 0, nat64(dirección(b[0])), 64) entonces
+                    si b[0] = 'H' y b[1] = 'I' y b[2] = 'S' y b[3] = 'P' y b[4] = 'A' y b[5] = '6' y b[6] = '4' y b[8] = 'C' y b[9] = 'R' entonces crudo := d fin
+                fin
+            fin
+            d := d + 1
+        fin
+        si crudo <> 0xFFFFFFFF entonces prueba_crudo() fin
+        si no con_programas entonces devolver fin
+        nodos_antes := n_nodos
+        montón_antes := en_uso
+        si busca_archivo("ARCHIVOS") < 0 entonces
+            escribir("(sin el programa ARCHIVOS en la unidad: sin las pruebas de los archivos)\n")
+            devolver
+        fin
+        corre("ARCHIVOS auto", 0)
+        corre("ARCHIVOS dir /", 0)
+        si línea_dir <> nulo entonces
+            si línea_dir[0] <> 0 entonces corre(línea_dir, 0) fin
+        fin
+        si abiertos = 0 y n_nodos = nodos_antes y en_uso = montón_antes entonces
+            escribir("Después de los archivos: 0 abiertos, ", n_nodos, " nodos (los de antes: las raíces), el montón como antes\n")
+        sino
+            escribir("Después de los archivos: ", abiertos, " abiertos, ", n_nodos, " nodos (antes ", nodos_antes, "), el montón: ", en_uso, " bloques (antes ", montón_antes, ")\n")
+            mal("queda algo abierto o en el montón")
+        fin
+    fin
+
+fin PrDisco64.

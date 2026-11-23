@@ -2,7 +2,7 @@
 ;  hilos64.cas - Hispa-64, etapa 3: los hilos del núcleo y el planificador
 ;  (docs/64/HISPA-64.md, 2.5 y sección 9).
 ;
-;  Un hilo es una pila (16 KB, en la zona de las pilas, con su guarda) y un
+;  Un hilo es una pila (32 KB desde la etapa 5, en la zona de las pilas, con su guarda) y un
 ;  bloque (Hilo) con lo que se guarda al dejarlo (su RSP: lo demás, en su
 ;  pila). Cuatro prioridades (tiempo real, interactivo, normal, de fondo) y,
 ;  dentro de cada una, por turnos (CUANTO tics cada uno). Expropiativo: el tic
@@ -645,6 +645,29 @@ módulo Hilos64
         fin
         suelta_sin(dirección(e.cerrojo))
         planifica()
+    fin
+
+    ; [etapa 5] como duerme_en, pero el tic también lo despierta en «límite» (ns
+    ; de ahora_ns): esperar con plazo (Sinc64.espera_plazo)
+    público función duerme_en_hasta(e: puntero a Espera, límite: nat64)
+        variable h: puntero a Hilo
+        h := actual()
+        h.estado := DURMIENDO
+        si h.en_espera = 0 entonces
+            h.sig_espera := 0
+            si e.último = 0 entonces e.primero := nat64(h) sino hilo(e.último).sig_espera := nat64(h) fin
+            e.último := nat64(h)
+            h.en_espera := nat64(e)
+        fin
+        h.despertar := límite
+        toma_sin(dirección(reloj_cerrojo))
+        si h.en_reloj = 0 entonces al_reloj(h) fin
+        suelta_sin(dirección(reloj_cerrojo))
+        suelta_sin(dirección(e.cerrojo))
+        planifica()
+        toma_sin(dirección(reloj_cerrojo))
+        si h.en_reloj <> 0 entonces fuera_del_reloj(h) fin
+        suelta_sin(dirección(reloj_cerrojo))
     fin
 
     ; (con e.cerrojo tomado) quita h de e

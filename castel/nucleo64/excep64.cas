@@ -19,7 +19,7 @@
 ;  Un fallo de página «con red» (lee_con_red de Smp64: las pruebas de vaciar
 ;  la TLB de los demás) no para: vuelve adonde diga el bloque del procesador.
 ;  Y un desbordamiento de la pila de un hilo (en la zona de las pilas, cada una
-;  con 16 KB sin poner debajo) se dice igual que el de la pila del núcleo.
+;  con 32 KB sin poner debajo) se dice igual que el de la pila del núcleo.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Excep64
@@ -60,9 +60,10 @@ módulo Excep64
     ; programa y no vuelve
     público variable al_fallo_usuario: nat64
     ; la zona de las pilas de los hilos y de los procesadores (Pagina64): cada
-    ; sitio, 32 KB; la pila, los 16 KB de arriba; los de abajo, sin poner
+    ; sitio, 64 KB; la pila, los 32 KB de arriba (desde la etapa 5); los de abajo, sin poner
     público constante ZONA_PILAS = 0xFFFFE00000000000
-    público constante SITIO_PILA = 32768
+    público constante SITIO_PILA = 65536            ; [etapa 5] 64 KB: la guarda (32) y la pila (32; eran 16)
+    público constante PÁGINAS_PILA = 8
     público constante MAX_PILAS = 4096
 
     ; el marco que deja una función de interrupción: los quince registros, de r15

@@ -13,7 +13,7 @@
 ;                        sin caché
 ;    0xFFFFC80000000000  los bloques grandes del montón (monton64.cas)
 ;    0xFFFFE00000000000  [etapa 3] las pilas de los hilos y de los procesadores:
-;                        sitios de 32 KB, la pila en los 16 KB de arriba y los
+;                        sitios de 64 KB, la pila en los 32 KB de arriba y los
 ;                        de abajo sin poner (la guarda: quien se desborde
 ;                        falla en el acto, y Excep64 lo dice)
 ;    0xFFFFFFFF80000000  el núcleo: el código, de solo leer; los datos y la
@@ -283,7 +283,7 @@ módulo Pagina64
         devolver r
     fin
 
-    ; [etapa 3] una pila nueva de 16 KB en la zona de las pilas, con su guarda
+    ; [etapa 3] una pila nueva de 32 KB (16 KB hasta la etapa 4) en la zona de las pilas, con su guarda
     ; debajo; devuelve lo alto (o 0 si no queda sitio o memoria)
     público función pila_nueva(): nat64
         variable b, base, f: nat64
@@ -300,7 +300,7 @@ módulo Pagina64
         suelta(dirección(pilas_cerrojo), b)
         base := ZONA_PILAS + nat64(i) * SITIO_PILA + SITIO_PILA div 2
         k := 0
-        mientras k < 4 hacer
+        mientras k < PÁGINAS_PILA hacer
             f := pide()
             si f = 0 entonces
                 ; (nadie la ha visto aún: sin avisar a los demás)
@@ -324,7 +324,7 @@ módulo Pagina64
     ; tablas de todos (sin ningún cerrojo tomado) y sus marcos, a la memoria libre
     público función pila_suelta(cima: nat64)
         variable b, base: nat64
-        variable f: arreglo [4] de nat64
+        variable f: arreglo [PÁGINAS_PILA] de nat64
         variable i, k: nat32
         base := cima - SITIO_PILA div 2
         si base < ZONA_PILAS o (base - ZONA_PILAS) yb (SITIO_PILA - 1) <> SITIO_PILA div 2 entonces
@@ -335,13 +335,13 @@ módulo Pagina64
         fin
         i := nat32((base - ZONA_PILAS) div SITIO_PILA)
         k := 0
-        mientras k < 4 hacer
+        mientras k < PÁGINAS_PILA hacer
             f[k] := desmapea_aquí(base + nat64(k) * K4)
             k := k + 1
         fin
-        avisa_tlb(base, 4)
+        avisa_tlb(base, PÁGINAS_PILA)
         k := 0
-        mientras k < 4 hacer
+        mientras k < PÁGINAS_PILA hacer
             si f[k] <> nob nat64(0) entonces devuelve(f[k]) fin
             k := k + 1
         fin

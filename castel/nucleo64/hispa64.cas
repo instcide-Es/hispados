@@ -53,6 +53,7 @@ módulo Hispa64
     importar Cifras64, Cpu64, Pant64, Excep64, Gdt64, Fisica64, Pagina64, Monton64, Nombre64, PrMem64
     importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64, Cerrojo, Hilos64, Smp64, PrSmp64
     importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
+    importar Msi64, Nvme64, Ahci64, Bloques64, Archivos64, Fat64, Exfat64, Vfs64, PrDisco64
 
     constante VERSIÓN = "0.4.0"
     constante MB1 = 0x2BADB002
@@ -489,6 +490,89 @@ módulo Hispa64
         mientras i < módulos hacer
             si cuántos = 0 o i <> sim_índice entonces añade_archivo(mod_ini[i], mod_fin[i], mod_nombre[i]) fin
             i := i + 1
+        fin
+    fin
+
+    ; ---- [etapa 5] los discos y los archivos ----
+    función etapa5()
+        escribir("Discos:\n")
+        prepara_nvme(tiene("sinmsix"))
+        prepara_ahci(tiene("sinmsi"))
+        si no prepara_bloques(tiene("escribir")) entonces escribir("  sin memoria para la caché de bloques\n") fin
+        escribir("  la caché de bloques: ", cb_n, " bloques de 4 KB (")
+        tamaño_legible(nat64(cb_n) * 4096)
+        escribir("), con escritura diferida (a los 5 s, o al vaciar)\n")
+        escribe_discos()
+        prepara_vfs()
+        escribir("Archivos (el VFS): ", n_montajes, " montajes\n")
+        escribe_montajes()
+    fin
+
+    ; el valor de «nombre=valor» de la línea de órdenes, en t (vacío si no está)
+    función valor_de(nombre: puntero a byte, t: puntero a byte)
+        variable i, j, k: nat32
+        t[0] := 0
+        i := 0
+        mientras línea[i] <> 0 hacer
+            si i = 0 o línea[i - 1] = ' ' entonces
+                j := 0
+                mientras nombre[j] <> 0 y línea[i + j] = nombre[j] hacer j := j + 1 fin
+                si nombre[j] = 0 entonces
+                    k := 0
+                    mientras línea[i + j] <> 0 y línea[i + j] <> ' ' y k < 200 hacer
+                        t[k] := línea[i + j]
+                        j := j + 1
+                        k := k + 1
+                    fin
+                    t[k] := 0
+                    devolver
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; [etapa 5] las pruebas de los discos y de los archivos (después de las de los programas)
+    función pruebas5()
+        variable v: arreglo [210] de byte
+        variable l: arreglo [240] de byte
+        variable i, j: nat32
+        l[0] := 0
+        valor_de("dir=", dirección(v[0]))
+        si v[0] = 0 entonces
+            valor_de("rapido=", dirección(v[0]))
+            si v[0] <> 0 entonces copia_texto(dirección(l[0]), "ARCHIVOS rapido ", 240) fin
+        sino
+            copia_texto(dirección(l[0]), "ARCHIVOS dir ", 240)
+        fin
+        si l[0] <> 0 entonces
+            i := 0
+            mientras l[i] <> 0 hacer i := i + 1 fin
+            j := 0
+            mientras v[j] <> 0 y i < 238 hacer
+                l[i] := v[j]
+                i := i + 1
+                j := j + 1
+            fin
+            l[i] := 0
+        fin
+        si tiene("sinpruebas") o no tic_va entonces
+            pruebas_discos(falso, nulo)
+        sino
+            pruebas_discos(cierto, dirección(l[0]))
+        fin
+    fin
+
+    ; [etapa 5] antes de apagar: lo que quede sin escribir, al disco (sync)
+    función al_apagar()
+        variable n: nat64
+        variable r: ent64
+        si cb_n = 0 entonces devolver fin
+        n := cb_sucios
+        r := vfs_sync()
+        si n > 0 o r > 0 entonces
+            escribir("Al apagar: ", n, " bloques sin escribir en la caché; vaciados (sync): ")
+            si r < 0 entonces escribir("¡alguno ha fallado!\n") sino escribir(r, " escritos\n") fin
         fin
     fin
 
@@ -962,6 +1046,7 @@ módulo Hispa64
         mientras cierto hacer
             si botón entonces
                 escribir("\nBotón de encendido pulsado: se apaga el equipo.\n")
+                al_apagar()
                 apaga_equipo()
                 escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
                 apaga()
@@ -1117,7 +1202,9 @@ módulo Hispa64
         si tiene("prueba=monton") entonces prueba_montón(100000, 1000) fin
         ; [etapa 3] los demás procesadores y el planificador
         etapa3()
+        etapa5()
         etapa4()
+        pruebas5()
         ; las excepciones: un punto de parada, que se atiende y se sigue
         escribir("Excepciones: las 32 en la IDT, explicadas en español. Una int3 de prueba:\n  ")
         ensamblador
@@ -1125,16 +1212,20 @@ módulo Hispa64
         fin
         provoca()
         pruebas2()
-        si fallos + fallos_proc > 0 entonces
+        si fallos + fallos_proc + fallos_disco > 0 entonces
             pon_color(12, 0)
             escribir("Hispa-64 etapa 4: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
-            si apagar_al_fallar entonces devolver 43 fin
+            si apagar_al_fallar entonces
+                al_apagar()
+                devolver 43
+            fin
         sino
             pon_color(10, 0)
             escribir("Hispa-64 etapa 4: todo en orden.\n")
             pon_color(7, 0)
         fin
+        al_apagar()
         si apagar_al_fallar entonces devolver 42 fin
         en_marcha()
         devolver 0

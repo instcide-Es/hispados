@@ -267,6 +267,85 @@ módulo Pci64
         fin
     fin
 
+    ; ---- [etapa 5] lo de cada aparato, para los drivers ----
+    público función clase_de(i: nat32): nat32
+        devolver (nat32(clase[i]) << 16) ob (nat32(sub[i]) << 8) ob prog[i]
+    fin
+
+    público función bus_de(i: nat32): nat32
+        devolver bus[i]
+    fin
+
+    público función disp_de(i: nat32): nat32
+        devolver disp[i]
+    fin
+
+    público función fun_de(i: nat32): nat32
+        devolver fun[i]
+    fin
+
+    público función fab_de(i: nat32): nat32
+        devolver fab[i]
+    fin
+
+    público función apa_de(i: nat32): nat32
+        devolver apa[i]
+    fin
+
+    ; la BAR k: su dirección física (0 si no la hay o es de E/S) y su tamaño
+    público función bar_mem(i: nat32, k: nat32): nat64
+        si k >= 6 entonces devolver 0 fin
+        si bar_marcas[i][k] yb 8 = 0 o bar_marcas[i][k] yb 1 <> 0 entonces devolver 0 fin
+        devolver bar_dir[i][k]
+    fin
+
+    público función bar_largo(i: nat32, k: nat32): nat64
+        si k >= 6 entonces devolver 0 fin
+        devolver bar_tam[i][k]
+    fin
+
+    ; la configuración del aparato i (de 32 bits; r múltiplo de 4)
+    público función conf(i: nat32, r: nat32): nat32
+        devolver lee32(bus[i], disp[i], fun[i], r)
+    fin
+
+    público función pon_conf(i: nat32, r: nat32, v: nat32)
+        pon32(bus[i], disp[i], fun[i], r, v)
+    fin
+
+    ; dónde está su capacidad «id» (0x05 MSI, 0x11 MSI-X...) en la
+    ; configuración, o 0 si no la tiene
+    público función capacidad(i: nat32, id: nat32): nat32
+        variable p, v, n: nat32
+        si (conf(i, 4) >> 16) yb 0x10 = 0 entonces devolver 0 fin
+        p := conf(i, 0x34) yb 0xFC
+        n := 0
+        mientras p >= 0x40 y n < 48 hacer
+            v := conf(i, p)
+            si v yb 0xFF = id entonces devolver p fin
+            p := (v >> 8) yb 0xFC
+            n := n + 1
+        fin
+        devolver 0
+    fin
+
+    ; que decodifique su memoria y pueda hacer DMA (bus master); sin las
+    ; interrupciones de siempre (INTx) si se van a usar MSI
+    público función habilita(i: nat32, sin_intx: bool)
+        variable c: nat32
+        c := (conf(i, 4) yb 0xFFFF) ob 0x6
+        si sin_intx entonces c := c ob 0x400 fin
+        pon_conf(i, 4, c)
+    fin
+
+    ; el nombre corto «BB:DD.F»
+    público función escribe_bdf(i: nat32)
+        hex2(bus[i])
+        escribir(":")
+        hex2(disp[i])
+        escribir(".", fun[i])
+    fin
+
     ; la lista, como se ve en el arranque
     público función escribe_pci()
         variable i, k: nat32

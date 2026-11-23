@@ -1,0 +1,765 @@
+; =============================================================================
+;  bloques64.cas - Hispa-64, etapa 5: los discos, sus particiones y la caché de
+;  bloques (docs/64/HISPA-64.md, sección 11).
+;
+;  Los discos: los de NVMe (Nvme64) y los de SATA (Ahci64), con su nombre
+;  («nvme0», «sata0»...), y sus particiones («nvme0p1»...), que son discos
+;  también: un trozo del de debajo. Las particiones se leen de la tabla GPT
+;  (la cabecera y las entradas con su CRC32; si la de delante está mal, la
+;  copia del final) o de la MBR (las cuatro primarias y las lógicas de una
+;  extendida); un disco que empieza con un sistema de archivos (sin tabla,
+;  como una memoria «superfloppy») es él mismo el volumen.
+;
+;  La caché de bloques: trozos de 4 KB de cada disco (una página de memoria
+;  física cada uno: el disco los deja ahí por DMA, sin copiar), buscados por
+;  (disco, número de bloque) en una tabla de dispersión; los que hacen falta
+;  y no están desplazan a los que hace más que no se usan (el «reloj»).
+;  **Escritura diferida**: escribir solo cambia el bloque en la memoria y lo
+;  marca sucio; los sucios van al disco cuando hace falta su sitio, cuando lo
+;  pide fsync (o sync, o apagar: vacía), y si no, el hilo «vaciador» los
+;  escribe a los 5 s. Vaciar acaba con la orden de vaciar la caché del
+;  propio disco (Flush de NVMe, FLUSH CACHE EXT de SATA).
+;  Todo con un mutex (la caché la usan los programas, a la vez, desde sus
+;  hilos); los sistemas de archivos leen y escriben octetos (cb_lee,
+;  cb_escribe), copiados, y no se quedan con punteros a los bloques.
+;
+;  Nada se escribe en un disco que no se haya dado por escribible (la línea
+;  de órdenes: «escribir»; el plan: nunca escribir sin permiso en el disco
+;  interno de un equipo del taller).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Bloques64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64
+
+    público constante MAX_DISCOS = 48
+    público constante D_NVME = 1
+    público constante D_SATA = 2
+    público constante D_PARTE = 3
+    público constante BLOQUE = 4096
+    constante NADA = 0xFFFFFFFF
+    constante CUBOS = 4096
+
+    ; ---- los discos ----
+    público variable n_dk: nat32
+    variable dk_clase, dk_índice, dk_sector, dk_padre, dk_núm: arreglo [MAX_DISCOS] de nat32
+    variable dk_sectores, dk_base: arreglo [MAX_DISCOS] de nat64
+    variable dk_nombre: arreglo [MAX_DISCOS] de arreglo [16] de byte
+    variable dk_tipo: arreglo [MAX_DISCOS] de puntero a byte        ; lo que dice su tabla («EFI», «datos de Windows»...)
+    variable dk_escribe: arreglo [MAX_DISCOS] de bool
+    variable dk_tabla: arreglo [MAX_DISCOS] de nat32                 ; (los de abajo) 0 ninguna, 1 MBR, 2 GPT, 3 un volumen sin tabla
+    público variable dk_errores: nat64
+    público variable gpt_copia: nat32           ; cuántas GPT se han leído de la copia del final
+
+    ; ---- la caché ----
+    tipo Caja = estructura
+        bloque: nat64               ; su número (de 4 KB) en el disco de abajo
+        fís: nat64                  ; su página
+        sucio_desde: nat64          ; ns de ahora_ns en que se ensució (0: limpio)
+        disco: nat32                ; el disco de abajo, o NADA
+        sig: nat32                  ; el siguiente en su cubo
+        usado: nat32
+        nada: nat32
+    fin
+    variable cajas: puntero a Caja
+    público variable cb_n: nat32                ; cuántas
+    variable cubo: arreglo [CUBOS] de nat32
+    variable manilla: nat32
+    variable cb_mutex: Mutex
+    público variable cb_aciertos, cb_fallos, cb_escritos, cb_leídos, cb_diferidos, cb_vaciados: nat64
+    público variable cb_sucios: nat64           ; los sucios ahora
+    variable vaciador: puntero a Hilo
+    variable parar_vaciador: bool
+
+    función ceros(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    público función copia_oct(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    ; ---- los discos ----
+    ; el nombre del disco d: «base», y detrás (si letra no es 0) la letra y m
+    función pon_nombre(d: nat32, base: puntero a byte, letra: byte, m: nat32)
+        variable i: nat32
+        i := 0
+        mientras base[i] <> 0 y i < 10 hacer
+            dk_nombre[d][i] := base[i]
+            i := i + 1
+        fin
+        dk_nombre[d][i] := 0
+        si letra <> 0 entonces
+            dk_nombre[d][i] := letra
+            dk_nombre[d][i + 1] := 0
+            añade_número(d, m)
+        fin
+    fin
+
+    función añade_número(d: nat32, n: nat32)
+        variable i: nat32
+        si n >= 10 entonces añade_número(d, n div 10) fin
+        i := 0
+        mientras dk_nombre[d][i] <> 0 hacer i := i + 1 fin
+        si i < 15 entonces
+            dk_nombre[d][i] := byte('0' + n mod 10)
+            dk_nombre[d][i + 1] := 0
+        fin
+    fin
+
+    función nuevo_disco(clase: nat32, índice: nat32, sector: nat32, sectores: nat64): nat32
+        variable d: nat32
+        si n_dk >= MAX_DISCOS entonces devolver NADA fin
+        d := n_dk
+        n_dk := n_dk + 1
+        dk_clase[d] := clase
+        dk_índice[d] := índice
+        dk_sector[d] := sector
+        dk_sectores[d] := sectores
+        dk_base[d] := 0
+        dk_padre[d] := d
+        dk_tipo[d] := ""
+        dk_escribe[d] := falso
+        devolver d
+    fin
+
+    público función nombre_dk(d: nat32): puntero a byte
+        devolver dirección(dk_nombre[d][0])
+    fin
+
+    público función sector_dk(d: nat32): nat32
+        devolver dk_sector[d]
+    fin
+
+    público función sectores_dk(d: nat32): nat64
+        devolver dk_sectores[d]
+    fin
+
+    público función octetos_dk(d: nat32): nat64
+        devolver dk_sectores[d] * dk_sector[d]
+    fin
+
+    público función base_dk(d: nat32): nat64
+        devolver dk_base[d]
+    fin
+
+    público función clase_dk(d: nat32): nat32
+        devolver dk_clase[d]
+    fin
+
+    público función es_parte(d: nat32): bool
+        devolver dk_clase[d] = D_PARTE
+    fin
+
+    público función padre_dk(d: nat32): nat32
+        devolver dk_padre[d]
+    fin
+
+    público función tipo_dk(d: nat32): puntero a byte
+        devolver dk_tipo[d]
+    fin
+
+    público función tabla_dk(d: nat32): nat32
+        devolver dk_tabla[d]
+    fin
+
+    público función escribible(d: nat32): bool
+        devolver dk_escribe[dk_padre[d]]
+    fin
+
+    ; se da por escribible (o no) un disco de abajo y sus particiones
+    público función deja_escribir(d: nat32, sí: bool)
+        dk_escribe[dk_padre[d]] := sí
+    fin
+
+    público función modelo_dk(d: nat32): puntero a byte
+        d := dk_padre[d]
+        si dk_clase[d] = D_NVME entonces devolver nvme_modelo(dk_índice[d]) fin
+        si dk_clase[d] = D_SATA entonces devolver sata_modelo(dk_índice[d]) fin
+        devolver ""
+    fin
+
+    ; el disco de ese nombre, o NADA
+    público función busca_dk(n: puntero a byte): nat32
+        variable d, i: nat32
+        d := 0
+        mientras d < n_dk hacer
+            i := 0
+            mientras dk_nombre[d][i] = n[i] y n[i] <> 0 hacer i := i + 1 fin
+            si dk_nombre[d][i] = n[i] entonces devolver d fin
+            d := d + 1
+        fin
+        devolver NADA
+    fin
+
+    ; lee o escribe sectores del disco de abajo d, de o a la física fís (seguida)
+    función es_abajo(d: nat32, lba: nat64, n: nat64, fís: nat64, escribe: bool): bool
+        variable bien: bool
+        bien := falso
+        si dk_clase[d] = D_NVME entonces bien := nvme_es(dk_índice[d], lba, n, fís, escribe)
+        sino si dk_clase[d] = D_SATA entonces bien := sata_es(dk_índice[d], lba, n, fís, escribe) fin
+        si no bien entonces dk_errores := dk_errores + 1 fin
+        devolver bien
+    fin
+
+    ; [para las pruebas y para leer de un tirón] sectores de cualquier disco
+    ; (también de una partición), sin pasar por la caché
+    público función es_directo(d: nat32, lba: nat64, n: nat64, fís: nat64, escribe: bool): bool
+        si lba + n > dk_sectores[d] o lba + n < lba entonces devolver falso fin
+        si escribe y no dk_escribe[dk_padre[d]] entonces devolver falso fin
+        devolver es_abajo(dk_padre[d], dk_base[d] + lba, n, fís, escribe)
+    fin
+
+    función vacía_abajo(d: nat32): bool
+        si dk_clase[d] = D_NVME entonces devolver nvme_vacía(dk_índice[d]) fin
+        si dk_clase[d] = D_SATA entonces devolver sata_vacía(dk_índice[d]) fin
+        devolver cierto
+    fin
+
+    ; ---- la caché ----
+    función caja(i: nat32): puntero a Caja
+        devolver cajas + i
+    fin
+
+    función cubo_de(d: nat32, b: nat64): nat32
+        devolver nat32((b * 2654435761 + nat64(d) * 40503) >> 7) yb (CUBOS - 1)
+    fin
+
+    ; prepara la caché con n bloques (de 4 KB)
+    función prepara_caché(n: nat32): bool
+        variable i: nat32
+        variable c: puntero a Caja
+        cajas := puntero(nat64(reserva(nat64(n) * tamaño(Caja))))
+        si cajas = nulo entonces devolver falso fin
+        i := 0
+        mientras i < CUBOS hacer
+            cubo[i] := NADA
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n hacer
+            c := caja(i)
+            c.fís := pide()
+            si c.fís = 0 entonces romper fin
+            c.disco := NADA
+            c.sig := NADA
+            c.usado := 0
+            c.sucio_desde := 0
+            i := i + 1
+        fin
+        cb_n := i
+        devolver cb_n >= 16
+    fin
+
+    función quita_del_cubo(i: nat32)
+        variable c: puntero a Caja
+        variable k, a: nat32
+        c := caja(i)
+        k := cubo_de(c.disco, c.bloque)
+        si cubo[k] = i entonces
+            cubo[k] := c.sig
+        sino
+            a := cubo[k]
+            mientras a <> NADA y caja(a).sig <> i hacer a := caja(a).sig fin
+            si a <> NADA entonces caja(a).sig := c.sig fin
+        fin
+        c.sig := NADA
+    fin
+
+    ; los sectores de verdad del bloque b del disco d (el último puede ser corto)
+    función sectores_de(d: nat32, b: nat64, ref primero: nat64): nat64
+        variable por, n: nat64
+        por := BLOQUE div dk_sector[d]
+        primero := b * por
+        si primero >= dk_sectores[d] entonces devolver 0 fin
+        n := dk_sectores[d] - primero
+        si n > por entonces n := por fin
+        devolver n
+    fin
+
+    ; (con el mutex) escribe la caja i al disco y la deja limpia
+    función escribe_caja(i: nat32): bool
+        variable c: puntero a Caja
+        variable p, n: nat64
+        c := caja(i)
+        si c.sucio_desde = 0 entonces devolver cierto fin
+        n := sectores_de(c.disco, c.bloque, p)
+        si n > 0 entonces
+            si no es_abajo(c.disco, p, n, c.fís, cierto) entonces devolver falso fin
+        fin
+        c.sucio_desde := 0
+        cb_sucios := cb_sucios - 1
+        cb_escritos := cb_escritos + 1
+        devolver cierto
+    fin
+
+    ; (con el mutex) la caja del bloque b del disco de abajo d: la busca o la
+    ; trae (leyéndola, si «leer»); NADA si el disco falla
+    función trae(d: nat32, b: nat64, leer: bool): nat32
+        variable i, k, vueltas: nat32
+        variable c: puntero a Caja
+        variable p, n: nat64
+        k := cubo_de(d, b)
+        i := cubo[k]
+        mientras i <> NADA hacer
+            c := caja(i)
+            si c.disco = d y c.bloque = b entonces
+                c.usado := 1
+                cb_aciertos := cb_aciertos + 1
+                devolver i
+            fin
+            i := c.sig
+        fin
+        cb_fallos := cb_fallos + 1
+        ; una caja: la primera sin usar desde la última vuelta del reloj
+        vueltas := 0
+        mientras cierto hacer
+            i := manilla
+            manilla := manilla + 1
+            si manilla >= cb_n entonces manilla := 0 fin
+            c := caja(i)
+            si c.disco = NADA entonces romper fin
+            si c.usado = 0 entonces romper fin
+            c.usado := 0
+            vueltas := vueltas + 1
+        fin
+        si c.disco <> NADA entonces
+            si c.sucio_desde <> 0 entonces
+                si no escribe_caja(i) entonces devolver NADA fin
+                cb_diferidos := cb_diferidos + 1
+            fin
+            quita_del_cubo(i)
+            c.disco := NADA
+        fin
+        si leer entonces
+            n := sectores_de(d, b, p)
+            si n = 0 o no es_abajo(d, p, n, c.fís, falso) entonces devolver NADA fin
+            cb_leídos := cb_leídos + 1
+        fin
+        c.disco := d
+        c.bloque := b
+        c.usado := 1
+        c.sucio_desde := 0
+        c.sig := cubo[k]
+        cubo[k] := i
+        devolver i
+    fin
+
+    ; lee n octetos del disco d (o partición) desde el octeto «pos» a la
+    ; memoria del núcleo «a»; cierto si sale bien
+    público función cb_lee(d: nat32, pos: nat64, a: nat64, n: nat64): bool
+        variable ab: nat32
+        variable i: nat32
+        variable b, dentro, trozo: nat64
+        si pos + n > octetos_dk(d) o pos + n < pos entonces devolver falso fin
+        ab := dk_padre[d]
+        pos := pos + dk_base[d] * dk_sector[ab]
+        cierra_mutex(dirección(cb_mutex))
+        mientras n > 0 hacer
+            b := pos div BLOQUE
+            dentro := pos mod BLOQUE
+            trozo := BLOQUE - dentro
+            si trozo > n entonces trozo := n fin
+            i := trae(ab, b, cierto)
+            si i = NADA entonces
+                abre_mutex(dirección(cb_mutex))
+                devolver falso
+            fin
+            copia_oct(a, virt(caja(i).fís) + dentro, trozo)
+            a := a + trozo
+            pos := pos + trozo
+            n := n - trozo
+        fin
+        abre_mutex(dirección(cb_mutex))
+        devolver cierto
+    fin
+
+    ; escribe n octetos de la memoria del núcleo «de» en el disco d desde
+    ; «pos» (en la caché: sucios); de = 0 escribe ceros
+    público función cb_escribe(d: nat32, pos: nat64, de: nat64, n: nat64): bool
+        variable ab, i: nat32
+        variable b, dentro, trozo, p, m: nat64
+        variable c: puntero a Caja
+        si pos + n > octetos_dk(d) o pos + n < pos entonces devolver falso fin
+        ab := dk_padre[d]
+        si no dk_escribe[ab] entonces devolver falso fin
+        pos := pos + dk_base[d] * dk_sector[ab]
+        cierra_mutex(dirección(cb_mutex))
+        mientras n > 0 hacer
+            b := pos div BLOQUE
+            dentro := pos mod BLOQUE
+            trozo := BLOQUE - dentro
+            si trozo > n entonces trozo := n fin
+            ; (un bloque entero no hace falta leerlo antes; uno corto del final, sí)
+            m := sectores_de(ab, b, p)
+            i := trae(ab, b, trozo < BLOQUE o m * dk_sector[ab] < BLOQUE)
+            si i = NADA entonces
+                abre_mutex(dirección(cb_mutex))
+                devolver falso
+            fin
+            c := caja(i)
+            si de = 0 entonces ceros(virt(c.fís) + dentro, trozo) sino copia_oct(virt(c.fís) + dentro, de, trozo) fin
+            si c.sucio_desde = 0 entonces
+                c.sucio_desde := ahora_ns() ob 1
+                cb_sucios := cb_sucios + 1
+            fin
+            si de <> 0 entonces de := de + trozo fin
+            pos := pos + trozo
+            n := n - trozo
+        fin
+        abre_mutex(dirección(cb_mutex))
+        devolver cierto
+    fin
+
+    ; escribe los sucios del disco d (de abajo; NADA: de todos) que lleven
+    ; sucios desde antes de «antes» (0: todos) y, si «del_todo», vacía la
+    ; caché del propio disco; cuántos ha escrito (o -1 si alguno falla)
+    función vacía_(d: nat32, antes: nat64, del_todo: bool): ent64
+        variable i, k: nat32
+        variable n: ent64
+        variable c: puntero a Caja
+        variable mal: bool
+        n := 0
+        mal := falso
+        cierra_mutex(dirección(cb_mutex))
+        ; (por orden de bloque, más o menos: de cubo en cubo no; de caja en caja)
+        i := 0
+        mientras i < cb_n hacer
+            c := caja(i)
+            si c.disco <> NADA y c.sucio_desde <> 0 y (d = NADA o c.disco = d) y (antes = 0 o c.sucio_desde < antes) entonces
+                si escribe_caja(i) entonces n := n + 1 sino mal := cierto fin
+            fin
+            i := i + 1
+        fin
+        si del_todo entonces
+            k := 0
+            mientras k < n_dk hacer
+                si dk_clase[k] <> D_PARTE y dk_escribe[k] y (d = NADA o d = k) entonces
+                    si no vacía_abajo(k) entonces mal := cierto fin
+                fin
+                k := k + 1
+            fin
+        fin
+        cb_vaciados := cb_vaciados + nat64(n)
+        abre_mutex(dirección(cb_mutex))
+        si mal entonces devolver -1 fin
+        devolver n
+    fin
+
+    ; fsync de lo que está en el disco d (o partición): todo lo suyo, al disco
+    público función cb_vacía(d: nat32): ent64
+        devolver vacía_(dk_padre[d], 0, cierto)
+    fin
+
+    ; sync: todos los discos
+    público función cb_vacía_todo(): ent64
+        devolver vacía_(NADA, 0, cierto)
+    fin
+
+    ; se olvida de lo que tenga del disco d (limpio): para leer otra vez del disco
+    público función cb_olvida(d: nat32)
+        variable i, ab: nat32
+        variable c: puntero a Caja
+        ab := dk_padre[d]
+        cierra_mutex(dirección(cb_mutex))
+        i := 0
+        mientras i < cb_n hacer
+            c := caja(i)
+            si c.disco = ab y c.sucio_desde = 0 entonces
+                quita_del_cubo(i)
+                c.disco := NADA
+            fin
+            i := i + 1
+        fin
+        abre_mutex(dirección(cb_mutex))
+    fin
+
+    ; el hilo vaciador: cada segundo, al disco lo que lleve 5 s sucio
+    función vaciador_(arg: nat64)
+        variable a: nat64
+        mientras no parar_vaciador hacer
+            duerme_ms(1000)
+            si cb_sucios > 0 entonces
+                a := ahora_ns()
+                si a > 5000000000 entonces vacía_(NADA, a - 5000000000, falso) fin
+            fin
+        fin
+    fin
+
+    ; ---- las particiones ----
+    función l8(d: nat64): nat32
+        devolver m8(d)
+    fin
+
+    función l16(d: nat64): nat32
+        devolver m16(d)
+    fin
+
+    función l32(d: nat64): nat32
+        devolver m32(d)
+    fin
+
+    función l64(d: nat64): nat64
+        devolver m64(d)
+    fin
+
+    ; el CRC32 (el de Ethernet, zlib y GPT) de n octetos desde d
+    público función crc32(d: nat64, n: nat64): nat32
+        variable c, k: nat32
+        variable i: nat64
+        c := 0xFFFFFFFF
+        i := 0
+        mientras i < n hacer
+            c := c xob m8(d + i)
+            k := 0
+            mientras k < 8 hacer
+                si c yb 1 <> 0 entonces c := (c >> 1) xob 0xEDB88320 sino c := c >> 1 fin
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+        devolver c xob 0xFFFFFFFF
+    fin
+
+    función nueva_parte(d: nat32, n: nat32, ini: nat64, cuántos: nat64, tipo_: puntero a byte): bool
+        variable p: nat32
+        si cuántos = 0 o ini >= dk_sectores[d] o ini + cuántos > dk_sectores[d] o ini + cuántos < ini entonces devolver falso fin
+        p := nuevo_disco(D_PARTE, n, dk_sector[d], cuántos)
+        si p = NADA entonces devolver falso fin
+        dk_base[p] := ini
+        dk_padre[p] := d
+        dk_núm[p] := n
+        dk_tipo[p] := tipo_
+        pon_nombre(p, dirección(dk_nombre[d][0]), 'p', n)
+        devolver cierto
+    fin
+
+    función tipo_gpt(t: nat32, t2: nat32): puntero a byte
+        si t = 0xC12A7328 entonces devolver "EFI" fin
+        si t = 0xEBD0A0A2 entonces devolver "datos (Windows: FAT, exFAT o NTFS)" fin
+        si t = 0x0FC63DAF entonces devolver "Linux" fin
+        si t = 0x0657FD6D entonces devolver "Linux (intercambio)" fin
+        si t = 0xE3C9E316 entonces devolver "reservada de Microsoft" fin
+        si t = 0xDE94BBA4 entonces devolver "recuperación de Windows" fin
+        si t = 0x21686148 entonces devolver "arranque de la BIOS (GRUB)" fin
+        si t = 0x48465300 entonces devolver "Apple HFS+" fin
+        si t = 0x7C3457EF entonces devolver "Apple APFS" fin
+        devolver "otra"
+    fin
+
+    función tipo_mbr(t: nat32): puntero a byte
+        según nat16(t)
+            caso 0x01: devolver "FAT12"
+            caso 0x04, 0x06, 0x0E: devolver "FAT16"
+            caso 0x07: devolver "exFAT o NTFS"
+            caso 0x0B, 0x0C: devolver "FAT32"
+            caso 0x82: devolver "Linux (intercambio)"
+            caso 0x83: devolver "Linux"
+            caso 0xEF: devolver "EFI"
+            si no: devolver "otra"
+        fin
+    fin
+
+    ; (las cabeceras de GPT y sus entradas, en una página del montón)
+    función lee_gpt(d: nat32, lba: nat64, t: nat64): bool
+        variable tam, crc, n, esz, crc_e, i: nat32
+        variable ent, total, ini, fin_: nat64
+        variable e: nat64
+        variable buf: nat64
+        variable bien: bool
+        si no cb_lee(d, lba * dk_sector[d], t, 512) entonces devolver falso fin
+        si l32(t) <> 0x20494645 o l32(t + 4) <> 0x54524150 entonces devolver falso fin
+        tam := l32(t + 12)
+        si tam < 92 o tam > 512 entonces devolver falso fin
+        crc := l32(t + 16)
+        pon_m32(t + 16, 0)
+        si crc32(t, tam) <> crc entonces devolver falso fin
+        ent := l64(t + 72)
+        n := l32(t + 80)
+        esz := l32(t + 84)
+        crc_e := l32(t + 88)
+        si esz < 128 o esz > 1024 o n > 1024 entonces devolver falso fin
+        total := nat64(n) * esz
+        buf := nat64(reserva(total))
+        si buf = 0 entonces devolver falso fin
+        bien := cb_lee(d, ent * dk_sector[d], buf, total)
+        si bien y crc32(buf, total) <> crc_e entonces bien := falso fin
+        si bien entonces
+            dk_tabla[d] := 2
+            i := 0
+            mientras i < n hacer
+                e := buf + nat64(i) * esz
+                ini := l64(e + 32)
+                fin_ := l64(e + 40)
+                si (l64(e) <> 0 o l64(e + 8) <> 0) y fin_ >= ini entonces
+                    nueva_parte(d, i + 1, ini, fin_ - ini + 1, tipo_gpt(l32(e), l32(e + 4)))
+                fin
+                i := i + 1
+            fin
+        fin
+        libera(puntero(buf))
+        devolver bien
+    fin
+
+    función lee_ebr(d: nat32, ext: nat64, t: nat64)
+        variable n, vueltas: nat32
+        variable este, lógica: nat64
+        este := ext
+        n := 5
+        vueltas := 0
+        mientras vueltas < 64 hacer
+            si no cb_lee(d, este * dk_sector[d], t, 512) entonces devolver fin
+            si l16(t + 510) <> 0xAA55 entonces devolver fin
+            lógica := nat64(l32(t + 446 + 8))
+            si l8(t + 446 + 4) <> 0 y l32(t + 446 + 12) <> 0 entonces
+                si nueva_parte(d, n, este + lógica, nat64(l32(t + 446 + 12)), tipo_mbr(l8(t + 446 + 4))) entonces n := n + 1 fin
+            fin
+            si l8(t + 462 + 4) = 0 o l32(t + 462 + 8) = 0 entonces devolver fin
+            este := ext + nat64(l32(t + 462 + 8))
+            vueltas := vueltas + 1
+        fin
+    fin
+
+    ; ¿empieza por un sistema de archivos (FAT o exFAT)?
+    función es_volumen(t: nat64): bool
+        si l32(t + 3) = 0x41465845 y l32(t + 7) = 0x20202054 entonces devolver cierto fin     ; «EXFAT   »
+        si l32(t + 82) = 0x33544146 y l16(t + 86) = 0x2032 entonces devolver cierto fin       ; «FAT32 »
+        si l32(t + 54) = 0x31544146 y (l8(t + 58) = '6' o l8(t + 58) = '2') entonces devolver cierto fin   ; «FAT16», «FAT12»
+        devolver falso
+    fin
+
+    función lee_tabla(d: nat32)
+        variable t: nat64
+        variable i, ty: nat32
+        variable e: nat64
+        variable gpt: bool
+        t := nat64(reserva(4096))
+        si t = 0 entonces devolver fin
+        si no cb_lee(d, 0, t, 512) entonces
+            libera(puntero(t))
+            devolver
+        fin
+        si l16(t + 510) = 0xAA55 y es_volumen(t) entonces
+            dk_tabla[d] := 3
+            libera(puntero(t))
+            devolver
+        fin
+        gpt := falso
+        si l16(t + 510) = 0xAA55 entonces
+            i := 0
+            mientras i < 4 hacer
+                si l8(t + 446 + i * 16 + 4) = 0xEE entonces gpt := cierto fin
+                i := i + 1
+            fin
+            si gpt entonces
+                si no lee_gpt(d, 1, t) entonces
+                    ; la copia, en el último sector
+                    si lee_gpt(d, dk_sectores[d] - 1, t) entonces gpt_copia := gpt_copia + 1 fin
+                fin
+            sino
+                dk_tabla[d] := 1
+                i := 0
+                mientras i < 4 hacer
+                    e := t + 446 + nat64(i) * 16
+                    ty := l8(e + 4)
+                    si ty = 0x05 o ty = 0x0F o ty = 0x85 entonces
+                        lee_ebr(d, nat64(l32(e + 8)), t)
+                        ; (lee_ebr ha pisado t: se lee otra vez la MBR)
+                        cb_lee(d, 0, t, 512)
+                    sino si ty <> 0 y l32(e + 12) <> 0 entonces
+                        nueva_parte(d, i + 1, nat64(l32(e + 8)), nat64(l32(e + 12)), tipo_mbr(ty))
+                    fin
+                    i := i + 1
+                fin
+            fin
+        fin
+        libera(puntero(t))
+    fin
+
+    ; ---- todo ----
+    ; los discos de los drivers, la caché y las particiones; «escribir»: que se
+    ; pueda escribir en todos
+    público función prepara_bloques(escribir_: bool): bool
+        variable i, d, n_abajo, bloques: nat32
+        variable m: nat64
+        i := 0
+        mientras i < nv_n_discos hacer
+            d := nuevo_disco(D_NVME, i, nvme_sector(i), nvme_sectores(i))
+            si d <> NADA entonces
+                pon_nombre(d, "nvme", 0, 0)
+                añade_número(d, nvme_ctl(i))
+                si nvme_ns(i) <> 1 entonces pon_nombre(d, dirección(dk_nombre[d][0]), 'n', nvme_ns(i)) fin
+            fin
+            i := i + 1
+        fin
+        i := 0
+        mientras i < sa_n_discos hacer
+            d := nuevo_disco(D_SATA, i, sata_sector(i), sata_sectores(i))
+            si d <> NADA entonces
+                pon_nombre(d, "sata", 0, 0)
+                añade_número(d, i)
+            fin
+            i := i + 1
+        fin
+        n_abajo := n_dk
+        ; la caché: 1/16 de la memoria libre, de 256 bloques (1 MB) a 16384 (64 MB)
+        m := libres div 16
+        si m < 256 entonces m := 256 fin
+        si m > 16384 entonces m := 16384 fin
+        bloques := nat32(m)
+        si cb_n = 0 entonces
+            si no prepara_caché(bloques) entonces devolver falso fin
+        fin
+        i := 0
+        mientras i < n_abajo hacer
+            dk_escribe[i] := escribir_
+            lee_tabla(i)
+            i := i + 1
+        fin
+        parar_vaciador := falso
+        vaciador := crea(nat64(dirección(vaciador_)), 0, "vaciador", NORMAL, CUALQUIERA)
+        devolver cierto
+    fin
+
+    ; la lista, como se ve en el arranque
+    público función escribe_discos()
+        variable d, k: nat32
+        d := 0
+        mientras d < n_dk hacer
+            si dk_clase[d] <> D_PARTE entonces
+                escribir("  ", dk_nombre[d], ": «", modelo_dk(d), "», ")
+                tamaño_legible(octetos_dk(d))
+                escribir(" (", dk_sectores[d], " sectores de ", dk_sector[d], " octetos)")
+                según nat16(dk_tabla[d])
+                    caso 1: escribir(", tabla MBR")
+                    caso 2: escribir(", tabla GPT")
+                    caso 3: escribir(", sin tabla: un volumen entero")
+                    si no: escribir(", sin tabla de particiones")
+                fin
+                si dk_escribe[d] entonces escribir("; se puede escribir") sino escribir("; solo se lee") fin
+                escribir("\n")
+                k := 0
+                mientras k < n_dk hacer
+                    si dk_clase[k] = D_PARTE y dk_padre[k] = d entonces
+                        escribir("    ", dk_nombre[k], ": ")
+                        tamaño_legible(octetos_dk(k))
+                        escribir(", desde el sector ", dk_base[k], ", ", dk_tipo[k], "\n")
+                    fin
+                    k := k + 1
+                fin
+            fin
+            d := d + 1
+        fin
+    fin
+
+fin Bloques64.

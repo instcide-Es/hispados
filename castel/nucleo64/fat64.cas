@@ -1,0 +1,1167 @@
+; =============================================================================
+;  fat64.cas - Hispa-64, etapa 5: FAT32, para leer y escribir (docs/64/HISPA-64.md,
+;  sección 11), según «Microsoft FAT Specification» (la de 2005). Es lo que
+;  traen las memorias USB, las tarjetas y la partición EFI.
+;
+;  Todo pasa por la caché de bloques (Bloques64.cb_lee y cb_escribe: con
+;  escritura diferida), así que aquí se lee y se escribe por octetos del
+;  volumen. Lo que hace:
+;   - montar: el sector de arranque (BPB), las FAT (todas sus copias se
+;     escriben igual), la carpeta raíz (una cadena de cúmulos, en FAT32), el
+;     sector FSInfo (los cúmulos libres y dónde buscar el siguiente: se fía de
+;     él si está bien; si no, cuenta la FAT entera) y la etiqueta;
+;   - las carpetas: los nombres largos (VFAT: las entradas 0x0F con su suma,
+;     en UTF-16, que aquí son UTF-8), los cortos 8.3 con sus minúsculas de
+;     Windows NT (el octeto 12), y los nombres nuevos: si caben en 8.3, cortos
+;     (con esas minúsculas); si no, el largo y uno corto «BASE~N» que no esté;
+;   - leer y escribir un archivo (los cúmulos que hagan falta, del primero
+;     libre desde FSInfo, enlazados en todas las FAT; lo de en medio, a cero),
+;     acortarlo (O_TRUNC, ftruncate), crear, borrar (las entradas, 0xE5; los
+;     cúmulos, cuando nadie lo tenga abierto), renombrar y mover (también una
+;     carpeta, con su «..»), crear y quitar carpetas («.» y «..»);
+;   - vaciar: el FSInfo al día y la caché al disco.
+;  FAT12 y FAT16 no (las particiones EFI pequeñas pueden serlo: más adelante).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Fat64
+
+    importar Cifras64, Es64, Monton64, Reloj64, Bloques64, Archivos64
+
+    constante FIN_CADENA = 0x0FFFFFF8
+    constante MARCA_FIN = 0x0FFFFFFF
+    constante A_SOLO_LEER = 0x01
+    constante A_OCULTO = 0x02
+    constante A_SISTEMA = 0x04
+    constante A_ETIQUETA = 0x08
+    constante A_CARPETA = 0x10
+    constante A_ARCHIVO = 0x20
+    constante A_LARGO = 0x0F
+
+    ; una entrada encontrada en una carpeta
+    público tipo Ent = estructura
+        e: arreglo [32] de byte     ; la entrada 8.3
+        pos: nat64                  ; su octeto en el volumen
+        idx: nat64                  ; su número en la carpeta
+        n_ent: nat32                ; cuántas ocupa (con las del nombre largo)
+        nada: nat32
+        nombre: arreglo [256] de byte
+        corto: arreglo [16] de byte ; el nombre 8.3, como texto («HOLA.TXT»)
+    fin
+
+    público variable fat_error: ent64           ; el último error (ENOSPC, EIO...)
+    variable época_s, época_ns: nat64
+
+    función mm(m: nat32): puntero a Montaje
+        devolver montaje(m)
+    fin
+
+    ; la hora de ahora (segundos de Unix)
+    público función ahora_unix(): nat64
+        si época_s = 0 entonces
+            época_s := segundos_unix()
+            época_ns := ahora_ns()
+        fin
+        devolver época_s + (ahora_ns() - época_ns) div 1000000000
+    fin
+
+    ; ---- la FAT ----
+    función lee_fat(x: puntero a Montaje, c: nat64): nat64
+        variable v: nat32
+        v := 0
+        si c >= x.cúmulos + 2 entonces devolver MARCA_FIN fin
+        si no cb_lee(x.disco, x.fat_ini + c * 4, nat64(dirección(v)), 4) entonces
+            fat_error := EIO
+            devolver MARCA_FIN
+        fin
+        devolver nat64(v yb 0x0FFFFFFF)
+    fin
+
+    función pon_fat(x: puntero a Montaje, c: nat64, v: nat64): bool
+        variable viejo, nuevo: nat32
+        variable k: nat64
+        viejo := 0
+        si no cb_lee(x.disco, x.fat_ini + c * 4, nat64(dirección(viejo)), 4) entonces devolver falso fin
+        nuevo := (viejo yb 0xF0000000) ob (nat32(v) yb 0x0FFFFFFF)
+        k := 0
+        mientras k < x.n_fats hacer
+            si no cb_escribe(x.disco, x.fat_ini + k * x.fat_largo + c * 4, nat64(dirección(nuevo)), 4) entonces devolver falso fin
+            k := k + 1
+        fin
+        devolver cierto
+    fin
+
+    función pos_cúmulo(x: puntero a Montaje, c: nat64): nat64
+        devolver x.datos_ini + (c - 2) * x.oct_cúmulo
+    fin
+
+    ; un cúmulo libre (marcado como fin de cadena), o 0 si no queda
+    función pide_cúmulo(x: puntero a Montaje): nat64
+        variable c, n, v: nat64
+        si x.libres = 0 entonces
+            fat_error := ENOSPC
+            devolver 0
+        fin
+        c := x.próximo
+        si c < 2 o c >= x.cúmulos + 2 entonces c := 2 fin
+        n := 0
+        mientras n < x.cúmulos hacer
+            v := lee_fat(x, c)
+            si v = 0 entonces
+                si no pon_fat(x, c, MARCA_FIN) entonces
+                    fat_error := EIO
+                    devolver 0
+                fin
+                si x.libres <> 0xFFFFFFFF entonces x.libres := x.libres - 1 fin
+                x.próximo := c + 1
+                x.libres_cambiado := 1
+                devolver c
+            fin
+            c := c + 1
+            si c >= x.cúmulos + 2 entonces c := 2 fin
+            n := n + 1
+        fin
+        x.libres := 0
+        fat_error := ENOSPC
+        devolver 0
+    fin
+
+    ; libera la cadena que empieza en c
+    función suelta_cadena(x: puntero a Montaje, c: nat64)
+        variable sig, n: nat64
+        n := 0
+        mientras c >= 2 y c < x.cúmulos + 2 y n < x.cúmulos hacer
+            sig := lee_fat(x, c)
+            pon_fat(x, c, 0)
+            si x.libres <> 0xFFFFFFFF entonces x.libres := x.libres + 1 fin
+            si c < x.próximo entonces x.próximo := c fin
+            x.libres_cambiado := 1
+            si sig >= FIN_CADENA o sig < 2 entonces devolver fin
+            c := sig
+            n := n + 1
+        fin
+    fin
+
+    ; el cúmulo número idx (desde 0) del nodo n; con «crear», alarga la cadena
+    ; si hace falta (los nuevos, a cero si «ceros»); 0 si no lo hay
+    función cúmulo_de(x: puntero a Montaje, n: puntero a Nodo, idx: nat64, crear: bool, ceros: bool): nat64
+        variable c, k, sig, nc: nat64
+        si n.primero = 0 entonces
+            si no crear entonces devolver 0 fin
+            c := pide_cúmulo(x)
+            si c = 0 entonces devolver 0 fin
+            si ceros entonces cb_escribe(x.disco, pos_cúmulo(x, c), 0, x.oct_cúmulo) fin
+            n.primero := c
+            n.pista_idx := 0
+            n.pista_cum := c
+        fin
+        si n.pista_cum <> 0 y idx >= n.pista_idx entonces
+            k := n.pista_idx
+            c := n.pista_cum
+        sino
+            k := 0
+            c := n.primero
+        fin
+        mientras k < idx hacer
+            sig := lee_fat(x, c)
+            si sig >= FIN_CADENA o sig < 2 entonces
+                si no crear entonces devolver 0 fin
+                nc := pide_cúmulo(x)
+                si nc = 0 entonces devolver 0 fin
+                si ceros entonces cb_escribe(x.disco, pos_cúmulo(x, nc), 0, x.oct_cúmulo) fin
+                si no pon_fat(x, c, nc) entonces
+                    fat_error := EIO
+                    devolver 0
+                fin
+                sig := nc
+            fin
+            si k > x.cúmulos entonces
+                fat_error := EIO
+                devolver 0
+            fin
+            c := sig
+            k := k + 1
+        fin
+        n.pista_idx := idx
+        n.pista_cum := c
+        devolver c
+    fin
+
+    ; ---- las entradas de una carpeta ----
+    ; el octeto de la entrada número i de la carpeta d (0 si no la hay; con
+    ; «crear», la carpeta crece un cúmulo a cero)
+    función pos_ent(x: puntero a Montaje, d: puntero a Nodo, i: nat64, crear: bool): nat64
+        variable c, por: nat64
+        por := x.oct_cúmulo div 32
+        c := cúmulo_de(x, d, i div por, crear, cierto)
+        si c = 0 entonces devolver 0 fin
+        devolver pos_cúmulo(x, c) + (i mod por) * 32
+    fin
+
+    ; la suma de un nombre 8.3 (la que llevan sus entradas largas)
+    función suma_corto(e: puntero a byte): nat32
+        variable s, i: nat32
+        s := 0
+        i := 0
+        mientras i < 11 hacer
+            s := (((s yb 1) << 7) + (s >> 1) + e[i]) yb 0xFF
+            i := i + 1
+        fin
+        devolver s
+    fin
+
+    ; el nombre 8.3 de la entrada, como texto (con las minúsculas de NT)
+    función texto_corto(e: puntero a byte, t: puntero a byte)
+        variable i, n, k: nat32
+        variable c: byte
+        n := 0
+        i := 0
+        mientras i < 8 hacer
+            c := e[i]
+            si i = 0 y c = 0x05 entonces c := 0xE5 fin
+            si c >= 'A' y c <= 'Z' y e[12] yb 0x08 <> 0 entonces c := c + 32 fin
+            si c >= 0x80 entonces c := '_' fin
+            t[n] := c
+            n := n + 1
+            i := i + 1
+        fin
+        mientras n > 0 y t[n - 1] = ' ' hacer n := n - 1 fin
+        k := n
+        si e[8] <> ' ' entonces
+            t[n] := '.'
+            n := n + 1
+            i := 8
+            mientras i < 11 hacer
+                c := e[i]
+                si c >= 'A' y c <= 'Z' y e[12] yb 0x10 <> 0 entonces c := c + 32 fin
+                si c >= 0x80 entonces c := '_' fin
+                t[n] := c
+                n := n + 1
+                i := i + 1
+            fin
+            mientras n > k + 1 y t[n - 1] = ' ' hacer n := n - 1 fin
+        fin
+        t[n] := 0
+    fin
+
+    ; la siguiente entrada de la carpeta d desde la número i (y deja i detrás
+    ; de ella): con su nombre largo si lo tiene; sin borradas ni etiquetas, y
+    ; sin «.» ni «..»; falso al llegar al final
+    función siguiente(x: puntero a Montaje, d: puntero a Nodo, ref i: nat64, ref h: Ent): bool
+        variable p: nat64
+        variable largo_: arreglo [260] de nat16
+        variable esperada, suma, ord, k, j, n_largas: nat32
+        variable c: nat32
+        variable e: arreglo [32] de byte
+        variable n: nat32
+        esperada := 0
+        suma := 0
+        n_largas := 0
+        mientras cierto hacer
+            p := pos_ent(x, d, i, falso)
+            si p = 0 entonces devolver falso fin
+            si no cb_lee(x.disco, p, nat64(dirección(e[0])), 32) entonces
+                fat_error := EIO
+                devolver falso
+            fin
+            i := i + 1
+            si e[0] = 0 entonces
+                i := i - 1
+                devolver falso
+            fin
+            si e[0] = 0xE5 entonces
+                esperada := 0
+                seguir
+            fin
+            si e[11] yb 0x3F = A_LARGO entonces
+                ord := e[0]
+                si ord yb 0x40 <> 0 entonces
+                    esperada := ord yb 0x1F
+                    si esperada = 0 o esperada > 20 entonces
+                        esperada := 0
+                        seguir
+                    fin
+                    suma := e[13]
+                    n_largas := esperada
+                    ; (lo de detrás del nombre, a cero)
+                    k := 0
+                    mientras k < 260 hacer
+                        largo_[k] := 0
+                        k := k + 1
+                    fin
+                sino si (ord yb 0x1F) <> esperada o e[13] <> suma entonces
+                    esperada := 0
+                    seguir
+                fin
+                si esperada > 0 entonces
+                    k := (esperada - 1) * 13
+                    j := 0
+                    mientras j < 5 hacer
+                        largo_[k + j] := nat16(e[1 + j * 2]) ob (nat16(e[2 + j * 2]) << 8)
+                        j := j + 1
+                    fin
+                    j := 0
+                    mientras j < 6 hacer
+                        largo_[k + 5 + j] := nat16(e[14 + j * 2]) ob (nat16(e[15 + j * 2]) << 8)
+                        j := j + 1
+                    fin
+                    largo_[k + 11] := nat16(e[28]) ob (nat16(e[29]) << 8)
+                    largo_[k + 12] := nat16(e[30]) ob (nat16(e[31]) << 8)
+                    esperada := esperada - 1
+                    ; (la última que se ha leído es la 1: ya vale, si la 8.3 va detrás)
+                    si esperada = 0 entonces esperada := 0xFF fin
+                fin
+                seguir
+            fin
+            ; una entrada 8.3
+            si e[11] yb A_ETIQUETA <> 0 entonces
+                esperada := 0
+                seguir
+            fin
+            si e[0] = '.' entonces
+                esperada := 0
+                seguir
+            fin
+            k := 0
+            mientras k < 32 hacer
+                h.e[k] := e[k]
+                k := k + 1
+            fin
+            h.pos := p
+            h.idx := i - 1
+            texto_corto(dirección(h.e[0]), dirección(h.corto[0]))
+            n := 0
+            h.nombre[0] := 0
+            si esperada = 0xFF y suma_corto(dirección(e[0])) = suma entonces
+                k := 0
+                mientras k < n_largas * 13 y largo_[k] <> 0 y largo_[k] <> 0xFFFF hacer
+                    c := largo_[k]
+                    si no pon_utf8(dirección(h.nombre[0]), n, c, 256) entonces romper fin
+                    k := k + 1
+                fin
+                h.n_ent := n_largas + 1
+            fin
+            si h.nombre[0] = 0 entonces
+                copia_texto(dirección(h.nombre[0]), dirección(h.corto[0]), 256)
+                h.n_ent := 1
+            fin
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; ---- los nodos ----
+    función l32(e: puntero a byte, k: nat32): nat32
+        devolver nat32(e[k]) ob (nat32(e[k + 1]) << 8) ob (nat32(e[k + 2]) << 16) ob (nat32(e[k + 3]) << 24)
+    fin
+
+    función l16(e: puntero a byte, k: nat32): nat32
+        devolver nat32(e[k]) ob (nat32(e[k + 1]) << 8)
+    fin
+
+    función p16(e: puntero a byte, k: nat32, v: nat32)
+        e[k] := byte(v)
+        e[k + 1] := byte(v >> 8)
+    fin
+
+    función p32(e: puntero a byte, k: nat32, v: nat32)
+        e[k] := byte(v)
+        e[k + 1] := byte(v >> 8)
+        e[k + 2] := byte(v >> 16)
+        e[k + 3] := byte(v >> 24)
+    fin
+
+    ; el nodo de la entrada h de la carpeta d (el que ya esté en memoria, o uno nuevo)
+    función nodo_de(m: nat32, d: puntero a Nodo, ref h: Ent): puntero a Nodo
+        variable n: puntero a Nodo
+        n := busca_nodo(m, h.pos)
+        si n <> nulo entonces devolver n fin
+        si h.e[11] yb A_CARPETA <> 0 entonces n := nuevo_nodo(m, h.pos, N_CARPETA) sino n := nuevo_nodo(m, h.pos, N_ARCHIVO) fin
+        si n = nulo entonces devolver nulo fin
+        n.primero := nat64(l16(dirección(h.e[0]), 26)) ob (nat64(l16(dirección(h.e[0]), 20)) << 16)
+        si n.clase = N_ARCHIVO entonces n.tamaño := nat64(l32(dirección(h.e[0]), 28)) fin
+        n.mtime := de_dos(l16(dirección(h.e[0]), 24), l16(dirección(h.e[0]), 22))
+        n.dir_primero := d.primero
+        n.ent_idx := h.idx
+        n.n_ent := h.n_ent
+        n.atrib := h.e[11]
+        devolver n
+    fin
+
+    ; pone en su entrada lo que ha cambiado del nodo: el primer cúmulo, el
+    ; tamaño, la hora
+    público función fat_al_día(m: nat32, n: puntero a Nodo): bool
+        variable x: puntero a Montaje
+        variable e: arreglo [32] de byte
+        variable t: nat32
+        x := mm(m)
+        si n.clave = 0 o n.borrado <> 0 entonces devolver cierto fin
+        si no cb_lee(x.disco, n.clave, nat64(dirección(e[0])), 32) entonces devolver falso fin
+        p16(dirección(e[0]), 26, nat32(n.primero))
+        p16(dirección(e[0]), 20, nat32(n.primero >> 16))
+        si n.clase = N_ARCHIVO entonces p32(dirección(e[0]), 28, nat32(n.tamaño)) fin
+        t := a_dos(n.mtime)
+        p16(dirección(e[0]), 22, t)
+        p16(dirección(e[0]), 24, t >> 16)
+        p16(dirección(e[0]), 18, t >> 16)
+        e[11] := e[11] ob A_ARCHIVO
+        si n.clase = N_CARPETA entonces e[11] := e[11] yb (nob nat32(A_ARCHIVO)) fin
+        devolver cb_escribe(x.disco, n.clave, nat64(dirección(e[0])), 32)
+    fin
+
+    ; ---- montar ----
+    público función fat_monta(m: nat32): bool
+        variable x: puntero a Montaje
+        variable b: arreglo [512] de byte
+        variable bps, spc, res, nf, total, fsz, datos, raíz, fsi: nat64
+        variable r: puntero a Nodo
+        variable i, k: nat64
+        variable buf: nat64
+        variable v: nat32
+        x := mm(m)
+        si no cb_lee(x.disco, 0, nat64(dirección(b[0])), 512) entonces devolver falso fin
+        si b[510] <> 0x55 o b[511] <> 0xAA entonces devolver falso fin
+        bps := l16(dirección(b[0]), 11)
+        spc := b[13]
+        res := l16(dirección(b[0]), 14)
+        nf := b[16]
+        total := l16(dirección(b[0]), 19)
+        si total = 0 entonces total := l32(dirección(b[0]), 32) fin
+        fsz := l16(dirección(b[0]), 22)
+        si fsz <> 0 o l16(dirección(b[0]), 17) <> 0 entonces devolver falso fin       ; (FAT12 o FAT16)
+        fsz := l32(dirección(b[0]), 36)
+        si bps <> 512 y bps <> 1024 y bps <> 2048 y bps <> 4096 entonces devolver falso fin
+        si spc = 0 o spc yb (spc - 1) <> 0 o nf = 0 o nf > 4 o fsz = 0 o res = 0 entonces devolver falso fin
+        si total * bps > octetos_dk(x.disco) entonces total := octetos_dk(x.disco) div bps fin
+        datos := res + nf * fsz
+        si datos >= total entonces devolver falso fin
+        x.oct_sector := bps
+        x.oct_cúmulo := bps * spc
+        x.fat_ini := res * bps
+        x.fat_largo := fsz * bps
+        x.n_fats := nf
+        x.datos_ini := datos * bps
+        x.cúmulos := (total - datos) div spc
+        si x.cúmulos < 65525 entonces devolver falso fin
+        si x.cúmulos + 2 > fsz * bps div 4 entonces x.cúmulos := fsz * bps div 4 - 2 fin
+        raíz := l32(dirección(b[0]), 44)
+        si raíz < 2 o raíz >= x.cúmulos + 2 entonces devolver falso fin
+        x.raíz_cúmulo := raíz
+        ; (con el «mirroring» quitado, solo cuenta la FAT activa)
+        si b[40] yb 0x80 <> 0 entonces
+            x.fat_ini := x.fat_ini + nat64(b[40] yb 15) * x.fat_largo
+            x.n_fats := 1
+        fin
+        ; la etiqueta del sector de arranque (la de la raíz, si la hay, manda)
+        k := 0
+        mientras k < 11 hacer
+            x.etiqueta[nat32(k)] := b[nat32(71 + k)]
+            k := k + 1
+        fin
+        x.etiqueta[11] := 0
+        quita_espacios(x)
+        ; FSInfo
+        x.libres := 0xFFFFFFFF
+        x.próximo := 2
+        fsi := l16(dirección(b[0]), 48)
+        x.fsinfo := 0
+        si fsi <> 0 y fsi < res entonces
+            si cb_lee(x.disco, fsi * bps, nat64(dirección(b[0])), 512) entonces
+                si l32(dirección(b[0]), 0) = 0x41615252 y l32(dirección(b[0]), 484) = 0x61417272 entonces
+                    x.fsinfo := fsi * bps
+                    si nat64(l32(dirección(b[0]), 488)) <= x.cúmulos entonces x.libres := l32(dirección(b[0]), 488) fin
+                    si l32(dirección(b[0]), 492) >= 2 y nat64(l32(dirección(b[0]), 492)) < x.cúmulos + 2 entonces x.próximo := l32(dirección(b[0]), 492) fin
+                fin
+            fin
+        fin
+        si x.libres = 0xFFFFFFFF entonces
+            ; contarlos: la FAT, de 4 KB en 4 KB
+            buf := nat64(reserva(4096))
+            si buf <> 0 entonces
+                x.libres := 0
+                i := 0
+                mientras i < x.cúmulos + 2 hacer
+                    si i yb 1023 = 0 entonces
+                        k := (x.cúmulos + 2 - i) * 4
+                        si k > 4096 entonces k := 4096 fin
+                        si no cb_lee(x.disco, x.fat_ini + i * 4, buf, k) entonces romper fin
+                    fin
+                    v := m32(buf + (i yb 1023) * 4) yb 0x0FFFFFFF
+                    si i >= 2 y v = 0 entonces x.libres := x.libres + 1 fin
+                    i := i + 1
+                fin
+                libera(puntero(buf))
+                x.libres_cambiado := 1
+            fin
+        fin
+        ; la raíz
+        r := nuevo_nodo(m, 0, N_CARPETA)
+        si r = nulo entonces devolver falso fin
+        r.primero := raíz
+        r.atrib := A_CARPETA
+        x.raíz := nat64(r)
+        x.clase := FS_FAT
+        devolver cierto
+    fin
+
+    función quita_espacios(x: puntero a Montaje)
+        variable k: nat32
+        k := 11
+        mientras k > 0 y (x.etiqueta[k - 1] = ' ' o x.etiqueta[k - 1] = 0) hacer k := k - 1 fin
+        x.etiqueta[k] := 0
+    fin
+
+    ; la etiqueta de la carpeta raíz (la entrada 0x08), si la hay
+    público función fat_etiqueta(m: nat32)
+        variable x: puntero a Montaje
+        variable i: nat64
+        variable p: nat64
+        variable e: arreglo [32] de byte
+        variable k: nat32
+        x := mm(m)
+        i := 0
+        mientras i < 4096 hacer
+            p := pos_ent(x, nodo(x.raíz), i, falso)
+            si p = 0 entonces devolver fin
+            si no cb_lee(x.disco, p, nat64(dirección(e[0])), 32) entonces devolver fin
+            si e[0] = 0 entonces devolver fin
+            si e[0] <> 0xE5 y e[11] yb 0x3F = A_ETIQUETA entonces
+                k := 0
+                mientras k < 11 hacer
+                    x.etiqueta[k] := e[k]
+                    k := k + 1
+                fin
+                quita_espacios(x)
+                devolver
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; ---- buscar y listar ----
+    ; el nodo de «nombre» en la carpeta d, o nulo (y fat_error)
+    público función fat_busca(m: nat32, d: puntero a Nodo, nombre: puntero a byte): puntero a Nodo
+        variable x: puntero a Montaje
+        variable h: Ent
+        variable i: nat64
+        x := mm(m)
+        fat_error := ENOENT
+        i := 0
+        mientras siguiente(x, d, i, h) hacer
+            si igual_nombre(dirección(h.nombre[0]), nombre) o igual_nombre(dirección(h.corto[0]), nombre) entonces
+                fat_error := 0
+                devolver nodo_de(m, d, h)
+            fin
+        fin
+        devolver nulo
+    fin
+
+    ; la entrada que sigue a «galleta» (0 «.», 1 «..», luego 2 + su número):
+    ; su nombre, si es carpeta y su número de nodo; falso al acabar
+    público función fat_lista(m: nat32, d: puntero a Nodo, ref galleta: nat64, nombre: puntero a byte, ref carpeta: bool, ref ino: nat64): bool
+        variable x: puntero a Montaje
+        variable h: Ent
+        variable i: nat64
+        x := mm(m)
+        si galleta < 2 entonces
+            nombre[0] := '.'
+            nombre[1] := 0
+            si galleta = 1 entonces
+                nombre[1] := '.'
+                nombre[2] := 0
+            fin
+            carpeta := cierto
+            ino := d.clave + 1
+            galleta := galleta + 1
+            devolver cierto
+        fin
+        i := galleta - 2
+        si no siguiente(x, d, i, h) entonces devolver falso fin
+        copia_texto(nombre, dirección(h.nombre[0]), 256)
+        carpeta := h.e[11] yb A_CARPETA <> 0
+        ino := h.pos + 1
+        galleta := i + 2
+        devolver cierto
+    fin
+
+    ; ---- leer y escribir ----
+    público función fat_lee(m: nat32, n: puntero a Nodo, pos: nat64, a: nat64, cuánto: nat64): ent64
+        variable x: puntero a Montaje
+        variable hecho, c, dentro, trozo: nat64
+        x := mm(m)
+        si pos >= n.tamaño entonces devolver 0 fin
+        si cuánto > n.tamaño - pos entonces cuánto := n.tamaño - pos fin
+        hecho := 0
+        mientras hecho < cuánto hacer
+            c := cúmulo_de(x, n, pos div x.oct_cúmulo, falso, falso)
+            si c = 0 entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver EIO
+            fin
+            dentro := pos mod x.oct_cúmulo
+            trozo := x.oct_cúmulo - dentro
+            si trozo > cuánto - hecho entonces trozo := cuánto - hecho fin
+            si no cb_lee(x.disco, pos_cúmulo(x, c) + dentro, a + hecho, trozo) entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver EIO
+            fin
+            hecho := hecho + trozo
+            pos := pos + trozo
+        fin
+        devolver ent64(hecho)
+    fin
+
+    ; escribe «cuánto» octetos de «de» (0: ceros) desde pos; lo escrito, o el error
+    público función fat_escribe(m: nat32, n: puntero a Nodo, pos: nat64, de: nat64, cuánto: nat64): ent64
+        variable x: puntero a Montaje
+        variable hecho, c, dentro, trozo: nat64
+        variable r: ent64
+        x := mm(m)
+        si pos + cuánto > 0xFFFFFFFF o pos + cuánto < pos entonces devolver EFBIG fin
+        ; lo de en medio, a cero
+        si pos > n.tamaño entonces
+            r := fat_escribe(m, n, n.tamaño, 0, pos - n.tamaño)
+            si r < 0 entonces devolver r fin
+            si nat64(r) < pos - n.tamaño entonces devolver ENOSPC fin
+        fin
+        hecho := 0
+        fat_error := 0
+        mientras hecho < cuánto hacer
+            c := cúmulo_de(x, n, pos div x.oct_cúmulo, cierto, falso)
+            si c = 0 entonces romper fin
+            dentro := pos mod x.oct_cúmulo
+            trozo := x.oct_cúmulo - dentro
+            si trozo > cuánto - hecho entonces trozo := cuánto - hecho fin
+            si de = 0 entonces
+                si no cb_escribe(x.disco, pos_cúmulo(x, c) + dentro, 0, trozo) entonces
+                    fat_error := EIO
+                    romper
+                fin
+            sino
+                si no cb_escribe(x.disco, pos_cúmulo(x, c) + dentro, de + hecho, trozo) entonces
+                    fat_error := EIO
+                    romper
+                fin
+            fin
+            hecho := hecho + trozo
+            pos := pos + trozo
+        fin
+        si pos > n.tamaño y hecho > 0 entonces n.tamaño := pos fin
+        n.mtime := ahora_unix()
+        fat_al_día(m, n)
+        si hecho = 0 y cuánto > 0 entonces
+            si fat_error = 0 entonces fat_error := ENOSPC fin
+            devolver fat_error
+        fin
+        devolver ent64(hecho)
+    fin
+
+    ; el archivo, de ese tamaño (más corto: suelta los cúmulos de más; más
+    ; largo: ceros)
+    público función fat_trunca(m: nat32, n: puntero a Nodo, nuevo: nat64): ent64
+        variable x: puntero a Montaje
+        variable quedan, c, resto: nat64
+        variable r: ent64
+        x := mm(m)
+        si nuevo > 0xFFFFFFFF entonces devolver EFBIG fin
+        si nuevo > n.tamaño entonces
+            r := fat_escribe(m, n, n.tamaño, 0, nuevo - n.tamaño)
+            si r < 0 entonces devolver r fin
+            devolver 0
+        fin
+        quedan := (nuevo + x.oct_cúmulo - 1) div x.oct_cúmulo
+        si quedan = 0 entonces
+            si n.primero <> 0 entonces suelta_cadena(x, n.primero) fin
+            n.primero := 0
+        sino
+            c := cúmulo_de(x, n, quedan - 1, falso, falso)
+            si c <> 0 entonces
+                resto := lee_fat(x, c)
+                pon_fat(x, c, MARCA_FIN)
+                si resto >= 2 y resto < FIN_CADENA entonces suelta_cadena(x, resto) fin
+            fin
+        fin
+        n.pista_cum := 0
+        n.pista_idx := 0
+        n.tamaño := nuevo
+        n.mtime := ahora_unix()
+        fat_al_día(m, n)
+        devolver 0
+    fin
+
+    ; ---- los nombres nuevos ----
+    función vale_corto(c: nat32): bool
+        si c >= 'A' y c <= 'Z' entonces devolver cierto fin
+        si c >= '0' y c <= '9' entonces devolver cierto fin
+        según nat16(c)
+            caso '$', '%', 0x27, '-', '_', '@', '~', '`', '!', '(', ')', '{', '}', '^', '#', '&': devolver cierto
+            si no: devolver falso
+        fin
+    fin
+
+    función mayús(c: nat32): nat32
+        si c >= 'a' y c <= 'z' entonces devolver c - 32 fin
+        devolver c
+    fin
+
+    ; ¿se puede usar como nombre en FAT? (sin / \ : * ? " < > | ni de control)
+    público función nombre_válido(t: puntero a byte): bool
+        variable i: nat32
+        si t[0] = 0 entonces devolver falso fin
+        si t[0] = '.' y (t[1] = 0 o (t[1] = '.' y t[2] = 0)) entonces devolver falso fin
+        i := 0
+        mientras t[i] <> 0 hacer
+            si t[i] < 32 entonces devolver falso fin
+            si t[i] = '/' o t[i] = 0x5C o t[i] = ':' o t[i] = '*' o t[i] = '?' o t[i] = '"' o t[i] = '<' o t[i] = '>' o t[i] = '|' entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; el nombre 8.3 de t, si cabe tal cual (con minúsculas enteras en la base
+    ; o en la extensión: el octeto 12, «minús»): cierto; si no, falso y en «e»
+    ; la base para «~N» (en mayúsculas, sin lo que no vale)
+    función corto_de(t: puntero a byte, e: puntero a byte, ref minús: nat32): bool
+        variable i, k, punto, n, mayúsculas, minúsculas, mayús_e, minús_e: nat32
+        variable cabe: bool
+        variable c: nat32
+        k := 0
+        mientras k < 11 hacer
+            e[k] := ' '
+            k := k + 1
+        fin
+        minús := 0
+        cabe := cierto
+        ; el último punto (la extensión)
+        punto := 0xFFFFFFFF
+        i := 0
+        mientras t[i] <> 0 hacer
+            si t[i] = '.' entonces punto := i fin
+            i := i + 1
+        fin
+        n := i
+        si punto = 0 entonces punto := 0xFFFFFFFF fin
+        mayúsculas := 0
+        minúsculas := 0
+        mayús_e := 0
+        minús_e := 0
+        ; la base
+        k := 0
+        i := 0
+        mientras t[i] <> 0 y i <> punto hacer
+            c := t[i]
+            si c = '.' o c = ' ' entonces
+                cabe := falso
+            sino
+                si c >= 'a' y c <= 'z' entonces minúsculas := minúsculas + 1 fin
+                si c >= 'A' y c <= 'Z' entonces mayúsculas := mayúsculas + 1 fin
+                c := mayús(c)
+                si no vale_corto(c) entonces
+                    cabe := falso
+                    c := '_'
+                fin
+                si k < 8 entonces
+                    e[k] := byte(c)
+                    k := k + 1
+                sino
+                    cabe := falso
+                fin
+            fin
+            i := i + 1
+        fin
+        si k = 0 entonces
+            cabe := falso
+            e[0] := '_'
+        fin
+        ; la extensión
+        si punto <> 0xFFFFFFFF entonces
+            si n - punto - 1 > 3 o n - punto - 1 = 0 entonces cabe := falso fin
+            i := punto + 1
+            k := 8
+            mientras t[i] <> 0 hacer
+                c := t[i]
+                si c >= 'a' y c <= 'z' entonces minús_e := minús_e + 1 fin
+                si c >= 'A' y c <= 'Z' entonces mayús_e := mayús_e + 1 fin
+                c := mayús(c)
+                si c = ' ' entonces
+                    cabe := falso
+                sino
+                    si no vale_corto(c) entonces
+                        cabe := falso
+                        c := '_'
+                    fin
+                    si k < 11 entonces
+                        e[k] := byte(c)
+                        k := k + 1
+                    fin
+                fin
+                i := i + 1
+            fin
+        fin
+        ; mayúsculas y minúsculas mezcladas en la base o en la extensión: largo
+        si mayúsculas > 0 y minúsculas > 0 entonces cabe := falso fin
+        si mayús_e > 0 y minús_e > 0 entonces cabe := falso fin
+        si minúsculas > 0 entonces minús := minús ob 0x08 fin
+        si minús_e > 0 entonces minús := minús ob 0x10 fin
+        devolver cabe
+    fin
+
+    ; ¿hay en la carpeta d una entrada con ese nombre 8.3 (11 octetos)?
+    función hay_corto(x: puntero a Montaje, d: puntero a Nodo, e: puntero a byte): bool
+        variable i, p: nat64
+        variable f: arreglo [32] de byte
+        variable k: nat32
+        i := 0
+        mientras cierto hacer
+            p := pos_ent(x, d, i, falso)
+            si p = 0 entonces devolver falso fin
+            si no cb_lee(x.disco, p, nat64(dirección(f[0])), 32) entonces devolver cierto fin
+            si f[0] = 0 entonces devolver falso fin
+            si f[0] <> 0xE5 y f[11] yb 0x3F <> A_LARGO entonces
+                k := 0
+                mientras k < 11 y f[k] = e[k] hacer k := k + 1 fin
+                si k = 11 entonces devolver cierto fin
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; «BASE~N»: la base (hasta 8 - las cifras - 1) con ~N, que no esté en d
+    función pon_tilde(x: puntero a Montaje, d: puntero a Nodo, e: puntero a byte): bool
+        variable base: arreglo [8] de byte
+        variable cifras: arreglo [8] de byte
+        variable n, v, nc, k, lb: nat32
+        k := 0
+        mientras k < 8 hacer
+            base[k] := e[k]
+            k := k + 1
+        fin
+        lb := 0
+        mientras lb < 8 y base[lb] <> ' ' hacer lb := lb + 1 fin
+        n := 1
+        mientras n < 1000000 hacer
+            v := n
+            nc := 0
+            mientras v > 0 hacer
+                cifras[nc] := byte('0' + v mod 10)
+                v := v div 10
+                nc := nc + 1
+            fin
+            k := lb
+            si k > 7 - nc entonces k := 7 - nc fin
+            e[k] := '~'
+            k := k + 1
+            mientras nc > 0 hacer
+                nc := nc - 1
+                e[k] := cifras[nc]
+                k := k + 1
+            fin
+            mientras k < 8 hacer
+                e[k] := ' '
+                k := k + 1
+            fin
+            si no hay_corto(x, d, e) entonces devolver cierto fin
+            ; (otra vez la base)
+            k := 0
+            mientras k < 8 hacer
+                e[k] := base[k]
+                k := k + 1
+            fin
+            n := n + 1
+        fin
+        devolver falso
+    fin
+
+    ; n entradas seguidas libres en la carpeta d: el número de la primera (la
+    ; carpeta crece si hace falta), o -1
+    función sitio_libre(x: puntero a Montaje, d: puntero a Nodo, n: nat32): ent64
+        variable i, p, ini: nat64
+        variable seguidas: nat32
+        variable f: arreglo [32] de byte
+        variable al_final: bool
+        i := 0
+        ini := 0
+        seguidas := 0
+        al_final := falso
+        mientras i < 65536 hacer
+            p := pos_ent(x, d, i, al_final)
+            si p = 0 entonces
+                ; se acaba la cadena: lo que falte, en un cúmulo nuevo (a cero)
+                al_final := cierto
+                p := pos_ent(x, d, i, cierto)
+                si p = 0 entonces devolver -1 fin
+                f[0] := 0
+            sino si al_final entonces
+                f[0] := 0
+            sino
+                si no cb_lee(x.disco, p, nat64(dirección(f[0])), 32) entonces devolver -1 fin
+            fin
+            si f[0] = 0 entonces al_final := cierto fin
+            si f[0] = 0 o f[0] = 0xE5 entonces
+                si seguidas = 0 entonces ini := i fin
+                seguidas := seguidas + 1
+                si seguidas >= n entonces devolver ent64(ini) fin
+            sino
+                seguidas := 0
+            fin
+            i := i + 1
+        fin
+        devolver -1
+    fin
+
+    ; escribe en la carpeta d las entradas del nombre (largas, si hacen falta,
+    ; y la 8.3 «e», con sus campos ya puestos menos el nombre): h, la nueva
+    función pon_entradas(m: nat32, d: puntero a Nodo, nombre: puntero a byte, ref e: arreglo [32] de byte, ref h: Ent): bool
+        variable x: puntero a Montaje
+        variable corto: arreglo [11] de byte
+        variable u: arreglo [260] de nat16
+        variable minús, nu, n_largas, k, j, i, s, idx_u: nat32
+        variable ini: ent64
+        variable f: arreglo [32] de byte
+        variable p: nat64
+        variable c: nat32
+        x := mm(m)
+        si no nombre_válido(nombre) entonces
+            fat_error := EINVAL
+            devolver falso
+        fin
+        ; el nombre en UTF-16
+        nu := 0
+        i := 0
+        mientras nombre[i] <> 0 hacer
+            si nu >= 255 entonces
+                fat_error := ENAMETOOLONG
+                devolver falso
+            fin
+            c := saca_utf8(nombre, i)
+            si c = 0xFFFF entonces
+                fat_error := EINVAL
+                devolver falso
+            fin
+            u[nu] := nat16(c)
+            nu := nu + 1
+        fin
+        ; quitados los espacios y puntos del final (como Windows), no vale: se niega
+        si u[nu - 1] = ' ' o u[nu - 1] = '.' entonces
+            fat_error := EINVAL
+            devolver falso
+        fin
+        n_largas := 0
+        si corto_de(nombre, dirección(corto[0]), minús) y no hay_corto(x, d, dirección(corto[0])) entonces
+            e[12] := byte(minús)
+        sino
+            e[12] := 0
+            si no pon_tilde(x, d, dirección(corto[0])) entonces
+                fat_error := EEXIST
+                devolver falso
+            fin
+            n_largas := (nu + 12) div 13
+        fin
+        k := 0
+        mientras k < 11 hacer
+            e[k] := corto[k]
+            k := k + 1
+        fin
+        si e[0] = 0xE5 entonces e[0] := 0x05 fin
+        ini := sitio_libre(x, d, n_largas + 1)
+        si ini < 0 entonces
+            fat_error := ENOSPC
+            devolver falso
+        fin
+        s := suma_corto(dirección(e[0]))
+        ; las largas, de la última a la primera
+        k := 0
+        mientras k < n_largas hacer
+            ceros_k(nat64(dirección(f[0])), 32)
+            j := n_largas - k
+            f[0] := byte(j)
+            si k = 0 entonces f[0] := byte(j ob 0x40) fin
+            f[11] := A_LARGO
+            f[13] := byte(s)
+            i := 0
+            mientras i < 13 hacer
+                idx_u := (j - 1) * 13 + i
+                si idx_u < nu entonces c := u[idx_u]
+                sino si idx_u = nu entonces c := 0
+                sino c := 0xFFFF fin
+                si i < 5 entonces p16(dirección(f[0]), 1 + i * 2, c)
+                sino si i < 11 entonces p16(dirección(f[0]), 14 + (i - 5) * 2, c)
+                sino p16(dirección(f[0]), 28 + (i - 11) * 2, c) fin
+                i := i + 1
+            fin
+            p := pos_ent(x, d, nat64(ini) + k, cierto)
+            si p = 0 o no cb_escribe(x.disco, p, nat64(dirección(f[0])), 32) entonces
+                fat_error := EIO
+                devolver falso
+            fin
+            k := k + 1
+        fin
+        p := pos_ent(x, d, nat64(ini) + n_largas, cierto)
+        si p = 0 o no cb_escribe(x.disco, p, nat64(dirección(e[0])), 32) entonces
+            fat_error := EIO
+            devolver falso
+        fin
+        k := 0
+        mientras k < 32 hacer
+            h.e[k] := e[k]
+            k := k + 1
+        fin
+        h.pos := p
+        h.idx := nat64(ini) + n_largas
+        h.n_ent := n_largas + 1
+        copia_texto(dirección(h.nombre[0]), nombre, 256)
+        devolver cierto
+    fin
+
+    ; marca como borradas las entradas del nodo n (en su carpeta d)
+    función quita_entradas(x: puntero a Montaje, d: puntero a Nodo, n: puntero a Nodo): bool
+        variable i, p: nat64
+        variable b: byte
+        b := 0xE5
+        i := n.ent_idx + 1 - n.n_ent
+        mientras i <= n.ent_idx hacer
+            p := pos_ent(x, d, i, falso)
+            si p = 0 o no cb_escribe(x.disco, p, nat64(dirección(b)), 1) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; ---- crear, borrar, renombrar ----
+    ; un archivo (o una carpeta) nuevo en d; nulo y fat_error si no se puede
+    público función fat_crea(m: nat32, d: puntero a Nodo, nombre: puntero a byte, carpeta: bool): puntero a Nodo
+        variable x: puntero a Montaje
+        variable e: arreglo [32] de byte
+        variable f: arreglo [64] de byte
+        variable h: Ent
+        variable c: nat64
+        variable t: nat32
+        variable k: nat32
+        x := mm(m)
+        ceros_k(nat64(dirección(e[0])), 32)
+        t := a_dos(ahora_unix())
+        p16(dirección(e[0]), 14, t)
+        p16(dirección(e[0]), 16, t >> 16)
+        p16(dirección(e[0]), 18, t >> 16)
+        p16(dirección(e[0]), 22, t)
+        p16(dirección(e[0]), 24, t >> 16)
+        c := 0
+        si carpeta entonces
+            e[11] := A_CARPETA
+            c := pide_cúmulo(x)
+            si c = 0 entonces devolver nulo fin
+            cb_escribe(x.disco, pos_cúmulo(x, c), 0, x.oct_cúmulo)
+            ; «.» y «..»
+            ceros_k(nat64(dirección(f[0])), 64)
+            k := 0
+            mientras k < 11 hacer
+                f[k] := ' '
+                f[32 + k] := ' '
+                k := k + 1
+            fin
+            f[0] := '.'
+            f[32] := '.'
+            f[33] := '.'
+            f[11] := A_CARPETA
+            f[43] := A_CARPETA
+            k := 14
+            mientras k < 26 hacer
+                f[k] := e[k]
+                f[32 + k] := e[k]
+                k := k + 1
+            fin
+            p16(dirección(f[0]), 26, nat32(c))
+            p16(dirección(f[0]), 20, nat32(c >> 16))
+            si d.primero <> x.raíz_cúmulo entonces
+                p16(dirección(f[0]), 32 + 26, nat32(d.primero))
+                p16(dirección(f[0]), 32 + 20, nat32(d.primero >> 16))
+            fin
+            si no cb_escribe(x.disco, pos_cúmulo(x, c), nat64(dirección(f[0])), 64) entonces
+                suelta_cadena(x, c)
+                fat_error := EIO
+                devolver nulo
+            fin
+            p16(dirección(e[0]), 26, nat32(c))
+            p16(dirección(e[0]), 20, nat32(c >> 16))
+        sino
+            e[11] := A_ARCHIVO
+        fin
+        si no pon_entradas(m, d, nombre, e, h) entonces
+            si c <> 0 entonces suelta_cadena(x, c) fin
+            devolver nulo
+        fin
+        devolver nodo_de(m, d, h)
+    fin
+
+    ; ¿está vacía la carpeta n (sin contar «.» y «..»)?
+    público función fat_vacía_carpeta(m: nat32, n: puntero a Nodo): bool
+        variable h: Ent
+        variable i: nat64
+        i := 0
+        devolver no siguiente(mm(m), n, i, h)
+    fin
+
+    ; quita el nombre del nodo n de su carpeta d; sus cúmulos se sueltan al
+    ; soltar el nodo (fat_suelta: nadie lo tendrá abierto)
+    público función fat_borra(m: nat32, d: puntero a Nodo, n: puntero a Nodo): ent64
+        si no quita_entradas(mm(m), d, n) entonces devolver EIO fin
+        n.borrado := 1
+        devolver 0
+    fin
+
+    ; (el nodo borrado ya no lo tiene nadie) sus cúmulos, libres
+    público función fat_suelta(m: nat32, n: puntero a Nodo)
+        si n.borrado <> 0 y n.primero <> 0 entonces
+            suelta_cadena(mm(m), n.primero)
+            n.primero := 0
+        fin
+    fin
+
+    ; el nodo n (en la carpeta d1) pasa a llamarse «nombre» en la carpeta d2
+    ; (que no tiene ya uno así: lo ha quitado quien llama)
+    público función fat_renombra(m: nat32, d1: puntero a Nodo, n: puntero a Nodo, d2: puntero a Nodo, nombre: puntero a byte): ent64
+        variable x: puntero a Montaje
+        variable e: arreglo [32] de byte
+        variable h: Ent
+        variable p: nat64
+        variable c: nat64
+        x := mm(m)
+        si no cb_lee(x.disco, n.clave, nat64(dirección(e[0])), 32) entonces devolver EIO fin
+        si no pon_entradas(m, d2, nombre, e, h) entonces devolver fat_error fin
+        ; (pon_entradas ha podido alargar d1 si es la misma: n sigue en su sitio)
+        si no quita_entradas(x, d1, n) entonces devolver EIO fin
+        n.clave := h.pos
+        n.ent_idx := h.idx
+        n.n_ent := h.n_ent
+        n.dir_primero := d2.primero
+        ; una carpeta que cambia de carpeta: su «..»
+        si n.clase = N_CARPETA y d1 <> d2 y n.primero <> 0 entonces
+            p := pos_cúmulo(x, n.primero) + 32
+            si no cb_lee(x.disco, p, nat64(dirección(e[0])), 32) entonces devolver EIO fin
+            si e[0] = '.' y e[1] = '.' entonces
+                c := d2.primero
+                si c = x.raíz_cúmulo entonces c := 0 fin
+                p16(dirección(e[0]), 26, nat32(c))
+                p16(dirección(e[0]), 20, nat32(c >> 16))
+                si no cb_escribe(x.disco, p, nat64(dirección(e[0])), 32) entonces devolver EIO fin
+            fin
+        fin
+        devolver 0
+    fin
+
+    ; ---- vaciar ----
+    ; el FSInfo al día (si ha cambiado) y todo lo del volumen al disco
+    público función fat_vacía(m: nat32): ent64
+        variable x: puntero a Montaje
+        variable v: arreglo [2] de nat32
+        x := mm(m)
+        si x.solo_leer = 0 y x.libres_cambiado <> 0 y x.fsinfo <> 0 entonces
+            v[0] := nat32(x.libres)
+            v[1] := nat32(x.próximo)
+            si cb_escribe(x.disco, x.fsinfo + 488, nat64(dirección(v[0])), 8) entonces x.libres_cambiado := 0 fin
+        fin
+        si x.solo_leer <> 0 entonces devolver 0 fin
+        devolver cb_vacía(x.disco)
+    fin
+
+fin Fat64.

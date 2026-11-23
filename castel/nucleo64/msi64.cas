@@ -1,0 +1,97 @@
+; =============================================================================
+;  msi64.cas - Hispa-64, etapa 5: las interrupciones por mensaje de PCIe (MSI y
+;  MSI-X; docs/64/HISPA-64.md, sección 11). Un aparato con MSI no usa las
+;  patillas INTx ni el IOAPIC (ni las tablas _PRT del AML, que no se leen):
+;  escribe un número (el vector) en una dirección del APIC local
+;  (0xFEE00000 + el número de APIC del procesador << 12), y eso es su
+;  interrupción. Con MSI-X, cada cola puede tener la suya (una tabla en una
+;  BAR); aquí se usa la primera entrada y las demás quedan tapadas.
+;  Los vectores de los aparatos, desde 0x50 (los da pide_vector).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Msi64
+
+    importar Cifras64, Es64, Pagina64, PorCpu64, Pci64, Excep64
+
+    público constante NINGUNA = 0
+    público constante CON_MSI = 1
+    público constante CON_MSIX = 2
+
+    variable próximo: nat32
+
+    ; un vector libre para un aparato (0x50 a 0xDF), o 0 si no quedan
+    público función pide_vector(): nat32
+        si próximo = 0 entonces próximo := 0x50 fin
+        si próximo > 0xDF entonces devolver 0 fin
+        próximo := próximo + 1
+        devolver próximo - 1
+    fin
+
+    función dirección_msi(): nat32
+        devolver 0xFEE00000 ob ((yo().apic yb 0xFF) << 12)
+    fin
+
+    ; MSI-X (si el aparato i lo tiene): la entrada 0 al vector v, hacia este
+    ; procesador, y las demás tapadas; cierto si queda puesto
+    público función pon_msix(i: nat32, v: nat32): bool
+        variable c, ctl, tab, bir, n, k: nat32
+        variable base, t: nat64
+        c := capacidad(i, 0x11)
+        si c = 0 entonces devolver falso fin
+        ctl := conf(i, c) >> 16
+        n := (ctl yb 0x7FF) + 1
+        tab := conf(i, c + 4)
+        bir := tab yb 7
+        base := bar_mem(i, bir)
+        si base = 0 entonces devolver falso fin
+        ; (con la función tapada mientras se prepara la tabla)
+        pon_conf(i, c, (conf(i, c) yb 0xFFFF) ob ((ctl ob 0xC000) << 16))
+        t := mapea_disp(base + (tab yb 0xFFFFFFF8), nat64(n) * 16, sin_caché())
+        k := 0
+        mientras k < n hacer
+            pon_m32(t + nat64(k) * 16 + 12, 1)
+            k := k + 1
+        fin
+        pon_m32(t, dirección_msi())
+        pon_m32(t + 4, 0)
+        pon_m32(t + 8, v)
+        pon_m32(t + 12, 0)
+        habilita(i, cierto)
+        ; encendido (bit 15) y sin tapar la función (bit 14)
+        pon_conf(i, c, (conf(i, c) yb 0xFFFF) ob (((ctl ob 0x8000) yb 0xBFFF) << 16))
+        devolver cierto
+    fin
+
+    ; MSI (si el aparato i lo tiene): un mensaje, al vector v
+    público función pon_msi(i: nat32, v: nat32): bool
+        variable c, ctl: nat32
+        c := capacidad(i, 0x05)
+        si c = 0 entonces devolver falso fin
+        ctl := conf(i, c) >> 16
+        pon_conf(i, c + 4, dirección_msi())
+        si ctl yb 0x80 <> 0 entonces
+            pon_conf(i, c + 8, 0)
+            pon_conf(i, c + 12, (conf(i, c + 12) yb 0xFFFF0000) ob v)
+        sino
+            pon_conf(i, c + 8, (conf(i, c + 8) yb 0xFFFF0000) ob v)
+        fin
+        habilita(i, cierto)
+        ; un solo mensaje (MME = 0) y encendido
+        pon_conf(i, c, (conf(i, c) yb 0xFFFF) ob (((ctl yb 0xFF8F) ob 1) << 16))
+        devolver cierto
+    fin
+
+    ; lo mejor que tenga: MSI-X, MSI o nada (se mirará la cola)
+    público función pon_mensajes(i: nat32, v: nat32, sin_msix: bool): nat32
+        si no sin_msix y pon_msix(i, v) entonces devolver CON_MSIX fin
+        si pon_msi(i, v) entonces devolver CON_MSI fin
+        devolver NINGUNA
+    fin
+
+    público función escribe_modo(m: nat32)
+        si m = CON_MSIX entonces escribir("MSI-X")
+        sino si m = CON_MSI entonces escribir("MSI")
+        sino escribir("sin interrupciones (se mira la cola)") fin
+    fin
+
+fin Msi64.

@@ -24,7 +24,7 @@
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64, Procesos
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64, Procesos, Vfs64
 
     constante EPERM = -1
     constante ENOENT = -2
@@ -40,6 +40,9 @@ módulo Sistema
     constante ESPIPE = -29
     constante EROFS = -30
     constante ENOSYS = -38
+    constante LARGO_RUTA = 1024
+    constante ENAMETOOLONG = -36
+    constante TROZO = 16384                     ; lo que se copia de una vez (read, write, getdents64)
 
     público variable llamadas: nat64            ; cuántas se han atendido
     variable época: nat64                       ; los segundos de Unix al arrancar
@@ -157,31 +160,130 @@ módulo Sistema
         devolver ent64(hecho)
     fin
 
-    ; ---- los archivos ----
-    función lee(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
-        variable k: nat32
-        variable queda: nat64
-        si no fd_bien(p, fd) entonces devolver EBADF fin
-        si n = 0 entonces devolver 0 fin
-        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver 0 fin
-        k := p.fd_arch[nat32(fd)]
-        queda := 0
-        si p.fd_pos[nat32(fd)] < cuánto(k) entonces queda := cuánto(k) - p.fd_pos[nat32(fd)] fin
-        si n > queda entonces n := queda fin
-        si n = 0 entonces devolver 0 fin
-        si no copia_a(p, v, dónde(k) + p.fd_pos[nat32(fd)], n) entonces devolver EFAULT fin
-        p.fd_pos[nat32(fd)] := p.fd_pos[nat32(fd)] + n
-        devolver ent64(n)
+    ; ---- los archivos [etapa 5: por el VFS] ----
+    función abierto(p: puntero a Proceso, fd: nat64): puntero a Abierto
+        devolver puntero(p.fd_obj[nat32(fd)])
     fin
 
-    función escribe(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
-        si no fd_bien(p, fd) entonces devolver EBADF fin
-        si p.fd_clase[nat32(fd)] <> F_CONSOLA entonces devolver EBADF fin
-        si n = 0 entonces devolver 0 fin
-        devolver escribe_consola(p, v, n)
+    ; el primer descriptor libre desde «desde», o -1
+    función fd_libre(p: puntero a Proceso, mínimo_: nat32): ent32
+        variable fd: nat32
+        fd := mínimo_
+        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
+        si fd >= MAX_FD entonces devolver -1 fin
+        devolver ent32(fd)
     fin
 
-    función escribe_v(p: puntero a Proceso, fd: nat64, iov: nat64, cuántos: nat64): ent64
+    ; una ruta del programa, a un bloque del montón (lo suelta quien llama); nulo y el error
+    función ruta_de(p: puntero a Proceso, v: nat64, ref err: ent64): puntero a byte
+        variable t: puntero a byte
+        variable r: ent64
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces
+            err := ENOMEM
+            devolver nulo
+        fin
+        r := texto_de(p, t, v, LARGO_RUTA)
+        si r < 0 entonces
+            libera(t)
+            err := r
+            devolver nulo
+        fin
+        err := 0
+        devolver t
+    fin
+
+    ; la carpeta desde la que se ve una ruta de un «...at»: la actual
+    ; (AT_FDCWD, -100) o la de un descriptor que sea una carpeta
+    función base_de(p: puntero a Proceso, dirfd: ent64, ref err: ent64): puntero a byte
+        err := 0
+        si dirfd = -100 entonces devolver dirección(p.dir_actual[0]) fin
+        si dirfd < 0 entonces
+            err := EBADF
+            devolver nulo
+        fin
+        si no fd_bien(p, nat64(dirfd)) entonces
+            err := EBADF
+            devolver nulo
+        fin
+        si p.fd_clase[nat32(dirfd)] <> F_ARCHIVO entonces
+            err := ENOTDIR
+            devolver nulo
+        fin
+        si no vfs_es_carpeta(abierto(p, nat64(dirfd))) entonces
+            err := ENOTDIR
+            devolver nulo
+        fin
+        devolver vfs_ruta(abierto(p, nat64(dirfd)))
+    fin
+
+    ; read y pread (pos: -1, la del archivo)
+    función lee(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64, pos: ent64): ent64
+        variable k: nat64
+        variable hecho, trozo: nat64
+        variable r: ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            devolver 0
+        fin
+        si n = 0 entonces devolver 0 fin
+        k := nat64(reserva(TROZO))
+        si k = 0 entonces devolver ENOMEM fin
+        hecho := 0
+        r := 0
+        mientras hecho < n hacer
+            trozo := n - hecho
+            si trozo > TROZO entonces trozo := TROZO fin
+            si pos < 0 entonces r := vfs_lee(abierto(p, fd), -1, k, trozo) sino r := vfs_lee(abierto(p, fd), pos + ent64(hecho), k, trozo) fin
+            si r <= 0 entonces romper fin
+            si no copia_a(p, v + hecho, k, nat64(r)) entonces
+                r := EFAULT
+                romper
+            fin
+            hecho := hecho + nat64(r)
+            si nat64(r) < trozo entonces romper fin
+        fin
+        libera(puntero(k))
+        si hecho = 0 y r < 0 entonces devolver r fin
+        devolver ent64(hecho)
+    fin
+
+    ; write y pwrite
+    función escribe(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64, pos: ent64): ent64
+        variable k: nat64
+        variable hecho, trozo: nat64
+        variable r: ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            si n = 0 entonces devolver 0 fin
+            devolver escribe_consola(p, v, n)
+        fin
+        si n = 0 entonces devolver 0 fin
+        k := nat64(reserva(TROZO))
+        si k = 0 entonces devolver ENOMEM fin
+        hecho := 0
+        r := 0
+        mientras hecho < n hacer
+            trozo := n - hecho
+            si trozo > TROZO entonces trozo := TROZO fin
+            si no copia_de(p, k, v + hecho, trozo) entonces
+                r := EFAULT
+                romper
+            fin
+            si pos < 0 entonces r := vfs_escribe(abierto(p, fd), -1, k, trozo) sino r := vfs_escribe(abierto(p, fd), pos + ent64(hecho), k, trozo) fin
+            si r <= 0 entonces romper fin
+            hecho := hecho + nat64(r)
+            si nat64(r) < trozo entonces romper fin
+        fin
+        libera(puntero(k))
+        si hecho = 0 y r < 0 entonces devolver r fin
+        devolver ent64(hecho)
+    fin
+
+    ; readv y writev
+    función vectores(p: puntero a Proceso, fd: nat64, iov: nat64, cuántos: nat64, escribir_: bool): ent64
         variable par: arreglo [2] de nat64
         variable i: nat64
         variable total, r: ent64
@@ -194,71 +296,293 @@ módulo Sistema
                 si total = 0 entonces devolver EFAULT fin
                 devolver total
             fin
-            r := escribe(p, fd, par[0], par[1])
+            si escribir_ entonces r := escribe(p, fd, par[0], par[1], -1) sino r := lee(p, fd, par[0], par[1], -1) fin
             si r < 0 entonces
                 si total = 0 entonces devolver r fin
                 devolver total
             fin
             total := total + r
+            si nat64(r) < par[1] entonces devolver total fin
             i := i + 1
         fin
         devolver total
     fin
 
     función abre(p: puntero a Proceso, dirfd: ent64, ruta: nat64, marcas_: nat64): ent64
-        variable t: arreglo [256] de byte
-        variable r: ent64
-        variable i, fd: nat32
-        variable k: ent32
-        r := texto_de(p, dirección(t[0]), ruta, 256)
-        si r < 0 entonces devolver r fin
-        si t[0] = 0 entonces devolver ENOENT fin
-        i := 0
-        si t[0] <> '/' y dirfd <> -100 entonces
-            si dirfd >= 0 y fd_bien(p, nat64(dirfd)) entonces devolver ENOTDIR fin
-            devolver EBADF
+        variable t, base: puntero a byte
+        variable err: ent64
+        variable fd: ent32
+        variable a: puntero a Abierto
+        t := ruta_de(p, ruta, err)
+        si t = nulo entonces devolver err fin
+        base := nulo
+        si t[0] <> '/' entonces
+            base := base_de(p, dirfd, err)
+            si base = nulo entonces
+                libera(t)
+                devolver err
+            fin
         fin
-        mientras t[i] = '/' hacer i := i + 1 fin
-        si t[i] = 0 entonces devolver EISDIR fin
-        ; (sin carpetas: «a/b» no está)
-        r := ent64(i)
-        mientras t[i] <> 0 hacer
-            si t[i] = '/' entonces devolver ENOENT fin
-            i := i + 1
+        fd := fd_libre(p, 0)
+        si fd < 0 entonces
+            libera(t)
+            devolver EMFILE
         fin
-        k := busca_archivo(dirección(t[nat32(r)]))
-        si k < 0 entonces
-            si marcas_ yb 0x40 <> 0 entonces devolver EROFS fin
-            devolver ENOENT
-        fin
-        si marcas_ yb 3 <> 0 o marcas_ yb 0x200 <> 0 entonces devolver EROFS fin
-        si marcas_ yb 0x10000 <> 0 entonces devolver ENOTDIR fin
-        fd := 0
-        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
-        si fd >= MAX_FD entonces devolver EMFILE fin
-        p.fd_clase[fd] := F_UNIDAD
-        p.fd_arch[fd] := nat32(k)
-        p.fd_pos[fd] := 0
+        a := vfs_abre(base, t, marcas_, err)
+        libera(t)
+        si a = nulo entonces devolver err fin
+        p.fd_clase[nat32(fd)] := F_ARCHIVO
+        p.fd_obj[nat32(fd)] := nat64(a)
         devolver ent64(fd)
     fin
 
     función cierra(p: puntero a Proceso, fd: nat64): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_ARCHIVO entonces vfs_cierra(abierto(p, fd)) fin
         p.fd_clase[nat32(fd)] := 0
+        p.fd_obj[nat32(fd)] := 0
         devolver 0
     fin
 
+    ; dup, dup2, dup3 y fcntl(F_DUPFD): a «a» (o al primero libre desde «desde»)
+    función duplica(p: puntero a Proceso, fd: nat64, a: ent64, mínimo_: nat32): ent64
+        variable n: ent32
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si a >= 0 entonces
+            si a >= MAX_FD entonces devolver EBADF fin
+            si nat64(a) = fd entonces devolver a fin
+            si fd_bien(p, nat64(a)) entonces cierra(p, nat64(a)) fin
+            n := ent32(a)
+        sino
+            n := fd_libre(p, mínimo_)
+            si n < 0 entonces devolver EMFILE fin
+        fin
+        p.fd_clase[nat32(n)] := p.fd_clase[nat32(fd)]
+        p.fd_obj[nat32(n)] := p.fd_obj[nat32(fd)]
+        si p.fd_clase[nat32(n)] = F_ARCHIVO entonces vfs_otro(abierto(p, fd)) fin
+        devolver ent64(n)
+    fin
+
+    función fcntl_(p: puntero a Proceso, fd: nat64, orden: nat64, arg: nat64): ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si orden = 0 o orden = 1030 entonces devolver duplica(p, fd, -1, nat32(arg)) fin    ; F_DUPFD, F_DUPFD_CLOEXEC
+        si orden = 1 o orden = 2 o orden = 4 entonces devolver 0 fin                     ; F_GETFD, F_SETFD, F_SETFL
+        si orden = 3 entonces                                                            ; F_GETFL
+            si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver 2 fin
+            devolver ent64(abierto(p, fd).marcas yb 0x403)
+        fin
+        devolver EINVAL
+    fin
+
     función sitúa(p: puntero a Proceso, fd: nat64, d: ent64, de_dónde: nat64): ent64
-        variable n: ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
         si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver ESPIPE fin
-        si de_dónde = 0 entonces n := d
-        sino si de_dónde = 1 entonces n := ent64(p.fd_pos[nat32(fd)]) + d
-        sino si de_dónde = 2 entonces n := ent64(cuánto(p.fd_arch[nat32(fd)])) + d
-        sino devolver EINVAL fin
-        si n < 0 entonces devolver EINVAL fin
-        p.fd_pos[nat32(fd)] := nat64(n)
-        devolver n
+        devolver vfs_sitúa(abierto(p, fd), d, de_dónde)
+    fin
+
+    ; la «struct stat» (144 octetos) de la consola
+    función stat_consola(k: nat64)
+        variable i: nat32
+        i := 0
+        mientras i < 144 hacer
+            pon_m8(k + i, 0)
+            i := i + 1
+        fin
+        pon_m64(k + 16, 1)
+        pon_m32(k + 24, 0x2000 ob 0x1B6)        ; S_IFCHR, 0666
+        pon_m64(k + 40, 0x8801)                 ; (como /dev/pts/1)
+        pon_m64(k + 56, 1024)
+    fin
+
+    función fstat_(p: puntero a Proceso, fd: nat64, v: nat64): ent64
+        variable st: arreglo [18] de nat64
+        variable r: ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces
+            stat_consola(nat64(dirección(st[0])))
+            r := 0
+        sino
+            r := vfs_fstat(abierto(p, fd), nat64(dirección(st[0])))
+        fin
+        si r < 0 entonces devolver r fin
+        si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; stat, lstat y newfstatat (con AT_EMPTY_PATH y la ruta vacía: el del descriptor)
+    función stat_(p: puntero a Proceso, dirfd: ent64, ruta: nat64, v: nat64, marcas_: nat64): ent64
+        variable t, base: puntero a byte
+        variable err: ent64
+        variable st: arreglo [18] de nat64
+        t := ruta_de(p, ruta, err)
+        si t = nulo entonces devolver err fin
+        si t[0] = 0 entonces
+            libera(t)
+            si marcas_ yb 0x1000 = 0 entonces devolver ENOENT fin
+            si dirfd = -100 entonces devolver stat_ruta(p, dirección(p.dir_actual[0]), v) fin
+            si dirfd < 0 entonces devolver EBADF fin
+            devolver fstat_(p, nat64(dirfd), v)
+        fin
+        base := nulo
+        si t[0] <> '/' entonces
+            base := base_de(p, dirfd, err)
+            si base = nulo entonces
+                libera(t)
+                devolver err
+            fin
+        fin
+        err := vfs_stat(base, t, nat64(dirección(st[0])))
+        libera(t)
+        si err < 0 entonces devolver err fin
+        si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    función stat_ruta(p: puntero a Proceso, t: puntero a byte, v: nat64): ent64
+        variable st: arreglo [18] de nat64
+        variable err: ent64
+        err := vfs_stat(nulo, t, nat64(dirección(st[0])))
+        si err < 0 entonces devolver err fin
+        si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    función lista_(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
+        variable k: nat64
+        variable r: ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ENOTDIR fin
+        si n > TROZO entonces n := TROZO fin
+        k := nat64(reserva(TROZO))
+        si k = 0 entonces devolver ENOMEM fin
+        r := vfs_lista(abierto(p, fd), k, n)
+        si r > 0 entonces
+            si no copia_a(p, v, k, nat64(r)) entonces r := EFAULT fin
+        fin
+        libera(puntero(k))
+        devolver r
+    fin
+
+    ; mkdir (0), unlink (1), rmdir (2) y access (3), desde dirfd
+    función con_ruta(p: puntero a Proceso, dirfd: ent64, ruta: nat64, qué: nat32): ent64
+        variable t, base: puntero a byte
+        variable err: ent64
+        variable st: arreglo [18] de nat64
+        t := ruta_de(p, ruta, err)
+        si t = nulo entonces devolver err fin
+        si t[0] = 0 entonces
+            libera(t)
+            devolver ENOENT
+        fin
+        base := nulo
+        si t[0] <> '/' entonces
+            base := base_de(p, dirfd, err)
+            si base = nulo entonces
+                libera(t)
+                devolver err
+            fin
+        fin
+        si qué = 0 entonces err := vfs_mkdir(base, t)
+        sino si qué = 1 entonces err := vfs_borra(base, t, falso)
+        sino si qué = 2 entonces err := vfs_borra(base, t, cierto)
+        sino err := vfs_stat(base, t, nat64(dirección(st[0])))
+        fin
+        libera(t)
+        devolver err
+    fin
+
+    función renombra_(p: puntero a Proceso, dirfd1: ent64, ruta1: nat64, dirfd2: ent64, ruta2: nat64): ent64
+        variable t1, t2, b1, b2: puntero a byte
+        variable err: ent64
+        t1 := ruta_de(p, ruta1, err)
+        si t1 = nulo entonces devolver err fin
+        t2 := ruta_de(p, ruta2, err)
+        si t2 = nulo entonces
+            libera(t1)
+            devolver err
+        fin
+        b1 := nulo
+        b2 := nulo
+        si t1[0] <> '/' entonces b1 := base_de(p, dirfd1, err) fin
+        si err = 0 y t2[0] <> '/' entonces b2 := base_de(p, dirfd2, err) fin
+        si err = 0 y (t1[0] = 0 o t2[0] = 0) entonces err := ENOENT fin
+        si err = 0 entonces err := vfs_renombra(b1, t1, b2, t2) fin
+        libera(t1)
+        libera(t2)
+        devolver err
+    fin
+
+    función trunca_(p: puntero a Proceso, fd: nat64, t: ent64): ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si t < 0 entonces devolver EINVAL fin
+        si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver EINVAL fin
+        devolver vfs_trunca(abierto(p, fd), nat64(t))
+    fin
+
+    ; truncate(ruta, tamaño): abre, acorta y cierra
+    función trunca_ruta(p: puntero a Proceso, ruta: nat64, t: ent64): ent64
+        variable fd, r: ent64
+        fd := abre(p, -100, ruta, 1)
+        si fd < 0 entonces devolver fd fin
+        r := trunca_(p, nat64(fd), t)
+        cierra(p, nat64(fd))
+        devolver r
+    fin
+
+    función fsync_(p: puntero a Proceso, fd: nat64): ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver EINVAL fin
+        devolver vfs_fsync(abierto(p, fd))
+    fin
+
+    función getcwd_(p: puntero a Proceso, v: nat64, n: nat64): ent64
+        variable l: nat64
+        l := 0
+        mientras p.dir_actual[nat32(l)] <> 0 hacer l := l + 1 fin
+        l := l + 1
+        si n < l entonces devolver -34 fin                     ; ERANGE
+        si no copia_a(p, v, nat64(dirección(p.dir_actual[0])), l) entonces devolver EFAULT fin
+        devolver ent64(l)
+    fin
+
+    ; chdir (fd < 0) y fchdir
+    función chdir_(p: puntero a Proceso, ruta: nat64, fd: ent64): ent64
+        variable t, base, nueva: puntero a byte
+        variable err: ent64
+        variable i: nat32
+        nueva := reserva(LARGO_RUTA)
+        si nueva = nulo entonces devolver ENOMEM fin
+        si fd >= 0 entonces
+            base := base_de(p, fd, err)
+            si base = nulo entonces
+                libera(nueva)
+                devolver err
+            fin
+            err := vfs_carpeta(nulo, base, nueva)
+        sino
+            t := ruta_de(p, ruta, err)
+            si t = nulo entonces
+                libera(nueva)
+                devolver err
+            fin
+            si t[0] = 0 entonces err := ENOENT sino err := vfs_carpeta(dirección(p.dir_actual[0]), t, nueva) fin
+            libera(t)
+        fin
+        si err = 0 entonces
+            i := 0
+            mientras nueva[i] <> 0 hacer i := i + 1 fin
+            si i > 255 entonces err := ENAMETOOLONG fin
+        fin
+        si err = 0 entonces
+            i := 0
+            mientras nueva[i] <> 0 hacer
+                p.dir_actual[i] := nueva[i]
+                i := i + 1
+            fin
+            p.dir_actual[i] := 0
+        fin
+        libera(nueva)
+        devolver err
     fin
 
     ; ---- la memoria ----
@@ -452,10 +776,12 @@ módulo Sistema
         a5 := l64(m + 56)
         llamadas := llamadas + 1
         según n
-            caso 0: r := lee(p, a1, a2, a3)
-            caso 1: r := escribe(p, a1, a2, a3)
+            caso 0: r := lee(p, a1, a2, a3, -1)
+            caso 1: r := escribe(p, a1, a2, a3, -1)
             caso 2: r := abre(p, -100, a1, a2)
             caso 3: r := cierra(p, a1)
+            caso 4, 6: r := stat_(p, -100, a1, a2, 0)
+            caso 5: r := fstat_(p, a1, a2)
             caso 8: r := sitúa(p, a1, ent64(a2), a3)
             caso 9: r := mapea_(p, a1, a2, a3, a4, ent64(a5))
             caso 10: r := protege_(p, a1, a2, a3)
@@ -463,21 +789,54 @@ módulo Sistema
             caso 12: r := brk_(p, a1)
             caso 16:
                 si fd_bien(p, a1) entonces r := ENOTTY sino r := EBADF fin
-            caso 20: r := escribe_v(p, a1, a2, a3)
+            caso 17:
+                si ent64(a4) < 0 entonces r := EINVAL sino r := lee(p, a1, a2, a3, ent64(a4)) fin
+            caso 18:
+                si ent64(a4) < 0 entonces r := EINVAL sino r := escribe(p, a1, a2, a3, ent64(a4)) fin
+            caso 19: r := vectores(p, a1, a2, a3, falso)
+            caso 20: r := vectores(p, a1, a2, a3, cierto)
+            caso 21: r := con_ruta(p, -100, a1, 3)
             caso 24:
                 cede()
                 r := 0
+            caso 32: r := duplica(p, a1, -1, 0)
+            caso 33: r := duplica(p, a1, ent64(a2), 0)
             caso 35: r := duerme_(p, a1)
             caso 39, 186: r := ent64(p.id)
             caso 60, 231: sal(a1, 0)
             caso 63: r := nombre_(p, a1)
+            caso 72: r := fcntl_(p, a1, a2, a3)
+            caso 74, 75: r := fsync_(p, a1)
+            caso 76: r := trunca_ruta(p, a1, ent64(a2))
+            caso 77: r := trunca_(p, a1, ent64(a2))
+            caso 79: r := getcwd_(p, a1, a2)
+            caso 80: r := chdir_(p, a1, -1)
+            caso 81: r := chdir_(p, 0, ent64(a1))
+            caso 82: r := renombra_(p, -100, a1, -100, a2)
+            caso 83: r := con_ruta(p, -100, a1, 0)
+            caso 84: r := con_ruta(p, -100, a1, 2)
+            caso 87: r := con_ruta(p, -100, a1, 1)
             caso 102, 104, 107, 108: r := 0
             caso 158: r := arch_(p, a1, a2)
+            caso 162:
+                vfs_sync()
+                r := 0
+            caso 217: r := lista_(p, a1, a2, a3)
             caso 218:
                 p.tid_dir := a1
                 r := ent64(p.id)
             caso 228: r := reloj(p, a1, a2)
             caso 257: r := abre(p, ent64(a1), a2, a3)
+            caso 258: r := con_ruta(p, ent64(a1), a2, 0)
+            caso 262: r := stat_(p, ent64(a1), a2, a3, a4)
+            caso 263:
+                si a3 yb 0x200 <> 0 entonces r := con_ruta(p, ent64(a1), a2, 2) sino r := con_ruta(p, ent64(a1), a2, 1) fin
+            caso 264: r := renombra_(p, ent64(a1), a2, ent64(a3), a4)
+            caso 269: r := con_ruta(p, ent64(a1), a2, 3)
+            caso 292:
+                si a1 = a2 entonces r := EINVAL sino r := duplica(p, a1, ent64(a2), 0) fin
+            caso 316:
+                si a5 <> 0 entonces r := EINVAL sino r := renombra_(p, ent64(a1), a2, ent64(a3), a4) fin
             si no: r := desconocida(p, n)
         fin
         p64(m + 112, nat64(r))

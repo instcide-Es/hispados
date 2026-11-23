@@ -1,0 +1,380 @@
+; =============================================================================
+;  archivos64.cas - Hispa-64, etapa 5: lo común de los sistemas de archivos
+;  (docs/64/HISPA-64.md, sección 11): los nodos, los montajes, los errores de
+;  Linux, los nombres (UTF-8, UTF-16 y sin mirar mayúsculas) y el mutex de
+;  todo el VFS.
+;
+;  Un **nodo** es un archivo o una carpeta en la memoria: de qué montaje es,
+;  quién es dentro de él (la «clave»: en FAT, dónde está su entrada en el
+;  disco; la raíz, 0), su tamaño, su primer cúmulo... Hay uno solo por
+;  archivo aunque se abra varias veces (se busca por montaje y clave), con su
+;  cuenta de quién lo tiene; al llegar a 0 se suelta (y, si se había
+;  borrado mientras estaba abierto, se liberan entonces sus cúmulos, como en
+;  Linux).
+;  Un **montaje** es un sistema de archivos a la vista en una ruta («/»: la
+;  unidad en memoria; «/nvme0p1»: la partición 1 del primer NVMe...), con lo
+;  que hace falta de cada clase (FAT32, exFAT).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Archivos64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Hilos64, Sinc64, Reloj64, Bloques64
+
+    ; ---- los errores (los de Linux, en negativo) ----
+    público constante EPERM = -1
+    público constante ENOENT = -2
+    público constante EIO = -5
+    público constante EBADF = -9
+    público constante ENOMEM = -12
+    público constante EACCES = -13
+    público constante EFAULT = -14
+    público constante EBUSY = -16
+    público constante EEXIST = -17
+    público constante EXDEV = -18
+    público constante ENOTDIR = -20
+    público constante EISDIR = -21
+    público constante EINVAL = -22
+    público constante ENFILE = -23
+    público constante EMFILE = -24
+    público constante EFBIG = -27
+    público constante ENOSPC = -28
+    público constante ESPIPE = -29
+    público constante EROFS = -30
+    público constante ENAMETOOLONG = -36
+    público constante ENOTEMPTY = -39
+
+    ; ---- las clases ----
+    público constante N_ARCHIVO = 1
+    público constante N_CARPETA = 2
+    público constante FS_UNIDAD = 1
+    público constante FS_FAT = 2
+    público constante FS_EXFAT = 3
+    público constante MAX_MONTAJES = 16
+    público constante LARGO_NOMBRE = 256        ; un nombre, en UTF-8, con su 0
+    público constante LARGO_RUTA = 1024
+
+    público tipo Nodo = estructura
+        sig: nat64                  ; el siguiente de la lista de nodos en memoria
+        clave: nat64                ; quién es en su sistema (FAT: el octeto de su entrada 8.3; exFAT: el de su entrada 0x85; la raíz: 0)
+        primero: nat64              ; su primer cúmulo (0: ninguno) o, en la unidad, su número
+        tamaño: nat64
+        mtime: nat64                ; la hora de su última escritura (segundos de Unix)
+        dir_primero: nat64          ; el primer cúmulo de la carpeta en la que está
+        ent_idx: nat64              ; el número de su entrada 8.3 (FAT) o 0x85 (exFAT) en esa carpeta
+        pista_idx: nat64            ; (para leer seguido) el último cúmulo visto: su número de orden...
+        pista_cum: nat64            ; ...y cuál es
+        válido: nat64               ; exFAT: ValidDataLength (más allá, ceros)
+        montaje: nat32
+        clase: nat32                ; N_ARCHIVO o N_CARPETA
+        refs: nat32                 ; quién lo tiene
+        borrado: nat32              ; 1: ya no tiene nombre (sus cúmulos, al soltarlo)
+        n_ent: nat32                ; cuántas entradas ocupa su nombre (FAT: las largas y la 8.3)
+        atrib: nat32                ; los atributos de FAT
+        sin_cadena: nat32           ; exFAT: los cúmulos van seguidos (NoFatChain)
+        nada: nat32
+    fin
+
+    público tipo Montaje = estructura
+        ruta: arreglo [32] de byte  ; dónde se ve («/», «/nvme0p1»)
+        clase: nat32                ; FS_UNIDAD, FS_FAT, FS_EXFAT
+        disco: nat32                ; el disco (o partición) de Bloques64
+        solo_leer: nat32            ; 1: no se escribe
+        en_uso: nat32
+        raíz: nat64                 ; su nodo raíz
+        ; FAT32 y exFAT
+        oct_sector: nat64
+        oct_cúmulo: nat64
+        fat_ini: nat64              ; el octeto donde empieza la primera FAT
+        fat_largo: nat64            ; los octetos de cada FAT
+        n_fats: nat64
+        datos_ini: nat64            ; el octeto del cúmulo 2
+        cúmulos: nat64              ; cuántos hay (el último es cúmulos + 1)
+        raíz_cúmulo: nat64
+        fsinfo: nat64               ; el octeto del sector FSInfo (0: no hay)
+        libres: nat64               ; cúmulos libres (0xFFFFFFFF: no se sabe)
+        próximo: nat64              ; dónde empezar a buscar uno libre
+        libres_cambiado: nat32      ; hay que escribir el FSInfo
+        nada: nat32
+        etiqueta: arreglo [12] de byte
+        ; (para recorrer carpetas sin nodo: el último cúmulo visto)
+        pc_primero, pc_idx, pc_cum: nat64
+    fin
+
+    público variable montajes: arreglo [MAX_MONTAJES] de Montaje
+    público variable n_montajes: nat32
+    público variable vfs_mutex: Mutex
+    variable nodos: nat64                       ; la lista de nodos en memoria
+    público variable n_nodos: nat64
+
+    ; ---- la memoria ----
+    público función ceros_k(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    público función copia_k(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    público función montaje(i: nat32): puntero a Montaje
+        devolver dirección(montajes[i])
+    fin
+
+    público función nodo(d: nat64): puntero a Nodo
+        devolver puntero(d)
+    fin
+
+    ; ---- los nodos ----
+    ; el nodo del montaje m con esa clave, si ya está en memoria (con una
+    ; referencia más), o nulo
+    público función busca_nodo(m: nat32, clave: nat64): puntero a Nodo
+        variable x: nat64
+        variable n: puntero a Nodo
+        x := nodos
+        mientras x <> 0 hacer
+            n := nodo(x)
+            si n.montaje = m y n.clave = clave y n.borrado = 0 entonces
+                n.refs := n.refs + 1
+                devolver n
+            fin
+            x := n.sig
+        fin
+        devolver nulo
+    fin
+
+    ; uno nuevo (con una referencia), a la lista; nulo si no hay memoria
+    público función nuevo_nodo(m: nat32, clave: nat64, clase: nat32): puntero a Nodo
+        variable n: puntero a Nodo
+        n := puntero(nat64(reserva(tamaño(Nodo))))
+        si n = nulo entonces devolver nulo fin
+        ceros_k(nat64(n), tamaño(Nodo))
+        n.montaje := m
+        n.clave := clave
+        n.clase := clase
+        n.refs := 1
+        n.sig := nodos
+        nodos := nat64(n)
+        n_nodos := n_nodos + 1
+        devolver n
+    fin
+
+    público función toma_nodo(n: puntero a Nodo)
+        n.refs := n.refs + 1
+    fin
+
+    ; quita una referencia; si era la última, sale de la lista y se libera
+    ; (devuelve cierto: quien llama hace antes lo que haga falta si estaba borrado)
+    público función suelta_nodo(n: puntero a Nodo): bool
+        variable x, antes: nat64
+        si n.refs > 1 entonces
+            n.refs := n.refs - 1
+            devolver falso
+        fin
+        ; (las raíces de los montajes no se sueltan nunca)
+        si n.clave = 0 y montaje(n.montaje).raíz = nat64(n) entonces devolver falso fin
+        antes := 0
+        x := nodos
+        mientras x <> 0 y x <> nat64(n) hacer
+            antes := x
+            x := nodo(x).sig
+        fin
+        si x <> 0 entonces
+            si antes = 0 entonces nodos := n.sig sino nodo(antes).sig := n.sig fin
+        fin
+        n_nodos := n_nodos - 1
+        libera(puntero(nat64(n)))
+        devolver cierto
+    fin
+
+    ; cuántos nodos de un montaje están en uso (sin contar su raíz)
+    público función nodos_de(m: nat32): nat32
+        variable x: nat64
+        variable k: nat32
+        k := 0
+        x := nodos
+        mientras x <> 0 hacer
+            si nodo(x).montaje = m y x <> montaje(m).raíz entonces k := k + 1 fin
+            x := nodo(x).sig
+        fin
+        devolver k
+    fin
+
+    ; ---- los nombres ----
+    público función largo(t: puntero a byte): nat32
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 hacer i := i + 1 fin
+        devolver i
+    fin
+
+    público función copia_texto(a: puntero a byte, de: puntero a byte, máx: nat32)
+        variable i: nat32
+        i := 0
+        mientras de[i] <> 0 y i + 1 < máx hacer
+            a[i] := de[i]
+            i := i + 1
+        fin
+        a[i] := 0
+    fin
+
+    ; la letra c sin mayúscula: las de ASCII y las de Latin-1 (en UTF-8, C3 80..9E
+    ; son las mayúsculas de C3 A0..BE)
+    función baja(c: nat32, antes: nat32): nat32
+        si c >= 'A' y c <= 'Z' entonces devolver c + 32 fin
+        si antes = 0xC3 y c >= 0x80 y c <= 0x9E y c <> 0x97 entonces devolver c + 0x20 fin
+        devolver c
+    fin
+
+    ; ¿son el mismo nombre sin mirar mayúsculas y minúsculas? (como FAT y exFAT)
+    público función igual_nombre(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        variable pa, pb: nat32
+        i := 0
+        pa := 0
+        pb := 0
+        mientras cierto hacer
+            si baja(a[i], pa) <> baja(b[i], pb) entonces devolver falso fin
+            si a[i] = 0 entonces devolver cierto fin
+            pa := a[i]
+            pb := b[i]
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; un punto de UTF-16 (sin las parejas: lo de fuera del plano básico, «?») a
+    ; UTF-8, al final de t (que tiene sitio para máx); falso si no cabe
+    público función pon_utf8(t: puntero a byte, ref n: nat32, u: nat32, máx: nat32): bool
+        si u >= 0xD800 y u <= 0xDFFF entonces u := '?' fin
+        si u < 0x80 entonces
+            si n + 2 > máx entonces devolver falso fin
+            t[n] := byte(u)
+            n := n + 1
+        sino si u < 0x800 entonces
+            si n + 3 > máx entonces devolver falso fin
+            t[n] := byte(0xC0 ob (u >> 6))
+            t[n + 1] := byte(0x80 ob (u yb 0x3F))
+            n := n + 2
+        sino
+            si n + 4 > máx entonces devolver falso fin
+            t[n] := byte(0xE0 ob (u >> 12))
+            t[n + 1] := byte(0x80 ob ((u >> 6) yb 0x3F))
+            t[n + 2] := byte(0x80 ob (u yb 0x3F))
+            n := n + 3
+        fin
+        t[n] := 0
+        devolver cierto
+    fin
+
+    ; el siguiente punto de t (UTF-8) desde i (y adelanta i); 0xFFFF si no es
+    ; UTF-8 bien hecho o si se sale del plano básico (no cabe en una entrada de FAT)
+    público función saca_utf8(t: puntero a byte, ref i: nat32): nat32
+        variable c: nat32
+        c := t[i]
+        si c < 0x80 entonces
+            i := i + 1
+            devolver c
+        fin
+        si c >= 0xC2 y c <= 0xDF y t[i + 1] yb 0xC0 = 0x80 entonces
+            i := i + 2
+            devolver ((c yb 0x1F) << 6) ob (t[i - 1] yb 0x3F)
+        fin
+        si c >= 0xE0 y c <= 0xEF y t[i + 1] yb 0xC0 = 0x80 y t[i + 2] yb 0xC0 = 0x80 entonces
+            i := i + 3
+            c := ((c yb 0x0F) << 12) ob ((t[i - 2] yb 0x3F) << 6) ob (t[i - 1] yb 0x3F)
+            si c < 0x800 o (c >= 0xD800 y c <= 0xDFFF) entonces devolver 0xFFFF fin
+            devolver c
+        fin
+        i := i + 1
+        devolver 0xFFFF
+    fin
+
+    ; ---- la hora de los archivos ----
+    ; segundos de Unix -> fecha y hora del DOS (FAT): (fecha << 16) | hora
+    público función a_dos(s: nat64): nat32
+        variable días, año, mes, d, h, mi, se: nat64
+        variable dm: arreglo [12] de nat32
+        se := s mod 60
+        mi := (s div 60) mod 60
+        h := (s div 3600) mod 24
+        días := s div 86400
+        año := 1970
+        mientras cierto hacer
+            d := 365
+            si año mod 4 = 0 y (año mod 100 <> 0 o año mod 400 = 0) entonces d := 366 fin
+            si días < d entonces romper fin
+            días := días - d
+            año := año + 1
+        fin
+        dm[0] := 31
+        dm[1] := 28
+        si año mod 4 = 0 y (año mod 100 <> 0 o año mod 400 = 0) entonces dm[1] := 29 fin
+        dm[2] := 31
+        dm[3] := 30
+        dm[4] := 31
+        dm[5] := 30
+        dm[6] := 31
+        dm[7] := 31
+        dm[8] := 30
+        dm[9] := 31
+        dm[10] := 30
+        dm[11] := 31
+        mes := 0
+        mientras mes < 11 y días >= nat64(dm[nat32(mes)]) hacer
+            días := días - dm[nat32(mes)]
+            mes := mes + 1
+        fin
+        si año < 1980 entonces devolver (nat32(0) << 16) ob 0x21 fin
+        devolver (nat32(((año - 1980) << 9) ob ((mes + 1) << 5) ob (días + 1)) << 16) ob nat32((h << 11) ob (mi << 5) ob (se div 2))
+    fin
+
+    ; fecha y hora del DOS -> segundos de Unix
+    público función de_dos(fecha: nat32, hora: nat32): nat64
+        variable año, mes, día, d, s: nat64
+        variable i: nat64
+        año := 1980 + nat64(fecha >> 9)
+        mes := nat64((fecha >> 5) yb 15)
+        día := nat64(fecha yb 31)
+        si mes < 1 o mes > 12 o día < 1 entonces devolver 315532800 fin
+        d := 0
+        i := 1970
+        mientras i < año hacer
+            d := d + 365
+            si i mod 4 = 0 y (i mod 100 <> 0 o i mod 400 = 0) entonces d := d + 1 fin
+            i := i + 1
+        fin
+        i := 1
+        mientras i < mes hacer
+            según nat16(i)
+                caso 2:
+                    d := d + 28
+                    si año mod 4 = 0 y (año mod 100 <> 0 o año mod 400 = 0) entonces d := d + 1 fin
+                caso 4, 6, 9, 11: d := d + 30
+                si no: d := d + 31
+            fin
+            i := i + 1
+        fin
+        d := d + día - 1
+        s := d * 86400 + nat64(hora >> 11) * 3600 + nat64((hora >> 5) yb 63) * 60 + nat64(hora yb 31) * 2
+        devolver s
+    fin
+
+    ; ---- el mutex del VFS ----
+    público función cierra_vfs()
+        cierra_mutex(dirección(vfs_mutex))
+    fin
+
+    público función abre_vfs()
+        abre_mutex(dirección(vfs_mutex))
+    fin
+
+fin Archivos64.

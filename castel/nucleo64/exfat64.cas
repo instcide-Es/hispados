@@ -1,0 +1,347 @@
+; =============================================================================
+;  exfat64.cas - Hispa-64, etapa 5: exFAT, para leer (docs/64/HISPA-64.md,
+;  sección 11), según «exFAT file system specification» (Microsoft, 2019). Es
+;  lo que traen las tarjetas SD y las memorias de más de 32 GB.
+;
+;  Lo que hace: montar (el sector de arranque, con su suma de las 11 primeras
+;  regiones comprobada), la carpeta raíz (una cadena de la FAT), la etiqueta
+;  (la entrada 0x83), y en cada carpeta los grupos de entradas de cada archivo:
+;  la 0x85 (los atributos y la hora), la 0xC0 (el primer cúmulo, el tamaño,
+;  lo escrito de verdad «ValidDataLength», y si los cúmulos van seguidos sin
+;  pasar por la FAT: «NoFatChain») y las 0xC1 (el nombre, en UTF-16, de 15 en
+;  15), con la suma del grupo comprobada. Leer: por la FAT o seguido; lo que
+;  pasa de ValidDataLength, a cero.
+;  Escribir en exFAT (el mapa de bits de los libres, las sumas, el «hash» del
+;  nombre con la tabla de mayúsculas) queda para la etapa 6.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Exfat64
+
+    importar Cifras64, Es64, Monton64, Bloques64, Archivos64
+
+    público variable ex_error: ent64
+    público variable ex_sumas_mal: nat64        ; los grupos de entradas con la suma mal (no se ven)
+
+    tipo EntX = estructura
+        pos: nat64                  ; el octeto de la 0x85
+        idx: nat64                  ; su número en la carpeta
+        primero: nat64
+        tamaño: nat64
+        válido: nat64
+        hora: nat32                 ; la de la última escritura (como la del DOS)
+        atrib: nat32
+        sin_cadena: nat32
+        nada: nat32
+        nombre: arreglo [256] de byte
+    fin
+
+    función mm(m: nat32): puntero a Montaje
+        devolver montaje(m)
+    fin
+
+    función l16(e: puntero a byte, k: nat32): nat32
+        devolver nat32(e[k]) ob (nat32(e[k + 1]) << 8)
+    fin
+
+    función l32(e: puntero a byte, k: nat32): nat32
+        devolver nat32(e[k]) ob (nat32(e[k + 1]) << 8) ob (nat32(e[k + 2]) << 16) ob (nat32(e[k + 3]) << 24)
+    fin
+
+    función l64(e: puntero a byte, k: nat32): nat64
+        devolver nat64(l32(e, k)) ob (nat64(l32(e, k + 4)) << 32)
+    fin
+
+    función lee_fat(x: puntero a Montaje, c: nat64): nat64
+        variable v: nat32
+        v := 0xFFFFFFFF
+        si c < 2 o c >= x.cúmulos + 2 entonces devolver 0xFFFFFFFF fin
+        si no cb_lee(x.disco, x.fat_ini + c * 4, nat64(dirección(v)), 4) entonces
+            ex_error := EIO
+            devolver 0xFFFFFFFF
+        fin
+        devolver nat64(v)
+    fin
+
+    función pos_cúmulo(x: puntero a Montaje, c: nat64): nat64
+        devolver x.datos_ini + (c - 2) * x.oct_cúmulo
+    fin
+
+    ; el cúmulo número idx del nodo (por la FAT, o seguido); 0 si no lo hay
+    función cúmulo_de(x: puntero a Montaje, n: puntero a Nodo, idx: nat64): nat64
+        variable c, k, sig: nat64
+        si n.primero < 2 entonces devolver 0 fin
+        si n.sin_cadena <> 0 entonces
+            si idx * x.oct_cúmulo >= n.tamaño entonces devolver 0 fin
+            si n.primero + idx >= x.cúmulos + 2 entonces devolver 0 fin
+            devolver n.primero + idx
+        fin
+        si n.pista_cum <> 0 y idx >= n.pista_idx entonces
+            k := n.pista_idx
+            c := n.pista_cum
+        sino
+            k := 0
+            c := n.primero
+        fin
+        mientras k < idx hacer
+            sig := lee_fat(x, c)
+            si sig < 2 o sig >= x.cúmulos + 2 entonces devolver 0 fin
+            si k > x.cúmulos entonces devolver 0 fin
+            c := sig
+            k := k + 1
+        fin
+        n.pista_idx := idx
+        n.pista_cum := c
+        devolver c
+    fin
+
+    función pos_ent(x: puntero a Montaje, d: puntero a Nodo, i: nat64): nat64
+        variable c, por: nat64
+        por := x.oct_cúmulo div 32
+        c := cúmulo_de(x, d, i div por)
+        si c = 0 entonces devolver 0 fin
+        devolver pos_cúmulo(x, c) + (i mod por) * 32
+    fin
+
+    función suma16(s: nat32, b: nat32): nat32
+        devolver ((((s yb 1) << 15) + (s >> 1)) + b) yb 0xFFFF
+    fin
+
+    ; el siguiente archivo de la carpeta d desde la entrada i (deja i detrás de su grupo)
+    función siguiente(x: puntero a Montaje, d: puntero a Nodo, ref i: nat64, ref h: EntX): bool
+        variable e: arreglo [32] de byte
+        variable p, p0: nat64
+        variable sc, k, j, n, nl, suma, s, u: nat32
+        variable bien: bool
+        mientras cierto hacer
+            p := pos_ent(x, d, i)
+            si p = 0 entonces devolver falso fin
+            si no cb_lee(x.disco, p, nat64(dirección(e[0])), 32) entonces
+                ex_error := EIO
+                devolver falso
+            fin
+            si e[0] = 0 entonces devolver falso fin
+            i := i + 1
+            si e[0] <> 0x85 entonces seguir fin
+            ; un grupo: la 0x85, la 0xC0 y las 0xC1
+            p0 := p
+            h.pos := p
+            h.idx := i - 1
+            sc := e[1]
+            suma := l16(dirección(e[0]), 2)
+            h.atrib := l16(dirección(e[0]), 4)
+            h.hora := l32(dirección(e[0]), 12)
+            s := 0
+            j := 0
+            mientras j < 32 hacer
+                si j <> 2 y j <> 3 entonces s := suma16(s, e[j]) fin
+                j := j + 1
+            fin
+            si sc < 2 o sc > 18 entonces seguir fin
+            bien := cierto
+            n := 0
+            nl := 0
+            h.nombre[0] := 0
+            k := 1
+            mientras k <= sc y bien hacer
+                p := pos_ent(x, d, i)
+                si p = 0 o no cb_lee(x.disco, p, nat64(dirección(e[0])), 32) entonces
+                    devolver falso
+                fin
+                j := 0
+                mientras j < 32 hacer
+                    s := suma16(s, e[j])
+                    j := j + 1
+                fin
+                si k = 1 entonces
+                    si e[0] <> 0xC0 entonces bien := falso fin
+                    h.sin_cadena := (e[1] >> 1) yb 1
+                    nl := e[3]
+                    h.válido := l64(dirección(e[0]), 8)
+                    h.primero := l32(dirección(e[0]), 20)
+                    h.tamaño := l64(dirección(e[0]), 24)
+                sino si e[0] = 0xC1 entonces
+                    j := 0
+                    mientras j < 15 y nl > 0 hacer
+                        u := l16(dirección(e[0]), 2 + j * 2)
+                        pon_utf8(dirección(h.nombre[0]), n, u, 256)
+                        nl := nl - 1
+                        j := j + 1
+                    fin
+                fin
+                i := i + 1
+                k := k + 1
+            fin
+            si no bien entonces seguir fin
+            si s <> suma entonces
+                ex_sumas_mal := ex_sumas_mal + 1
+                seguir
+            fin
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    función nodo_de(m: nat32, ref h: EntX): puntero a Nodo
+        variable n: puntero a Nodo
+        n := busca_nodo(m, h.pos)
+        si n <> nulo entonces devolver n fin
+        si h.atrib yb 0x10 <> 0 entonces n := nuevo_nodo(m, h.pos, N_CARPETA) sino n := nuevo_nodo(m, h.pos, N_ARCHIVO) fin
+        si n = nulo entonces devolver nulo fin
+        n.primero := h.primero
+        n.tamaño := h.tamaño
+        n.válido := h.válido
+        n.sin_cadena := h.sin_cadena
+        n.mtime := de_dos(h.hora >> 16, h.hora yb 0xFFFF)
+        n.ent_idx := h.idx
+        n.atrib := h.atrib
+        devolver n
+    fin
+
+    ; ---- montar ----
+    público función ex_monta(m: nat32): bool
+        variable x: puntero a Montaje
+        variable b: nat64
+        variable bps, spc, s, i: nat64
+        variable suma: nat32
+        variable r: puntero a Nodo
+        variable e: arreglo [32] de byte
+        variable p: nat64
+        variable k, j: nat32
+        x := mm(m)
+        b := nat64(reserva(4096 * 12))
+        si b = 0 entonces devolver falso fin
+        si no cb_lee(x.disco, 0, b, 512) o m32(b + 3) <> 0x41465845 o m32(b + 7) <> 0x20202054 entonces
+            libera(puntero(b))
+            devolver falso
+        fin
+        bps := nat64(1) << m8(b + 108)
+        spc := nat64(1) << m8(b + 109)
+        si bps < 512 o bps > 4096 o m8(b + 109) > 25 entonces
+            libera(puntero(b))
+            devolver falso
+        fin
+        ; la suma de las 11 primeras regiones (menos VolumeFlags y PercentInUse)
+        si no cb_lee(x.disco, 0, b, bps * 12) entonces
+            libera(puntero(b))
+            devolver falso
+        fin
+        suma := 0
+        i := 0
+        mientras i < bps * 11 hacer
+            si i <> 106 y i <> 107 y i <> 112 entonces suma := (((suma yb 1) << 31) ob (suma >> 1)) + m8(b + i) fin
+            i := i + 1
+        fin
+        si m32(b + bps * 11) <> suma entonces
+            escribir("  (exFAT: la suma del sector de arranque no cuadra)\n")
+            libera(puntero(b))
+            devolver falso
+        fin
+        x.oct_sector := bps
+        x.oct_cúmulo := bps * spc
+        x.fat_ini := nat64(m32(b + 80)) * bps
+        x.fat_largo := nat64(m32(b + 84)) * bps
+        x.n_fats := m8(b + 110)
+        x.datos_ini := nat64(m32(b + 88)) * bps
+        x.cúmulos := m32(b + 92)
+        x.raíz_cúmulo := m32(b + 96)
+        x.libres := 0xFFFFFFFF
+        libera(puntero(b))
+        si x.raíz_cúmulo < 2 o x.raíz_cúmulo >= x.cúmulos + 2 entonces devolver falso fin
+        si x.datos_ini + x.cúmulos * x.oct_cúmulo > octetos_dk(x.disco) entonces devolver falso fin
+        r := nuevo_nodo(m, 0, N_CARPETA)
+        si r = nulo entonces devolver falso fin
+        r.primero := x.raíz_cúmulo
+        r.atrib := 0x10
+        x.raíz := nat64(r)
+        x.clase := FS_EXFAT
+        x.solo_leer := 1
+        ; la etiqueta (la entrada 0x83 de la raíz)
+        x.etiqueta[0] := 0
+        i := 0
+        mientras i < 64 hacer
+            p := pos_ent(x, r, i)
+            si p = 0 o no cb_lee(x.disco, p, nat64(dirección(e[0])), 32) entonces romper fin
+            si e[0] = 0 entonces romper fin
+            si e[0] = 0x83 entonces
+                k := e[1]
+                si k > 11 entonces k := 11 fin
+                j := 0
+                mientras j < k hacer
+                    x.etiqueta[j] := byte(l16(dirección(e[0]), 2 + j * 2))
+                    si l16(dirección(e[0]), 2 + j * 2) > 126 entonces x.etiqueta[j] := '_' fin
+                    j := j + 1
+                fin
+                x.etiqueta[k] := 0
+                romper
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    público función ex_busca(m: nat32, d: puntero a Nodo, nombre: puntero a byte): puntero a Nodo
+        variable h: EntX
+        variable i: nat64
+        ex_error := ENOENT
+        i := 0
+        mientras siguiente(mm(m), d, i, h) hacer
+            si igual_nombre(dirección(h.nombre[0]), nombre) entonces
+                ex_error := 0
+                devolver nodo_de(m, h)
+            fin
+        fin
+        devolver nulo
+    fin
+
+    público función ex_lista(m: nat32, d: puntero a Nodo, ref galleta: nat64, nombre: puntero a byte, ref carpeta: bool, ref ino: nat64): bool
+        variable h: EntX
+        variable i: nat64
+        si galleta < 2 entonces
+            nombre[0] := '.'
+            nombre[1] := 0
+            si galleta = 1 entonces
+                nombre[1] := '.'
+                nombre[2] := 0
+            fin
+            carpeta := cierto
+            ino := d.clave + 1
+            galleta := galleta + 1
+            devolver cierto
+        fin
+        i := galleta - 2
+        si no siguiente(mm(m), d, i, h) entonces devolver falso fin
+        copia_texto(nombre, dirección(h.nombre[0]), 256)
+        carpeta := h.atrib yb 0x10 <> 0
+        ino := h.pos + 1
+        galleta := i + 2
+        devolver cierto
+    fin
+
+    público función ex_lee(m: nat32, n: puntero a Nodo, pos: nat64, a: nat64, cuánto: nat64): ent64
+        variable x: puntero a Montaje
+        variable hecho, c, dentro, trozo: nat64
+        x := mm(m)
+        si pos >= n.tamaño entonces devolver 0 fin
+        si cuánto > n.tamaño - pos entonces cuánto := n.tamaño - pos fin
+        hecho := 0
+        mientras hecho < cuánto hacer
+            dentro := pos mod x.oct_cúmulo
+            trozo := x.oct_cúmulo - dentro
+            si trozo > cuánto - hecho entonces trozo := cuánto - hecho fin
+            si pos >= n.válido entonces
+                ceros_k(a + hecho, trozo)
+            sino
+                si pos + trozo > n.válido entonces trozo := n.válido - pos fin
+                c := cúmulo_de(x, n, pos div x.oct_cúmulo)
+                si c = 0 o no cb_lee(x.disco, pos_cúmulo(x, c) + dentro, a + hecho, trozo) entonces
+                    si hecho > 0 entonces devolver ent64(hecho) fin
+                    devolver EIO
+                fin
+            fin
+            hecho := hecho + trozo
+            pos := pos + trozo
+        fin
+        devolver ent64(hecho)
+    fin
+
+fin Exfat64.

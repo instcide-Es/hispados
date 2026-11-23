@@ -493,7 +493,7 @@ módulo PrSmp64
         k := último()
         si qué = 1 entonces escribir("Prueba: un fallo de página en un hilo del procesador ", k, "...\n") fin
         si qué = 2 entonces escribir("Prueba: abrir un mutex sin haberlo cerrado, en un hilo del procesador ", k, "...\n") fin
-        si qué = 3 entonces escribir("Prueba: una función que se llama a sí misma sin fin, en un hilo (su pila es de 16 KB)...\n") fin
+        si qué = 3 entonces escribir("Prueba: una función que se llama a sí misma sin fin, en un hilo (su pila es de 32 KB)...\n") fin
         h := crea(nat64(dirección(pánico)), nat64(qué), "pánico", NORMAL, k)
         une(h)
         escribir("¡No se ha parado!\n")

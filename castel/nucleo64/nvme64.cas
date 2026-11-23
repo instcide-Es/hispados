@@ -1,0 +1,541 @@
+; =============================================================================
+;  nvme64.cas - Hispa-64, etapa 5: los discos NVMe (docs/64/HISPA-64.md,
+;  sección 11), según «NVM Express Base Specification 2.0».
+;
+;  La controladora se ve en su BAR 0 (de 64 bits, donde esté: también por
+;  encima de 4 GB). Se le habla por colas en la memoria: una de órdenes
+;  (64 octetos cada una) y otra de respuestas (16), con un «timbre» (un
+;  registro) para cada una. La cola 0 es la de administración (decir quién
+;  es, crear las demás); las de E/S, **una por procesador** (hasta 8, o las
+;  que dé la controladora): cada procesador manda por la suya, sin esperar a
+;  los demás. Cada cola tiene su mutex (una orden en marcha por cola) y su
+;  suceso, que señala la interrupción.
+;
+;  Las interrupciones, por MSI-X (la entrada 0 para todas las colas), o MSI;
+;  si no hay, se mira la cola. Al esperar una respuesta: primero se mira un
+;  momento (las rápidas no duermen), luego se duerme en el suceso de la cola
+;  (con plazo: si la interrupción no llega, se vuelve a mirar), y a los 5 s
+;  sin respuesta, la orden falla.
+;
+;  Los datos van por DMA a memoria física seguida (los bloques de la caché,
+;  una página; o trozos más grandes): PRP1, PRP2 o una lista de PRP (una
+;  página por cola), hasta 128 KB por orden (o lo que diga MDTS).
+;  Órdenes: Identify (la controladora y los espacios de nombres), Set
+;  Features (cuántas colas), Create I/O CQ/SQ, Read, Write y Flush.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Nvme64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64
+
+    público constante MAX_CTL = 4
+    público constante MAX_NS = 8               ; los discos (espacios de nombres), de todas
+    constante MAX_COLAS = 9                     ; la de administración y 8 de E/S
+    constante ENTRADAS = 64                     ; por cola
+    constante POR_ORDEN = 32                    ; páginas por orden, como mucho (128 KB)
+
+    ; ---- una controladora ----
+    tipo Ctl = estructura
+        aparato: nat32              ; su número en Pci64
+        modo: nat32                 ; NINGUNA, CON_MSI, CON_MSIX
+        regs: nat64                 ; dónde se ven sus registros
+        timbre: nat64               ; la distancia entre timbres (4 << DSTRD)
+        colas: nat32                ; las de E/S
+        máx_pág: nat32              ; páginas por orden
+        vwc: nat32                  ; 1: tiene caché de escritura (hay que vaciarla: Flush)
+        nn: nat32                   ; cuántos espacios de nombres dice
+        ver: nat32
+        nada: nat32
+        sq, cq, prp: arreglo [MAX_COLAS] de nat64        ; las páginas de cada cola (física)
+        sq_cola, cq_cabeza, cq_fase: arreglo [MAX_COLAS] de nat32
+        próx_cid: arreglo [MAX_COLAS] de nat32
+        mutex: arreglo [MAX_COLAS] de Mutex
+        suceso: arreglo [MAX_COLAS] de Suceso
+        ident: nat64                ; una página para lo que dice Identify (física)
+        modelo: arreglo [41] de byte
+        serie: arreglo [21] de byte
+    fin
+
+    variable ctls: arreglo [MAX_CTL] de nat64
+    público variable nv_n_ctl: nat32
+    variable vector: nat32
+
+    ; ---- los discos (cada espacio de nombres activo) ----
+    público variable nv_n_discos: nat32
+    variable d_ctl, d_ns, d_sector: arreglo [MAX_NS] de nat32
+    variable d_sectores: arreglo [MAX_NS] de nat64
+
+    ; ---- lo que se cuenta ----
+    público variable nv_interrupciones, nv_sin_aviso, nv_órdenes, nv_fallos: nat64
+    público variable nv_sectores_leídos, nv_sectores_escritos: nat64
+    público variable nv_por_cola: arreglo [MAX_COLAS] de nat64      ; las nv_órdenes de E/S de cada cola (de todas)
+    público variable nv_motivo: puntero a byte     ; por qué no ha salido la última
+
+    función ctl(c: nat32): puntero a Ctl
+        devolver puntero(ctls[c])
+    fin
+
+    función r32(x: puntero a Ctl, r: nat32): nat32
+        devolver m32(x.regs + r)
+    fin
+
+    función r64(x: puntero a Ctl, r: nat32): nat64
+        devolver nat64(m32(x.regs + r)) ob (nat64(m32(x.regs + r + 4)) << 32)
+    fin
+
+    función p32(x: puntero a Ctl, r: nat32, v: nat32)
+        pon_m32(x.regs + r, v)
+    fin
+
+    función p64(x: puntero a Ctl, r: nat32, v: nat64)
+        pon_m32(x.regs + r, nat32(v))
+        pon_m32(x.regs + r + 4, nat32(v >> 32))
+    fin
+
+    función ceros(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    función página(): nat64
+        variable f: nat64
+        f := pide()
+        si f <> 0 entonces ceros(virt(f), 4096) fin
+        devolver f
+    fin
+
+    ; el texto de Identify (con espacios a la derecha), limpio
+    función copia_texto(d: nat64, n: nat32, t: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras i < n hacer
+            t[i] := byte(m8(d + i))
+            si t[i] < 32 o t[i] > 126 entonces t[i] := ' ' fin
+            i := i + 1
+        fin
+        mientras i > 0 y t[i - 1] = ' ' hacer i := i - 1 fin
+        t[i] := 0
+    fin
+
+    ; ---- la interrupción: despierta a quien espere en una cola con respuesta ----
+    interrupción función int_nvme()
+        variable c, q: nat32
+        variable x: puntero a Ctl
+        nv_interrupciones := nv_interrupciones + 1
+        c := 0
+        mientras c < nv_n_ctl hacer
+            x := ctl(c)
+            q := 0
+            mientras q <= x.colas hacer
+                si x.cq[q] <> 0 entonces
+                    si (m32(virt(x.cq[q]) + nat64(x.cq_cabeza[q]) * 16 + 12) >> 16) yb 1 = x.cq_fase[q] entonces señala(dirección(x.suceso[q])) fin
+                fin
+                q := q + 1
+            fin
+            c := c + 1
+        fin
+        eoi()
+    fin
+
+    ; ---- mandar una orden y esperar su respuesta ----
+    ; (con el mutex de la cola q cerrado) la orden de 16 palabras «o» (su cid
+    ; lo pone esta); devuelve el estado (0: bien) y el resultado en «res»
+    función manda(x: puntero a Ctl, q: nat32, ref ord: arreglo [16] de nat32, ref res: nat32): nat32
+        variable sq, e: nat64
+        variable cid, i, w3, vueltas: nat32
+        variable t0: nat64
+        cid := x.próx_cid[q]
+        x.próx_cid[q] := (cid + 1) yb 0xFFFF
+        ord[0] := (ord[0] yb 0xFFFF) ob (cid << 16)
+        sq := virt(x.sq[q]) + nat64(x.sq_cola[q]) * 64
+        i := 0
+        mientras i < 16 hacer
+            pon_m32(sq + nat64(i) * 4, ord[i])
+            i := i + 1
+        fin
+        x.sq_cola[q] := (x.sq_cola[q] + 1) mod ENTRADAS
+        rearma(dirección(x.suceso[q]))
+        ensamblador
+            mfence
+        fin
+        p32(x, 0x1000 + nat32(x.timbre) * (2 * q), x.sq_cola[q])
+        nv_órdenes := nv_órdenes + 1
+        t0 := ahora_ns()
+        vueltas := 0
+        mientras cierto hacer
+            e := virt(x.cq[q]) + nat64(x.cq_cabeza[q]) * 16
+            w3 := m32(e + 12)
+            si (w3 >> 16) yb 1 = x.cq_fase[q] entonces
+                res := m32(e)
+                x.cq_cabeza[q] := x.cq_cabeza[q] + 1
+                si x.cq_cabeza[q] >= ENTRADAS entonces
+                    x.cq_cabeza[q] := 0
+                    x.cq_fase[q] := x.cq_fase[q] xob 1
+                fin
+                p32(x, 0x1000 + nat32(x.timbre) * (2 * q + 1), x.cq_cabeza[q])
+                si w3 yb 0xFFFF = cid entonces
+                    si (w3 >> 17) <> 0 entonces nv_fallos := nv_fallos + 1 fin
+                    devolver w3 >> 17
+                fin
+                seguir
+            fin
+            vueltas := vueltas + 1
+            si ahora_ns() - t0 > 5000000000 entonces
+                nv_fallos := nv_fallos + 1
+                nv_motivo := "la orden no contesta en 5 s"
+                devolver 0xFFFF
+            fin
+            si vueltas < 400 o no va entonces
+                pausa()
+            sino si x.modo <> NINGUNA y tic_va entonces
+                si no espera_plazo(dirección(x.suceso[q]), 20000000) entonces nv_sin_aviso := nv_sin_aviso + 1 fin
+                rearma(dirección(x.suceso[q]))
+            sino
+                cede()
+            fin
+        fin
+        devolver 0xFFFF
+    fin
+
+    función vacía(ref ord: arreglo [16] de nat32)
+        variable i: nat32
+        i := 0
+        mientras i < 16 hacer
+            ord[i] := 0
+            i := i + 1
+        fin
+    fin
+
+    ; una orden de administración (cola 0)
+    función admin(x: puntero a Ctl, ref ord: arreglo [16] de nat32, ref res: nat32): nat32
+        variable e: nat32
+        cierra_mutex(dirección(x.mutex[0]))
+        e := manda(x, 0, ord, res)
+        abre_mutex(dirección(x.mutex[0]))
+        devolver e
+    fin
+
+    función identifica(x: puntero a Ctl, cns: nat32, nsid: nat32): bool
+        variable ord: arreglo [16] de nat32
+        variable r: nat32
+        vacía(ord)
+        ord[0] := 0x06
+        ord[1] := nsid
+        ord[6] := nat32(x.ident)
+        ord[7] := nat32(x.ident >> 32)
+        ord[10] := cns
+        devolver admin(x, ord, r) = 0
+    fin
+
+    ; ---- poner en marcha una controladora ----
+    función espera_listo(x: puntero a Ctl, listo: nat32, ms: nat64): bool
+        variable t0: nat64
+        t0 := ahora_ns()
+        mientras (r32(x, 0x1C) yb 1) <> listo hacer
+            si r32(x, 0x1C) yb 2 <> 0 entonces
+                nv_motivo := "la controladora dice que ha fallado (CSTS.CFS)"
+                devolver falso
+            fin
+            si ahora_ns() - t0 > ms * 1000000 entonces
+                nv_motivo := "la controladora no se pone lista a tiempo"
+                devolver falso
+            fin
+            si va entonces cede() sino pausa() fin
+        fin
+        devolver cierto
+    fin
+
+    función crea_cola(x: puntero a Ctl, q: nat32): bool
+        variable ord: arreglo [16] de nat32
+        variable r: nat32
+        x.sq[q] := página()
+        x.cq[q] := página()
+        x.prp[q] := página()
+        si x.sq[q] = 0 o x.cq[q] = 0 o x.prp[q] = 0 entonces
+            nv_motivo := "no queda memoria"
+            devolver falso
+        fin
+        x.cq_fase[q] := 1
+        ; la de respuestas (con interrupción, la 0 de MSI-X)
+        vacía(ord)
+        ord[0] := 0x05
+        ord[6] := nat32(x.cq[q])
+        ord[7] := nat32(x.cq[q] >> 32)
+        ord[10] := ((ENTRADAS - 1) << 16) ob q
+        ord[11] := 1
+        si x.modo <> NINGUNA entonces ord[11] := 3 fin
+        si admin(x, ord, r) <> 0 entonces
+            nv_motivo := "no se puede crear una cola de respuestas"
+            devolver falso
+        fin
+        ; la de órdenes, que contesta en esa
+        vacía(ord)
+        ord[0] := 0x01
+        ord[6] := nat32(x.sq[q])
+        ord[7] := nat32(x.sq[q] >> 32)
+        ord[10] := ((ENTRADAS - 1) << 16) ob q
+        ord[11] := (q << 16) ob 1
+        si admin(x, ord, r) <> 0 entonces
+            nv_motivo := "no se puede crear una cola de órdenes"
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; el aparato i de PCI: cierto si queda en marcha (y sus discos, apuntados)
+    función pon_ctl(i: nat32, sin_msix: bool): bool
+        variable x: puntero a Ctl
+        variable cap, base, tam: nat64
+        variable ord: arreglo [16] de nat32
+        variable r, q, n, ns, lbads: nat32
+        variable id: nat64
+        x := puntero(nat64(reserva(tamaño(Ctl))))
+        si x = nulo entonces
+            nv_motivo := "no queda memoria"
+            devolver falso
+        fin
+        ceros(nat64(x), tamaño(Ctl))
+        x.aparato := i
+        base := bar_mem(i, 0)
+        tam := bar_largo(i, 0)
+        si base = 0 o tam < 0x2000 entonces
+            nv_motivo := "su BAR 0 no es de memoria"
+            libera(puntero(nat64(x)))
+            devolver falso
+        fin
+        habilita(i, falso)
+        x.regs := mapea_disp(base, tam, sin_caché())
+        cap := r64(x, 0)
+        x.ver := r32(x, 8)
+        x.timbre := nat64(4) << ((cap >> 32) yb 15)
+        si (cap >> 37) yb 1 = 0 entonces
+            nv_motivo := "no sabe la orden NVM (CAP.CSS)"
+            devolver falso
+        fin
+        ; parada, sus colas de administración, y en marcha
+        si r32(x, 0x14) yb 1 <> 0 entonces
+            p32(x, 0x14, r32(x, 0x14) yb 0xFFFFFFFE)
+        fin
+        si no espera_listo(x, 0, 500 * ((cap >> 24) yb 0xFF) + 1000) entonces devolver falso fin
+        x.sq[0] := página()
+        x.cq[0] := página()
+        x.ident := página()
+        si x.sq[0] = 0 o x.cq[0] = 0 o x.ident = 0 entonces
+            nv_motivo := "no queda memoria"
+            devolver falso
+        fin
+        x.cq_fase[0] := 1
+        p32(x, 0x24, ((ENTRADAS - 1) << 16) ob (ENTRADAS - 1))
+        p64(x, 0x28, x.sq[0])
+        p64(x, 0x30, x.cq[0])
+        ; las interrupciones, antes de nada (la cola 0 también las usa)
+        x.modo := pon_mensajes(i, vector, sin_msix)
+        si x.modo = NINGUNA entonces habilita(i, cierto) fin
+        p32(x, 0x14, (4 << 20) ob (6 << 16) ob 1)
+        si no espera_listo(x, 1, 500 * ((cap >> 24) yb 0xFF) + 1000) entonces devolver falso fin
+        ; ya puede contestar (antes de que se use en manda)
+        ctls[nv_n_ctl] := nat64(x)
+        nv_n_ctl := nv_n_ctl + 1
+        ; quién es
+        si no identifica(x, 1, 0) entonces
+            nv_motivo := "no contesta a Identify"
+            nv_n_ctl := nv_n_ctl - 1
+            devolver falso
+        fin
+        id := virt(x.ident)
+        copia_texto(id + 24, 40, dirección(x.modelo[0]))
+        copia_texto(id + 4, 20, dirección(x.serie[0]))
+        x.máx_pág := POR_ORDEN
+        r := m8(id + 77)
+        si r <> 0 y r < 5 entonces
+            ; (MDTS: 2^r páginas de las más pequeñas, que son de 4 KB o más)
+            si (nat32(1) << r) < x.máx_pág entonces x.máx_pág := nat32(1) << r fin
+        fin
+        x.vwc := m8(id + 525) yb 1
+        x.nn := m32(id + 516)
+        ; las colas de E/S: una por procesador
+        n := n_cpus
+        si n > MAX_COLAS - 1 entonces n := MAX_COLAS - 1 fin
+        si n = 0 entonces n := 1 fin
+        vacía(ord)
+        ord[0] := 0x09
+        ord[10] := 7
+        ord[11] := ((n - 1) << 16) ob (n - 1)
+        si admin(x, ord, r) = 0 entonces
+            si (r yb 0xFFFF) + 1 < n entonces n := (r yb 0xFFFF) + 1 fin
+            si (r >> 16) + 1 < n entonces n := (r >> 16) + 1 fin
+        sino
+            n := 1
+        fin
+        q := 1
+        mientras q <= n hacer
+            si no crea_cola(x, q) entonces
+                si q = 1 entonces
+                    nv_n_ctl := nv_n_ctl - 1
+                    devolver falso
+                fin
+                romper
+            fin
+            x.colas := q
+            q := q + 1
+        fin
+        ; sus espacios de nombres (los primeros, activos)
+        ns := 1
+        mientras ns <= x.nn y ns <= 16 y nv_n_discos < MAX_NS hacer
+            si identifica(x, 0, ns) entonces
+                id := virt(x.ident)
+                si m64(id) <> 0 entonces
+                    lbads := (m32(id + 128 + (m8(id + 26) yb 15) * 4) >> 16) yb 0xFF
+                    si lbads >= 9 y lbads <= 12 entonces
+                        d_ctl[nv_n_discos] := nv_n_ctl - 1
+                        d_ns[nv_n_discos] := ns
+                        d_sector[nv_n_discos] := nat32(1) << lbads
+                        d_sectores[nv_n_discos] := m64(id)
+                        nv_n_discos := nv_n_discos + 1
+                    fin
+                fin
+            fin
+            ns := ns + 1
+        fin
+        devolver cierto
+    fin
+
+    ; todas las controladoras NVMe de PCI (clase 01, 08, 02)
+    público función prepara_nvme(sin_msix: bool)
+        variable i: nat32
+        vector := pide_vector()
+        si vector <> 0 entonces pon_vector(vector, nat64(dirección(int_nvme))) fin
+        i := 0
+        mientras i < pci_n y nv_n_ctl < MAX_CTL hacer
+            si clase_de(i) = 0x010802 entonces
+                escribir("NVMe: ")
+                escribe_bdf(i)
+                escribir(" ")
+                hex4(fab_de(i))
+                escribir(":")
+                hex4(apa_de(i))
+                si pon_ctl(i, sin_msix) entonces
+                    escribir(", «", ctl(nv_n_ctl - 1).modelo, "» (serie ", ctl(nv_n_ctl - 1).serie, "), versión ", ctl(nv_n_ctl - 1).ver >> 16, ".", (ctl(nv_n_ctl - 1).ver >> 8) yb 0xFF)
+                    escribir("\n  BAR 0 en ")
+                    hex(bar_mem(i, 0))
+                    si bar_mem(i, 0) >= nat64(1) << 32 entonces escribir(" (por encima de 4 GB)") fin
+                    escribir("; ", ctl(nv_n_ctl - 1).colas, " colas de E/S (una por procesador) de ", ENTRADAS, " órdenes; ")
+                    escribe_modo(ctl(nv_n_ctl - 1).modo)
+                    escribir("; hasta ", ctl(nv_n_ctl - 1).máx_pág * 4, " KB por orden")
+                    si ctl(nv_n_ctl - 1).vwc <> 0 entonces escribir("; con caché de escritura") fin
+                    escribir("\n")
+                sino
+                    escribir(": no se pone en marcha: ", nv_motivo, "\n")
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; ---- lo que piden los discos (Bloques64) ----
+    público función nvme_sector(d: nat32): nat32
+        devolver d_sector[d]
+    fin
+
+    público función nvme_sectores(d: nat32): nat64
+        devolver d_sectores[d]
+    fin
+
+    público función nvme_ctl(d: nat32): nat32
+        devolver d_ctl[d]
+    fin
+
+    público función nvme_ns(d: nat32): nat32
+        devolver d_ns[d]
+    fin
+
+    público función nvme_modelo(d: nat32): puntero a byte
+        devolver dirección(ctl(d_ctl[d]).modelo[0])
+    fin
+
+    ; lee o escribe n sectores desde lba, de o a la memoria física seguida «fís»
+    ; (alineada a 4 KB); cierto si sale bien
+    público función nvme_es(d: nat32, lba: nat64, n: nat64, fís: nat64, escribe: bool): bool
+        variable x: puntero a Ctl
+        variable q, k, págs, trozo, por_vez, r: nat32
+        variable ord: arreglo [16] de nat32
+        variable lista, bytes: nat64
+        variable bien: bool
+        si d >= nv_n_discos entonces devolver falso fin
+        si lba + n > d_sectores[d] o lba + n < lba entonces
+            nv_motivo := "más allá del final del disco"
+            devolver falso
+        fin
+        x := ctl(d_ctl[d])
+        q := 1 + yo().número mod x.colas
+        por_vez := x.máx_pág * 4096 div d_sector[d]
+        bien := cierto
+        cierra_mutex(dirección(x.mutex[q]))
+        mientras n > 0 y bien hacer
+            trozo := por_vez
+            si n < nat64(trozo) entonces trozo := nat32(n) fin
+            bytes := nat64(trozo) * d_sector[d]
+            págs := nat32((bytes + 4095) div 4096)
+            vacía(ord)
+            si escribe entonces ord[0] := 0x01 sino ord[0] := 0x02 fin
+            ord[1] := d_ns[d]
+            ord[6] := nat32(fís)
+            ord[7] := nat32(fís >> 32)
+            si págs = 2 entonces
+                ord[8] := nat32(fís + 4096)
+                ord[9] := nat32((fís + 4096) >> 32)
+            sino si págs > 2 entonces
+                lista := virt(x.prp[q])
+                k := 1
+                mientras k < págs hacer
+                    pon_m64(lista + nat64(k - 1) * 8, fís + nat64(k) * 4096)
+                    k := k + 1
+                fin
+                ord[8] := nat32(x.prp[q])
+                ord[9] := nat32(x.prp[q] >> 32)
+            fin
+            ord[10] := nat32(lba)
+            ord[11] := nat32(lba >> 32)
+            ord[12] := trozo - 1
+            si manda(x, q, ord, r) <> 0 entonces
+                bien := falso
+                nv_motivo := "el disco da un error"
+            fin
+            nv_por_cola[q] := nv_por_cola[q] + 1
+            si escribe entonces nv_sectores_escritos := nv_sectores_escritos + trozo sino nv_sectores_leídos := nv_sectores_leídos + trozo fin
+            lba := lba + trozo
+            fís := fís + bytes
+            n := n - trozo
+        fin
+        abre_mutex(dirección(x.mutex[q]))
+        devolver bien
+    fin
+
+    ; que lo escrito quede en el disco (Flush), si tiene caché de escritura
+    público función nvme_vacía(d: nat32): bool
+        variable x: puntero a Ctl
+        variable q, r: nat32
+        variable ord: arreglo [16] de nat32
+        variable e: nat32
+        si d >= nv_n_discos entonces devolver falso fin
+        x := ctl(d_ctl[d])
+        si x.vwc = 0 entonces devolver cierto fin
+        q := 1 + yo().número mod x.colas
+        vacía(ord)
+        ord[0] := 0x00
+        ord[1] := d_ns[d]
+        cierra_mutex(dirección(x.mutex[q]))
+        e := manda(x, q, ord, r)
+        abre_mutex(dirección(x.mutex[q]))
+        devolver e = 0
+    fin
+
+    público función colas_de(d: nat32): nat32
+        devolver ctl(d_ctl[d]).colas
+    fin
+
+fin Nvme64.

@@ -1,0 +1,923 @@
+; =============================================================================
+;  vfs64.cas - Hispa-64, etapa 5: el VFS, el sistema de archivos virtual
+;  (docs/64/HISPA-64.md, sección 11): una sola forma de ver los archivos, sea
+;  cual sea el sistema que los guarda.
+;
+;   - **Los montajes**: «/» es la unidad en memoria (los módulos del cargador,
+;     de solo leer: un sistema de archivos más); cada volumen de un disco que
+;     se sabe leer (FAT32, exFAT) se ve en «/» con el nombre de su disco o
+;     partición: «/nvme0p1», «/sata0p2»... (y la raíz los lista como carpetas).
+;   - **Las rutas**: absolutas, o desde una carpeta abierta (openat y
+;     compañía) o desde la carpeta actual del proceso; con «.» y «..»
+;     resueltos antes (no hay enlaces); se busca el montaje más largo que
+;     encaje y, dentro, trozo a trozo, sin mirar mayúsculas (FAT, exFAT).
+;   - **Lo abierto** (Abierto: el nodo, la posición, las marcas de open; lo
+;     comparten los descriptores hechos con dup), y lo de Linux: open/openat
+;     con O_CREAT, O_EXCL, O_TRUNC, O_APPEND y O_DIRECTORY, read y write (y
+;     pread y pwrite), lseek, getdents64, stat/fstat/newfstatat (la estructura
+;     de Linux x86-64), mkdir, unlink y rmdir, rename (también entre
+;     carpetas), ftruncate, fsync y sync. Los errores, los de Linux.
+;  Todo con el mutex del VFS (Archivos64): una operación a la vez; los discos
+;  (la caché, NVMe, SATA) tienen sus propios cerrojos.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Vfs64
+
+    importar Cifras64, Es64, Monton64, Hilos64, Sinc64, Bloques64, Unidad64, Archivos64, Fat64, Exfat64
+
+    público constante O_ACCESO = 3
+    público constante O_RDONLY = 0
+    público constante O_WRONLY = 1
+    público constante O_RDWR = 2
+    público constante O_CREAT = 0x40
+    público constante O_EXCL = 0x80
+    público constante O_TRUNC = 0x200
+    público constante O_APPEND = 0x400
+    público constante O_DIRECTORY = 0x10000
+
+    público tipo Abierto = estructura
+        nodo: nat64
+        pos: nat64
+        marcas: nat64
+        refs: nat64
+        ruta: nat64                 ; su ruta absoluta (para openat desde ella)
+    fin
+
+    público variable abiertos: nat64            ; los Abierto que hay
+    variable fs_error: ent64
+
+    función ab(d: nat64): puntero a Abierto
+        devolver puntero(d)
+    fin
+
+    función mm(m: nat32): puntero a Montaje
+        devolver montaje(m)
+    fin
+
+    ; ---- la unidad en memoria como sistema de archivos ----
+    función unidad_busca(m: nat32, nombre: puntero a byte): puntero a Nodo
+        variable k: ent32
+        variable n: puntero a Nodo
+        k := busca_archivo(nombre)
+        si k < 0 entonces
+            fs_error := ENOENT
+            devolver nulo
+        fin
+        n := busca_nodo(m, nat64(k) + 1)
+        si n <> nulo entonces devolver n fin
+        n := nuevo_nodo(m, nat64(k) + 1, N_ARCHIVO)
+        si n = nulo entonces
+            fs_error := ENOMEM
+            devolver nulo
+        fin
+        n.primero := nat64(k)
+        n.tamaño := cuánto(nat32(k))
+        n.mtime := ahora_unix()
+        devolver n
+    fin
+
+    ; ---- lo de cada clase ----
+    función fs_busca(m: nat32, d: puntero a Nodo, nombre: puntero a byte): puntero a Nodo
+        variable n: puntero a Nodo
+        n := nulo
+        según nat16(mm(m).clase)
+            caso FS_UNIDAD: n := unidad_busca(m, nombre)
+            caso FS_FAT:
+                n := fat_busca(m, d, nombre)
+                fs_error := fat_error
+            caso FS_EXFAT:
+                n := ex_busca(m, d, nombre)
+                fs_error := ex_error
+        fin
+        si n = nulo y fs_error = 0 entonces fs_error := ENOENT fin
+        devolver n
+    fin
+
+    función fs_lee(n: puntero a Nodo, pos: nat64, a: nat64, cuánto_: nat64): ent64
+        según nat16(mm(n.montaje).clase)
+            caso FS_UNIDAD:
+                si pos >= n.tamaño entonces devolver 0 fin
+                si cuánto_ > n.tamaño - pos entonces cuánto_ := n.tamaño - pos fin
+                copia_k(a, dónde(nat32(n.primero)) + pos, cuánto_)
+                devolver ent64(cuánto_)
+            caso FS_FAT: devolver fat_lee(n.montaje, n, pos, a, cuánto_)
+            caso FS_EXFAT: devolver ex_lee(n.montaje, n, pos, a, cuánto_)
+        fin
+        devolver EIO
+    fin
+
+    ; suelta una referencia del nodo (si era la última de uno borrado, sus cúmulos)
+    función suelta(n: puntero a Nodo)
+        si n.refs = 1 y n.borrado <> 0 y mm(n.montaje).clase = FS_FAT entonces fat_suelta(n.montaje, n) fin
+        suelta_nodo(n)
+    fin
+
+    ; ---- las rutas ----
+    ; la ruta absoluta y limpia (sin «.», «..», ni «//») de «ruta» vista desde
+    ; la carpeta «base» (absoluta); en t (LARGO_RUTA); falso si es muy larga
+    público función normaliza(base: puntero a byte, ruta: puntero a byte, t: puntero a byte): bool
+        variable n, i, j, k: nat32
+        variable fuente: puntero a byte
+        variable vez: nat32
+        t[0] := '/'
+        t[1] := 0
+        n := 1
+        vez := 0
+        si ruta[0] = '/' o base = nulo entonces vez := 1 fin
+        mientras vez < 2 hacer
+            si vez = 0 entonces fuente := base sino fuente := ruta fin
+            i := 0
+            mientras fuente[i] <> 0 hacer
+                mientras fuente[i] = '/' hacer i := i + 1 fin
+                si fuente[i] = 0 entonces romper fin
+                j := i
+                mientras fuente[j] <> 0 y fuente[j] <> '/' hacer j := j + 1 fin
+                si j - i = 1 y fuente[i] = '.' entonces
+                    ; nada
+                sino si j - i = 2 y fuente[i] = '.' y fuente[i + 1] = '.' entonces
+                    ; uno atrás
+                    si n > 1 entonces
+                        n := n - 1
+                        mientras n > 0 y t[n - 1] <> '/' hacer n := n - 1 fin
+                        si n > 1 entonces n := n - 1 fin
+                    fin
+                sino
+                    si j - i >= Archivos64.LARGO_NOMBRE entonces devolver falso fin
+                    si n + (j - i) + 2 >= LARGO_RUTA entonces devolver falso fin
+                    si n > 1 entonces
+                        t[n] := '/'
+                        n := n + 1
+                    fin
+                    k := i
+                    mientras k < j hacer
+                        t[n] := fuente[k]
+                        n := n + 1
+                        k := k + 1
+                    fin
+                fin
+                t[n] := 0
+                i := j
+            fin
+            vez := vez + 1
+        fin
+        t[n] := 0
+        devolver cierto
+    fin
+
+    función baja(c: nat32): nat32
+        si c >= 'A' y c <= 'Z' entonces devolver c + 32 fin
+        devolver c
+    fin
+
+    ; el montaje de la ruta absoluta t (el más largo que encaja); en «resto», dónde
+    ; empieza lo de dentro de él
+    función montaje_de(t: puntero a byte, ref resto: nat32): nat32
+        variable m, mejor, l, mejor_l, i: nat32
+        variable r: puntero a byte
+        mejor := 0
+        mejor_l := 0
+        m := 0
+        mientras m < n_montajes hacer
+            si mm(m).en_uso <> 0 entonces
+                r := dirección(mm(m).ruta[0])
+                l := largo(r)
+                si l = 1 entonces
+                    si mejor_l = 0 entonces
+                        mejor := m
+                        mejor_l := 1
+                    fin
+                sino
+                    i := 0
+                    mientras i < l y baja(t[i]) = baja(r[i]) hacer i := i + 1 fin
+                    si i = l y (t[l] = 0 o t[l] = '/') y l > mejor_l entonces
+                        mejor := m
+                        mejor_l := l
+                    fin
+                fin
+            fin
+            m := m + 1
+        fin
+        resto := mejor_l
+        si mejor_l = 1 entonces resto := 0 fin
+        devolver mejor
+    fin
+
+    ; el nodo de la ruta absoluta t (con una referencia), o nulo y fs_error
+    ; con «padre»: el de su carpeta, y en «último» el último trozo (vacío si
+    ; es la raíz de un montaje)
+    función camina(t: puntero a byte, padre: bool, último: puntero a byte, ref m: nat32): puntero a Nodo
+        variable resto, i, j, k: nat32
+        variable n, sig: puntero a Nodo
+        variable trozo: arreglo [256] de byte
+        m := montaje_de(t, resto)
+        n := nodo(mm(m).raíz)
+        toma_nodo(n)
+        si último <> nulo entonces último[0] := 0 fin
+        i := resto
+        mientras cierto hacer
+            mientras t[i] = '/' hacer i := i + 1 fin
+            si t[i] = 0 entonces devolver n fin
+            j := i
+            k := 0
+            mientras t[j] <> 0 y t[j] <> '/' hacer
+                si k < 255 entonces
+                    trozo[k] := t[j]
+                    k := k + 1
+                fin
+                j := j + 1
+            fin
+            trozo[k] := 0
+            ; ¿es el último trozo?
+            k := j
+            mientras t[k] = '/' hacer k := k + 1 fin
+            si padre y t[k] = 0 entonces
+                si último <> nulo entonces copia_texto(último, dirección(trozo[0]), 256) fin
+                devolver n
+            fin
+            si n.clase <> N_CARPETA entonces
+                suelta(n)
+                fs_error := ENOTDIR
+                devolver nulo
+            fin
+            sig := fs_busca(m, n, dirección(trozo[0]))
+            suelta(n)
+            si sig = nulo entonces devolver nulo fin
+            n := sig
+            i := j
+        fin
+        devolver nulo
+    fin
+
+    ; ---- abrir y cerrar ----
+    función nuevo_abierto(n: puntero a Nodo, marcas: nat64, t: puntero a byte): puntero a Abierto
+        variable a: puntero a Abierto
+        variable r: nat64
+        a := puntero(nat64(reserva(tamaño(Abierto))))
+        si a = nulo entonces devolver nulo fin
+        r := nat64(reserva(nat64(largo(t)) + 1))
+        si r = 0 entonces
+            libera(puntero(nat64(a)))
+            devolver nulo
+        fin
+        copia_texto(puntero(r), t, largo(t) + 1)
+        a.nodo := nat64(n)
+        a.pos := 0
+        a.marcas := marcas
+        a.refs := 1
+        a.ruta := r
+        abiertos := abiertos + 1
+        devolver a
+    fin
+
+    ; abre «ruta» (desde la carpeta base, absoluta; nulo: «/») con las marcas
+    ; de open de Linux; nulo y en «err» el error si no se puede
+    público función vfs_abre(base: puntero a byte, ruta: puntero a byte, marcas: nat64, ref err: ent64): puntero a Abierto
+        variable t: puntero a byte
+        variable último: arreglo [256] de byte
+        variable d, n: puntero a Nodo
+        variable m: nat32
+        variable a: puntero a Abierto
+        variable escribe: bool
+        err := 0
+        si ruta[0] = 0 entonces
+            err := ENOENT
+            devolver nulo
+        fin
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces
+            err := ENOMEM
+            devolver nulo
+        fin
+        si no normaliza(base, ruta, t) entonces
+            libera(t)
+            err := ENAMETOOLONG
+            devolver nulo
+        fin
+        escribe := marcas yb O_ACCESO <> O_RDONLY
+        cierra_vfs()
+        fs_error := 0
+        d := camina(t, cierto, dirección(último[0]), m)
+        si d = nulo entonces
+            err := fs_error
+        sino si último[0] = 0 entonces
+            ; la raíz de un montaje
+            n := d
+        sino
+            si d.clase <> N_CARPETA entonces
+                err := ENOTDIR
+                suelta(d)
+                d := nulo
+            sino
+                n := fs_busca(m, d, dirección(último[0]))
+                si n = nulo entonces
+                    si fs_error <> ENOENT o marcas yb O_CREAT = 0 entonces
+                        err := fs_error
+                    sino si mm(m).solo_leer <> 0 entonces
+                        err := EROFS
+                    sino
+                        n := fat_crea(m, d, dirección(último[0]), falso)
+                        si n = nulo entonces err := fat_error fin
+                    fin
+                sino si marcas yb (O_CREAT ob O_EXCL) = O_CREAT ob O_EXCL entonces
+                    err := EEXIST
+                    suelta(n)
+                    n := nulo
+                fin
+                suelta(d)
+            fin
+        fin
+        a := nulo
+        si err = 0 entonces
+            si n.clase = N_CARPETA y escribe entonces err := EISDIR
+            sino si n.clase <> N_CARPETA y marcas yb O_DIRECTORY <> 0 entonces err := ENOTDIR
+            sino si (escribe o marcas yb O_TRUNC <> 0) y mm(m).solo_leer <> 0 entonces err := EROFS
+            fin
+            si err = 0 y marcas yb O_TRUNC <> 0 y escribe y n.clase = N_ARCHIVO y n.tamaño > 0 entonces
+                err := fat_trunca(m, n, 0)
+            fin
+            si err = 0 entonces
+                a := nuevo_abierto(n, marcas, t)
+                si a = nulo entonces err := ENOMEM fin
+            fin
+            si err <> 0 entonces suelta(n) fin
+        fin
+        abre_vfs()
+        libera(t)
+        si err = 0 y a = nulo entonces err := ENOMEM fin
+        devolver a
+    fin
+
+    ; un descriptor más para lo mismo (dup)
+    público función vfs_otro(a: puntero a Abierto)
+        cierra_vfs()
+        a.refs := a.refs + 1
+        abre_vfs()
+    fin
+
+    público función vfs_cierra(a: puntero a Abierto)
+        cierra_vfs()
+        si a.refs > 1 entonces
+            a.refs := a.refs - 1
+        sino
+            suelta(nodo(a.nodo))
+            libera(puntero(a.ruta))
+            libera(puntero(nat64(a)))
+            abiertos := abiertos - 1
+        fin
+        abre_vfs()
+    fin
+
+    público función vfs_ruta(a: puntero a Abierto): puntero a byte
+        devolver puntero(a.ruta)
+    fin
+
+    público función vfs_es_carpeta(a: puntero a Abierto): bool
+        devolver nodo(a.nodo).clase = N_CARPETA
+    fin
+
+    público función vfs_tamaño(a: puntero a Abierto): nat64
+        devolver nodo(a.nodo).tamaño
+    fin
+
+    ; ---- leer y escribir ----
+    ; lee desde «pos» (o, si pos es -1, desde la suya, y la adelanta)
+    público función vfs_lee(a: puntero a Abierto, pos: ent64, k: nat64, n: nat64): ent64
+        variable r: ent64
+        variable nd: puntero a Nodo
+        si a.marcas yb O_ACCESO = O_WRONLY entonces devolver EBADF fin
+        nd := nodo(a.nodo)
+        si nd.clase = N_CARPETA entonces devolver EISDIR fin
+        cierra_vfs()
+        si pos < 0 entonces
+            r := fs_lee(nd, a.pos, k, n)
+            si r > 0 entonces a.pos := a.pos + nat64(r) fin
+        sino
+            r := fs_lee(nd, nat64(pos), k, n)
+        fin
+        abre_vfs()
+        devolver r
+    fin
+
+    público función vfs_escribe(a: puntero a Abierto, pos: ent64, k: nat64, n: nat64): ent64
+        variable r: ent64
+        variable nd: puntero a Nodo
+        variable p: nat64
+        si a.marcas yb O_ACCESO = O_RDONLY entonces devolver EBADF fin
+        nd := nodo(a.nodo)
+        si mm(nd.montaje).solo_leer <> 0 entonces devolver EROFS fin
+        si n = 0 entonces devolver 0 fin
+        cierra_vfs()
+        si pos < 0 entonces
+            p := a.pos
+            si a.marcas yb O_APPEND <> 0 entonces p := nd.tamaño fin
+            r := fat_escribe(nd.montaje, nd, p, k, n)
+            si r > 0 entonces a.pos := p + nat64(r) fin
+        sino
+            r := fat_escribe(nd.montaje, nd, nat64(pos), k, n)
+        fin
+        abre_vfs()
+        devolver r
+    fin
+
+    público función vfs_sitúa(a: puntero a Abierto, d: ent64, de_dónde: nat64): ent64
+        variable n: ent64
+        si de_dónde = 0 entonces n := d
+        sino si de_dónde = 1 entonces n := ent64(a.pos) + d
+        sino si de_dónde = 2 entonces n := ent64(nodo(a.nodo).tamaño) + d
+        sino devolver EINVAL fin
+        si n < 0 entonces devolver EINVAL fin
+        a.pos := nat64(n)
+        devolver n
+    fin
+
+    público función vfs_trunca(a: puntero a Abierto, t: nat64): ent64
+        variable r: ent64
+        variable nd: puntero a Nodo
+        nd := nodo(a.nodo)
+        si nd.clase = N_CARPETA entonces devolver EISDIR fin
+        si a.marcas yb O_ACCESO = O_RDONLY entonces devolver EINVAL fin
+        si mm(nd.montaje).solo_leer <> 0 entonces devolver EROFS fin
+        cierra_vfs()
+        r := fat_trunca(nd.montaje, nd, t)
+        abre_vfs()
+        devolver r
+    fin
+
+    ; ---- vaciar ----
+    público función vfs_fsync(a: puntero a Abierto): ent64
+        variable r: ent64
+        variable m: nat32
+        m := nodo(a.nodo).montaje
+        si mm(m).clase <> FS_FAT o mm(m).solo_leer <> 0 entonces devolver 0 fin
+        cierra_vfs()
+        r := fat_vacía(m)
+        abre_vfs()
+        si r < 0 entonces devolver EIO fin
+        devolver 0
+    fin
+
+    ; sync: todos los volúmenes; cuántos bloques ha escrito (o -1)
+    público función vfs_sync(): ent64
+        variable m: nat32
+        variable r, t: ent64
+        cierra_vfs()
+        t := 0
+        m := 0
+        mientras m < n_montajes hacer
+            si mm(m).en_uso <> 0 y mm(m).clase = FS_FAT y mm(m).solo_leer = 0 entonces
+                r := fat_vacía(m)
+                si r < 0 entonces t := -1 sino si t >= 0 entonces t := t + r fin
+            fin
+            m := m + 1
+        fin
+        abre_vfs()
+        devolver t
+    fin
+
+    ; ---- stat ----
+    función p64(d: nat64, v: nat64)
+        pon_m64(d, v)
+    fin
+
+    ; la «struct stat» de Linux x86-64 (144 octetos) del nodo, en k
+    función llena_stat(n: puntero a Nodo, k: nat64)
+        variable modo, oc: nat64
+        ceros_k(k, 144)
+        p64(k, nat64(n.montaje) + 1)
+        si n.clave = 0 entonces p64(k + 8, 1) sino p64(k + 8, n.clave + 1) fin
+        p64(k + 16, 1)
+        si n.clase = N_CARPETA entonces
+            modo := 0x4000 ob 0x1ED            ; S_IFDIR, 0755
+            p64(k + 16, 2)
+        sino
+            modo := 0x8000 ob 0x1A4            ; S_IFREG, 0644
+        fin
+        si mm(n.montaje).solo_leer <> 0 entonces modo := modo yb (nob nat64(0x92)) fin
+        pon_m32(k + 24, nat32(modo))
+        p64(k + 48, n.tamaño)
+        p64(k + 56, 4096)
+        oc := mm(n.montaje).oct_cúmulo
+        si oc = 0 entonces oc := 512 fin
+        p64(k + 64, ((n.tamaño + oc - 1) div oc) * (oc div 512))
+        p64(k + 72, n.mtime)
+        p64(k + 88, n.mtime)
+        p64(k + 104, n.mtime)
+    fin
+
+    público función vfs_fstat(a: puntero a Abierto, k: nat64): ent64
+        cierra_vfs()
+        llena_stat(nodo(a.nodo), k)
+        abre_vfs()
+        devolver 0
+    fin
+
+    público función vfs_stat(base: puntero a byte, ruta: puntero a byte, k: nat64): ent64
+        variable t: puntero a byte
+        variable n: puntero a Nodo
+        variable m: nat32
+        variable r: ent64
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces devolver ENOMEM fin
+        si no normaliza(base, ruta, t) entonces
+            libera(t)
+            devolver ENAMETOOLONG
+        fin
+        cierra_vfs()
+        fs_error := 0
+        n := camina(t, falso, nulo, m)
+        si n = nulo entonces
+            r := fs_error
+        sino
+            llena_stat(n, k)
+            suelta(n)
+            r := 0
+        fin
+        abre_vfs()
+        libera(t)
+        devolver r
+    fin
+
+    ; ---- getdents64 ----
+    ; la siguiente entrada de la carpeta (galleta: por dónde va)
+    función fs_lista(n: puntero a Nodo, ref galleta: nat64, nombre: puntero a byte, ref carpeta: bool, ref ino: nat64): bool
+        variable m, k: nat32
+        variable x: puntero a Montaje
+        m := n.montaje
+        x := mm(m)
+        según nat16(x.clase)
+            caso FS_FAT: devolver fat_lista(m, n, galleta, nombre, carpeta, ino)
+            caso FS_EXFAT: devolver ex_lista(m, n, galleta, nombre, carpeta, ino)
+            caso FS_UNIDAD:
+                ; «.», «..», los archivos y los montajes (sin el de «/»)
+                si galleta < 2 entonces
+                    nombre[0] := '.'
+                    nombre[1] := 0
+                    si galleta = 1 entonces
+                        nombre[1] := '.'
+                        nombre[2] := 0
+                    fin
+                    carpeta := cierto
+                    ino := 1
+                    galleta := galleta + 1
+                    devolver cierto
+                fin
+                si galleta - 2 < n_archivos entonces
+                    copia_texto(nombre, nombre_de(nat32(galleta - 2)), 256)
+                    carpeta := falso
+                    ino := galleta
+                    galleta := galleta + 1
+                    devolver cierto
+                fin
+                k := nat32(galleta - 2 - n_archivos)
+                mientras k < n_montajes hacer
+                    si mm(k).en_uso <> 0 y largo(dirección(mm(k).ruta[0])) > 1 entonces
+                        copia_texto(nombre, dirección(mm(k).ruta[1]), 256)
+                        carpeta := cierto
+                        ino := 1000000 + k
+                        galleta := 2 + n_archivos + k + 1
+                        devolver cierto
+                    fin
+                    k := k + 1
+                fin
+                devolver falso
+        fin
+        devolver falso
+    fin
+
+    ; llena k (n octetos) con entradas «linux_dirent64»: lo que ha llenado
+    público función vfs_lista(a: puntero a Abierto, k: nat64, n: nat64): ent64
+        variable nd: puntero a Nodo
+        variable nombre: arreglo [256] de byte
+        variable g, ino: nat64
+        variable carpeta: bool
+        variable l, rec: nat64
+        variable hecho: nat64
+        nd := nodo(a.nodo)
+        si nd.clase <> N_CARPETA entonces devolver ENOTDIR fin
+        cierra_vfs()
+        hecho := 0
+        mientras cierto hacer
+            g := a.pos
+            si no fs_lista(nd, g, dirección(nombre[0]), carpeta, ino) entonces romper fin
+            l := largo(dirección(nombre[0]))
+            rec := (19 + l + 1 + 7) yb (nob nat64(7))
+            si hecho + rec > n entonces
+                abre_vfs()
+                si hecho = 0 entonces devolver EINVAL fin
+                devolver ent64(hecho)
+            fin
+            ceros_k(k + hecho, rec)
+            pon_m64(k + hecho, ino)
+            pon_m64(k + hecho + 8, g)
+            pon_m16(k + hecho + 16, nat32(rec))
+            si carpeta entonces pon_m8(k + hecho + 18, 4) sino pon_m8(k + hecho + 18, 8) fin
+            copia_k(k + hecho + 19, nat64(dirección(nombre[0])), l)
+            hecho := hecho + rec
+            a.pos := g
+        fin
+        abre_vfs()
+        devolver ent64(hecho)
+    fin
+
+    ; ---- crear carpetas, borrar, renombrar ----
+    ; la carpeta y el último trozo de la ruta (en t, ya absoluta): con una
+    ; referencia a la carpeta; nulo y el error si no es una carpeta
+    función carpeta_de(t: puntero a byte, último: puntero a byte, ref m: nat32, ref err: ent64): puntero a Nodo
+        variable d: puntero a Nodo
+        fs_error := 0
+        d := camina(t, cierto, último, m)
+        si d = nulo entonces
+            err := fs_error
+            devolver nulo
+        fin
+        si último[0] = 0 entonces
+            ; la raíz de un montaje (o «/»)
+            suelta(d)
+            err := EBUSY
+            devolver nulo
+        fin
+        si d.clase <> N_CARPETA entonces
+            suelta(d)
+            err := ENOTDIR
+            devolver nulo
+        fin
+        devolver d
+    fin
+
+    público función vfs_mkdir(base: puntero a byte, ruta: puntero a byte): ent64
+        variable t: puntero a byte
+        variable último: arreglo [256] de byte
+        variable d, n: puntero a Nodo
+        variable m: nat32
+        variable err: ent64
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces devolver ENOMEM fin
+        si no normaliza(base, ruta, t) entonces
+            libera(t)
+            devolver ENAMETOOLONG
+        fin
+        cierra_vfs()
+        err := 0
+        d := carpeta_de(t, dirección(último[0]), m, err)
+        si d <> nulo entonces
+            n := fs_busca(m, d, dirección(último[0]))
+            si n <> nulo entonces
+                err := EEXIST
+                suelta(n)
+            sino si fs_error <> ENOENT entonces
+                err := fs_error
+            sino si mm(m).solo_leer <> 0 entonces
+                err := EROFS
+            sino
+                n := fat_crea(m, d, dirección(último[0]), cierto)
+                si n = nulo entonces err := fat_error sino suelta(n) fin
+            fin
+            suelta(d)
+        sino si err = EBUSY entonces
+            err := EEXIST
+        fin
+        abre_vfs()
+        libera(t)
+        devolver err
+    fin
+
+    ; unlink (carpeta: falso) o rmdir (carpeta: cierto)
+    público función vfs_borra(base: puntero a byte, ruta: puntero a byte, carpeta: bool): ent64
+        variable t: puntero a byte
+        variable último: arreglo [256] de byte
+        variable d, n: puntero a Nodo
+        variable m: nat32
+        variable err: ent64
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces devolver ENOMEM fin
+        si no normaliza(base, ruta, t) entonces
+            libera(t)
+            devolver ENAMETOOLONG
+        fin
+        cierra_vfs()
+        err := 0
+        d := carpeta_de(t, dirección(último[0]), m, err)
+        si d <> nulo entonces
+            n := fs_busca(m, d, dirección(último[0]))
+            si n = nulo entonces
+                err := fs_error
+            sino
+                si mm(m).solo_leer <> 0 entonces err := EROFS
+                sino si carpeta y n.clase <> N_CARPETA entonces err := ENOTDIR
+                sino si no carpeta y n.clase = N_CARPETA entonces err := EISDIR
+                sino si carpeta y no fat_vacía_carpeta(m, n) entonces err := ENOTEMPTY
+                fin
+                si err = 0 entonces err := fat_borra(m, d, n) fin
+                suelta(n)
+            fin
+            suelta(d)
+        fin
+        abre_vfs()
+        libera(t)
+        devolver err
+    fin
+
+    ; ¿empieza b por a seguido de «/»? (mover una carpeta dentro de sí misma)
+    función dentro_de(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y baja(a[i]) = baja(b[i]) hacer i := i + 1 fin
+        devolver a[i] = 0 y b[i] = '/'
+    fin
+
+    función mismo_texto(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] = b[i] y a[i] <> 0 hacer i := i + 1 fin
+        devolver a[i] = b[i]
+    fin
+
+    público función vfs_renombra(base1: puntero a byte, ruta1: puntero a byte, base2: puntero a byte, ruta2: puntero a byte): ent64
+        variable t1, t2: puntero a byte
+        variable ú1, ú2: arreglo [256] de byte
+        variable d1, d2, n, otro: puntero a Nodo
+        variable m1, m2: nat32
+        variable err: ent64
+        variable hecho: bool
+        t1 := reserva(LARGO_RUTA)
+        t2 := reserva(LARGO_RUTA)
+        si t1 = nulo o t2 = nulo entonces
+            si t1 <> nulo entonces libera(t1) fin
+            si t2 <> nulo entonces libera(t2) fin
+            devolver ENOMEM
+        fin
+        err := 0
+        si no normaliza(base1, ruta1, t1) o no normaliza(base2, ruta2, t2) entonces err := ENAMETOOLONG fin
+        cierra_vfs()
+        d1 := nulo
+        d2 := nulo
+        n := nulo
+        si err = 0 entonces d1 := carpeta_de(t1, dirección(ú1[0]), m1, err) fin
+        si err = 0 entonces d2 := carpeta_de(t2, dirección(ú2[0]), m2, err) fin
+        si err = 0 y m1 <> m2 entonces err := EXDEV fin
+        si err = 0 y mm(m1).solo_leer <> 0 entonces err := EROFS fin
+        si err = 0 entonces
+            n := fs_busca(m1, d1, dirección(ú1[0]))
+            si n = nulo entonces err := fs_error fin
+        fin
+        si err = 0 y n.clase = N_CARPETA y dentro_de(t1, t2) entonces err := EINVAL fin
+        hecho := falso
+        si err = 0 entonces
+            otro := fs_busca(m2, d2, dirección(ú2[0]))
+            si otro = nulo y fs_error <> ENOENT entonces
+                err := fs_error
+            sino si otro <> nulo y otro = n entonces
+                ; el mismo: nada, o solo cambian las mayúsculas
+                suelta(otro)
+                otro := nulo
+                si no mismo_texto(dirección(ú1[0]), dirección(ú2[0])) entonces err := fat_renombra(m1, d1, n, d2, dirección(ú2[0])) fin
+                hecho := cierto
+            sino si otro <> nulo entonces
+                si n.clase = N_CARPETA y otro.clase <> N_CARPETA entonces err := ENOTDIR
+                sino si n.clase <> N_CARPETA y otro.clase = N_CARPETA entonces err := EISDIR
+                sino si otro.clase = N_CARPETA y no fat_vacía_carpeta(m2, otro) entonces err := ENOTEMPTY
+                sino err := fat_borra(m2, d2, otro)
+                fin
+                suelta(otro)
+            fin
+            si err = 0 y no hecho entonces err := fat_renombra(m1, d1, n, d2, dirección(ú2[0])) fin
+        fin
+        si n <> nulo entonces suelta(n) fin
+        si d1 <> nulo entonces suelta(d1) fin
+        si d2 <> nulo entonces suelta(d2) fin
+        abre_vfs()
+        libera(t1)
+        libera(t2)
+        devolver err
+    fin
+
+    ; ¿es «ruta» una carpeta? (chdir); su ruta absoluta, en t
+    público función vfs_carpeta(base: puntero a byte, ruta: puntero a byte, t: puntero a byte): ent64
+        variable n: puntero a Nodo
+        variable m: nat32
+        variable err: ent64
+        si no normaliza(base, ruta, t) entonces devolver ENAMETOOLONG fin
+        cierra_vfs()
+        fs_error := 0
+        n := camina(t, falso, nulo, m)
+        err := 0
+        si n = nulo entonces
+            err := fs_error
+        sino
+            si n.clase <> N_CARPETA entonces err := ENOTDIR fin
+            suelta(n)
+        fin
+        abre_vfs()
+        devolver err
+    fin
+
+    ; un archivo entero a la memoria del núcleo (para arrancar un programa de
+    ; un disco): el bloque del montón (o 0) y su tamaño en «tam»
+    público función vfs_entero(ruta: puntero a byte, ref tam: nat64, ref err: ent64): nat64
+        variable a: puntero a Abierto
+        variable b: nat64
+        variable r: ent64
+        tam := 0
+        a := vfs_abre(nulo, ruta, O_RDONLY, err)
+        si a = nulo entonces devolver 0 fin
+        si nodo(a.nodo).clase <> N_ARCHIVO entonces
+            vfs_cierra(a)
+            err := EISDIR
+            devolver 0
+        fin
+        tam := nodo(a.nodo).tamaño
+        si tam > nat64(256) << 20 entonces
+            vfs_cierra(a)
+            err := EFBIG
+            devolver 0
+        fin
+        b := nat64(reserva(tam + 1))
+        si b = 0 entonces
+            vfs_cierra(a)
+            err := ENOMEM
+            devolver 0
+        fin
+        r := vfs_lee(a, 0, b, tam)
+        vfs_cierra(a)
+        si r < 0 o nat64(r) <> tam entonces
+            libera(puntero(b))
+            err := EIO
+            devolver 0
+        fin
+        devolver b
+    fin
+
+    ; ---- montar ----
+    función nuevo_montaje(ruta: puntero a byte, disco: nat32): nat32
+        variable m: nat32
+        si n_montajes >= MAX_MONTAJES entonces devolver 0xFFFFFFFF fin
+        m := n_montajes
+        ceros_k(nat64(dirección(montajes[m])), tamaño(Montaje))
+        copia_texto(dirección(montajes[m].ruta[0]), ruta, 32)
+        montajes[m].disco := disco
+        devolver m
+    fin
+
+    ; «/» (la unidad en memoria) y cada volumen que se sepa leer
+    público función prepara_vfs()
+        variable m, d: nat32
+        variable r: puntero a Nodo
+        variable ruta: arreglo [32] de byte
+        m := nuevo_montaje("/", 0xFFFFFFFF)
+        r := nuevo_nodo(m, 0, N_CARPETA)
+        montajes[m].raíz := nat64(r)
+        montajes[m].clase := FS_UNIDAD
+        montajes[m].solo_leer := 1
+        montajes[m].en_uso := 1
+        n_montajes := 1
+        d := 0
+        mientras d < n_dk hacer
+            ; los volúmenes: las particiones, y los discos sin tabla
+            si es_parte(d) o tabla_dk(d) = 3 o tabla_dk(d) = 0 entonces
+                ruta[0] := '/'
+                copia_texto(dirección(ruta[1]), nombre_dk(d), 31)
+                m := nuevo_montaje(dirección(ruta[0]), d)
+                si m <> 0xFFFFFFFF entonces
+                    si fat_monta(m) entonces
+                        fat_etiqueta(m)
+                        si no escribible(d) entonces montajes[m].solo_leer := 1 fin
+                        montajes[m].en_uso := 1
+                        n_montajes := n_montajes + 1
+                    sino si ex_monta(m) entonces
+                        montajes[m].en_uso := 1
+                        n_montajes := n_montajes + 1
+                    fin
+                fin
+            fin
+            d := d + 1
+        fin
+    fin
+
+    público función escribe_montajes()
+        variable m: nat32
+        variable x: puntero a Montaje
+        m := 0
+        mientras m < n_montajes hacer
+            x := mm(m)
+            escribir("  ", x.ruta, ": ")
+            según nat16(x.clase)
+                caso FS_UNIDAD: escribir("la unidad en memoria (", n_archivos, " archivos), de solo leer\n")
+                caso FS_FAT, FS_EXFAT:
+                    si x.clase = FS_FAT entonces escribir("FAT32") sino escribir("exFAT") fin
+                    si x.etiqueta[0] <> 0 entonces escribir(" «", x.etiqueta, "»") fin
+                    escribir(", ")
+                    tamaño_legible(x.cúmulos * x.oct_cúmulo)
+                    escribir(" en ", x.cúmulos, " cúmulos de ")
+                    si x.oct_cúmulo < 1024 entonces escribir(x.oct_cúmulo, " octetos") sino escribir(x.oct_cúmulo div 1024, " KB") fin
+                    si x.libres <> 0xFFFFFFFF entonces
+                        escribir(", ")
+                        tamaño_legible(x.libres * x.oct_cúmulo)
+                        escribir(" libres")
+                    fin
+                    si x.solo_leer <> 0 entonces escribir("; de solo leer\n") sino escribir("; de leer y escribir\n") fin
+            fin
+            m := m + 1
+        fin
+    fin
+
+fin Vfs64.

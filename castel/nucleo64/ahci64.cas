@@ -1,0 +1,535 @@
+; =============================================================================
+;  ahci64.cas - Hispa-64, etapa 5: los discos SATA por AHCI (docs/64/HISPA-64.md,
+;  sección 11), según «Serial ATA AHCI 1.3.1». Lo aprendido en Hispa-Pentium
+;  (nucleo32/ahci.cas, probado en los equipos del taller) pasado a 64 bits:
+;
+;  La controladora se ve en su BAR 5 (ABAR): unos registros generales y, por
+;  cada puerto, 0x80 octetos. A cada puerto con un disco se le da una página:
+;  la lista de órdenes (32 cabeceras; se usa la primera), el sitio donde el
+;  disco deja lo que contesta (los FIS recibidos) y la tabla de la orden (el
+;  FIS de la orden y un trozo de memoria, PRD, de hasta 128 KB seguidos). Con
+;  CAP.S64A las direcciones son de 64 bits (las páginas pueden estar por
+;  encima de 4 GB); si no, lo que esté por encima pasa por una memoria de paso
+;  de debajo de 4 GB.
+;
+;  Como en Hispa-Pentium, al empezar: se pide la controladora a la BIOS (BOHC)
+;  si la norma lo prevé, AHCI encendido (GHC.AE) sin reiniciarla (los discos
+;  ya giran), y cada puerto con algo enchufado como dice la norma (10.1.2):
+;  parar ST y FRE, darle sus tablas, FRE = 1, limpiar SERR e IS, y solo
+;  entonces mirar TFD; si el disco sigue ocupado, un COMRESET (con FRE = 1:
+;  el ICH7 del Toshiba NB250 lo pedía); ST = 1 e IDENTIFY. Un lector de CD
+;  (ATAPI) u otra cosa no es un disco (se dice y se deja).
+;
+;  Órdenes: IDENTIFY, READ DMA EXT, WRITE DMA EXT (LBA de 48 bits) y FLUSH
+;  CACHE EXT. Una orden en marcha por puerto (su mutex). Las interrupciones,
+;  por MSI si la controladora lo tiene (la de QEMU, la de los Intel de hoy);
+;  si no, se mira el puerto, cediendo el procesador.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ahci64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64
+
+    público constante MAX_SATA = 8
+    constante MAX_CTL = 2
+    constante POR_ORDEN = 32                    ; páginas por orden (128 KB)
+
+    constante CAP = 0x00
+    constante GHC = 0x04
+    constante IS = 0x08
+    constante PI = 0x0C
+    constante VS = 0x10
+    constante CAP2 = 0x24
+    constante BOHC = 0x28
+    constante P_CLB = 0x00
+    constante P_FB = 0x08
+    constante P_IS = 0x10
+    constante P_IE = 0x14
+    constante P_CMD = 0x18
+    constante P_TFD = 0x20
+    constante P_SIG = 0x24
+    constante P_SSTS = 0x28
+    constante P_SCTL = 0x2C
+    constante P_SERR = 0x30
+    constante P_CI = 0x38
+    constante CMD_ST = 0x0001
+    constante CMD_SUD = 0x0002
+    constante CMD_POD = 0x0004
+    constante CMD_FRE = 0x0010
+    constante CMD_FR = 0x4000
+    constante CMD_CR = 0x8000
+    constante CMD_CPD = 0x100000
+    constante CMD_ICC = 0xF0000000
+    constante CMD_ACTIVO = 0x10000000
+    constante CMD_ALPE = 0x04000000
+    constante CMD_ASP = 0x08000000
+    constante CAP_SSS = 0x08000000
+    constante FIRMA_ATAPI = 0xEB140101
+    constante FIRMA_MULTI = 0x96690101
+    constante FIRMA_SEMB = 0xC33C0101
+    constante IE_PUERTO = 0x7C000003            ; D2H, PIO, y los errores (TFE, HBF, HBD, IF, OF)
+
+    ; ---- las controladoras ----
+    variable c_regs: arreglo [MAX_CTL] de nat64
+    variable c_aparato, c_modo, c_cap, c_ver: arreglo [MAX_CTL] de nat32
+    variable c_s64: arreglo [MAX_CTL] de bool
+    público variable sa_n_ctl: nat32
+    variable vector: nat32
+
+    ; ---- los discos ----
+    público variable sa_n_discos: nat32
+    variable d_ctl, d_puerto, d_sector: arreglo [MAX_SATA] de nat32
+    variable d_sectores: arreglo [MAX_SATA] de nat64
+    variable d_tablas, d_paso: arreglo [MAX_SATA] de nat64           ; su página (física) y la de paso (debajo de 4 GB, o 0)
+    variable d_mutex: arreglo [MAX_SATA] de Mutex
+    variable d_suceso: arreglo [MAX_SATA] de Suceso
+    variable d_visto: arreglo [MAX_SATA] de nat32                    ; lo que ha visto la interrupción en su IS
+    variable d_modelo: arreglo [MAX_SATA] de arreglo [41] de byte
+    público variable sa_atapi, sa_puertos_con_algo: nat32
+    público variable sa_interrupciones, sa_sin_aviso, sa_órdenes, sa_fallos: nat64
+    público variable sa_sectores_leídos, sa_sectores_escritos: nat64
+    público variable sa_motivo: puntero a byte
+
+    función lee(c: nat32, r: nat32): nat32
+        devolver m32(c_regs[c] + r)
+    fin
+
+    función pon(c: nat32, r: nat32, v: nat32)
+        pon_m32(c_regs[c] + r, v)
+    fin
+
+    función pu(p: nat32, r: nat32): nat32
+        devolver 0x100 + p * 0x80 + r
+    fin
+
+    función a_cero(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    función copia(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    función espera_ms(ms: nat64)
+        si va entonces duerme_ms(ms) sino espera_us(ms * 1000) fin
+    fin
+
+    ; espera (hasta ms milisegundos) a que (registro r) yb máscara = v
+    función espera(c: nat32, r: nat32, máscara: nat32, v: nat32, ms: nat64): bool
+        variable t0: nat64
+        t0 := ahora_ns()
+        mientras lee(c, r) yb máscara <> v hacer
+            si ahora_ns() - t0 > ms * 1000000 entonces devolver falso fin
+            pausa()
+        fin
+        devolver cierto
+    fin
+
+    ; espera a que el puerto tenga enlace (DET = 3); si en 150 ms no se ve nada
+    ; enchufado (DET = 0), está vacío (como Linux: sata_link_debounce)
+    función espera_enlace(c: nat32, p: nat32, ms: nat64): bool
+        variable t0, vacío: nat64
+        variable d: nat32
+        t0 := ahora_ns()
+        vacío := t0
+        mientras cierto hacer
+            d := lee(c, pu(p, P_SSTS)) yb 0x0F
+            si d = 3 entonces devolver cierto fin
+            si d <> 0 entonces vacío := ahora_ns() fin
+            si ahora_ns() - t0 > ms * 1000000 o ahora_ns() - vacío > 150000000 entonces devolver falso fin
+            espera_ms(1)
+        fin
+        devolver falso
+    fin
+
+    función para_puerto(c: nat32, p: nat32): bool
+        variable x: nat32
+        x := lee(c, pu(p, P_CMD))
+        si x yb (CMD_ST ob CMD_CR ob CMD_FRE ob CMD_FR) = 0 entonces devolver cierto fin
+        pon(c, pu(p, P_CMD), x yb (nob nat32(CMD_ST)))
+        si no espera(c, pu(p, P_CMD), CMD_CR, 0, 600) entonces devolver falso fin
+        pon(c, pu(p, P_CMD), lee(c, pu(p, P_CMD)) yb (nob nat32(CMD_FRE)))
+        devolver espera(c, pu(p, P_CMD), CMD_FR, 0, 600)
+    fin
+
+    función reinicia_puerto(c: nat32, p: nat32): bool
+        variable x: nat32
+        x := lee(c, pu(p, P_SCTL)) yb 0xFFFFF0F0
+        pon(c, pu(p, P_SCTL), x ob 0x301)
+        espera_ms(2)
+        pon(c, pu(p, P_SCTL), x ob 0x300)
+        espera_enlace(c, p, 1000)
+        pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+        devolver lee(c, pu(p, P_SSTS)) yb 0x0F = 3
+    fin
+
+    función enciende_puerto(c: nat32, p: nat32): bool
+        variable x, n: nat32
+        x := lee(c, pu(p, P_CMD))
+        n := x
+        si c_cap[c] yb CAP_SSS <> 0 entonces n := n ob CMD_SUD fin
+        si x yb CMD_CPD <> 0 entonces n := n ob CMD_POD fin
+        n := n yb (nob nat32(CMD_ALPE ob CMD_ASP))
+        si n <> x entonces pon(c, pu(p, P_CMD), n) fin
+        si n yb CMD_ICC = 0 entonces pon(c, pu(p, P_CMD), n ob CMD_ACTIVO) fin
+        devolver n <> x
+    fin
+
+    ; ---- la interrupción ----
+    interrupción función int_ahci()
+        variable c, d, is_, x: nat32
+        sa_interrupciones := sa_interrupciones + 1
+        c := 0
+        mientras c < sa_n_ctl hacer
+            is_ := lee(c, IS)
+            si is_ <> 0 entonces
+                d := 0
+                mientras d < sa_n_discos hacer
+                    si d_ctl[d] = c y (is_ >> d_puerto[d]) yb 1 <> 0 entonces
+                        x := lee(c, pu(d_puerto[d], P_IS))
+                        pon(c, pu(d_puerto[d], P_IS), x)
+                        d_visto[d] := d_visto[d] ob x
+                        señala(dirección(d_suceso[d]))
+                    fin
+                    d := d + 1
+                fin
+                pon(c, IS, is_)
+            fin
+            c := c + 1
+        fin
+        eoi()
+    fin
+
+    ; ---- mandar una orden ----
+    ; (con el mutex del disco cerrado, o al empezar) la orden «orden» con lba y
+    ; la cuenta n; «octetos» van o vienen de la física «fís» (seguida)
+    función manda(d: nat32, orden: nat32, lba: nat64, n: nat32, octetos: nat64, fís: nat64, escribe: bool): bool
+        variable c, p, vueltas, is_: nat32
+        variable t, t0: nat64
+        variable bien: bool
+        c := d_ctl[d]
+        p := d_puerto[d]
+        t := virt(d_tablas[d])
+        si no espera(c, pu(p, P_TFD), 0x88, 0, 3000) entonces
+            sa_motivo := "el disco está ocupado (TFD)"
+            sa_fallos := sa_fallos + 1
+            devolver falso
+        fin
+        a_cero(t, 32)
+        a_cero(t + 0x500, 0x90)
+        pon_m32(t, 5)                           ; el FIS: 5 palabras
+        si escribe entonces pon_m32(t, m32(t) ob 0x40) fin
+        si octetos <> 0 entonces pon_m32(t, m32(t) ob 0x10000) fin
+        pon_m64(t + 8, d_tablas[d] + 0x500)
+        pon_m8(t + 0x500, 0x27)
+        pon_m8(t + 0x501, 0x80)
+        pon_m8(t + 0x502, orden)
+        pon_m8(t + 0x504, nat32(lba))
+        pon_m8(t + 0x505, nat32(lba >> 8))
+        pon_m8(t + 0x506, nat32(lba >> 16))
+        pon_m8(t + 0x507, 0x40)
+        pon_m8(t + 0x508, nat32(lba >> 24))
+        pon_m8(t + 0x509, nat32(lba >> 32))
+        pon_m8(t + 0x50A, nat32(lba >> 40))
+        pon_m8(t + 0x50C, n)
+        pon_m8(t + 0x50D, n >> 8)
+        si octetos <> 0 entonces
+            pon_m64(t + 0x580, fís)
+            pon_m32(t + 0x58C, nat32(octetos - 1))
+        fin
+        d_visto[d] := 0
+        rearma(dirección(d_suceso[d]))
+        pon(c, pu(p, P_IS), 0xFFFFFFFF)
+        ensamblador
+            mfence
+        fin
+        pon(c, pu(p, P_CI), 1)
+        sa_órdenes := sa_órdenes + 1
+        bien := cierto
+        t0 := ahora_ns()
+        vueltas := 0
+        mientras lee(c, pu(p, P_CI)) yb 1 <> 0 y bien hacer
+            is_ := lee(c, pu(p, P_IS)) ob d_visto[d]
+            si is_ yb 0x78000000 <> 0 entonces bien := falso fin
+            si ahora_ns() - t0 > 5000000000 entonces
+                bien := falso
+                sa_motivo := "la orden no acaba en 5 s"
+            fin
+            vueltas := vueltas + 1
+            si bien entonces
+                si vueltas < 400 o no va entonces
+                    pausa()
+                sino si c_modo[c] <> NINGUNA y tic_va entonces
+                    si no espera_plazo(dirección(d_suceso[d]), 20000000) entonces sa_sin_aviso := sa_sin_aviso + 1 fin
+                    rearma(dirección(d_suceso[d]))
+                sino
+                    cede()
+                fin
+            fin
+        fin
+        is_ := lee(c, pu(p, P_IS)) ob d_visto[d]
+        si is_ yb 0x78000000 <> 0 o lee(c, pu(p, P_TFD)) yb 0x01 <> 0 entonces bien := falso fin
+        si no bien entonces
+            si sa_motivo = nulo entonces sa_motivo := "el disco da un error" fin
+            sa_fallos := sa_fallos + 1
+            ; que quede listo para otra: parar y arrancar
+            pon(c, pu(p, P_CMD), lee(c, pu(p, P_CMD)) yb (nob nat32(CMD_ST)))
+            espera(c, pu(p, P_CMD), CMD_CR, 0, 600)
+            pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+            pon(c, pu(p, P_IS), 0xFFFFFFFF)
+            pon(c, pu(p, P_CMD), lee(c, pu(p, P_CMD)) ob CMD_ST)
+        fin
+        devolver bien
+    fin
+
+    ; el puerto p de la controladora c: si hay un disco, a la lista
+    función mira_puerto(c: nat32, p: nat32)
+        variable d, firma, w: nat32
+        variable t: nat64
+        variable id: nat64
+        si enciende_puerto(c, p) entonces espera_enlace(c, p, 1000) fin
+        si lee(c, pu(p, P_SSTS)) yb 0x0F <> 3 entonces devolver fin
+        si sa_n_discos >= MAX_SATA entonces devolver fin
+        si no para_puerto(c, p) entonces
+            escribir("  SATA: el puerto ", p, " no se para\n")
+            devolver
+        fin
+        d := sa_n_discos
+        d_ctl[d] := c
+        d_puerto[d] := p
+        d_tablas[d] := pide()
+        si d_tablas[d] = 0 entonces devolver fin
+        si no c_s64[c] y d_tablas[d] >= nat64(1) << 32 entonces
+            devuelve(d_tablas[d])
+            d_tablas[d] := pide_seguidos(1, 1)
+            si d_tablas[d] = 0 o d_tablas[d] >= nat64(1) << 32 entonces devolver fin
+        fin
+        t := virt(d_tablas[d])
+        a_cero(t, 4096)
+        pon(c, pu(p, P_CLB), nat32(d_tablas[d]))
+        pon(c, pu(p, P_CLB + 4), nat32(d_tablas[d] >> 32))
+        pon(c, pu(p, P_FB), nat32(d_tablas[d] + 0x400))
+        pon(c, pu(p, P_FB + 4), nat32((d_tablas[d] + 0x400) >> 32))
+        pon(c, pu(p, P_IE), 0)
+        pon(c, pu(p, P_CMD), lee(c, pu(p, P_CMD)) ob CMD_FRE)
+        espera(c, pu(p, P_CMD), CMD_FR, CMD_FR, 500)
+        pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+        pon(c, pu(p, P_IS), 0xFFFFFFFF)
+        si no espera(c, pu(p, P_TFD), 0x88, 0, 500) entonces
+            reinicia_puerto(c, p)
+            pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+            pon(c, pu(p, P_IS), 0xFFFFFFFF)
+        fin
+        si lee(c, pu(p, P_SSTS)) yb 0x0F <> 3 entonces
+            para_puerto(c, p)
+            devolver
+        fin
+        sa_puertos_con_algo := sa_puertos_con_algo + 1
+        espera(c, pu(p, P_TFD), 0x88, 0, 5000)
+        t := ahora_ns()
+        mientras lee(c, pu(p, P_SIG)) = 0xFFFFFFFF y ahora_ns() - t < 1000000000 hacer espera_ms(1) fin
+        pon(c, pu(p, P_SERR), 0xFFFFFFFF)
+        pon(c, pu(p, P_CMD), lee(c, pu(p, P_CMD)) ob CMD_ST)
+        firma := lee(c, pu(p, P_SIG))
+        si firma = FIRMA_ATAPI o firma = FIRMA_MULTI o firma = FIRMA_SEMB entonces
+            si firma = FIRMA_ATAPI entonces
+                sa_atapi := sa_atapi + 1
+                escribir("  SATA: puerto ", p, ": un lector de CD o DVD (ATAPI): no es un disco\n")
+            sino
+                escribir("  SATA: puerto ", p, ": no es un disco (firma ")
+                hex(nat64(firma))
+                escribir(")\n")
+            fin
+            para_puerto(c, p)
+            devolver
+        fin
+        ; la página de paso, si la controladora no sabe 64 bits
+        d_paso[d] := 0
+        si no c_s64[c] entonces
+            d_paso[d] := pide_seguidos(POR_ORDEN, 1)
+            si d_paso[d] = 0 o d_paso[d] + POR_ORDEN * 4096 > nat64(1) << 32 entonces
+                escribir("  SATA: puerto ", p, ": sin memoria de paso debajo de 4 GB\n")
+                devolver
+            fin
+        fin
+        ; IDENTIFY, a la página de las tablas (desde 0x800: 512 octetos)
+        sa_n_discos := sa_n_discos + 1
+        si no manda(d, 0xEC, 0, 0, 512, d_tablas[d] + 0x800, falso) entonces
+            escribir("  SATA: puerto ", p, ": IDENTIFY falla\n")
+            sa_n_discos := sa_n_discos - 1
+            devolver
+        fin
+        id := virt(d_tablas[d]) + 0x800
+        si m16(id + 49 * 2) yb 0x200 = 0 entonces
+            escribir("  SATA: puerto ", p, ": el disco no sabe LBA\n")
+            sa_n_discos := sa_n_discos - 1
+            devolver
+        fin
+        si m16(id + 83 * 2) yb 0x400 <> 0 entonces
+            d_sectores[d] := m64(id + 100 * 2)
+        sino
+            d_sectores[d] := nat64(m32(id + 60 * 2))
+            escribir("  SATA: puerto ", p, ": sin LBA de 48 bits (no se usa)\n")
+            sa_n_discos := sa_n_discos - 1
+            devolver
+        fin
+        d_sector[d] := 512
+        w := m16(id + 106 * 2)
+        si w yb 0xC000 = 0x4000 y w yb 0x1000 <> 0 entonces
+            d_sector[d] := m32(id + 117 * 2) * 2
+            si d_sector[d] <> 512 y d_sector[d] <> 4096 entonces d_sector[d] := 512 fin
+        fin
+        ; el modelo (palabras 27 a 46, cada una con sus dos letras al revés)
+        w := 0
+        mientras w < 40 hacer
+            d_modelo[d][w] := byte(m8(id + 54 + (w xob 1)))
+            si d_modelo[d][w] < 32 o d_modelo[d][w] > 126 entonces d_modelo[d][w] := ' ' fin
+            w := w + 1
+        fin
+        mientras w > 0 y d_modelo[d][w - 1] = ' ' hacer w := w - 1 fin
+        d_modelo[d][w] := 0
+        ; ya con su interrupción
+        si c_modo[c] <> NINGUNA entonces pon(c, pu(p, P_IE), IE_PUERTO) fin
+    fin
+
+    función pon_ctl(i: nat32, sin_msi: bool): bool
+        variable c, p, pi: nat32
+        variable base, tam: nat64
+        c := sa_n_ctl
+        base := bar_mem(i, 5)
+        tam := bar_largo(i, 5)
+        si base = 0 o tam < 0x180 entonces
+            sa_motivo := "su BAR 5 (ABAR) no es de memoria"
+            devolver falso
+        fin
+        habilita(i, falso)
+        c_aparato[c] := i
+        c_regs[c] := mapea_disp(base, tam, sin_caché())
+        sa_n_ctl := sa_n_ctl + 1
+        ; la BIOS la suelta (si lo prevé)
+        si lee(c, CAP2) yb 1 <> 0 entonces
+            pon(c, BOHC, lee(c, BOHC) ob 2)
+            espera(c, BOHC, 1, 0, 50)
+            espera_ms(25)
+        fin
+        pon(c, GHC, lee(c, GHC) ob 0x80000000)
+        c_cap[c] := lee(c, CAP)
+        c_ver[c] := lee(c, VS)
+        c_s64[c] := c_cap[c] yb 0x80000000 <> 0
+        c_modo[c] := NINGUNA
+        si no sin_msi y vector <> 0 entonces
+            si pon_msi(i, vector) entonces c_modo[c] := CON_MSI fin
+        fin
+        pon(c, IS, 0xFFFFFFFF)
+        pi := lee(c, PI)
+        p := 0
+        mientras p < 32 hacer
+            si (pi >> p) yb 1 <> 0 entonces mira_puerto(c, p) fin
+            p := p + 1
+        fin
+        si c_modo[c] <> NINGUNA entonces pon(c, GHC, lee(c, GHC) ob 2) fin
+        devolver cierto
+    fin
+
+    ; todas las controladoras AHCI de PCI (clase 01, 06, 01)
+    público función prepara_ahci(sin_msi: bool)
+        variable i, d, antes: nat32
+        vector := pide_vector()
+        si vector <> 0 entonces pon_vector(vector, nat64(dirección(int_ahci))) fin
+        i := 0
+        mientras i < pci_n y sa_n_ctl < MAX_CTL hacer
+            si clase_de(i) = 0x010601 entonces
+                escribir("SATA (AHCI): ")
+                escribe_bdf(i)
+                escribir(" ")
+                hex4(fab_de(i))
+                escribir(":")
+                hex4(apa_de(i))
+                antes := sa_n_discos
+                si pon_ctl(i, sin_msi) entonces
+                    escribir(", AHCI ", c_ver[sa_n_ctl - 1] >> 16, ".", (c_ver[sa_n_ctl - 1] >> 8) yb 0xFF, ", ", (c_cap[sa_n_ctl - 1] yb 31) + 1, " puertos")
+                    si c_s64[sa_n_ctl - 1] entonces escribir(", direcciones de 64 bits") sino escribir(", direcciones de 32 bits (con memoria de paso)") fin
+                    escribir("; ")
+                    escribe_modo(c_modo[sa_n_ctl - 1])
+                    escribir("; ", sa_n_discos - antes)
+                    si sa_n_discos - antes = 1 entonces escribir(" disco\n") sino escribir(" discos\n") fin
+                sino
+                    escribir(": no se pone en marcha: ", sa_motivo, "\n")
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; ---- lo que piden los discos (Bloques64) ----
+    público función sata_sector(d: nat32): nat32
+        devolver d_sector[d]
+    fin
+
+    público función sata_sectores(d: nat32): nat64
+        devolver d_sectores[d]
+    fin
+
+    público función sata_puerto(d: nat32): nat32
+        devolver d_puerto[d]
+    fin
+
+    público función sata_modelo(d: nat32): puntero a byte
+        devolver dirección(d_modelo[d][0])
+    fin
+
+    público función sata_es(d: nat32, lba: nat64, n: nat64, fís: nat64, escribe: bool): bool
+        variable trozo, por_vez, orden: nat32
+        variable bytes: nat64
+        variable bien, de_paso: bool
+        si d >= sa_n_discos entonces devolver falso fin
+        si lba + n > d_sectores[d] o lba + n < lba entonces
+            sa_motivo := "más allá del final del disco"
+            devolver falso
+        fin
+        por_vez := POR_ORDEN * 4096 div d_sector[d]
+        bien := cierto
+        cierra_mutex(dirección(d_mutex[d]))
+        mientras n > 0 y bien hacer
+            trozo := por_vez
+            si n < nat64(trozo) entonces trozo := nat32(n) fin
+            bytes := nat64(trozo) * d_sector[d]
+            de_paso := d_paso[d] <> 0 y fís + bytes > nat64(1) << 32
+            si de_paso y escribe entonces copia(virt(d_paso[d]), virt(fís), bytes) fin
+            orden := 0x25                       ; READ DMA EXT
+            si escribe entonces orden := 0x35 fin   ; WRITE DMA EXT
+            si de_paso entonces
+                bien := manda(d, orden, lba, trozo, bytes, d_paso[d], escribe)
+            sino
+                bien := manda(d, orden, lba, trozo, bytes, fís, escribe)
+            fin
+            si bien y de_paso y no escribe entonces copia(virt(fís), virt(d_paso[d]), bytes) fin
+            si escribe entonces sa_sectores_escritos := sa_sectores_escritos + trozo sino sa_sectores_leídos := sa_sectores_leídos + trozo fin
+            lba := lba + trozo
+            fís := fís + bytes
+            n := n - trozo
+        fin
+        abre_mutex(dirección(d_mutex[d]))
+        devolver bien
+    fin
+
+    público función sata_vacía(d: nat32): bool
+        variable bien: bool
+        si d >= sa_n_discos entonces devolver falso fin
+        cierra_mutex(dirección(d_mutex[d]))
+        bien := manda(d, 0xEA, 0, 0, 0, 0, falso)
+        abre_mutex(dirección(d_mutex[d]))
+        devolver bien
+    fin
+
+fin Ahci64.
