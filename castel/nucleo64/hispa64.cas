@@ -1,0 +1,421 @@
+; =============================================================================
+;  hispa64.cas - Hispa-64, etapa 0 (docs/64/HISPA-64.md): el núcleo mínimo.
+;  Lo carga GRUB por multiboot2 (con UEFI de 64 bits: \EFI\BOOT\BOOTX64.EFI; o
+;  con la BIOS) o QEMU con -kernel (multiboot). El arranque del compilador
+;  («modelo hispa64») mira que el procesador sea de 64 bits, pone las tablas de
+;  páginas de cuatro niveles (los 64 primeros GB tal cual y en la mitad alta) y
+;  pasa al modo largo. Aquí: la IDT con las excepciones explicadas en español,
+;  lo que ha dejado el cargador (la línea de órdenes, la pantalla del GOP, el
+;  mapa de memoria, la RSDP de ACPI, si es UEFI), la consola en la pantalla con
+;  la letra propia y el puerto serie, y lo que dice CPUID del procesador.
+;  Línea de órdenes: «apagar» (acaba en QEMU por el puerto 0xF4: las pruebas) y
+;  «prueba=pagina», «prueba=division», «prueba=gp», «prueba=ud» (provoca esa
+;  excepción, para ver lo que dice) y «prueba=alto» (pone en las tablas y lee
+;  1 GB en 512 GB, como una pantalla muy arriba).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Hispa64
+
+    modelo hispa64
+
+    importar Cifras64, Cpu64, Consola64, Excepciones64
+
+    constante VERSIÓN = "0.0.1"
+    constante MB1 = 0x2BADB002
+    constante MB2 = 0x36D76289
+
+    variable magia, info: nat32
+    variable línea: arreglo [256] de byte
+    variable cargador: arreglo [80] de byte
+    variable con_uefi: nat32                    ; 0 no, 32 o 64: de cuántos bits es el firmware
+    variable fb_dir: nat64
+    variable fb_paso, fb_ancho, fb_alto: nat32
+    variable fb_bpp, fb_tipo, fb_r, fb_v, fb_a: byte
+    variable hay_fb: bool
+    variable rsdp: nat64
+    variable rsdp_v2: bool
+    variable mapa: nat64                        ; la etiqueta del mapa de memoria (multiboot2)
+    variable mapa1, mapa1_largo: nat32          ; el mapa de multiboot
+    variable prueba_lectura: nat64 = 0x48363421         ; «!46H»: se lee también por la mitad alta
+
+    función l8(d: nat64): byte
+        variable p: puntero a byte
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función l32(d: nat64): nat32
+        variable p: puntero a nat32
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función l64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función copia(d: nat64, ref t: arreglo [256] de byte)
+        variable i: nat32
+        i := 0
+        mientras i < 255 y l8(d + i) <> 0 hacer
+            t[i] := l8(d + i)
+            i := i + 1
+        fin
+        t[i] := 0
+    fin
+
+    función copia_nombre(d: nat64)
+        variable i: nat32
+        i := 0
+        mientras i < 79 y l8(d + i) <> 0 hacer
+            cargador[i] := l8(d + i)
+            i := i + 1
+        fin
+        cargador[i] := 0
+    fin
+
+    ; ¿está esa palabra, entera, en la línea de órdenes?
+    función tiene(pal: puntero a byte): bool
+        variable i, j: nat32
+        i := 0
+        mientras línea[i] <> 0 hacer
+            si i = 0 o línea[i - 1] = ' ' entonces
+                j := 0
+                mientras pal[j] <> 0 y línea[i + j] = pal[j] hacer j := j + 1 fin
+                si pal[j] = 0 y (línea[i + j] = 0 o línea[i + j] = ' ') entonces devolver cierto fin
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; las etiquetas de multiboot2: de 8 en 8 octetos, hasta la de tipo 0
+    función lee_mb2()
+        variable d, fin_: nat64
+        variable t, n: nat32
+        d := nat64(info) + 8
+        fin_ := nat64(info) + l32(nat64(info))
+        mientras d < fin_ hacer
+            t := l32(d)
+            n := l32(d + 4)
+            si t = 0 entonces romper fin
+            según nat16(t)
+                caso 1: copia(d + 8, línea)
+                caso 2: copia_nombre(d + 8)
+                caso 6: mapa := d
+                caso 8:
+                    fb_dir := l64(d + 8)
+                    fb_paso := l32(d + 16)
+                    fb_ancho := l32(d + 20)
+                    fb_alto := l32(d + 24)
+                    fb_bpp := l8(d + 28)
+                    fb_tipo := l8(d + 29)
+                    fb_r := l8(d + 32)
+                    fb_v := l8(d + 34)
+                    fb_a := l8(d + 36)
+                    hay_fb := fb_tipo = 1
+                caso 11: con_uefi := 32
+                caso 12: con_uefi := 64
+                caso 14: si rsdp = 0 entonces rsdp := d + 8 fin
+                caso 15:
+                    rsdp := d + 8
+                    rsdp_v2 := cierto
+            fin
+            d := d + ((nat64(n) + 7) yb (nob nat64(7)))
+        fin
+    fin
+
+    ; la información de multiboot (QEMU -kernel): la línea de órdenes y el mapa
+    función lee_mb1()
+        variable fl: nat32
+        fl := l32(nat64(info))
+        si fl yb 4 <> 0 entonces copia(nat64(l32(nat64(info) + 16)), línea) fin
+        si fl yb 64 <> 0 entonces
+            mapa1_largo := l32(nat64(info) + 44)
+            mapa1 := l32(nat64(info) + 48)
+        fin
+        si fl yb 512 <> 0 entonces copia_nombre(nat64(l32(nat64(info) + 64))) fin
+    fin
+
+    función tipo_memoria(t: nat32)
+        según nat16(t)
+            caso 1: escribir("disponible")
+            caso 2: escribir("reservada")
+            caso 3: escribir("ACPI (se puede recuperar)")
+            caso 4: escribir("ACPI NVS (se guarda al dormir)")
+            caso 5: escribir("defectuosa")
+            caso 20: escribir("código del firmware (UEFI)")
+            si no: escribir("tipo ", t)
+        fin
+    fin
+
+    variable total_libre, más_alta: nat64
+    variable trozos: nat32
+
+    función un_trozo(b: nat64, l: nat64, t: nat32)
+        escribir("  ")
+        hex16(b)
+        escribir(" - ")
+        hex16(b + l - 1)
+        escribir("  ")
+        tamaño_legible(l)
+        escribir("  ")
+        tipo_memoria(t)
+        escribir("\n")
+        trozos := trozos + 1
+        si t = 1 entonces
+            total_libre := total_libre + l
+            si b + l > más_alta entonces más_alta := b + l fin
+        fin
+    fin
+
+    función el_mapa()
+        variable d, fin_: nat64
+        variable tam: nat32
+        escribir("Mapa de memoria (lo que dice el firmware):\n")
+        si mapa <> 0 entonces
+            tam := l32(mapa + 8)
+            d := mapa + 16
+            fin_ := mapa + l32(mapa + 4)
+            mientras d + tam <= fin_ hacer
+                un_trozo(l64(d), l64(d + 8), l32(d + 16))
+                d := d + tam
+            fin
+        sino si mapa1 <> 0 entonces
+            d := nat64(mapa1)
+            fin_ := d + mapa1_largo
+            mientras d < fin_ hacer
+                un_trozo(l64(d + 4), l64(d + 12), l32(d + 20))
+                d := d + l32(d) + 4
+            fin
+        sino
+            escribir("  (el cargador no ha dado el mapa)\n")
+        fin
+        escribir("Memoria disponible: ")
+        tamaño_legible(total_libre)
+        escribir(" en ", trozos, " trozos; la más alta acaba en ")
+        hex(más_alta)
+        escribir("\n")
+    fin
+
+    ; dónde están las tablas de páginas del arranque (C_tablas: la PML4; detrás, la PDPT)
+    función tablas(): nat64
+        ensamblador
+            mov eax, C_tablas
+        fin
+    fin
+
+    función recarga_cr3()
+        ensamblador
+            mov rax, cr3
+            mov cr3, rax
+        fin
+    fin
+
+    ; páginas para las PDPT de más (alcanza): 4 de 4 KB, alineadas dentro de esto
+    variable sobrantes: arreglo [20480] de byte
+    variable usadas: nat32
+
+    ; el arranque deja hechos los 64 primeros GB. Lo de más arriba (una pantalla
+    ; con el BAR por encima de 64 GB: en los Intel de 11.ª generación suele estar
+    ; en 256 GB), tal cual, con páginas de 1 GB (en todos los procesadores desde
+    ; 2010); en la mitad de abajo de la PML4: hasta 128 TB. Dice si se alcanza.
+    función alcanza(dir: nat64, largo: nat64): bool
+        variable fin_, g, e: nat64
+        variable pml4, pdpt: puntero a nat64
+        variable i: nat32
+        fin_ := dir + largo
+        si fin_ <= nat64(64) << 30 entonces devolver cierto fin
+        si no pag1g o fin_ > nat64(1) << 47 o fin_ > nat64(1) << bits_físicos() entonces devolver falso fin
+        pml4 := puntero(tablas())
+        g := dir >> 30
+        mientras g <= (fin_ - 1) >> 30 hacer
+            e := pml4[g >> 9]
+            si e = 0 entonces
+                si usadas >= 4 entonces devolver falso fin
+                e := (nat64(dirección(sobrantes[0])) + 4095 + nat64(usadas) * 4096) yb (nob nat64(4095))
+                i := 0
+                mientras i < 512 hacer
+                    pdpt := puntero(e)
+                    pdpt[i] := 0
+                    i := i + 1
+                fin
+                usadas := usadas + 1
+                pml4[g >> 9] := e ob 3
+                e := e ob 3
+            fin
+            pdpt := puntero(e yb (nob nat64(4095)))
+            si pdpt[g yb 511] = 0 entonces pdpt[g yb 511] := (g << 30) ob 0x83 fin
+            g := g + 1
+        fin
+        recarga_cr3()
+        devolver cierto
+    fin
+
+    función pantalla_alcanzable(): bool
+        devolver alcanza(fb_dir, nat64(fb_paso) * fb_alto)
+    fin
+
+    función pon_consola()
+        variable f: nat64
+        f := nat64(dirección(consola_letra))
+        ensamblador
+            mov rax, {f}
+            mov [C_consola], rax
+        fin
+    fin
+
+    función efer(): nat64
+        ensamblador
+            mov ecx, 0xC0000080
+            rdmsr
+            shl rdx, 32
+            or rax, rdx
+        fin
+    fin
+
+    función sí_no(b: bool)
+        si b entonces escribir("sí") sino escribir("no") fin
+    fin
+
+    función provoca()
+        si tiene("prueba=pagina") entonces
+            escribir("Prueba: leer de 0x0000500000000000, que no está en las tablas...\n")
+            escribir(l64(nat64(0x5000) << 32), "\n")
+        fin
+        si tiene("prueba=gp") entonces
+            escribir("Prueba: leer de 0x0000800000000000, que no es canónica...\n")
+            escribir(l64(nat64(0x8000) << 32), "\n")
+        fin
+        si tiene("prueba=alto") entonces
+            escribir("Prueba: poner en las tablas 1 GB en 0x0000008000000000 (512 GB) y leer de allí: ")
+            si alcanza(nat64(0x80) << 32, nat64(1) << 30) entonces
+                hex(l64(nat64(0x80) << 32))
+                escribir(" (leído sin fallo de página)\n")
+            sino
+                escribir("no se puede (sin páginas de 1 GB, o más allá de lo que direcciona)\n")
+            fin
+        fin
+        si tiene("prueba=division") entonces
+            escribir("Prueba: dividir entre cero...\n")
+            ensamblador
+                xor edx, edx
+                xor ecx, ecx
+                mov eax, 7
+                div ecx
+            fin
+        fin
+        si tiene("prueba=ud") entonces
+            escribir("Prueba: una instrucción que no existe (ud2)...\n")
+            ensamblador
+                db 0x0F, 0x0B
+            fin
+        fin
+    fin
+
+    función principal(): byte
+        variable alto_: puntero a nat64
+        ensamblador
+            mov eax, [C_mb_magia]
+            mov {magia}, eax
+            mov eax, [C_mb_info]
+            mov {info}, eax
+        fin
+        prepara()
+        si magia = MB2 entonces lee_mb2() sino si magia = MB1 entonces lee_mb1() fin
+        apagar_al_fallar := tiene("apagar")
+        lee()
+        si hay_fb y pantalla_alcanzable() entonces
+            si abre(fb_dir, fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces pon_consola() fin
+        fin
+        pon_color(14, 0)
+        escribir("Hispa-64 ", VERSIÓN, " \xC4 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n")
+        pon_color(7, 0)
+        escribir("Etapa 0: el núcleo mínimo, en Castel de 64 bits.\n\n")
+        ; el cargador
+        escribir("Cargador: ")
+        si cargador[0] <> 0 entonces escribir(cargador, ", ") fin
+        si magia = MB2 entonces escribir("multiboot2") sino si magia = MB1 entonces escribir("multiboot") sino escribir("¿?") fin
+        si con_uefi = 64 entonces escribir(", con UEFI de 64 bits")
+        sino si con_uefi = 32 entonces escribir(", con UEFI de 32 bits")
+        sino si magia = MB2 entonces escribir(", con la BIOS") fin
+        escribir("\n")
+        si línea[0] <> 0 entonces escribir("Línea de órdenes: ", línea, "\n") fin
+        ; el procesador
+        escribir("Procesador: ", nombre_limpio(), "\n")
+        escribir("  ", fabricante, ", familia ", familia(), ", modelo ", modelo(), ", revisión ", revisión())
+        escribir("; ", lógicos(), " procesadores lógicos en el paquete (según CPUID)\n")
+        escribir("  páginas de 1 GB: ")
+        sí_no(pag1g)
+        escribir("; NX: ")
+        sí_no(nx)
+        escribir("; x2APIC: ")
+        sí_no(x2apic)
+        escribir("; HWP: ")
+        sí_no(hwp)
+        escribir("; híbrido (núcleos P y E): ")
+        sí_no(híbrido)
+        escribir("\n")
+        escribir("  direcciones físicas de ", bits_físicos(), " bits\n")
+        ; el modo largo y las páginas
+        si efer() yb 0x400 <> 0 entonces
+            escribir("Modo largo (64 bits): sí; paginación de 4 niveles, los 64 primeros GB tal cual\n")
+        sino
+            escribir("Modo largo: ¡NO! (EFER.LMA a cero)\n")
+        fin
+        alto_ := puntero((nat64(0xFFFF8000) << 32) + nat64(dirección(prueba_lectura)))
+        escribir("  y otra vez en la mitad alta (desde 0xFFFF800000000000): ")
+        si valor(alto_) = prueba_lectura entonces escribir("comprobada\n") sino escribir("¡NO CUADRA!\n") fin
+        ; la memoria
+        el_mapa()
+        ; la pantalla
+        escribir("Pantalla: ")
+        si hay_fb entonces
+            escribir(fb_ancho, " x ", fb_alto, " puntos, ", fb_bpp, " bits por punto, ", fb_paso, " octetos por línea, en ")
+            hex(fb_dir)
+            si fb_dir >= nat64(1) << 32 entonces escribir(" (por encima de 4 GB)") fin
+            escribir("\n")
+            si hay() entonces
+                escribir("  consola de ", columnas, " x ", filas, " letras")
+                si escala_letra() > 1 entonces escribir(", con la letra al ", escala_letra(), " x ", escala_letra()) fin
+                escribir("\n")
+            sino
+                escribir("  sin consola en ella (no es de 32 ni de 24 bits por punto, o no se alcanza)\n")
+            fin
+        sino
+            escribir("ninguna gráfica (solo el puerto serie)\n")
+        fin
+        ; ACPI
+        escribir("ACPI: ")
+        si rsdp <> 0 entonces
+            escribir("la RSDP (")
+            si rsdp_v2 entonces escribir("2.0 o más") sino escribir("1.0") fin
+            escribir(") la ha copiado el cargador; la XSDT/RSDT en ")
+            si rsdp_v2 entonces hex(l64(rsdp + 24)) sino hex(nat64(l32(rsdp + 16))) fin
+            escribir("\n")
+        sino
+            escribir("el cargador no da la RSDP\n")
+        fin
+        ; las excepciones: un punto de parada, que se atiende y se sigue
+        escribir("Excepciones: las 32 en la IDT, explicadas en español. Una int3 de prueba:\n  ")
+        ensamblador
+            int3
+        fin
+        provoca()
+        pon_color(10, 0)
+        escribir("Hispa-64 etapa 0: todo en orden.\n")
+        pon_color(7, 0)
+        si apagar_al_fallar entonces devolver 42 fin
+        escribir("(Ya puede apagar el equipo: mantenga pulsado el botón de encendido.)\n")
+        ensamblador
+            cli
+        .para:
+            hlt
+            jmp .para
+        fin
+        devolver 0
+    fin
+
+fin Hispa64.

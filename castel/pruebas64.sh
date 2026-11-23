@@ -15,7 +15,9 @@
 #      el arranque en tres pasos: ccastel.py -> CASTEL64 (paso 1) -> paso 2 ->
 #      paso 3, idénticos. Y el primer ladrillo de Hispa-64 (nucleo64/hola.cas):
 #      arranca en QEMU x86_64 (multiboot, y multiboot2 con GRUB si está
-#      grub-mkrescue), pasa al modo largo y saluda por el puerto serie.
+#      grub-mkrescue), pasa al modo largo y saluda por el puerto serie. Y el
+#      núcleo de la etapa 0 de Hispa-64 (nucleo64/hispa64.cas, «modelo hispa64»):
+#      sus pruebas (nucleo64/pruebas.sh), por multiboot y por UEFI (OVMF + GRUB).
 
 parte23() {
 echo "== CASTEL64: Castel para x86-64 (Linux de 64 bits y el primer ladrillo de Hispa-64) =="
@@ -151,12 +153,13 @@ else ko "CASTEL64 no saca lo mismo que ccastel.py en:$mal"; fi
 if command -v gcc > /dev/null && python3 -I $AQUI/ccastel.py $AQUI/compilador/32/pentium/castel32.cas -o $W/castel32.asm \
      -I $AQUI/compilador/32 -I $AQUI/biblioteca32/pentium -I $AQUI/compilador -I $AQUI/nucleo32 > /dev/null 2>&1 \
    && nasm -f bin $W/castel32.asm -o $W/castel32.bin 2> /dev/null; then
-  cp $AQUI/nucleo64/hola.cas $F/EJ64/HOLA.CAS
+  for f in $AQUI/nucleo64/*.cas; do cp $f $F/EJ64/$(up $f).CAS; done
   python3 -I $AQUI/ccastel.py $AQUI/nucleo64/hola.cas -o $W/ref/HOLA.ASM > /dev/null 2>&1
+  python3 -I $AQUI/ccastel.py $AQUI/nucleo64/hispa64.cas -o $W/ref/HISPA64.ASM -I $AQUI/nucleo32 > /dev/null 2>&1
   bien=0; mal=
-  for f in $AQUI/ejemplos64/*.cas $W/azar64.cas $AQUI/nucleo64/hola.cas; do
+  for f in $AQUI/ejemplos64/*.cas $W/azar64.cas $AQUI/nucleo64/hola.cas $AQUI/nucleo64/hispa64.cas; do
     N=$(up $f)
-    (cd $F/EJ64 && $AQUI/corre32/corre32.sh -C $F $W/castel32.bin $N.CAS -o \\S\\$N.A32 -I \\B64 -I \\BIB > $F/S/$N.S32 2>&1)
+    (cd $F/EJ64 && $AQUI/corre32/corre32.sh -C $F $W/castel32.bin $N.CAS -o \\S\\$N.A32 -I \\B64 -I \\BIB -I \\NUC > $F/S/$N.S32 2>&1)
     if cmp -s $W/ref/$N.ASM $F/S/$N.A32; then bien=$((bien + 1)); else mal="$mal $N"; fi
   done
   if [ -z "$mal" ]; then ok "CASTEL32 (el de Hispa-Pentium, con corre32) también saca 64 bits: lo mismo que ccastel.py en los $bien programas de 64 bits (Hispa-64 incluido)"
@@ -240,5 +243,10 @@ if command -v qemu-system-x86_64 > /dev/null; then
       fi
     fi
   else ko "nucleo64/hola.cas no se compila igual con ccastel.py y NASM que con CASTEL64 y ENSAMB64: $(head -2 $W/comp.txt | paste -sd ' ')"; fi
+  # [HISPA-64] el núcleo de verdad, etapa 0 (docs/64/HISPA-64.md): sus pruebas,
+  # con CASTEL64 y ENSAMB64 (que tienen que sacar lo mismo que ccastel.py y NASM)
+  if CASTEL64=$W/castel64 ENSAMB64=$W/ensamb64 $AQUI/nucleo64/pruebas.sh $W/h64 > $W/h64.txt 2>&1; then
+    ok "Hispa-64, etapa 0 (nucleo64/pruebas.sh): $(tail -1 $W/h64.txt | sed 's/^== Hispa-64: //; s/ ==$//') (multiboot, excepciones, UEFI con OVMF y GRUB, la pantalla del GOP; igual con CASTEL64 y ENSAMB64)"
+  else ko "Hispa-64, etapa 0 (nucleo64/pruebas.sh): $(grep 'MAL:' $W/h64.txt | head -3 | paste -sd ' ')"; fi
 fi
 }

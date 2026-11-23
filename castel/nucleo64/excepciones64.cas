@@ -1,0 +1,355 @@
+; =============================================================================
+;  excepciones64.cas - Hispa-64: la tabla de interrupciones (IDT de 64 bits) con
+;  las 32 excepciones del procesador, y lo que se dice de cada una, en español:
+;  qué ha pasado, dónde (RIP, CS, RFLAGS, RSP), el número de error si lo hay, los
+;  registros y, en un fallo de página, la dirección (CR2) y por qué. Un punto
+;  de parada (int3) se cuenta y se sigue; las demás paran el procesador (con
+;  «apagar» en la línea de órdenes, apagan QEMU con el código 99: las pruebas).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Excepciones64
+
+    importar Cifras64
+
+    ; una puerta de la IDT de 64 bits: 16 octetos
+    tipo Puerta = estructura
+        bajo: nat16
+        selector: nat16
+        ist: byte
+        tipo_: byte
+        medio: nat16
+        alto: nat32
+        nada: nat32
+    fin
+
+    tipo Idtr = estructura
+        límite: nat16
+        base: nat64
+    fin
+
+    variable idt: arreglo [256] de Puerta
+    variable idtr: Idtr
+    público variable paradas: nat32         ; cuántas int3 se han atendido
+    público variable apagar_al_fallar: bool
+
+    ; el marco que deja una función de interrupción: los quince registros, de r15
+    ; (el primero, en [rbp]) a rax (en [rbp+112]); detrás, lo del procesador
+    función marco(): nat64
+        ensamblador
+            mov rax, [rbp]
+        fin
+    fin
+
+    función cr2(): nat64
+        ensamblador
+            mov rax, cr2
+        fin
+    fin
+
+    función lee64(d: nat64): nat64
+        variable p: puntero a nat64
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función nombre(n: nat32): puntero a byte
+        según nat16(n)
+            caso 0: devolver "División por cero (#DE): una división entre cero, o un cociente que no cabe"
+            caso 1: devolver "Depuración (#DB): un aviso de los registros de depuración"
+            caso 2: devolver "NMI: un aviso grave del hardware (la memoria, el bus o el vigilante)"
+            caso 3: devolver "Punto de parada (#BP): una instrucción int3"
+            caso 4: devolver "Desbordamiento (#OF): un «into» con el desbordamiento puesto"
+            caso 5: devolver "Fuera de límites (#BR): un «bound» que no se cumple"
+            caso 6: devolver "Instrucción no válida (#UD): el procesador no conoce (o no tiene) esa instrucción"
+            caso 7: devolver "Sin coprocesador (#NM): coma flotante o SSE con el coprocesador apagado"
+            caso 8: devolver "Doble fallo (#DF): ha fallado al atender otra excepción"
+            caso 9: devolver "Desbordamiento del coprocesador (de los 386: no debería pasar)"
+            caso 10: devolver "TSS no válido (#TS)"
+            caso 11: devolver "Segmento no presente (#NP)"
+            caso 12: devolver "Fallo de la pila (#SS): la pila apunta a donde no debe"
+            caso 13: devolver "Protección general (#GP): algo prohibido (una dirección no canónica, un registro privilegiado, un selector malo...)"
+            caso 14: devolver "Fallo de página (#PF): una dirección que no está en las tablas de páginas, o sin permiso"
+            caso 16: devolver "Error de coma flotante (#MF)"
+            caso 17: devolver "Comprobación de alineación (#AC)"
+            caso 18: devolver "Comprobación de la máquina (#MC): el procesador ha visto un error del hardware"
+            caso 19: devolver "Error de SIMD (#XM): una cuenta de SSE que no sale"
+            caso 20: devolver "Virtualización (#VE)"
+            caso 21: devolver "Protección del control (#CP): un salto o una vuelta que no cuadran (CET)"
+            caso 28: devolver "Inyección del hipervisor (#HV)"
+            caso 29: devolver "Comunicación con el VMM (#VC)"
+            caso 30: devolver "Seguridad (#SX)"
+            si no: devolver "Reservada (el procesador no debería darla)"
+        fin
+    fin
+
+    función pon_puerta(n: nat32, f: nat64)
+        idt[n].bajo := nat16(f)
+        idt[n].selector := 0x08
+        idt[n].ist := 0
+        idt[n].tipo_ := 0x8E            ; presente, anillo 0, puerta de interrupción de 64 bits
+        idt[n].medio := nat16(f >> 16)
+        idt[n].alto := nat32(f >> 32)
+        idt[n].nada := 0
+    fin
+
+    ; lo que se dice de la excepción n; m es el marco; con_error, si el procesador
+    ; ha dejado un número de error (entonces RIP va 8 octetos más allá)
+    función explica(n: nat32, m: nat64, con_error: bool)
+        variable d, err, c2: nat64
+        d := m + 120
+        err := 0
+        si con_error entonces
+            err := lee64(d)
+            d := d + 8
+        fin
+        si n = 14 entonces c2 := cr2() fin
+        si n = 3 entonces
+            paradas := paradas + 1
+            escribir("Punto de parada (int3) número ", paradas, " en RIP=")
+            hex16(lee64(d) - 1)
+            escribir(": atendido, sigue.\n")
+            devolver
+        fin
+        escribir("\n*** Hispa-64 se ha parado: excepción ", n, " ***\n")
+        escribir(nombre(n), "\n")
+        si n = 14 entonces
+            escribir("Al ")
+            si err yb 16 <> 0 entonces escribir("ejecutar en ")
+            sino si err yb 2 <> 0 entonces escribir("escribir en ")
+            sino escribir("leer de ") fin
+            hex16(c2)
+            si err yb 1 = 0 entonces escribir(": la página no está") sino escribir(": la página está, pero sin permiso") fin
+            si err yb 4 <> 0 entonces escribir(" (desde un programa)") sino escribir(" (desde el núcleo)") fin
+            si err yb 8 <> 0 entonces escribir(" (un bit reservado puesto en las tablas)") fin
+            escribir(".\n")
+        fin
+        si con_error entonces
+            escribir("Número de error: ")
+            hex(err)
+            si n <> 14 y err <> 0 entonces
+                escribir(" (selector ")
+                hex(err yb 0xFFF8)
+                si err yb 2 <> 0 entonces escribir(", de la IDT") fin
+                escribir(")")
+            fin
+            escribir("\n")
+        fin
+        escribir("RIP=")
+        hex16(lee64(d))
+        escribir("  CS=")
+        hex(lee64(d + 8))
+        escribir("  RFLAGS=")
+        hex(lee64(d + 16))
+        escribir("  RSP=")
+        hex16(lee64(d + 24))
+        escribir("\nRAX=")
+        hex16(lee64(m + 112))
+        escribir(" RBX=")
+        hex16(lee64(m + 88))
+        escribir(" RCX=")
+        hex16(lee64(m + 104))
+        escribir(" RDX=")
+        hex16(lee64(m + 96))
+        escribir("\nRSI=")
+        hex16(lee64(m + 72))
+        escribir(" RDI=")
+        hex16(lee64(m + 64))
+        escribir(" RBP=")
+        hex16(lee64(m + 80))
+        escribir(" R8 =")
+        hex16(lee64(m + 56))
+        escribir("\nR9 =")
+        hex16(lee64(m + 48))
+        escribir(" R10=")
+        hex16(lee64(m + 40))
+        escribir(" R11=")
+        hex16(lee64(m + 32))
+        escribir(" R12=")
+        hex16(lee64(m + 24))
+        escribir("\nR13=")
+        hex16(lee64(m + 16))
+        escribir(" R14=")
+        hex16(lee64(m + 8))
+        escribir(" R15=")
+        hex16(lee64(m))
+        escribir("\nEl procesador queda parado. Apunte lo de arriba (o hágale una foto) y reinicie el equipo.\n")
+        si apagar_al_fallar entonces salir(99) fin
+        ensamblador
+            cli
+        .para:
+            hlt
+            jmp .para
+        fin
+    fin
+
+    interrupción función e0()
+        explica(0, marco(), falso)
+    fin
+
+    interrupción función e1()
+        explica(1, marco(), falso)
+    fin
+
+    interrupción función e2()
+        explica(2, marco(), falso)
+    fin
+
+    interrupción función e3()
+        explica(3, marco(), falso)
+    fin
+
+    interrupción función e4()
+        explica(4, marco(), falso)
+    fin
+
+    interrupción función e5()
+        explica(5, marco(), falso)
+    fin
+
+    interrupción función e6()
+        explica(6, marco(), falso)
+    fin
+
+    interrupción función e7()
+        explica(7, marco(), falso)
+    fin
+
+    interrupción función e8(código: nat64)
+        explica(8, marco(), cierto)
+    fin
+
+    interrupción función e9()
+        explica(9, marco(), falso)
+    fin
+
+    interrupción función e10(código: nat64)
+        explica(10, marco(), cierto)
+    fin
+
+    interrupción función e11(código: nat64)
+        explica(11, marco(), cierto)
+    fin
+
+    interrupción función e12(código: nat64)
+        explica(12, marco(), cierto)
+    fin
+
+    interrupción función e13(código: nat64)
+        explica(13, marco(), cierto)
+    fin
+
+    interrupción función e14(código: nat64)
+        explica(14, marco(), cierto)
+    fin
+
+    interrupción función e15()
+        explica(15, marco(), falso)
+    fin
+
+    interrupción función e16()
+        explica(16, marco(), falso)
+    fin
+
+    interrupción función e17(código: nat64)
+        explica(17, marco(), cierto)
+    fin
+
+    interrupción función e18()
+        explica(18, marco(), falso)
+    fin
+
+    interrupción función e19()
+        explica(19, marco(), falso)
+    fin
+
+    interrupción función e20()
+        explica(20, marco(), falso)
+    fin
+
+    interrupción función e21(código: nat64)
+        explica(21, marco(), cierto)
+    fin
+
+    interrupción función e22()
+        explica(22, marco(), falso)
+    fin
+
+    interrupción función e23()
+        explica(23, marco(), falso)
+    fin
+
+    interrupción función e24()
+        explica(24, marco(), falso)
+    fin
+
+    interrupción función e25()
+        explica(25, marco(), falso)
+    fin
+
+    interrupción función e26()
+        explica(26, marco(), falso)
+    fin
+
+    interrupción función e27()
+        explica(27, marco(), falso)
+    fin
+
+    interrupción función e28()
+        explica(28, marco(), falso)
+    fin
+
+    interrupción función e29(código: nat64)
+        explica(29, marco(), cierto)
+    fin
+
+    interrupción función e30(código: nat64)
+        explica(30, marco(), cierto)
+    fin
+
+    interrupción función e31()
+        explica(31, marco(), falso)
+    fin
+
+    ; monta la IDT con las 32 excepciones y la carga
+    público función prepara()
+
+        pon_puerta(0, nat64(dirección(e0)))
+        pon_puerta(1, nat64(dirección(e1)))
+        pon_puerta(2, nat64(dirección(e2)))
+        pon_puerta(3, nat64(dirección(e3)))
+        pon_puerta(4, nat64(dirección(e4)))
+        pon_puerta(5, nat64(dirección(e5)))
+        pon_puerta(6, nat64(dirección(e6)))
+        pon_puerta(7, nat64(dirección(e7)))
+        pon_puerta(8, nat64(dirección(e8)))
+        pon_puerta(9, nat64(dirección(e9)))
+        pon_puerta(10, nat64(dirección(e10)))
+        pon_puerta(11, nat64(dirección(e11)))
+        pon_puerta(12, nat64(dirección(e12)))
+        pon_puerta(13, nat64(dirección(e13)))
+        pon_puerta(14, nat64(dirección(e14)))
+        pon_puerta(15, nat64(dirección(e15)))
+        pon_puerta(16, nat64(dirección(e16)))
+        pon_puerta(17, nat64(dirección(e17)))
+        pon_puerta(18, nat64(dirección(e18)))
+        pon_puerta(19, nat64(dirección(e19)))
+        pon_puerta(20, nat64(dirección(e20)))
+        pon_puerta(21, nat64(dirección(e21)))
+        pon_puerta(22, nat64(dirección(e22)))
+        pon_puerta(23, nat64(dirección(e23)))
+        pon_puerta(24, nat64(dirección(e24)))
+        pon_puerta(25, nat64(dirección(e25)))
+        pon_puerta(26, nat64(dirección(e26)))
+        pon_puerta(27, nat64(dirección(e27)))
+        pon_puerta(28, nat64(dirección(e28)))
+        pon_puerta(29, nat64(dirección(e29)))
+        pon_puerta(30, nat64(dirección(e30)))
+        pon_puerta(31, nat64(dirección(e31)))
+        idtr.límite := tamaño(idt) - 1
+        idtr.base := nat64(dirección(idt))
+        ensamblador
+            lidt {idtr}
+        fin
+    fin
+
+fin Excepciones64.

@@ -1373,6 +1373,7 @@ módulo Programa
         es_usuario := falso
         en64 := falso
         es_linux := falso
+        es_hispa64 := falso
         d := nb(mod_arbol[prog])
         mientras d <> 0 hacer
             si nk(d) = K_MODELO entonces
@@ -1383,7 +1384,8 @@ módulo Programa
                 plano := es_núcleo o es_usuario o na(d) = a_hispa32
                 ; [CASTEL64] «modelo linux64» o «núcleo64»: 64 bits (CASTEL64.md)
                 es_linux := na(d) = a_linux64
-                en64 := es_linux o na(d) = a_núcleo64
+                es_hispa64 := na(d) = a_hispa64
+                en64 := es_linux o es_hispa64 o na(d) = a_núcleo64
                 plano := plano o en64
                 si en64 y no hay_64() entonces
                     m("este CASTEL, el de 16 bits, no saca 64 bits: use CASTEL32 o CASTEL64")

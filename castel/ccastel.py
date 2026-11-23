@@ -437,10 +437,11 @@ class Sintactico:
             return self.ensamblador()
         if self.es('ID', 'modelo') and (self.es('ID', 'grande', 1) or self.es('ID', 'núcleo', 1)
                                         or self.es('ID', 'hispa32', 1) or self.es('ID', 'usuario', 1)
-                                        or self.es('ID', 'linux64', 1) or self.es('ID', 'núcleo64', 1)):
+                                        or self.es('ID', 'linux64', 1) or self.es('ID', 'núcleo64', 1)
+                                        or self.es('ID', 'hispa64', 1)):
             pos = self.pos()                    # «modelo grande»: un .EXE de varios segmentos;
             cual = self.tok(1)[1]               # «modelo núcleo», «hispa32» y «usuario»: 32 bits
-            # [CASTEL64] «modelo linux64» y «núcleo64»: 64 bits (CASTEL64.md)
+            # [CASTEL64] «modelo linux64», «núcleo64» y «hispa64»: 64 bits (CASTEL64.md)
             self.p += 2
             return N('modelo', pos, cual=cual)
         if self.es('ID', self.nombre_modulo) or self.es('EOF'):
@@ -1040,7 +1041,7 @@ class Generador:
         self.plano = self.modelo in ('núcleo', 'hispa32', 'usuario')
         # [CASTEL64] «modelo linux64» o «núcleo64»: 64 bits; las cuentas, como en el
         # modelo plano (de 32), salvo las que llevan un nat64, un ent64 o un puntero
-        self.largo = self.modelo in ('linux64', 'núcleo64')
+        self.largo = self.modelo in ('linux64', 'núcleo64', 'hispa64')
         self.plano = self.plano or self.largo
         self.bits = 64 if self.largo else 32
         self.tpunt = 8 if self.largo else 4 if self.plano else 2     # lo que ocupa un puntero
@@ -1312,7 +1313,8 @@ class Generador:
         apoyos = APOYO
         if self.largo:                          # [CASTEL64]
             apoyos = dict(APOYO64)
-            apoyos.update({'linux64': APOYO_LINUX64, 'núcleo64': APOYO_NUCLEO64}[self.modelo])
+            apoyos.update({'linux64': APOYO_LINUX64, 'núcleo64': APOYO_NUCLEO64,
+                           'hispa64': APOYO_HISPA64}[self.modelo])
         elif self.plano:
             apoyos = dict(APOYO32)
             apoyos.update({'núcleo': APOYO_NUCLEO, 'hispa32': APOYO_HISPA32, 'usuario': APOYO_USUARIO}[self.modelo])
@@ -5372,6 +5374,74 @@ castel_salir:
 """,
 }
 
+# [HISPA-64] modelo hispa64 (docs/64/HISPA-64.md): al puerto serie COM1 y, si el
+# núcleo ha puesto en C_consola una función suya (su consola en la pantalla, la
+# del GOP), también a ella. No hay pantalla de texto (con UEFI no la hay).
+APOYO_HISPA64 = {
+    'castel_salida': r"""
+; castel_salida: escribe RCX octetos desde RSI (puerto serie y consola)
+castel_salida:
+    test rcx, rcx
+    jz .fin
+.otra:
+    lodsb
+    call castel_pon_car
+    dec rcx
+    jnz .otra
+.fin:
+    ret
+""",
+    'castel_pon_car': r"""
+; castel_pon_car: la letra de AL, al puerto serie COM1 (si no está, no se
+; espera: se da por perdida) y a la función de C_consola, si la hay, que la
+; recibe como su parámetro (una función de Castel: lo quita ella). Lo conserva todo.
+castel_pon_car:
+    push rdx
+    push rcx
+    push rax
+    mov edx, 0x3FD
+    mov ecx, 100000
+.espera:
+    in al, dx
+    test al, 0x20
+    jnz .va
+    dec ecx
+    jnz .espera
+.va:
+    pop rax
+    push rax
+    mov edx, 0x3F8
+    out dx, al
+    cmp qword [C_consola], 0
+    je .fin
+    push rbx
+    push rsi
+    push rdi
+    movzx eax, al
+    push rax
+    call [C_consola]
+    pop rdi
+    pop rsi
+    pop rbx
+.fin:
+    pop rax
+    pop rcx
+    pop rdx
+    ret
+""",
+    'castel_salir': r"""
+; castel_salir: el núcleo acaba (con el código de AL): se dice por el puerto
+; 0xF4 (en QEMU, el dispositivo isa-debug-exit) y el procesador se para
+castel_salir:
+    mov edx, 0xF4
+    out dx, al
+    cli
+.para:
+    hlt
+    jmp .para
+""",
+}
+
 # [CASTEL64] el arranque de 64 bits: lo que va delante del programa (desde la
 # tercera línea hasta llamar a principal) y lo que va detrás de los datos
 # (hasta las variables sin valor inicial, que llevan delante la pila)
@@ -5556,6 +5626,195 @@ _datos_fin:
 ; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----
 _vacio:
     absolute _vacio
+C_pila:
+    resb 65536
+C_pila_fin:
+""",
+    # [HISPA-64] el núcleo de Hispa-64 (docs/64/HISPA-64.md)
+    'hispa64': r"""
+; Ensamblar:  nasm -f bin ESTE.asm -o HISPA64.BIN
+; -----------------------------------------------------------------
+cpu x64
+bits 32
+org 0x100000
+; el núcleo de Hispa-64: lo carga GRUB por multiboot2 (con UEFI de 64 bits, con
+; UEFI de 32 bits, como los Atom Bay Trail, o con la BIOS) o QEMU con -kernel
+; (multiboot), en modo protegido de 32 bits. Pide a GRUB la pantalla gráfica
+; (la que deje el firmware). El arranque mira que el procesador sea de 64 bits
+; (si no, lo dice por el puerto serie y se para), pone sus tablas de páginas
+; (dentro del núcleo, en C_tablas: los 64 primeros GB tal cual y otra vez en
+; la mitad alta, desde 0xFFFF800000000000, con páginas de 2 MB) y pasa al
+; modo largo. Lo que se escribe va al puerto serie y a C_consola.
+C_ini:
+    jmp C_arranque
+    align 4, db 0
+C_multiboot:
+    dd 0x1BADB002
+    dd 0x00010000
+    dd 0xE4514FFE
+    dd C_multiboot
+    dd C_ini
+    dd _datos_fin
+    dd _vacio_fin
+    dd C_arranque
+    align 8, db 0
+C_multiboot2:
+    dd 0xE85250D6, 0
+    dd C_mb2_fin-C_multiboot2
+    dd 0x100000000-0xE85250D6-(C_mb2_fin-C_multiboot2)
+    dw 2, 0
+    dd 24
+    dd C_multiboot2, C_ini, _datos_fin, _vacio_fin
+    dw 3, 0
+    dd 12
+    dd C_arranque
+    dd 0
+    dw 5, 1
+    dd 20
+    dd 0, 0, 32
+    dd 0
+    dw 0, 0
+    dd 8
+C_mb2_fin:
+; la tabla de descriptores: código de 64 bits (0x08) y datos (0x10)
+C_gdt:
+    dd 0, 0
+    dd 0x0000FFFF, 0x00AF9A00
+    dd 0x0000FFFF, 0x00CF9200
+C_gdtr:
+    dw 23
+    dq C_gdt
+C_mb_magia:
+    dd 0
+C_mb_info:
+    dd 0
+C_consola:
+    dq 0
+C_no64:
+    db 13, 10, 'Hispa-64: este procesador no es de 64 bits (no tiene el modo largo).', 13, 10
+    db 'Este equipo necesita Hispa-Pentium, que es de 32 bits.', 13, 10, 0
+C_arranque:
+    cli
+    cld
+    mov [C_mb_magia], eax
+    mov [C_mb_info], ebx
+    mov edi, _vacio
+    mov ecx, _vacio_fin-_vacio
+    xor eax, eax
+    rep stosb
+; el puerto serie COM1 a 115200, 8N1
+    mov edx, 0x3F9
+    xor al, al
+    out dx, al
+    mov edx, 0x3FB
+    mov al, 0x80
+    out dx, al
+    mov edx, 0x3F8
+    mov al, 1
+    out dx, al
+    mov edx, 0x3F9
+    xor al, al
+    out dx, al
+    mov edx, 0x3FB
+    mov al, 3
+    out dx, al
+    mov edx, 0x3FA
+    mov al, 0xC7
+    out dx, al
+    mov edx, 0x3FC
+    mov al, 3
+    out dx, al
+; ¿es de 64 bits? (CPUID 80000001h, EDX bit 29: el modo largo)
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000001
+    jb .no64
+    mov eax, 0x80000001
+    cpuid
+    test edx, 0x20000000
+    jnz .si64
+.no64:
+    mov esi, C_no64
+.letra:
+    mov ah, [esi]
+    test ah, ah
+    jz .para
+    inc esi
+    mov edx, 0x3FD
+    mov ecx, 100000
+.espera:
+    in al, dx
+    test al, 0x20
+    jnz .sale
+    dec ecx
+    jnz .espera
+.sale:
+    mov al, ah
+    mov edx, 0x3F8
+    out dx, al
+    jmp .letra
+.para:
+    hlt
+    jmp .para
+; las tablas de páginas: la PML4 (la 0 y la 256 a la misma PDPT), la PDPT (64
+; entradas, una por GB) y 64 PD con páginas de 2 MB: de 0 a 64 GB
+.si64:
+    mov edi, C_tablas
+    lea eax, [edi+0x1003]
+    mov [edi], eax
+    mov [edi+2048], eax
+    lea ebx, [edi+0x1000]
+    lea eax, [edi+0x2003]
+    mov ecx, 64
+.pdpt:
+    mov [ebx], eax
+    add eax, 0x1000
+    add ebx, 8
+    loop .pdpt
+    lea ebx, [edi+0x2000]
+    mov eax, 0x83
+    xor edx, edx
+    mov ecx, 32768
+.pd:
+    mov [ebx], eax
+    mov [ebx+4], edx
+    add eax, 0x200000
+    adc edx, 0
+    add ebx, 8
+    loop .pd
+    mov eax, cr4
+    or eax, 0x20
+    mov cr4, eax
+    mov eax, C_tablas
+    mov cr3, eax
+    mov ecx, 0xC0000080
+    rdmsr
+    or eax, 0x100
+    wrmsr
+    mov eax, cr0
+    or eax, 0x80000001
+    mov cr0, eax
+    lgdt [C_gdtr]
+    jmp 0x08:C_largo
+bits 64
+C_largo:
+    mov ax, 0x10
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov esp, C_pila_fin
+""",
+    'hispa64_datos': r"""
+    align 4096, db 0
+_datos_fin:
+
+; ---- sin valor inicial: no van en el archivo; a cero al arrancar ----
+_vacio:
+    absolute _vacio
+C_tablas:
+    resb 270336
 C_pila:
     resb 65536
 C_pila_fin:
@@ -6415,7 +6674,7 @@ def compila(ruta, rutas=(), todo=False):
         clase = Generador
         if any(d.k == 'modelo' and d.cual in ('núcleo', 'hispa32', 'usuario') for d in c.orden[-1].arbol.decls):
             clase = Generador32                 # 32 bits (CASTEL32.md)
-        if any(d.k == 'modelo' and d.cual in ('linux64', 'núcleo64') for d in c.orden[-1].arbol.decls):
+        if any(d.k == 'modelo' and d.cual in ('linux64', 'núcleo64', 'hispa64') for d in c.orden[-1].arbol.decls):
             clase = Generador64                 # [CASTEL64] 64 bits (CASTEL64.md)
         return clase(c.orden, todo).genera()
     except ErrorCastel as e:

@@ -1,0 +1,211 @@
+; =============================================================================
+;  consola64.cas - Hispa-64: la consola en la pantalla gráfica (la del GOP de
+;  UEFI, que GRUB pasa por multiboot2), con la letra propia de Hispa (la «Hispa
+;  8x16» de nucleo32/letra.cas, en la página 437). Guarda el texto y el color
+;  de cada casilla: al llegar abajo sube el texto y vuelve a pintar, sin leer
+;  nunca de la pantalla (en los equipos de verdad leer del marco de la
+;  pantalla es muy lento). En pantallas altas (1400 puntos o más) cada punto
+;  de la letra son 2x2, para que se lea. De 32 bits por punto (lo que dan
+;  todos los GOP) o de 24 (algún modo VBE con la BIOS); si no, no hay consola
+;  (queda el puerto serie).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Consola64
+
+    importar Letra
+
+    constante CASILLAS = 65000
+
+    variable base: nat64                ; dónde está la pantalla (física = virtual, de 0 a 64 GB)
+    variable ancho, alto, salto: nat32   ; puntos de ancho y de alto; octetos por línea
+    variable escala: nat32
+    variable octetos: nat32             ; por punto: 4 o 3
+    público variable columnas, filas: nat32
+    variable cx, cy: nat32
+    variable color: byte                ; el de ahora: fondo en los 4 de arriba, tinta en los de abajo
+    variable rp, vp, ap: byte           ; dónde va cada color (rojo, verde, azul) en el punto
+    variable texto: arreglo [CASILLAS] de byte
+    variable colores: arreglo [CASILLAS] de byte
+    variable abierta: bool
+    ; la «─» (0xC4 en la página 437), que la letra de Hispa no trae: una raya en medio
+    variable raya: arreglo [16] de byte = (0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0)
+    ; los 16 colores de siempre (los del PC), en rojo, verde y azul
+    variable rojo: arreglo [16] de byte = (0, 0, 0, 0, 170, 170, 170, 170, 85, 85, 85, 85, 255, 255, 255, 255)
+    variable verde: arreglo [16] de byte = (0, 0, 170, 170, 0, 0, 85, 170, 85, 85, 255, 255, 85, 85, 255, 255)
+    variable azul: arreglo [16] de byte = (0, 170, 0, 170, 0, 170, 0, 170, 85, 255, 85, 255, 85, 255, 85, 255)
+
+    público función hay(): bool
+        devolver abierta
+    fin
+
+    público función ancho_puntos(): nat32
+        devolver ancho
+    fin
+
+    público función alto_puntos(): nat32
+        devolver alto
+    fin
+
+    público función escala_letra(): nat32
+        devolver escala
+    fin
+
+    función punto(c: byte): nat32
+        variable i: byte
+        i := c yb 15
+        devolver (nat32(rojo[i]) << rp) ob (nat32(verde[i]) << vp) ob (nat32(azul[i]) << ap)
+    fin
+
+    ; la casilla (xc, yc), pintada con su letra y su color
+    función pinta(xc: nat32, yc: nat32)
+        variable dib: puntero a byte
+        variable fila, sy, col, sx, px, py, t, f, c: nat32
+        variable bits: byte
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        dib := dibujo_letra(texto[yc * columnas + xc])
+        si texto[yc * columnas + xc] = 0xC4 entonces dib := dirección(raya[0]) fin
+        t := punto(colores[yc * columnas + xc])
+        f := punto(colores[yc * columnas + xc] >> 4)
+        px := xc * 8 * escala
+        py := yc * 16 * escala
+        fila := 0
+        mientras fila < 16 hacer
+            bits := dib[fila]
+            sy := 0
+            mientras sy < escala hacer
+                p := puntero(base + nat64(py + fila * escala + sy) * salto + nat64(px) * octetos)
+                q := puntero(p)
+                col := 0
+                mientras col < 8 hacer
+                    si bits yb (0x80 >> col) <> 0 entonces c := t sino c := f fin
+                    sx := 0
+                    mientras sx < escala hacer
+                        si octetos = 4 entonces
+                            valor(p) := c
+                            p := p + 1
+                        sino
+                            q[0] := byte(c)
+                            q[1] := byte(c >> 8)
+                            q[2] := byte(c >> 16)
+                            q := q + 3
+                        fin
+                        sx := sx + 1
+                    fin
+                    col := col + 1
+                fin
+                sy := sy + 1
+            fin
+            fila := fila + 1
+        fin
+    fin
+
+    ; abre la consola en esa pantalla (32 o 24 bits por punto); dice si se puede
+    público función abre(b: nat64, an: nat32, al: nat32, pa: nat32, bpp: byte, r: byte, v: byte, a: byte): bool
+        variable i, j: nat32
+        variable p: puntero a byte
+        abierta := falso
+        si (bpp <> 32 y bpp <> 24) o an < 320 o al < 200 entonces devolver falso fin
+        octetos := nat32(bpp) div 8
+        base := b
+        ancho := an
+        alto := al
+        salto := pa
+        rp := r
+        vp := v
+        ap := a
+        escala := 1
+        si al >= 1400 entonces escala := 2 fin
+        mientras (an div (8 * escala)) * (al div (16 * escala)) > CASILLAS hacer escala := escala + 1 fin
+        columnas := an div (8 * escala)
+        filas := al div (16 * escala)
+        color := 0x07
+        i := 0
+        mientras i < columnas * filas hacer
+            texto[i] := ' '
+            colores[i] := color
+            i := i + 1
+        fin
+        ; la pantalla entera, de negro (también lo que sobra a la derecha y abajo)
+        i := 0
+        mientras i < al hacer
+            p := puntero(base + nat64(i) * salto)
+            j := 0
+            mientras j < an * octetos hacer
+                p[j] := 0
+                j := j + 1
+            fin
+            i := i + 1
+        fin
+        cx := 0
+        cy := 0
+        abierta := cierto
+        devolver cierto
+    fin
+
+    público función pon_color(tinta: byte, fondo: byte)
+        color := (fondo << 4) ob (tinta yb 15)
+    fin
+
+    función sube()
+        variable i, n: nat32
+        variable xc, yc: nat32
+        n := columnas * (filas - 1)
+        i := 0
+        mientras i < n hacer
+            texto[i] := texto[i + columnas]
+            colores[i] := colores[i + columnas]
+            i := i + 1
+        fin
+        mientras i < columnas * filas hacer
+            texto[i] := ' '
+            colores[i] := color yb 0xF0
+            i := i + 1
+        fin
+        yc := 0
+        mientras yc < filas hacer
+            xc := 0
+            mientras xc < columnas hacer
+                pinta(xc, yc)
+                xc := xc + 1
+            fin
+            yc := yc + 1
+        fin
+    fin
+
+    función nueva_línea()
+        cx := 0
+        cy := cy + 1
+        si cy >= filas entonces
+            sube()
+            cy := filas - 1
+        fin
+    fin
+
+    ; una letra (de la página 437) en el cursor
+    público función letra(c: byte)
+        si no abierta entonces devolver fin
+        si c = 10 entonces
+            nueva_línea()
+        sino si c = 13 entonces
+            cx := 0
+        sino si c = 9 entonces
+            letra(' ')
+            mientras cx yb 7 <> 0 hacer letra(' ') fin
+        sino si c = 8 entonces
+            si cx > 0 entonces cx := cx - 1 fin
+        sino
+            texto[cy * columnas + cx] := c
+            colores[cy * columnas + cx] := color
+            pinta(cx, cy)
+            cx := cx + 1
+            si cx >= columnas entonces nueva_línea() fin
+        fin
+    fin
+
+    ; la que llama el arranque (C_consola) con cada letra que se escribe
+    público función consola_letra(c: nat64)
+        letra(byte(c))
+    fin
+
+fin Consola64.

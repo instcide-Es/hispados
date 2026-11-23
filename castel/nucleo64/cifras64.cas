@@ -1,0 +1,52 @@
+; =============================================================================
+;  cifras64.cas - Hispa-64: escribir números en hexadecimal y en megas
+;  (docs/64/HISPA-64.md). Lo usan el núcleo y las excepciones.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cifras64
+
+    ; n en hexadecimal, con «0x» delante y sin ceros de más
+    público función hex(n: nat64)
+        variable i: nat32
+        variable d: nat32
+        variable visto: bool
+        escribir("0x")
+        visto := falso
+        i := 60
+        mientras cierto hacer
+            d := nat32((n >> i) yb 15)
+            si d <> 0 o visto o i = 0 entonces
+                visto := cierto
+                si d < 10 entonces escribir_car('0' + d) sino escribir_car('A' + d - 10) fin
+            fin
+            si i = 0 entonces romper fin
+            i := i - 4
+        fin
+    fin
+
+    ; n en hexadecimal con 16 cifras (para las direcciones)
+    público función hex16(n: nat64)
+        variable i: nat32
+        variable d: nat32
+        escribir("0x")
+        i := 60
+        mientras cierto hacer
+            d := nat32((n >> i) yb 15)
+            si d < 10 entonces escribir_car('0' + d) sino escribir_car('A' + d - 10) fin
+            si i = 0 entonces romper fin
+            i := i - 4
+        fin
+    fin
+
+    ; un tamaño en octetos, en lo que se lea mejor: KB, MB o GB (con un decimal)
+    público función tamaño_legible(n: nat64)
+        si n >= nat64(1) << 30 entonces
+            escribir(n >> 30, ",", ((n yb ((nat64(1) << 30) - 1)) * 10) >> 30, " GB")
+        sino si n >= nat64(1) << 20 entonces
+            escribir(n >> 20, ",", ((n yb ((nat64(1) << 20) - 1)) * 10) >> 20, " MB")
+        sino
+            escribir(n >> 10, " KB")
+        fin
+    fin
+
+fin Cifras64.

@@ -1508,26 +1508,36 @@ módulo Gen64
     ; -------------------------------------------------------------------------
     público función l64_napoyo(): nat16
         si es_linux entonces devolver N_APOYO_LINUX64 fin
+        si es_hispa64 entonces devolver N_APOYO_HISPA64 fin
         devolver N_APOYO_NÚCLEO64
     fin
 
+    ; qué modelo de 64 bits: 0 núcleo64, 1 linux64, 2 hispa64 (Apoyo64)
+    función cuál64(): nat16
+        si es_linux entonces devolver 1 fin
+        si es_hispa64 entonces devolver 2 fin
+        devolver 0
+    fin
+
     público función l64_apoyo_nombre(i: nat16): puntero a byte
-        devolver apoyo64_nombre(es_linux, i)
+        devolver apoyo64_nombre(cuál64(), i)
     fin
 
     público función l64_apoyo_texto(i: nat16): puntero a byte
-        devolver apoyo64_texto(es_linux, i)
+        devolver apoyo64_texto(cuál64(), i)
     fin
 
     ; lo que va delante del programa (hasta llamar a principal)
     público función l64_arranque(): puntero a byte
         si es_linux entonces devolver ARRANQUE_LINUX64 fin
+        si es_hispa64 entonces devolver ARRANQUE_HISPA64 fin
         devolver ARRANQUE_NUCLEO64
     fin
 
     ; lo que va detrás de los datos
     público función l64_arranque_datos(): puntero a byte
         si es_linux entonces devolver ARRANQUE_LINUX64_DATOS fin
+        si es_hispa64 entonces devolver ARRANQUE_HISPA64_DATOS fin
         devolver ARRANQUE_NUCLEO64_DATOS
     fin
 

@@ -118,12 +118,14 @@ LINUX64 = dict(ccastel.APOYO64)
 LINUX64.update(ccastel.APOYO_LINUX64)
 NUCLEO64 = dict(ccastel.APOYO64)
 NUCLEO64.update(ccastel.APOYO_NUCLEO64)
+HISPA64 = dict(ccastel.APOYO64)
+HISPA64.update(ccastel.APOYO_HISPA64)
 l64 = [
     "; =============================================================================",
     ";  apoyo64.cas - [CASTEL64] las rutinas de apoyo de los programas de 64 bits",
-    ";  (modelo linux64 y núcleo64, CASTEL64.md) y su arranque. NO editar a mano: lo",
+    ";  (modelo linux64, núcleo64 y hispa64, CASTEL64.md) y su arranque. NO editar a mano: lo",
     ";  escribe compilador/haz_apoyo.py con el texto de APOYO64, APOYO_LINUX64,",
-    ";  APOYO_NUCLEO64 y ARRANQUE64 de ccastel.py, para que los dos compiladores",
+    ";  APOYO_NUCLEO64, APOYO_HISPA64 y ARRANQUE64 de ccastel.py, para que los dos compiladores",
     ";  pongan lo mismo, letra a letra.",
     ";  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.",
     "; =============================================================================",
@@ -131,14 +133,16 @@ l64 = [
     "",
     "    público constante N_APOYO_LINUX64 = %d" % len(LINUX64),
     "    público constante N_APOYO_NÚCLEO64 = %d" % len(NUCLEO64),
+    "    público constante N_APOYO_HISPA64 = %d" % len(HISPA64),
 ]
-for letra, tabla in (('L', LINUX64), ('N', NUCLEO64)):
+for letra, tabla in (('L', LINUX64), ('N', NUCLEO64), ('H', HISPA64)):
     for i, (nombre, txt) in enumerate(tabla.items()):
         l64.append('    constante %sN_%d = "%s"' % (letra, i, nombre))
         l64.append('    constante %sT_%d = "%s"' % (letra, i, literal(txt.strip('\n') + '\n')))
 for nombre, txt in ccastel.ARRANQUE64.items():
     clave = {'linux64': 'LINUX64', 'linux64_datos': 'LINUX64_DATOS', 'núcleo64': 'NUCLEO64',
-             'núcleo64_datos': 'NUCLEO64_DATOS'}[nombre]
+             'núcleo64_datos': 'NUCLEO64_DATOS', 'hispa64': 'HISPA64',
+             'hispa64_datos': 'HISPA64_DATOS'}[nombre]
     l64.append('    público constante ARRANQUE_%s = "%s"' % (clave, literal(txt.strip('\n') + '\n')))
 l64 += [
     "",
@@ -146,15 +150,19 @@ l64 += [
     "    variable textos_l: arreglo [N_APOYO_LINUX64] de puntero a byte = (%s)" % ', '.join('LT_%d' % i for i in range(len(LINUX64))),
     "    variable nombres_n: arreglo [N_APOYO_NÚCLEO64] de puntero a byte = (%s)" % ', '.join('NN_%d' % i for i in range(len(NUCLEO64))),
     "    variable textos_n: arreglo [N_APOYO_NÚCLEO64] de puntero a byte = (%s)" % ', '.join('NT_%d' % i for i in range(len(NUCLEO64))),
+    "    variable nombres_h: arreglo [N_APOYO_HISPA64] de puntero a byte = (%s)" % ', '.join('HN_%d' % i for i in range(len(HISPA64))),
+    "    variable textos_h: arreglo [N_APOYO_HISPA64] de puntero a byte = (%s)" % ', '.join('HT_%d' % i for i in range(len(HISPA64))),
     "",
-    "    ; las de linux64 (linux = cierto) o las de núcleo64",
-    "    público función apoyo64_nombre(linux: bool, i: nat16): puntero a byte",
-    "        si linux entonces devolver nombres_l[i] fin",
+    "    ; las de linux64 (cual = 1), las de hispa64 (cual = 2) o las de núcleo64 (cual = 0)",
+    "    público función apoyo64_nombre(cual: nat16, i: nat16): puntero a byte",
+    "        si cual = 1 entonces devolver nombres_l[i] fin",
+    "        si cual = 2 entonces devolver nombres_h[i] fin",
     "        devolver nombres_n[i]",
     "    fin",
     "",
-    "    público función apoyo64_texto(linux: bool, i: nat16): puntero a byte",
-    "        si linux entonces devolver textos_l[i] fin",
+    "    público función apoyo64_texto(cual: nat16, i: nat16): puntero a byte",
+    "        si cual = 1 entonces devolver textos_l[i] fin",
+    "        si cual = 2 entonces devolver textos_h[i] fin",
     "        devolver textos_n[i]",
     "    fin",
     "",

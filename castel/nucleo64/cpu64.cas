@@ -1,0 +1,145 @@
+; =============================================================================
+;  cpu64.cas - Hispa-64: lo que cuenta CPUID del procesador (docs/64/HISPA-64.md):
+;  el fabricante, el nombre, la familia, cuántos procesadores lógicos dice que
+;  hay en el paquete, si es híbrido (núcleos P y E, Intel 12.ª gen. en
+;  adelante) y lo que importa para Hispa-64 (páginas de 1 GB, NX, x2APIC...).
+;  Es solo lo que dice CPUID: cuántos procesadores hay de verdad lo dirá la
+;  tabla MADT de ACPI (etapa 2).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Cpu64
+
+    importar Cifras64
+
+    ; lo que deja la última llamada a cpuid()
+    público variable ra, rb, rc, rd: nat32
+
+    público variable fabricante: arreglo [13] de byte
+    público variable nombre: arreglo [49] de byte
+    público variable máx_hoja, máx_ext: nat32
+    público variable pag1g, nx, x2apic, híbrido, hwp: bool
+
+    público función cpuid(hoja: nat32, sub: nat32)
+        ensamblador
+            mov eax, {hoja}
+            mov ecx, {sub}
+            cpuid
+            mov {ra}, eax
+            mov {rb}, ebx
+            mov {rc}, ecx
+            mov {rd}, edx
+        fin
+    fin
+
+    función pon4(ref t: arreglo [49] de byte, en: nat32, v: nat32)
+        t[en] := byte(v)
+        t[en + 1] := byte(v >> 8)
+        t[en + 2] := byte(v >> 16)
+        t[en + 3] := byte(v >> 24)
+    fin
+
+    función pon4f(en: nat32, v: nat32)
+        fabricante[en] := byte(v)
+        fabricante[en + 1] := byte(v >> 8)
+        fabricante[en + 2] := byte(v >> 16)
+        fabricante[en + 3] := byte(v >> 24)
+    fin
+
+    ; lo lee todo (una vez, al arrancar)
+    público función lee()
+        variable i: nat32
+        cpuid(0, 0)
+        máx_hoja := ra
+        pon4f(0, rb)
+        pon4f(4, rd)
+        pon4f(8, rc)
+        fabricante[12] := 0
+        cpuid(0x80000000, 0)
+        máx_ext := ra
+        nombre[0] := 0
+        si máx_ext >= 0x80000004 entonces
+            i := 0
+            mientras i < 3 hacer
+                cpuid(0x80000002 + i, 0)
+                pon4(nombre, i * 16, ra)
+                pon4(nombre, i * 16 + 4, rb)
+                pon4(nombre, i * 16 + 8, rc)
+                pon4(nombre, i * 16 + 12, rd)
+                i := i + 1
+            fin
+            nombre[48] := 0
+        fin
+        si máx_ext >= 0x80000001 entonces
+            cpuid(0x80000001, 0)
+            pag1g := rd yb 0x04000000 <> 0
+            nx := rd yb 0x00100000 <> 0
+        fin
+        cpuid(1, 0)
+        x2apic := rc yb 0x00200000 <> 0
+        si máx_hoja >= 6 entonces
+            cpuid(6, 0)
+            hwp := ra yb 0x80 <> 0
+        fin
+        si máx_hoja >= 7 entonces
+            cpuid(7, 0)
+            híbrido := rd yb 0x8000 <> 0
+        fin
+    fin
+
+    ; la familia, el modelo y la revisión (con las extendidas sumadas, como dice Intel)
+    público función familia(): nat32
+        variable f: nat32
+        cpuid(1, 0)
+        f := (ra >> 8) yb 15
+        si f = 15 entonces f := f + ((ra >> 20) yb 255) fin
+        devolver f
+    fin
+
+    público función modelo(): nat32
+        variable f, m: nat32
+        cpuid(1, 0)
+        f := (ra >> 8) yb 15
+        m := (ra >> 4) yb 15
+        si f = 6 o f = 15 entonces m := m + (((ra >> 16) yb 15) << 4) fin
+        devolver m
+    fin
+
+    público función revisión(): nat32
+        cpuid(1, 0)
+        devolver ra yb 15
+    fin
+
+    ; cuántos procesadores lógicos dice CPUID que tiene el paquete
+    público función lógicos(): nat32
+        variable n: nat32
+        n := 0
+        si máx_hoja >= 0xB entonces
+            cpuid(0xB, 1)
+            n := rb yb 0xFFFF
+        fin
+        si n = 0 entonces
+            cpuid(1, 0)
+            n := (rb >> 16) yb 255
+        fin
+        si n = 0 entonces n := 1 fin
+        devolver n
+    fin
+
+    ; cuántos bits tienen las direcciones físicas (CPUID 80000008h; 36 si no lo dice)
+    público función bits_físicos(): nat32
+        si máx_ext >= 0x80000008 entonces
+            cpuid(0x80000008, 0)
+            devolver ra yb 255
+        fin
+        devolver 36
+    fin
+
+    ; el nombre sin los blancos de delante
+    público función nombre_limpio(): puntero a byte
+        variable i: nat32
+        i := 0
+        mientras i < 48 y nombre[i] = ' ' hacer i := i + 1 fin
+        devolver dirección(nombre[i])
+    fin
+
+fin Cpu64.

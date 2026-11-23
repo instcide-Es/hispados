@@ -99,6 +99,7 @@ módulo Tablas
     ; [CASTEL64] «modelo linux64» o «núcleo64»: 64 bits (CASTEL64.md); con «en64», también «plano»
     público variable en64: bool
     público variable es_linux: bool             ; «modelo linux64»
+    público variable es_hispa64: bool           ; [HISPA-64] «modelo hispa64» (docs/64/HISPA-64.md)
     ; de la última búsqueda: los módulos importados que traen ese nombre (si son dos o más)
     público variable amb_n: nat16
     público variable amb_mod: arreglo [MAX_MODULOS] de byte
