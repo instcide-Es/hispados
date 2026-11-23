@@ -329,6 +329,8 @@ módulo Ured
         fin
     fin
 
+    variable registro_vueltas: nat32
+
     función principal()
         variable p: puntero a Pedido_red
         variable n, k, espera, tic_visto, enlace_visto: nat32
@@ -374,6 +376,11 @@ módulo Ured
                 si ahora() - enlace_visto >= 25 entonces
                     enlace_visto := ahora()
                     elige_tarjeta()                         ; (WIFI) y, dentro, mira_enlace()
+                    registro_vueltas := registro_vueltas + 1
+                    si registro_vueltas >= 8 entonces       ; (RTL8168) cada 2 s, RED.LOG si RED.INI lo pide
+                        registro_vueltas := 0
+                        Rwifi.guarda_registro()
+                    fin
                 fin
                 dilo()
             fin

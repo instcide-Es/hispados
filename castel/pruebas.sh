@@ -3258,6 +3258,7 @@ for modo in memoria puertos; do
   for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin; do saca $R/k.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || iguales=0; done
   if [ $iguales = 1 ]; then ok "(RTL8168) por $modo: lo descargado es igual octeto a octeto"; else ko "(RTL8168) por $modo: lo descargado no es igual"; fi
 done
+S=$R/rtl.txt
 # (el DNS de QEMU le pregunta al de esta máquina: si esta no sale a la red, no se prueba)
 if getent hosts actualiza.hispados.es > /dev/null 2>&1; then
   mira "el DNS (el de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice; uno que sí, se resuelve" \
