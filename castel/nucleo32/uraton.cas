@@ -1,0 +1,358 @@
+; =============================================================================
+;  uraton.cas - (TOUCHPAD) RATON.BIN: el ratón y el touchpad de Hispa-Pentium.
+;
+;    RATON                   qué touchpad hay (si lo hay) y cómo está puesto
+;    RATON /TOUCHPAD [s]     graba lo que dice el touchpad durante s segundos
+;                            (10 si no se dice; hasta 60): mientras, se mueve
+;                            el dedo, se toca, se baja por el borde derecho...
+;                            y queda en TOUCHPAD.TXT, en la raíz de la unidad
+;                            del sistema (la memoria USB: X:\TOUCHPAD.TXT), para
+;                            mandarlo si algo no va
+;    RATON /ANALIZA archivo  (las pruebas, y para mirar un TOUCHPAD.TXT) pasa
+;                            lo grabado por touchpad.cas, aquí mismo, y dice lo
+;                            que sale: los botones, lo movido, la rueda
+;    RATON /INYECTA archivo [/TRAS s]
+;                            (las pruebas, con «tp_simulado» en la línea del
+;                            cargador) manda los octetos al touchpad de
+;                            mentira del núcleo, como si llegaran; con /TRAS,
+;                            se suelta y empieza a los s segundos
+;
+;  Los archivos (TOUCHPAD.TXT, y los de las pruebas: castel/pruebas_touchpad.sh)
+;  son de texto, una cosa por línea:
+;    # ...            nada (una nota)
+;    @n               el tic n (desde que empezó a grabar)
+;    +n               n tics más tarde (cada uno, el reloj de touchpad.cas)
+;    o HH HH ...      octetos que llegan (en hexadecimal)
+;    tecla            se pulsa una tecla
+;    aj nombre valor  un ajuste (toque, borde_v, borde_h, dos, vel, pausa,
+;                     zona) o lo que dice el touchpad de sí (dedos, clickpad,
+;                     medio, cuatro, xmin, xmax, ymin, ymax)
+;    ?                (/ANALIZA) dice lo que ha salido desde el último «?»
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo URaton
+
+    modelo usuario
+
+    importar Llamadas, Textos32, Formato, Panelaj, Touchpad
+
+    variable args: arreglo [160] de byte
+    variable p: arreglo [80] de byte
+    variable archivo: arreglo [100] de byte
+    variable línea: arreglo [200] de byte
+    variable trozo: arreglo [4096] de byte
+    variable en_trozo, leído_trozo: nat32
+    variable manejador: nat32
+    variable inyectar: bool
+
+    ; ---- lo que lleva /ANALIZA ----
+    variable t: nat32 = 1000
+    variable base: nat32 = 1000
+    variable s_dx, s_dy, s_rueda, s_lados: ent32
+    variable vistos: nat32                      ; los cambios de botones dichos
+
+    ; -------------------------------------------------------------------------
+    ;  Leer el archivo línea a línea
+    ; -------------------------------------------------------------------------
+    función lee_línea(): bool
+        variable n, c: nat32
+        n := 0
+        mientras cierto hacer
+            si en_trozo >= leído_trozo entonces
+                leído_trozo := leer(manejador, trozo, 4096)
+                en_trozo := 0
+                si es_error(leído_trozo) o leído_trozo = 0 entonces
+                    leído_trozo := 0
+                    línea[n] := 0
+                    devolver n > 0
+                fin
+            fin
+            c := trozo[en_trozo]
+            en_trozo := en_trozo + 1
+            si c = '\n' entonces
+                línea[n] := 0
+                devolver cierto
+            fin
+            si c <> '\r' y n < 199 entonces
+                línea[n] := byte(c)
+                n := n + 1
+            fin
+        fin
+        devolver falso
+    fin
+
+    función cifra_hex(c: nat32): nat32
+        si c >= '0' y c <= '9' entonces devolver c - '0' fin
+        si c >= 'a' y c <= 'f' entonces devolver c - 'a' + 10 fin
+        si c >= 'A' y c <= 'F' entonces devolver c - 'A' + 10 fin
+        devolver 0xFF
+    fin
+
+    función número(q: puntero a byte): nat32
+        variable n: nat32
+        n := 0
+        mientras valor(q) >= '0' y valor(q) <= '9' hacer
+            n := n * 10 + (valor(q) - '0')
+            q := q + 1
+        fin
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  /ANALIZA
+    ; -------------------------------------------------------------------------
+    función uno(b: bool): nat32
+        si b entonces devolver 1 fin
+        devolver 0
+    fin
+
+    ; recoge lo que ha salido de touchpad.cas (los cambios de botones, al momento)
+    función recoge()
+        variable i: nat32
+        variable d: arreglo [2] de nat32
+        s_dx := s_dx + tp_dx
+        s_dy := s_dy + tp_dy
+        s_rueda := s_rueda + tp_rueda
+        s_lados := s_lados + tp_rueda_h
+        si tp_n_cambios > 0 entonces
+            para i desde 0 hasta tp_n_cambios - 1 hacer
+                d[0] := t - base
+                d[1] := tp_cambios[i]
+                imprimir("t=%u botones=%u\n", d)
+                vistos := vistos + 1
+            fin
+        fin
+        tp_recogido()
+    fin
+
+    función resumen(qué: puntero a byte)
+        variable d: arreglo [14] de nat32
+        d[0] := nat32(qué)
+        d[1] := nat32(s_dx)
+        d[2] := nat32(s_dy)
+        d[3] := nat32(s_rueda)
+        d[4] := nat32(s_lados)
+        d[5] := tp_botones
+        d[6] := tp_toques
+        d[7] := tp_palmas
+        d[8] := tp_ignorados
+        d[9] := tp_malos
+        d[10] := tp_resincros
+        d[11] := tp_paquetes
+        d[12] := uno(tp_perdido)
+        d[13] := vistos
+        imprimir("%s dx=%d dy=%d rueda=%d lados=%d botones=%u toques=%u palmas=%u ignorados=%u malos=%u resincros=%u paquetes=%u perdido=%u cambios=%u\n", d)
+        s_dx := 0
+        s_dy := 0
+        s_rueda := 0
+        s_lados := 0
+    fin
+
+    ; el tiempo pasa hasta el tic «hasta» (con el reloj de touchpad.cas en cada uno)
+    función corre_hasta(n: nat32)
+        mientras t < n hacer
+            t := t + 1
+            tp_reloj(t)
+            recoge()
+        fin
+    fin
+
+    función ajuste_tp(nombre: puntero a byte, v: nat32): bool
+        si iguales(nombre, "toque") entonces tp_toque := v = 1
+        sino si iguales(nombre, "borde_v") entonces tp_borde_v := v = 1
+        sino si iguales(nombre, "borde_h") entonces tp_borde_h := v = 1
+        sino si iguales(nombre, "dos") entonces tp_dos_dedos := v = 1
+        sino si iguales(nombre, "vel") entonces tp_velocidad := v
+        sino si iguales(nombre, "pausa") entonces tp_pausa := v
+        sino si iguales(nombre, "zona") entonces tp_zona := v
+        sino si iguales(nombre, "dedos") entonces tp_varios_dedos := v = 1
+        sino si iguales(nombre, "clickpad") entonces tp_clickpad := v = 1
+        sino si iguales(nombre, "medio") entonces tp_medio := v = 1
+        sino si iguales(nombre, "cuatro") entonces tp_cuatro := v = 1
+        sino si iguales(nombre, "xmin") entonces tp_x_mín := ent32(v)
+        sino si iguales(nombre, "xmax") entonces tp_x_máx := ent32(v)
+        sino si iguales(nombre, "ymin") entonces tp_y_mín := ent32(v)
+        sino si iguales(nombre, "ymax") entonces tp_y_máx := ent32(v)
+        sino devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; los octetos de una línea «o HH HH ...»: a touchpad.cas (o al núcleo)
+    función octetos(q: puntero a byte)
+        variable a, b: nat32
+        mientras valor(q) <> 0 hacer
+            mientras valor(q) = ' ' o valor(q) = '\t' hacer q := q + 1 fin
+            si valor(q) = 0 entonces devolver fin
+            a := cifra_hex(valor(q))
+            b := cifra_hex(q[1])
+            si a = 0xFF o b = 0xFF entonces devolver fin
+            si inyectar entonces
+                poner_ajuste(AJ_TP_GRABA, 1000 + a * 16 + b)
+            sino
+                tp_octeto(a * 16 + b, t)
+                recoge()
+            fin
+            q := q + 2
+        fin
+    fin
+
+    función una_línea()
+        variable q: puntero a byte
+        variable n: nat32
+        variable nombre: arreglo [20] de byte
+        variable v: arreglo [20] de byte
+        q := saltar_espacios(línea)
+        si valor(q) = 0 o valor(q) = '#' entonces devolver fin
+        si valor(q) = '@' entonces
+            n := número(q + 1)
+            si inyectar entonces
+                si base + n > t entonces dormir(base + n - t) fin
+                t := base + n
+            sino
+                corre_hasta(base + n)
+            fin
+            ; (lo grabado: «@n o HH ...», en la misma línea)
+            q := q + 1
+            mientras valor(q) >= '0' y valor(q) <= '9' hacer q := q + 1 fin
+            q := saltar_espacios(q)
+            si valor(q) = 'o' y q[1] = ' ' entonces octetos(q + 1) fin
+        sino si valor(q) = '+' entonces
+            n := número(q + 1)
+            si inyectar entonces
+                dormir(n)
+                t := t + n
+            sino
+                corre_hasta(t + n)
+            fin
+        sino si valor(q) = 'o' y (q[1] = ' ' o q[1] = 0) entonces
+            octetos(q + 1)
+        sino si valor(q) = '?' entonces
+            si no inyectar entonces resumen("?") fin
+        sino si empieza_por(q, "tecla") entonces
+            si no inyectar entonces tp_tecla(t) fin
+        sino si empieza_por(q, "aj ") entonces
+            si palabra(q, 1, nombre, 20) y palabra(q, 2, v, 20) y no inyectar entonces
+                si no ajuste_tp(nombre, número(v)) entonces escribir("raton: no sé qué es «", nombre, "»\n") fin
+            fin
+        fin
+    fin
+
+    función recorre(): byte
+        manejador := abrir(archivo)
+        si es_error(manejador) entonces
+            escribir("raton: no puedo abrir ", archivo, "\n")
+            devolver 2
+        fin
+        tp_empieza()
+        mientras lee_línea() hacer una_línea() fin
+        cerrar(manejador)
+        si no inyectar entonces resumen("fin:") fin
+        devolver 0
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo demás
+    ; -------------------------------------------------------------------------
+    función nombre_tipo(k: nat32): puntero a byte
+        según nat16(k)
+            caso 1: devolver "Synaptics (en modo absoluto: borde derecho para desplazar, tocar para hacer clic)"
+            caso 2: devolver "Synaptics (va como un ratón: sin el modo absoluto)"
+            caso 3: devolver "ALPS (va como un ratón)"
+            caso 4: devolver "Elantech (va como un ratón)"
+        fin
+        devolver "ninguno (o no es de los que se conocen: va como un ratón)"
+    fin
+
+    función estado(): byte
+        variable d: arreglo [8] de nat32
+        escribir("Touchpad: ", nombre_tipo(ajuste(AJ_TP_HAY)), "\n")
+        d[0] := ajuste(AJ_TP_TOQUE)
+        d[1] := ajuste(AJ_TP_BORDE_V)
+        d[2] := ajuste(AJ_TP_BORDE_H)
+        d[3] := ajuste(AJ_TP_DOS_DEDOS)
+        d[4] := ajuste(AJ_TP_VELOCIDAD)
+        d[5] := ajuste(AJ_TP_ESCRIBIR) * 10
+        d[6] := ajuste(AJ_TP_ZONA)
+        imprimir("  tocar para hacer clic %u, borde derecho %u, borde de abajo %u, dos dedos %u, velocidad %u, sin hacer caso %u ms tras una tecla, el borde: %u %%\n", d)
+        escribir("  (lo que ha dicho al arrancar, en ARRANQUE.TXT; RATON /TOUCHPAD graba lo que manda)\n")
+        devolver 0
+    fin
+
+    función graba(s: nat32): byte
+        variable r, q, antes: nat32
+        si ajuste(AJ_TP_HAY) = 0 entonces escribir("raton: no se ha visto ningún touchpad; se graba igual lo que llega del ratón PS/2\n") fin
+        r := poner_ajuste(AJ_TP_GRABA, s)
+        si es_error(r) entonces
+            escribir("raton: no se puede grabar\n")
+            devolver 1
+        fin
+        escribir("raton: grabando ", s, " segundos: mueva el dedo, toque, baje y suba por el borde derecho, pulse los botones...\n")
+        antes := s + 1
+        q := ajuste(AJ_TP_GRABA)
+        mientras q <> 0 y q < 1000 hacer
+            si q <> antes entonces
+                escribir("  ", q, "...\n")
+                antes := q
+            fin
+            dormir(10)
+            q := ajuste(AJ_TP_GRABA)
+        fin
+        r := poner_ajuste(AJ_TP_GRABA, 0)
+        si es_error(r) entonces
+            escribir("raton: no se ha podido guardar TOUCHPAD.TXT (¿la unidad del sistema es de solo lectura?)\n")
+            devolver 1
+        fin
+        escribir("raton: guardado en TOUCHPAD.TXT, en la raíz de la unidad del sistema (", r, " octetos). Mándelo con ARRANQUE.TXT.\n")
+        devolver 0
+    fin
+
+    función principal(): byte
+        variable s, k: nat32
+        variable q: arreglo [100] de byte
+        argumentos(args, 160)
+        si no palabra(args, 0, p, 80) entonces devolver estado() fin
+        si iguales_sin_caja(p, "/TOUCHPAD") entonces
+            s := 10
+            si palabra(args, 1, q, 100) entonces s := número(q) fin
+            si s < 1 entonces s := 1 fin
+            si s > 60 entonces s := 60 fin
+            devolver graba(s)
+        fin
+        si iguales_sin_caja(p, "/ANALIZA") o iguales_sin_caja(p, "/INYECTA") entonces
+            inyectar := iguales_sin_caja(p, "/INYECTA")
+            si no palabra(args, 1, archivo, 100) entonces
+                escribir("raton: falta el archivo\n")
+                devolver 2
+            fin
+            si inyectar y ajuste(AJ_TP_HAY) = 0 entonces
+                escribir("raton: no hay touchpad (para las pruebas: «tp_simulado» en la línea del cargador)\n")
+                devolver 1
+            fin
+            si inyectar y palabra(args, 2, q, 100) y iguales_sin_caja(q, "/TRAS") y palabra(args, 3, q, 100) entonces
+                ; se suelta: otro RATON, que espera y lo manda
+                copiar(línea, "/INYECTA ")
+                concatenar(línea, archivo)
+                concatenar(línea, " /YA ")
+                concatenar(línea, q)
+                k := lanzar_suelto("\\HISPA\\RATON.BIN", línea)
+                si es_error(k) entonces k := lanzar_suelto("\\RATON.BIN", línea) fin
+                si es_error(k) entonces
+                    escribir("raton: no me puedo soltar\n")
+                    devolver 1
+                fin
+                escribir("raton: los octetos de ", archivo, ", dentro de ", q, " segundos\n")
+                devolver 0
+            fin
+            si inyectar y palabra(args, 2, q, 100) y iguales_sin_caja(q, "/YA") y palabra(args, 3, q, 100) entonces dormir(número(q) * 100) fin
+            t := tics()
+            base := t
+            k := recorre()
+            si inyectar y k = 0 entonces escribir("raton: inyectado ", archivo, "\n") fin
+            devolver k
+        fin
+        escribir("RATON [/TOUCHPAD [segundos] | /ANALIZA archivo | /INYECTA archivo [/TRAS segundos]]\n")
+        devolver 2
+    fin
+
+fin URaton.

@@ -75,6 +75,7 @@ módulo Ventanas
     ; en «c» de los sucesos del ratón: abajo, los botones; luego las teclas de
     ; cambio (c >> 8: 1, Mayús; 2, Control) y las veces seguidas (c >> 16: 1, 2 o 3)
     público constante DESPLAZA_CAMBIO = 8
+    público constante RUEDA_LADOS = 0x8000      ; (TOUCHPAD) en «c» de EV_RUEDA: es a los lados (va con Mayús)
     público constante DESPLAZA_VECES = 16
 
     ; ---- lo que se le puede pedir a una ventana: orden_ventana() ----
@@ -1525,6 +1526,7 @@ módulo Ventanas
             flecha_y := yy
             pinta_flecha()
         fin
+        tp_pulso()                              ; (TOUCHPAD) el botón del toque, y si el touchpad se descoloca
         ; (NAVEGADOR) la rueda: a la ventana de debajo de la flecha
         nr := saca_rueda()
         ; (PANEL) los renglones por paso (Panel de control > Ratón): los
@@ -1541,6 +1543,20 @@ módulo Ventanas
             vr := ventana_o_borde(x, yy, lr)
             si vr >= 0 y lr = 0 y está_dentro(vr, x, yy) entonces
                 pon_evento(vr, EV_RUEDA, nat32(dentro_x(vr, x)), nat32(dentro_y(vr, yy)), (nat32(nr) yb 0xFF) ob (modificadores() << DESPLAZA_CAMBIO))
+            fin
+        fin
+        ; (TOUCHPAD) a los lados (el borde de abajo del touchpad, dos dedos):
+        ; no hay suceso propio; va como la rueda con Mayús (lo que entiende el
+        ; Navegador: hacia arriba, a la izquierda) y RUEDA_LADOS
+        nr := saca_rueda_h()
+        si nr <> 0 entonces
+            si pasos_por_paso > 1 entonces nr := nr * pasos_por_paso fin
+            si nr > 120 entonces nr := 120 fin
+            si nr < -120 entonces nr := -120 fin
+            lr := 0
+            vr := ventana_o_borde(x, yy, lr)
+            si vr >= 0 y lr = 0 y está_dentro(vr, x, yy) entonces
+                pon_evento(vr, EV_RUEDA, nat32(dentro_x(vr, x)), nat32(dentro_y(vr, yy)), (nat32(-nr) yb 0xFF) ob ((modificadores() ob MOD_MAYÚS) << DESPLAZA_CAMBIO) ob RUEDA_LADOS)
             fin
         fin
         ; las teclas: la del logo, a la barra de tareas; las demás, al menú

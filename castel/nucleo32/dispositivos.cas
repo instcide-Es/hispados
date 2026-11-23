@@ -829,7 +829,14 @@ módulo Dispositivos
             recurso(REC_PUERTOS, 0x60, 1)
             recurso(REC_PUERTOS, 0x64, 1)
             añade()
-            si ratón_ps2 entonces
+            si ratón_ps2 y tp_tipo <> TP_NO y no tp_simulado entonces
+                ; (TOUCHPAD) un touchpad: su nombre y lo que lleva
+                de_placa(0x090200, "SYN0002", tp_nombre, "touchpad.cas", 12)
+                recurso(REC_PUERTOS, 0x60, 1)
+                recurso(REC_PUERTOS, 0x64, 1)
+                Textos32.copiar_hasta(uno.detalle, tp_corto, 80)
+                añade()
+            sino si ratón_ps2 entonces
                 de_placa(0x090200, "PNP0F13", "Ratón PS/2", "raton.cas", 12)
                 recurso(REC_PUERTOS, 0x60, 1)
                 recurso(REC_PUERTOS, 0x64, 1)

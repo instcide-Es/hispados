@@ -231,6 +231,7 @@ cuarta parte, los discos y el USB).
 | `edid.cas` (Edid) | Lo que dice la **pantalla** de sí misma (su EDID): en QEMU, de su tarjeta; en las Intel, por el DDC con el GMBUS; la nativa, lo más grande y su nombre (sección 10). |
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
 | `raton.cas` (Raton) | El **ratón** (el PS/2, por la IRQ 12, o uno USB): dónde está la flecha y la cola de clics. |
+| `touchpad.cas` (Touchpad) | (TOUCHPAD) **El touchpad Synaptics en modo absoluto**: de sus paquetes, el ratón (mover, tocar para hacer clic, el borde derecho como rueda, dos dedos, la palma); sin tocar el equipo (sección 14 quattervicies). |
 | `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha (y sus formas), mover y **cambiar de tamaño**, y repartir el ratón y las teclas. |
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
@@ -274,6 +275,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uhttps.cas` (con `biblioteca32/https.cas`) | `HTTPS.BIN` | La orden **HTTPS**: pedir direcciones con la biblioteca `Https` (sección 14). |
 | `uipconf.cas`, `uping.cas`, `udescarg.cas` | `IPCONFIG.BIN`, `PING.BIN`, `DESCARGA.BIN` | **IPCONFIG**, **PING** y **DESCARGAR** (sección 14). |
 | `upanel.cas` | `PANEL.BIN` | (PANEL) **El Panel de control**: Fecha y hora, Ratón, Teclado, Red y Wi-Fi, Energía y Personalización (sección 14 quattuordecies). |
+| `uraton.cas` | `RATON.BIN` | (TOUCHPAD) **El touchpad**: qué hay, `RATON /TOUCHPAD` (graba lo que manda en TOUCHPAD.TXT), `/ANALIZA` y `/INYECTA` (las pruebas) (sección 14 quattervicies). |
 | `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 quattuordecies). |
 | `panelaj.cas` (Panelaj) | — | (PANEL) Las llamadas 174 (los ajustes) y 175 (la hora exacta) para los programas. |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
@@ -9432,6 +9434,136 @@ cerrar, `/lento/` va a unos 150 K/s):
    reiniciado): `IPCONFIG` dice la nueva y el Navegador y `PING` van.
 5. Si algo falla: `IPCONFIG /TODO > RED.TXT` y `X:\WIFI.LOG` (lo apuntan RED.BIN
    y WIFI.BIN: el enlace, DHCP, «tcp: ... cortada»).
+
+## 14 quattervicies. El touchpad (rama touchpad, «(TOUCHPAD)»)
+
+*22/11/2026.* Pedido de Carlos: el touchpad del **HP Mini 5103** lleva dibujada
+a la derecha una línea para usarla como **rueda**, y Hispa-Pentium no la
+aprovechaba (el touchpad iba como un ratón PS/2, relativo y sin rueda). Ahora
+los **Synaptics** (los de casi todos los portátiles de 2005 a 2015: el HP Mini y
+el Toshiba NB250, firmware 7.2) van en **modo absoluto** y el núcleo hace de sus
+paquetes el ratón, con el borde derecho para desplazar.
+
+**Detectarlo** (`raton.cas`, al encender el ratón PS/2, antes del IntelliMouse):
+
+- **Synaptics**: la «llamada especial» (E6 y cuatro E8 con el argumento de dos
+  en dos bits, los altos primero) y E9; si el segundo octeto es **47h**, es un
+  Synaptics. Luego se pregunta el modelo (03h), las capacidades (02h), las
+  extendidas (09h y 0Ch, si las dice) y, si las tiene, las medidas máximas y
+  mínimas (0Dh y 0Fh), como Linux. Al **registro del arranque** (y, con
+  «registro», a `ARRANQUE.TXT`, que el escritorio guarda otra vez al poner el
+  ratón): `ratón: Touchpad Synaptics 7.2 (PS/2): modelo ..., capacidades ...,
+  extendidas ..., 0C ...; varios dedos: sí; palma: sí; clickpad: no; botón del
+  medio: no` y `ratón: el touchpad mide de 1472 a 5472 de ancho y de 1408 a
+  4448 de alto`. Así sabremos qué lleva cada portátil de Carlos.
+- Con firmware 4 o más y capacidades extendidas, el **modo**: absoluto, 80
+  paquetes por segundo, con W y sin los gestos del touchpad (el byte de modo
+  C5h: la llamada especial y F3 14h), y F4. No se comprueba con la pregunta 01h
+  (desde el firmware 7.5 da el número de placa); si no se ha puesto, sus
+  paquetes no tienen la forma del modo absoluto y vuelve solo al relativo.
+- Si no es Synaptics: **Elantech** (E6 tres veces y E9: 3C 03 C8) o **ALPS**
+  (E8 00, E6 tres veces y E9: 00 00 0A/64; y lo mismo con E7: 33, 53, 60, 63 o
+  73 en el primero). Solo se dice (`ratón: touchpad ALPS (PS/2; E6: ..., E7:
+  ...): va como un ratón`): su modo absoluto (hay ocho protocolos de ALPS)
+  queda para cuando haya uno en el taller. Un ratón de verdad no puede dar
+  esas respuestas (el bit 3 de su estado es siempre 0, y tras E7 lleva el
+  10h de la escala 2:1). Lo que no se queda en modo absoluto vuelve a estar
+  como de fábrica (F6: las preguntas cambian la resolución) y sigue como
+  antes: el **IntelliMouse** (200, 100 y 80) para la rueda de un ratón PS/2.
+- En el **Administrador de dispositivos**, «Touchpad Synaptics 7.2» (SYN0002,
+  `touchpad.cas`) en lugar de «Ratón PS/2», con lo que lleva.
+
+**El analizador** (`touchpad.cas`, puro: no toca el equipo, y así se prueba en
+Linux con corre32). `raton.cas` le da cada octeto de la IRQ 12 y, desde el
+pulso del escritorio (100 veces por segundo, `tp_pulso`), el reloj; recoge lo
+movido, los cambios de botones y la rueda:
+
+| | Cómo |
+|---|---|
+| Los octetos, en su sitio | el primero de cada paquete, `10xx0xxx`; el cuarto, `11xx0xxx`. Si no, se tira lo que había y ese puede ser otro principio; más de 50 ms a medias, se empieza de nuevo; con **60 octetos malos seguidos**, perdido: el núcleo pone el modo 0 (relativo), F6 y F4, lo apunta y sigue como ratón (nada se queda pulsado) |
+| El dedo | toca con Z ≥ 30, se suelta con Z < 25; sin paquetes 200 ms, se ha ido |
+| Mover | lo movido por el dedo, de unidades a puntos (el ancho entero, unos 600 despacio), con **aceleración suave** (de 1 a 3 veces según lo deprisa), por la velocidad del touchpad y luego la del ratón (Panel de control) |
+| Tocar para hacer clic | un toque de 180 ms como mucho y quieto: el botón se pulsa y, si no se vuelve a tocar en 180 ms, se suelta; tocar otra vez enseguida, el **doble clic**; tocar y, sin levantar, mover, **arrastrar**; con dos dedos, el **derecho**; con tres, el del medio |
+| **El borde derecho** | el dedo que empieza en el 8 % derecho del ancho (5, 8, 12 o 16 %: Panel) y sube o baja da **pasos de rueda**, tantos como recorre (un paso, 1/20 del alto: de arriba abajo, unos 20), con los renglones por paso del Panel; un toque ahí es un clic |
+| El borde de abajo | lo mismo, a los lados (quitado de salida: ver abajo) |
+| Dos dedos | si el touchpad lo dice (W = 0 con «varios dedos»): desplazar, arriba y abajo o a los lados (lo primero que sale manda hasta levantarlos); un dedo que mueve y luego otro pasa a desplazar sin salto de la flecha |
+| La palma | W ≥ 11 o Z ≥ 200: ese toque ni mueve ni hace clic |
+| Al escribir | un toque que empieza menos de 0,5 s después de una tecla no hace nada (en los que van como ratón, ni se mueve ni pulsa) |
+| Las medidas | lo que se ve más allá de lo que dijo el touchpad amplía el ancho y el alto (y el borde va con ellos) |
+| Botones | los de verdad; en un clickpad, el click de todo el touchpad (abajo a la derecha, el derecho); el del medio; los de arriba y abajo de los antiguos, un paso de rueda |
+
+**A los lados** no hay suceso propio: va como `EV_RUEDA` con **Mayús** (lo que
+el Navegador entiende como desplazar a los lados; hacia arriba, a la
+izquierda) y el bit nuevo `RUEDA_LADOS` (8000h en «c», `ventanas.cas`), para
+que un programa los distinga más adelante. Los que no miran Mayús (el Bloc)
+desplazarían arriba y abajo: por eso el borde de abajo sale quitado.
+
+**Panel de control › Ratón › Touchpad** (`upanel.cas`, solo si hay uno; las
+claves 23 a 31 de la llamada 174, `preferencias.cas` y `panelaj.cas`, en
+`PANEL.INI`):
+
+| Clave | | Valores (lo de siempre) | En PANEL.INI |
+|---|---|---|---|
+| 23 | tocar para hacer clic | 0 o 1 (1) | `touchpad_toque` |
+| 24 | el borde derecho | 0 o 1 (1) | `touchpad_borde` |
+| 25 | el borde de abajo | 0 o 1 (0) | `touchpad_borde_abajo` |
+| 26 | dos dedos | 0 o 1 (1) | `touchpad_dos_dedos` |
+| 27 | velocidad | 1 a 10 (5; el Panel da 2, 3, 5, 7 y 9) | `touchpad_velocidad` |
+| 28 | quieto tras una tecla | centésimas (50; 0: no) | `touchpad_escribir` |
+| 29 | el ancho del borde | 4 a 20 % (8) | `touchpad_zona` |
+| 30 | (solo leer) el touchpad | 0 ninguno, 1 Synaptics, 2 Synaptics como ratón, 3 ALPS, 4 Elantech | — |
+| 31 | (cualquiera) grabar | N segundos (1 a 60); 0, guardar `TOUCHPAD.TXT`; al leer, los que quedan; 1000 + octeto, inyectar (con `tp_simulado`) | — |
+
+| ![Panel de control › Ratón, con la sección Touchpad](pentium/panel/touchpad.png) |
+|---|
+
+Uno que va como ratón (ALPS, Elantech, o un Synaptics sin modo absoluto) solo
+tiene «Quieto mientras se escribe».
+
+**RATON.BIN** (`uraton.cas`, en la base, `\HISPA`): `RATON` dice qué touchpad
+hay y cómo está puesto; **`RATON /TOUCHPAD [s]`** graba lo que llega por la IRQ
+12 durante s segundos (10; hasta 60) y lo deja en **`TOUCHPAD.TXT`** en la raíz
+de la unidad del sistema (la memoria USB: `X:\TOUCHPAD.TXT`): lo que se sabe del
+touchpad y cada paquete con su tic (`@123 o 80 24 3C C0 5E 9A`), para que
+Carlos lo mande si algo no va. **`RATON /ANALIZA archivo`** pasa un archivo así
+(o uno hecho a mano) por `touchpad.cas` y dice lo que sale: sirve en Linux con
+corre32 y para mirar lo que mande. **`RATON /INYECTA archivo [/TRAS s]`** (con
+**`tp_simulado`** en la línea del cargador: un Synaptics de mentira, con
+varios dedos) le manda los octetos al núcleo como si llegaran: así se prueba en
+QEMU, que no tiene touchpad.
+
+**Probarlo**: `SOLO=touchpad castel/pruebas.sh` (la parte 50,
+`castel/pruebas_touchpad.sh`):
+
+1. Con corre32, 38 casos de `nucleo32/tpsintetico.py` (paquetes Synaptics
+   hechos a mano): mover, la aceleración, la velocidad, tocar (y quitado),
+   doble toque, arrastrar, uno largo, dos y tres dedos, el borde derecho
+   abajo y arriba, el límite de la zona y la zona al 15 %, quitado, un toque en
+   el borde, el borde de abajo, dos dedos (arriba y abajo, a los lados, de uno
+   a dos, sin «varios dedos», quitado), la palma por W y por Z, al escribir,
+   los botones, un botón con el dedo, el clickpad (y su esquina derecha),
+   octetos de más, un cuarto octeto malo, medio paquete, perdido, las medidas
+   que se aprenden y un dedo que se va sin su último paquete.
+2. En QEMU, el ratón PS/2 de siempre: sigue con su rueda (IntelliMouse) tras
+   las preguntas, no se toma por un touchpad, `RATON` lo dice, `RATON /TOUCHPAD
+   3` graba y guarda (y `/ANALIZA` lo lee) y la rueda sigue moviendo la Consola.
+3. En QEMU con `tp_simulado`: `RATON /INYECTA` con el borde derecho de arriba
+   abajo baja el Bloc de notas 16 pasos (la línea 049 arriba), dos dedos hacia
+   arriba lo suben 9 (la 022) y un toque encima de «Archivo» abre el menú; y el
+   Panel de control › Ratón con la sección, cambiada y guardada en PANEL.INI.
+
+En el PC de Albinyana (23/11): `touchpad` 113/0, `panel` 108/0, `rueda` 70/0,
+`menu` 94/0, `programas` 92/0, `pantalla` 98/0, `dispositivos` 85/0, `castel32`
+67/0 y `06` sin fallos (lo de la 9 cuenta ahora 44 módulos, con RATON.BIN). De
+camino se arregló una carrera del Panel: tras elegir el tapiz (o el dock) se
+repintaba antes de que el escritorio lo pusiera y enseñaba el de antes; ahora
+la 174 da lo pedido mientras tanto (`preferencias.cas`).
+
+**Lo que no se ha podido probar aquí**: un Synaptics de verdad (QEMU no lo
+tiene). Lo probará Carlos en el HP Mini 5103 (y el Toshiba NB250):
+`/root/FTP/HispaDOS/Pruebas/Pendientes/HP-Mini-5103/Touchpad/`. Si algo va
+mal, lo primero es `ARRANQUE.TXT` (lo que ha dicho el touchpad) y `RATON
+/TOUCHPAD` (lo que manda).
 
 ## 15. Las pruebas
 
