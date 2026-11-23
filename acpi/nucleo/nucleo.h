@@ -14,6 +14,9 @@ u32 mq_es_lee(u32 puerto, u32 octetos);
 void mq_es_escribe(u32 puerto, u32 octetos, u32 valor);
 void *mq_mapa(u32 fisica, u32 tam);	/* memoria física -> puntero del núcleo */
 void mq_desmapa(void *p, u32 tam);
+/* (TERMO) lo que el AML va a escribir en la memoria física, antes de
+ * escribirlo (Hispa-Pentium lo apunta, para ver qué congela un equipo) */
+void mq_traza_mem(u32 fisica, u32 v, u32 bits);
 u64 mq_ahora_us(void);			/* microsegundos desde que arrancó el núcleo */
 void mq_espera_us(u32 us);		/* espera sin soltar el procesador */
 u32 mq_rsdp(void);			/* dirección física de la RSDP (0: no hay ACPI) */

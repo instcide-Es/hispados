@@ -2996,8 +2996,19 @@ static void vuelca_cambios(void)
 	jg_cambio = 0;
 }
 
+/* (TERMO) hasta dónde pueden ir las notas (encima de la franja de la
+ * prueba): en el Acer One 10, a 800 x 600 con muchos sensores, salían unas
+ * encima de otras; la que no cabe, no se pinta (está en el .LOG) */
+static int nota_tope = 1 << 30, notas_fuera;
+
 static int nota(int y, const char *t, u32 c)
 {
+	int n = lz_parrafo(0, 0, 0, LZ.an - 28, t, 0, 1, 16);
+
+	if (y + 16 * (n > 0 ? n : 1) > nota_tope) {
+		notas_fuera++;
+		return 0;
+	}
 	return lz_parrafo(&LZ, 14, y, LZ.an - 28, t, c, 1, 16);
 }
 
@@ -3039,7 +3050,12 @@ static void pinta(void)
 	} else
 		snprintf(a, sizeof a, "Equipo: %s", hay_zonas ? "la BIOS no dice cuál (SMBIOS)" : "esperando al servicio de ACPI...");
 	lz_texto(&LZ, 10, 58, a, 0xD8E2F0, 1);
-	/* la tabla */
+	/* la tabla: con muchos sensores en poca altura (800 x 600), filas más
+	 * bajas, para que quepan la tabla, una nota y la franja de la prueba */
+	nota_tope = H - 60 - 30 - 6;
+	notas_fuera = 0;
+	if (ns > 0 && 110 + ns * fila > nota_tope - 20)
+		fila = LIMITA((nota_tope - 20 - 110) / ns, 18, 30);
 	y = 86;
 	ance = W - 20;
 	cn = 30;
@@ -3074,34 +3090,34 @@ static void pinta(void)
 
 		lz_rect(&LZ, 10, y, ance, fila, k % 2 ? 0xFAF8F3 : C_PANEL);
 		marca(k, 20, y + fila / 2, trazo_color[k % 8]);
-		lz_texto(&LZ, cn, y + 7, s->nombre, C_TINTA, 1);
+		lz_texto(&LZ, cn, y + (fila - 16) / 2, s->nombre, C_TINTA, 1);
 		if (s->fija)
-			lz_texto(&LZ, cn + ancho_texto(s->nombre, 1) + 6, y + 7, "(fija, no cambia)", C_GRIS, 1);
+			lz_texto(&LZ, cn + ancho_texto(s->nombre, 1) + 6, y + (fila - 16) / 2, "(fija, no cambia)", C_GRIS, 1);
 		if (s->clase == CL_CPU && (s->zona & 0x10000) && s->t == NO)
-			lz_texto(&LZ, ca, y + 7, "solo en la carga", C_GRIS, 1);
+			lz_texto(&LZ, ca, y + (fila - 16) / 2, "solo en la carga", C_GRIS, 1);
 		else if (s->clase == CL_GPU && s->t == NO && gpu_estado[k] > 0 && gpu_estado[k] < 10)
-			lz_texto(&LZ, ca, y + 7, estado_gpu[gpu_estado[k]], C_GRIS, 1);
+			lz_texto(&LZ, ca, y + (fila - 16) / 2, estado_gpu[gpu_estado[k]], C_GRIS, 1);
 		else
-			lz_negrita(&LZ, ca, y + 7, s->no_fiable ? "sin lectura fiable" : grados(g, s->t), s->no_fiable ? C_PELIGRO : C_TINTA, 1);
-		lz_texto(&LZ, cmi, y + 7, grados(g, s->min), C_TINTA, 1);
-		lz_texto(&LZ, cma, y + 7, grados(g, s->max), C_TINTA, 1);
+			lz_negrita(&LZ, ca, y + (fila - 16) / 2, s->no_fiable ? "sin lectura fiable" : grados(g, s->t), s->no_fiable ? C_PELIGRO : C_TINTA, 1);
+		lz_texto(&LZ, cmi, y + (fila - 16) / 2, grados(g, s->min), C_TINTA, 1);
+		lz_texto(&LZ, cma, y + (fila - 16) / 2, grados(g, s->max), C_TINTA, 1);
 		if (s->limite != NO)
 			snprintf(h, sizeof h, "%d °C%s", s->limite / 10, s->supuesto ? " (?)" : "");
 		else
 			strcpy(h, "no dice");
-		lz_texto(&LZ, cli, y + 7, h, C_GRIS, 1);
+		lz_texto(&LZ, cli, y + (fila - 16) / 2, h, C_GRIS, 1);
 		/* la barra, de 20 °C al límite, con su trama y su estado escrito */
-		lz_rect(&LZ, bx, y + 4, ban, fila - 8, 0xECE8E0);
+		lz_rect(&LZ, bx, y + 2, ban, fila - 4, 0xECE8E0);
 		llena = s->t == NO ? 0 : LIMITA((s->t - 200) * ban / (lim - 200), 0, ban);
-		lz_rect(&LZ, bx, y + 4, llena, fila - 8, color_estado[e]);
-		trama(bx, y + 4, llena, fila - 8, e, e == E_PELIGRO ? 0xFFFFFF : aclara(color_estado[e], -90));
-		lz_marco(&LZ, bx, y + 4, ban, fila - 8, 0x8A8378);
+		lz_rect(&LZ, bx, y + 2, llena, fila - 4, color_estado[e]);
+		trama(bx, y + 2, llena, fila - 4, e, e == E_PELIGRO ? 0xFFFFFF : aclara(color_estado[e], -90));
+		lz_marco(&LZ, bx, y + 2, ban, fila - 4, 0x8A8378);
 		{
 			const char *t = nombre_estado[e];
 			int an = ancho_texto(t, 1) + 10;
 
-			lz_rect(&LZ, bx + ban - an - 3, y + 6, an, fila - 12, 0xFFFFFF);
-			lz_negrita(&LZ, bx + ban - an + 2, y + 7, t, C_TINTA, 1);
+			lz_rect(&LZ, bx + ban - an - 3, y + (fila - 16) / 2 - 1, an, fila - 12 < 14 ? 14 : fila - 12, 0xFFFFFF);
+			lz_negrita(&LZ, bx + ban - an + 2, y + (fila - 16) / 2, t, C_TINTA, 1);
 		}
 		y += fila;
 	}

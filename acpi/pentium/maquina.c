@@ -19,6 +19,61 @@
 
 static u32 pci_dir;		/* lo último escrito en CF8h */
 
+/* (TERMO) El Acer One 10 (Bay Trail, UEFI de 32 bits) se congela entero con
+ * ACPI.BIN y no sin él. Con «registro», lo que el AML va a escribir en el
+ * equipo (los puertos, la configuración PCI y la memoria física) se apunta
+ * ANTES de escribirlo en \ACPIESC.TXT, abriendo, añadiendo y cerrando cada
+ * vez: si el equipo se queda parado, la última línea es la culpable. Las 400
+ * primeras (luego, una de cada 100) */
+int mq_traza;
+static u32 traza_n;
+
+static void traza(const char *clase, u32 d, u32 v, u32 n)
+{
+	static const char hx[] = "0123456789ABCDEF";
+	char l[64];
+	u32 m, k = 0, i;
+	const char *c;
+
+	if (!mq_traza)
+		return;
+	traza_n++;
+	if (traza_n > 400 && traza_n % 100)
+		return;
+	{
+		void mq_vacia_registro(void);
+
+		mq_vacia_registro();
+	}
+	for (c = clase; *c; c++)
+		l[k++] = *c;
+	l[k++] = ' ';
+	for (i = 0; i < 8; i++)
+		l[k++] = hx[(d >> (28 - 4 * i)) & 15];
+	l[k++] = 'h';
+	l[k++] = ' ';
+	l[k++] = '<';
+	l[k++] = '-';
+	l[k++] = ' ';
+	for (i = 8 - 2 * (n > 4 ? 4 : n ? n : 1); i < 8; i++)
+		l[k++] = hx[(v >> (28 - 4 * i)) & 15];
+	l[k++] = 'h';
+	l[k++] = '\r';
+	l[k++] = '\n';
+	m = sc(SC_ABRIR, (u32)"\\ACPIESC.TXT", traza_n == 1 ? 2 : 3, 0);
+	if (ES_ERROR(m)) {
+		mq_traza = 0;
+		return;
+	}
+	sc(SC_ESCRIBIR_ARCHIVO, m, (u32)l, k);
+	sc(SC_CERRAR, m, 0, 0);
+}
+
+void mq_traza_mem(u32 fisica, u32 v, u32 bits)
+{
+	traza("memoria", fisica, v, bits / 8);
+}
+
 u32 mq_es_lee(u32 p, u32 n)
 {
 	if (p == 0xCF8 && n == 4)
@@ -36,9 +91,12 @@ void mq_es_escribe(u32 p, u32 n, u32 v)
 	}
 	if (p >= 0xCFC && p <= 0xCFF) {
 		if (pci_dir & 0x80000000u)
+			traza("pci", (pci_dir & 0x7FFFFFFC) | (p & 3), v, n);
+		if (pci_dir & 0x80000000u)
 			sc(SC_PCI, (pci_dir & 0x7FFFFFFC) | (p & 3), v, n | ES_ESCRIBE);
 		return;
 	}
+	traza("puerto", p, v, n);
 	sc(SC_PUERTO, p, v, n | ES_ESCRIBE);
 }
 

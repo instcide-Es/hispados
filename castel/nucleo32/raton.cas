@@ -14,7 +14,7 @@
 ; =============================================================================
 módulo Raton
 
-    importar Cpu, Pozo, Registro           ; (PS2) Registro: la línea del 8042 en el registro del arranque
+    importar Cpu, Pozo, Registro, Multiboot, Textos32   ; (PS2) Registro: la línea del 8042 en el registro del arranque
 
     constante DATOS = 0x60
     constante ESTADO = 0x64
@@ -274,6 +274,12 @@ módulo Raton
         ratón_y := al div 2
         ; sin controlador de teclado y ratón PS/2 (un Mac, un PC «sin
         ; legado»: su puerto lee 0xFF): solo puede haber ratón USB
+        ; (TERMO) con «sin8042» en la línea del cargador, ni se mira
+        si buscar(línea_del_cargador(), "sin8042") <> nulo entonces
+            apunta0("ps2: «sin8042»: no se mira el controlador 8042\n")
+            hay_ratón := hay_ratón_usb
+            devolver hay_ratón
+        fin
         si meter_puerto(ESTADO) = 0xFF entonces
             apunta0("ps2: no hay controlador 8042 (el puerto 64h lee FFh): ni teclado ni ratón PS/2\n")    ; (PS2)
             hay_ratón := hay_ratón_usb

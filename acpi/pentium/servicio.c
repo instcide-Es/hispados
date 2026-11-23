@@ -83,6 +83,13 @@ static void vacia_registro(int archivo)
 		sc(SC_CERRAR, m, 0, 0);
 }
 
+/* (TERMO) maquina.c, antes de apuntar una escritura del AML en \ACPIESC.TXT:
+ * lo que lleve el registro, ya a \ACPI.TXT (para ver en qué paso iba) */
+void mq_vacia_registro(void)
+{
+	vacia_registro(1);
+}
+
 /* ---- lo de apagar y reiniciar, de la FADT y de \_S5 ---- */
 static u32 gas_es(const ACPI_GENERIC_ADDRESS *g)
 {
@@ -965,6 +972,11 @@ int servicio_principal(void)
 	n = sc(SC_ARGUMENTOS, (u32)args, sizeof args - 1, 0);
 	args[n < sizeof args ? n : 0] = 0;
 	al_archivo = tiene(args, "registro") != 0;
+	{
+		extern int mq_traza;
+
+		mq_traza = al_archivo && !tiene(args, "acpisintraza");	/* (TERMO) \ACPIESC.TXT */
+	}
 	detalle = tiene(args, "acpidetalle") != 0;
 	if ((p = tiene(args, "acpicada=")) != 0)
 		for (cada = 0; *p >= '0' && *p <= '9'; p++)

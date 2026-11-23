@@ -45,6 +45,7 @@ void *mq_mapa(u32 fisica, u32 tam)
 	return (void *)(fisica - mq_base);
 }
 void mq_desmapa(void *p, u32 tam) { }
+void mq_traza_mem(u32 fisica, u32 v, u32 bits) { }
 
 static u64 tsc(void)
 {
