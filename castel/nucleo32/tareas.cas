@@ -469,7 +469,7 @@ módulo Tareas
 
     función bucle_ocioso(n: nat32)
         mientras cierto hacer
-            esperar_interrupción()
+            reposar()                           ; (MWAIT) «hlt», o «mwait» si se puede (cpu.cas)
         fin
     fin
 

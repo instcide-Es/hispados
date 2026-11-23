@@ -769,6 +769,140 @@ módulo Semilla
         apunta("arranque: %s; la línea del cargador: %s\n", d)
     fin
 
+    ; (MWAIT, 0.8.9) ¿«mwait» en el reposo, con la pista más honda? Solo si
+    ; no hay nada que lo haga peligroso:
+    ;  - Intel (en AMD, «mwait» es C1, lo mismo que «hlt»);
+    ;  - no un Atom (Bay Trail se cuelga con C6: el Acer One 10, el Medion;
+    ;    los N455 del HP Mini y el Toshiba, por si acaso tampoco);
+    ;  - MONITOR/MWAIT (cpuid 1, ECX 3) y sus pistas (cpuid 5, ECX 0);
+    ;  - ARAT (cpuid 6, EAX 2: el temporizador del APIC local no se para en
+    ;    C3 y más hondo; el tic puede ser suyo, relojhpet.cas) y el TSC
+    ;    invariante (80000007h, EDX 8: lo usan el Termómetro y los tiempos);
+    ;  - no en una máquina virtual (el bit 31 de cpuid 1, ECX: VirtualBox
+    ;    puede tratar «mwait» como «nop» y gastar el procesador de verdad).
+    ; La pista: el C más hondo con subestados en cpuid 5, EDX (de 4 en 4
+    ; bits: C0, C1, C2...): ((C - 1) << 4) + (subestados - 1). Si el
+    ; firmware no deja tanto, el procesador lo rebaja solo.
+    ; «ocioso=hlt» en la línea del cargador: siempre «hlt»; «ocioso=mwait»
+    ; (las pruebas, en QEMU): «mwait» aunque no se cumpla lo de arriba
+    ; (con la pista de cpuid 5 si la hay; si no, 0, C1).
+    variable rc: arreglo [4] de nat32
+    función cpuid_s(hoja: nat32, sub: nat32)
+        ensamblador
+            push ebx
+            mov eax, {hoja}
+            mov ecx, {sub}
+            db 0x0F, 0xA2               ; cpuid
+            mov {rc}, eax
+            mov {rc+4}, ebx
+            mov {rc+8}, ecx
+            mov {rc+12}, edx
+            pop ebx
+        fin
+    fin
+
+    ; los Atom (Bonnell, Saltwell, Silvermont, Airmont, Goldmont, Tremont...)
+    función es_atom(m: nat32): bool
+        variable lista: arreglo [20] de nat32
+        variable i: nat32
+        lista[0] := 0x1C
+        lista[1] := 0x26
+        lista[2] := 0x27
+        lista[3] := 0x35
+        lista[4] := 0x36
+        lista[5] := 0x37
+        lista[6] := 0x4A
+        lista[7] := 0x4C
+        lista[8] := 0x4D
+        lista[9] := 0x5A
+        lista[10] := 0x5D
+        lista[11] := 0x5C
+        lista[12] := 0x5F
+        lista[13] := 0x7A
+        lista[14] := 0x86
+        lista[15] := 0x96
+        lista[16] := 0x9C
+        lista[17] := 0xBE
+        lista[18] := 0xAF
+        lista[19] := 0xB6
+        para i desde 0 hasta 19 hacer
+            si lista[i] = m entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    función mira_reposo()
+        variable máx, fam, modelo, ecx1, edx5, ecx5, c, n, sub, pista: nat32
+        variable intel, atom, arat, tsc_inv, virtual, forzado: bool
+        variable por: puntero a byte
+        si buscar(línea_del_cargador(), "ocioso=hlt") <> nulo entonces
+            apunta0("reposo: hlt (lo dice la línea del cargador: ocioso=hlt)\n")
+            devolver
+        fin
+        forzado := buscar(línea_del_cargador(), "ocioso=mwait") <> nulo
+        cpuid_s(0, 0)
+        máx := rc[0]
+        intel := rc[1] = 0x756E6547 y rc[3] = 0x49656E69 y rc[2] = 0x6C65746E
+        cpuid_s(1, 0)
+        ecx1 := rc[2]
+        fam := (rc[0] >> 8) yb 0xF
+        modelo := (rc[0] >> 4) yb 0xF
+        si fam = 6 o fam = 15 entonces modelo := modelo + (((rc[0] >> 16) yb 0xF) << 4) fin
+        atom := fam = 6 y es_atom(modelo)
+        virtual := (ecx1 >> 31) = 1
+        arat := falso
+        si máx >= 6 entonces
+            cpuid_s(6, 0)
+            arat := (rc[0] yb 4) <> 0
+        fin
+        cpuid_s(0x80000000, 0)
+        tsc_inv := falso
+        si rc[0] >= 0x80000007 entonces
+            cpuid_s(0x80000007, 0)
+            tsc_inv := (rc[3] yb 0x100) <> 0
+        fin
+        pista := 0
+        edx5 := 0
+        ecx5 := 0
+        si máx >= 5 y (ecx1 yb 8) <> 0 entonces
+            cpuid_s(5, 0)
+            ecx5 := rc[2]
+            edx5 := rc[3]
+            si (ecx5 yb 1) <> 0 entonces
+                c := 7
+                mientras c >= 1 hacer
+                    sub := (edx5 >> (c * 4)) yb 0xF
+                    si sub <> 0 entonces
+                        pista := ((c - 1) << 4) + (sub - 1)
+                        c := 0
+                    sino
+                        c := c - 1
+                    fin
+                fin
+            fin
+        fin
+        por := nulo
+        si (ecx1 yb 8) = 0 entonces por := "sin MONITOR/MWAIT"
+        sino si no intel entonces por := "no es Intel"
+        sino si atom entonces por := "un Atom"
+        sino si virtual entonces por := "una máquina virtual"
+        sino si máx < 5 o (ecx5 yb 1) = 0 entonces por := "sin las pistas de cpuid 5"
+        sino si no arat entonces por := "sin ARAT (el APIC local se pararía)"
+        sino si no tsc_inv entonces por := "sin TSC invariante"
+        sino si pista < 0x10 entonces por := "solo C1 (lo mismo que hlt)"
+        fin
+        si por <> nulo y no (forzado y (ecx1 yb 8) <> 0) entonces
+            apunta3("reposo: hlt (%s; familia %u, modelo %02Xh)\n", nat32(por), fam, modelo)
+            devolver
+        fin
+        pon_mwait(pista)
+        si por <> nulo entonces
+            apunta2("reposo: mwait con la pista %02Xh (C%u), FORZADO (ocioso=mwait)\n", pista, (pista >> 4) + 1)
+        sino
+            apunta3("reposo: mwait con la pista %02Xh (C%u; cpuid 5, EDX = %08Xh)\n", pista, (pista >> 4) + 1, edx5)
+        fin
+    fin
+
     ; (UEFI) el SMBIOS (lo que dice el equipo de sí mismo: el fabricante, el
     ; modelo, la placa, la BIOS) no está en F0000h-FFFFFh sin BIOS: está en la
     ; tabla de configuración de la tabla del sistema de EFI, con su GUID (el
@@ -864,6 +998,7 @@ módulo Semilla
         permitir_interrupciones()
         pinta_ahora()                           ; (UEFI) lo dicho hasta aquí, ya en la pantalla
         mira_reloj()                            ; (UEFI) ¿cuenta el 8254? Si no, el HPET (relojhpet.cas)
+        mira_reposo()                           ; (MWAIT) «hlt» o «mwait» en la tarea ociosa
         pinta_ahora()
         imprimir3("memoria: %u MB, %u marcos libres; paginación activa; %u programas de usuario.\n",
                   (límite + 0xFFFFF) div 0x100000, marcos_libres(), módulos())

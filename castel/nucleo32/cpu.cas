@@ -204,6 +204,47 @@ módulo Cpu
         fin
     fin
 
+    ; (MWAIT, 0.8.9) el reposo de la tarea ociosa: con «mwait» y la pista más
+    ; honda que da el procesador (cpuid 5), el núcleo deja que llegue a C6 o
+    ; más (con «hlt», solo a C1: el MacBook y el ASUS daban C6 = 0 % en el
+    ; Termómetro, y tardaban en enfriarse). Lo decide `mira_reposo` de
+    ; semilla.cas (solo Intel, nunca Atom, con ARAT y el TSC invariante; si
+    ; no, «hlt» como siempre); «ocioso=hlt» en la línea del cargador lo quita.
+    ; MONITOR vigila una línea que nadie escribe: solo despierta una
+    ; interrupción, como «hlt».
+    público variable con_mwait: bool
+    público variable pista_mwait: nat32
+    variable vigia_mwait: arreglo [32] de nat32     ; 128 octetos: su línea de caché, sola
+    variable dir_vigia: nat32
+
+    público función pon_mwait(pista: nat32)
+        dir_vigia := (nat32(dirección(vigia_mwait[0])) + 63) yb 0xFFFFFFC0
+        pista_mwait := pista
+        con_mwait := cierto
+    fin
+
+    ; lo que hace la tarea ociosa en cada vuelta
+    público función reposar()
+        si no con_mwait entonces
+            ensamblador
+                sti
+                hlt
+            fin
+            devolver
+        fin
+        ensamblador
+            cli
+            mov eax, {dir_vigia}
+            xor ecx, ecx
+            xor edx, edx
+            db 0x0F, 0x01, 0xC8         ; monitor (eax, ecx, edx)
+            mov eax, {pista_mwait}
+            xor ecx, ecx
+            sti                         ; (la interrupción llega tras la siguiente: no se pierde)
+            db 0x0F, 0x01, 0xC9         ; mwait (eax, ecx)
+        fin
+    fin
+
     ; -------------------------------------------------------------------------
     ;  Los registros de control
     ; -------------------------------------------------------------------------
