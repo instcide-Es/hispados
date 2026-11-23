@@ -9,8 +9,8 @@ portátiles de ahora (UEFI, NVMe, xHCI, varios núcleos, Wi-Fi moderna), aunque
 cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
-porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. La
-**etapa 0 está hecha** (sección 6).
+porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
+**etapas 0 y 1 están hechas** (secciones 6 y 7).
 
 ---
 
@@ -53,10 +53,10 @@ pruebas en pruebas64.sh, sin cambiar lo que sale para 16 y 32 bits):
 
 | Falta | Para qué | Etapa |
 |---|---|---|
-| El **«modelo de núcleo» de direcciones** (el `-mcmodel=kernel` de gcc): el núcleo en los últimos 2 GB (`0xFFFFFFFF80000000`). Las direcciones de 32 bits con signo (`[G_x]` ya vale; `mov ebx, G_x` pasa a `mov rbx, G_x` con el inmediato de 32 con signo, en ccastel.py, Gen64, ensambla.py y Montador) | el núcleo en la mitad alta | 1 |
+| El **«modelo de núcleo» de direcciones** (el `-mcmodel=kernel` de gcc): el núcleo en los últimos 2 GB (`0xFFFFFFFF80000000`). Las direcciones de 32 bits con signo (`[G_x]` ya vale; `mov esi, T_3` pasa a `lea rsi, [T_3]`, en ccastel.py y Gen64; el `org` de 64 bits en ensambla.py y Montador) | el núcleo en la mitad alta | **hecho** (etapa 1; CASTEL64.md §10 bis) |
 | **Llamar a C y que C llame** (System V AMD64: argumentos en RDI, RSI, RDX, RCX, R8, R9, pila alineada a 16): `externa función` con su puente | enlazar con código en C (ACPICA, musl, la oficina) | 2–7 |
-| **Números escritos de 64 bits** y constantes de 64 al compilar | las direcciones altas sin `nat64(x) << 32` | 1 |
-| Variables **alineadas** (`alineado 4096`) | tablas de páginas, estructuras de los dispositivos | 1 |
+| **Números escritos de 64 bits** y constantes de 64 al compilar | las direcciones altas sin `nat64(x) << 32` (la etapa 1 se ha hecho sin ellos) | 2 |
+| Variables **alineadas** (`alineado 4096`) | estructuras de los dispositivos (la etapa 1 no las ha necesitado: lo alineado se pide a la memoria física) | cuando haga falta |
 | `modelo usuario64`: programas del anillo 3 con `syscall` | los programas de Castel en Hispa-64 | 4 |
 
 ### 2.2 El arranque: multiboot2 de GRUB (recomendado), cargador UEFI propio más tarde
@@ -84,18 +84,22 @@ El **cargador propio queda como etapa opcional** (la 13): conviene cuando haga f
 Secure Boot (con shim firmado) o los servicios de ejecución.
 
 Detalle que importa: el núcleo se carga en 1 MB (como Hispa-Pentium). Si un equipo
-tuviera ocupado ese sitio, GRUB lo dirá; la etiqueta «relocatable» de multiboot2 lo
-resuelve cuando el núcleo esté en la mitad alta (etapa 1: entonces la dirección
-física da igual).
+tuviera ocupado ese sitio, GRUB lo dirá. Desde la etapa 1 corre en la mitad alta, y
+lo único que depende de la dirección física es el arranque de 32 bits y las tablas
+del núcleo (pagina64.cas): la etiqueta «relocatable» de multiboot2 (que GRUB lo cargue
+donde haya sitio) pide que el arranque calcule dónde está (`call`/`pop`) y lo sume.
+Se hará si algún equipo lo pide.
 
 ### 2.3 La memoria: 4 niveles de páginas y la mitad alta
 
 | Dónde (virtual) | Qué | Desde |
 |---|---|---|
 | `0x0000000000000000` – `0x00007FFFFFFFFFFF` | **la mitad baja: los programas** (cada proceso la suya) | etapa 4 |
-| `0xFFFF800000000000` – … | **el mapa directo**: toda la memoria física, tal cual, desplazada (física + `0xFFFF800000000000`) | etapa 0 (los 64 primeros GB) |
-| `0xFFFFC00000000000` – … | lo que se mapea a propósito: los registros de los dispositivos (con PAT: sin caché, o «escritura combinada» para la pantalla), el montón del núcleo | etapa 1 |
-| `0xFFFFFFFF80000000` – `0xFFFFFFFFFFFFFFFF` | **el núcleo** (código, datos, pila) | etapa 1 |
+| `0xFFFF800000000000` – … | **el mapa directo**: la memoria física, tal cual, desplazada (física + `0xFFFF800000000000`); desde la etapa 1, solo la RAM, lo de ACPI y lo del cargador, sin ejecutar | etapa 0 (los 64 primeros GB, enteros); etapa 1 |
+| `0xFFFFC00000000000` – … | los dispositivos, mapeados a propósito (con PAT: sin caché, o «escritura combinada» para la pantalla), cada uno en su GB | etapa 1 |
+| `0xFFFFC80000000000` – … | los bloques grandes del montón (páginas propias, con una sin poner detrás) | etapa 1 |
+| `0xFFFFD00000000000` – … | las pruebas de la memoria (prmem64.cas) | etapa 1 |
+| `0xFFFFFFFF80000000` – `0xFFFFFFFFFFFFFFFF` | **el núcleo** (código de solo leer, datos y pila sin ejecutar, una página de guarda bajo la pila) | etapa 1 |
 
 - **4 niveles** (PML4, PDPT, PD, PT): 48 bits de direcciones virtuales, 256 TB. La
   paginación de 5 niveles (LA57) no hace falta en portátiles.
@@ -104,10 +108,11 @@ física da igual).
   de 2010 en adelante (los del taller, todos); si no, de 2 MB.
 - **NX** en los datos y la pila; **SMEP/SMAP** (que el núcleo no ejecute ni toque
   sin querer la memoria de los programas) cuando haya programas.
-- La memoria física: un **mapa de bits** de marcos de 4 KB al principio (sencillo,
-  1 bit por marco: 32 KB por GB), y un **«buddy»** (bloques de 2^n páginas) cuando
-  haga falta pedir trozos grandes seguidos (las colas de NVMe y xHCI). El montón del
-  núcleo, con tamaños fijos (8, 16 … 2048 octetos) encima.
+- La memoria física: un **mapa de bits** de marcos de 4 KB (hecho en la etapa 1: 1
+  bit por marco, 32 KB por GB; con `pide_seguidos(n, alineación)` para lo que va
+  seguido), y un **«buddy»** (bloques de 2^n páginas) si pedir trozos grandes
+  seguidos llega a ser lento (las colas de NVMe y xHCI). El montón del núcleo, con
+  casillas de tamaño fijo (32 … 2048 octetos) y, lo grande, en páginas propias.
 - El núcleo deja de verse en la mitad baja cuando haya programas.
 
 ### 2.4 SMP desde el principio
@@ -249,7 +254,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | Etapa | Qué | Duración | Acumulado |
 |---|---|---|---|
 | 0 | Arranque UEFI, modo largo, consola, mapa de memoria, excepciones | **hecha (23/11)** | — |
-| 1 | Núcleo en la mitad alta, memoria física y virtual, montón | 3–4 sem. | 1 mes |
+| 1 | Núcleo en la mitad alta, memoria física y virtual, montón | **hecha (23/11)** | — |
 | 2 | ACPI (ACPICA), APIC, HPET, tiempo, PCIe, apagar | 4–6 sem. | 2,5 meses |
 | 3 | SMP, planificador, hilos del núcleo | 4–6 sem. | 4 meses |
 | 4 | Anillo 3, syscall/sysret, ELF64, procesos | 4–5 sem. | 5 meses |
@@ -272,23 +277,14 @@ lo que diga Carlos del taller.
 
 Ver la sección 6.
 
-### Etapa 1 — la memoria
+### Etapa 1 — la memoria (hecha)
 
-- El compilador, con el «modelo de núcleo» de direcciones (2.1) y variables
-  alineadas; el núcleo, enlazado en `0xFFFFFFFF80000000`.
-- Marcos de 4 KB (mapa de bits sacado del mapa de memoria, sin tocar lo del
-  firmware ni lo de ACPI hasta haberlo leído), tablas de páginas por función
-  (`mapea`, `desmapea`, con `invlpg`), el mapa directo **solo de la RAM** y los
-  dispositivos mapeados a propósito con PAT (la pantalla con escritura combinada:
-  pintar será varias veces más rápido en los equipos de verdad).
-- El montón del núcleo; una TSS con pilas IST para el doble fallo, el NMI y el #MC
-  (que un desbordamiento de la pila del núcleo se explique en vez de reiniciar).
-- **Se verá**: «Memoria: 7,8 GB libres en 21 trozos; 15 MB usados por el núcleo»,
-  una prueba de pedir y soltar memoria a millones, y un fallo de página del núcleo
-  explicado con el nombre de la función.
-- **QEMU**: OVMF con 512 MB, 3 GB (memoria por encima de 4 GB) y 16 GB; `-cpu
-  qemu64` (sin páginas de 1 GB) y `-cpu max`.
-- **Taller**: ThinkPad E14 Gen 5, Monovate, ASUS GL553VD (la misma imagen USB).
+Ver la sección 7. Lo que cambió del plan al hacerla: los números escritos de 64 bits
+y las variables alineadas no han hecho falta (quedan para la etapa 2); el montón son
+casillas de tamaño fijo y, lo grande, páginas propias (no un «buddy»); las pruebas de
+QEMU, con 128 MB, 3 GB y 8 GB (y `-cpu qemu64`, sin páginas de 1 GB, y `-cpu max`); y
+se ha añadido lo que hace falta para que un fallo «se explique con el nombre de la
+función»: los nombres van en un módulo del cargador (`HISPA64.SIM`).
 
 ### Etapa 2 — ACPI, interrupciones y tiempo
 
@@ -422,7 +418,7 @@ con la imagen y un LEEME.TXT.
   órdenes). La pantalla se comprueba con un pantallazo (`screendump` por el monitor
   de QEMU). Ojo con lo que QEMU no tiene igual que el hardware: no hay GOP por
   encima de 4 GB, sí hay 8254 y COM1. Por eso cada etapa va también al taller.
-- `castel/nucleo64/pruebas.sh` (solo, unos 35 s) y `SOLO=castel64 ./pruebas.sh`
+- `castel/nucleo64/pruebas.sh` (solo, unos 40 s) y `SOLO=castel64 ./pruebas.sh`
   (CASTEL64 entero, que lo llama). **Los martes y jueves de 16:30 a 21:00, nada
   pesado en el servidor** (el bingo).
 
@@ -528,3 +524,107 @@ consola).
 - Cuántos procesadores hay de verdad lo dirá la MADT (etapa 2): ahora es lo que dice
   CPUID del paquete.
 - Sin entrada (teclado): se para con todo escrito; se apaga con el botón.
+
+---
+
+## 7. La etapa 1, hecha (23/11/2026): la memoria
+
+### Qué hace
+
+Hispa-64 0.1.0. El núcleo corre **en la mitad alta**: enlazado en
+`0xFFFFFFFF80100000` (el «modelo de núcleo» de direcciones del compilador,
+CASTEL64.md §10 bis), cargado en 1 MB. El arranque (de 32 bits, con las direcciones
+físicas) pone unas tablas provisionales (los 64 primeros GB tal cual y en el mapa
+directo, y el primer GB en `0xFFFFFFFF80000000`), pasa al modo largo y salta arriba.
+Desde ahí, en Castel:
+
+| Archivo | Qué |
+|---|---|
+| `gdt64.cas` | la GDT del núcleo (en la mitad alta; con los segmentos del anillo 3 que querrá `syscall`) y la **TSS con tres pilas IST**: el doble fallo (IST 1), el NMI (IST 2) y el fallo de máquina (IST 3) |
+| `fisica64.cas` | **la memoria física**: un mapa de bits de marcos de 4 KB hecho con el mapa del firmware (multiboot2: el de UEFI o el de la BIOS; o el de multiboot). Solo es libre lo «disponible», y aun de eso se aparta el primer MB, el núcleo, la información del cargador, sus módulos, la pantalla y el propio mapa de bits. `pide`, `devuelve`, `pide_seguidos(n, alineación)`, `suelta_seguidos`; soltar un marco libre para el núcleo |
+| `pagina64.cas` | **la memoria virtual**: `mapea` (páginas de 4 KB, 2 MB y 1 GB), `desmapea` (con `invlpg`), `traduce`, `marcas_de`; NX (EFER.NXE), WP, páginas globales, la **PAT** (1: escritura combinada; 3: sin caché); `mapea_disp` para los dispositivos. Y las tablas de verdad: el núcleo con el código de solo leer y los datos sin ejecutar, la página de guarda bajo la pila sin poner, el **mapa directo solo de la RAM** (y lo de ACPI y lo del cargador) con las páginas más grandes que se pueda, la pantalla con escritura combinada en `0xFFFFC00000000000`, y **sin la identidad de abajo**; las tablas del arranque (268 KB) vuelven a la memoria libre |
+| `monton64.cas` | **el montón del núcleo**: `reserva(n)`/`libera(p)` de cualquier tamaño; casillas de 32 a 2048 octetos (en páginas del mapa directo) y, lo grande, en páginas propias en `0xFFFFC80000000000` con una sin poner detrás. Cabecera con marca y sello, 8 octetos de guarda detrás, lo liberado envenenado: se para y lo dice si se escribe de más, se libera dos veces, se libera algo que no es suyo o se escribe en un bloque liberado |
+| `cerrojo.cas` | cerrojos de espera activa (con las interrupciones quitadas mientras se tienen): la memoria física, las tablas y el montón ya van con cerrojo, para la etapa 3 |
+| `nombre64.cas`, `simbolos.py` | **los nombres de las funciones**: `simbolos.py` saca del mapa de NASM `HISPA64.SIM` («dirección Módulo.función»), que GRUB carga como módulo (`module2`) y QEMU con `-initrd`; una excepción o una parada dice en qué función ha pasado y **quién la ha llamado** (siguiendo los RBP; una función que se llama a sí misma se cuenta, no se repite) |
+| `prmem64.cas` | las pruebas de cada arranque: páginas de 4 KB (puesta, leída, quitada y puesta en otro marco: si la TLB no se vaciase, se leería el de antes), de 2 MB y de 1 GB; las banderas del núcleo; el montón con 2.000 reservas al azar; y la larga (`prueba=monton`): 100.000, con 1.000 vivos a la vez, de 1 a 20.025 octetos, comprobando que al acabar no se ha perdido ni un marco |
+| `excep64.cas` | además: las puertas del doble fallo, el NMI y el #MC con su IST; «la pila del núcleo se ha desbordado» cuando el doble fallo es por eso; las paradas del propio núcleo (`detén_ini`/`detén_fin`, código 98 en QEMU); una excepción dentro de otra (en la consola) sigue solo por el puerto serie |
+
+Lo que dice (QEMU con OVMF y 256 MB, abreviado):
+
+```
+Memoria: 248,7 MB libres en 7 trozos (de 249,7 MB que da el firmware); 380 KB usados por el núcleo
+  el núcleo, 312 KB (en 0xFFFFFFFF80100000); el mapa de los marcos, 8 KB; 15 tablas de páginas
+  mapa directo (desde 0xFFFF800000000000), solo de la RAM y lo de ACPI, en páginas de 1 GB: 0; de 2 MB: 122; de 4 KB: 2011; sin ejecutar (NX: sí)
+  sin la identidad de abajo: 1 MB ya no está en las tablas
+  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)
+  módulo del cargador: HISPA64.SIM, 5 KB en 0x1000: los nombres de 181 funciones (HISPA64.SIM)
+El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer), los datos sin ejecutar desde 0xFFFFFFFF80108000
+  la pila, de 0xFFFFFFFF8014E000 a 0xFFFFFFFF8015E000, con una página de guarda debajo
+TSS con pilas propias (IST) para el doble fallo (0xFFFFFFFF80181D20), el NMI (...) y el fallo de máquina (...)
+Páginas: de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día); de 2 MB, también; de 1 GB, no (el procesador no las tiene)
+  el código del núcleo, sin escribir: sí; los datos, sin ejecutar: sí; la guarda de la pila, sin poner: sí
+Montón: 2000 reservas y liberaciones al azar (de 1 a 20025 octetos, 59 grandes; 64 a la vez), comprobadas; al acabar, 0 en uso y la memoria física, la de antes (el montón se queda 25 páginas)
+Hispa-64 etapa 1: todo en orden.
+```
+
+Con `prueba=doble` (una función que se llama a sí misma sin fin):
+
+```
+*** Hispa-64 se ha parado: excepción 8 ***
+Doble fallo (#DF): ha fallado al atender otra excepción
+(Se atiende con su propia pila: la IST 1 de la TSS.)
+La pila del núcleo se ha desbordado: RSP=0xFFFFFFFF8014DF68 está en la página de guarda (0xFFFFFFFF8014D000 - 0xFFFFFFFF8014DFFF),
+que no está en las tablas a propósito.
+En la función Hispa64.hondo+0x12
+RIP=...  (los registros)
+Llamada desde: Hispa64.hondo+0x32 (y 39 veces más, por lo menos)
+```
+
+Y con `prueba=dosveces`:
+
+```
+*** Hispa-64 se ha parado: el montón del núcleo está estropeado ***
+En el bloque 0xFFFF800000121010: se libera dos veces
+Llamada desde: Monton64.estropeado+0x50 <- Monton64.libera+0x79 <- Hispa64.provoca+0x1C7 <- Hispa64.principal+0x74F <- el arranque+0x10
+```
+
+Ocupa 40 KB (más unos 470 KB que empiezan a cero; de ellos, 268 KB de las tablas del
+arranque, que se devuelven).
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh` (24 pruebas, 25 con CASTEL64 y ENSAMB64; unos 40 s; dentro de `SOLO=castel64
+./pruebas.sh`, con CASTEL64 y ENSAMB64):
+
+- se compila igual con ccastel.py + NASM, ensambla.py, CASTEL64 + ENSAMB64 y CASTEL32
+  (corre32); el «modelo de núcleo»: ninguna etiqueta en un registro de 32 bits;
+- por multiboot (QEMU `-kernel`, con `HISPA64.SIM` de módulo): con **128 MB** (126,5 MB
+  libres), con **3 GB** y `-cpu max` (2,9 GB; el mapa directo y la prueba con páginas
+  de 1 GB) y con **8 GB** y `qemu64` (7,9 GB; sin páginas de 1 GB, con 4.094 de 2 MB);
+- `prueba=monton`: 100.000 reservas y liberaciones (3.233 grandes), sin perder nada;
+- las excepciones, explicadas con el nombre de la función y quién la ha llamado:
+  `pagina`, `gp`, `division`, `ud`, **`doble`** (IST 1, la pila desbordada),
+  `identidad` (1 MB ya no está), `codigo` (escribir en el código: sin permiso), `nx`
+  (ejecutar en el montón: sin permiso); y el **NMI** que manda el monitor de QEMU
+  (IST 2);
+- las paradas del montón: `corrupcion` (escribir un octeto de más) y `dosveces`;
+- un procesador sin modo largo;
+- por **UEFI de 64 bits (OVMF) con GRUB**: con 128 MB, con 3 GB, `-cpu max` y 4
+  procesadores, y con 8 GB; el módulo `HISPA64.SIM`, la pantalla con escritura
+  combinada, y un pantallazo con la consola.
+
+### Lo que queda para la etapa 2 (y más adelante)
+
+- Las tablas de ACPI que el firmware ponga en memoria «reservada» (no en la de ACPI)
+  no están en el mapa directo: se mapearán con `mapea_disp` al leerlas (etapa 2).
+- Las tablas de páginas que se quedan vacías al desmapear no se devuelven aún; la
+  zona de los bloques grandes del montón no se reutiliza (avanza: hay 8 TB).
+- La GDT, la TSS y sus pilas IST son de un procesador: en la etapa 3, una por cada uno
+  (y la PAT, NX y WP puestos en cada uno); vaciar la TLB de los demás (IPI).
+- La mitad alta de la PML4 se compartirá entre los procesos (etapa 4): conviene
+  tener ya hechas sus 256 PDPT para que todos vean lo mismo.
+- El compilador: los números escritos de 64 bits (2.1), el puente con C.
+- El montón, sin cerrojo por procesador ni cachés por procesador (cuando haya SMP, si
+  hace falta por velocidad).
+- El fallo de máquina (#MC) va a su IST, pero no se lee aún lo que dicen los bancos
+  (MCi_STATUS): etapa 2 o 3.
