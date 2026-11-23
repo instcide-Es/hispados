@@ -1223,7 +1223,8 @@ done
 if [ $hechos = 1 ]; then
 # lo que tiene que sumar TEXTOS\LARGO.TXT (el mismo que escribe disco.sh)
 suma=$(python3 -c "print(sum(sum(('linea %03d de un archivo de varios clusters\r\n' % i).encode()) for i in range(1, 401)))")
-# 1. desde la consola del núcleo, con FAT16
+# 1. desde la consola del núcleo, con FAT16 (en la raíz, también AZAR.SEM: la
+# semilla del azar, que el núcleo escribe en el primer arranque desde la 0.8.7)
 DISCO=$P/d16.img $AQUI/nucleo32/probar.sh "" disco dir "dir textos" "dir nada" "lanzar hola.bin" "lanzar eco.bin uno dos tres" \
   "lanzar noprog.bin" "lanzar nada.bin" disco apagar > $P/disco.sal 2>&1
 S=$P/disco.sal
@@ -1231,7 +1232,7 @@ mira "el controlador ATA (PIO): IDENTIFY dice qué disco hay en el canal primari
   "^disco 0: QEMU HARDDISK, 16 MB, FAT16\.$" "^disco 0: QEMU HARDDISK, 32768 sectores (16 MB), LBA" "^disco 1: QEMU DVD-ROM, lector de CD o DVD (IDE), sin disco$"
 mira "la FAT16 se monta y se lee su raíz (los nombres largos se saltan; queda el corto)" \
   "^sistema de archivos: FAT16, desde el sector 0, [0-9]* clusters de 2048 octetos, [0-9]* libres" \
-  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^20 entradas"
+  "^ORDENES.BIN  *[0-9]*$" "^LEEME.TXT  *118$" "^NOMBRE~1.TXT  *32$" "^TEXTOS  *<carpeta>" "^AZAR.SEM  *32$" "^21 entradas"
 mira "una carpeta dentro de otra, y una que no está" "^LARGO.TXT  *17600$" "^PIRATA.TXT  *110$" "^5 entradas" "^no puedo abrir «nada»: no existe"
 m1=$(grep "^hola.bin ha acabado" $S | awk '{print $10, $13}')
 mira "un programa del anillo 3 cargado del disco (no de multiboot): corre y acaba con su código" \
@@ -1252,7 +1253,7 @@ mira "el intérprete de órdenes es un programa del anillo 3 cargado del disco, 
 mira "VER y MEM" "^Hispa-Pentium ${VERSION_BASE//./\\.}: un núcleo de 32 bits escrito en Castel" "^Memoria: 32640 K en total, [0-9]* K libres ([0-9]* marcos de 4 K)" \
   "^Este intérprete ocupa [0-9]* K. Tareas en marcha: 4\.$"
 mira "DIR: la raíz y una carpeta, con sus tamaños, sus fechas y lo que queda libre" "^ Directorio de C:.$" "^LEEME    TXT  *118  [0-9/]*  [0-9:]*$" \
-  "^TEXTOS  *<DIR>  " "^ *17 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
+  "^TEXTOS  *<DIR>  " "^ *18 archivos  *[0-9]* octetos$" "^ *3 carpetas  *[0-9]* octetos libres$" "^ Directorio de C:.TEXTOS$" \
   "^LARGO    TXT  *17600  " "^ *3 archivos  *18[0-9]* octetos$" "^No puedo abrir nada: no existe\.$"
 mira "TYPE: un archivo de la raíz y uno de una carpeta (abrir, leer y cerrar por la llamada al sistema)" \
   "^Este archivo está en un disco FAT y lo enseña la orden TYPE\.$" "^Con diez cañones por banda,$" "^un velero bergantín\.$" \
@@ -1512,7 +1513,7 @@ else ko "«sindisco» no deja los discos sin mirar:"; sed 's/^/        /' $S | h
 
 echo "== Hispa-Pentium: el escritorio (modo gráfico, ratón, ventanas, barra de tareas, menú Inicio, iconos, Bloc de notas, Consola y Mi equipo) =="
 cp $P/d16.img $G/e.img
-hora1=$(date +%H:%M); hora2=$(date -d "+1 minute" +%H:%M)
+hora1=$(date +%H:%M); antes=$(date +%s)
 CAPTURAS=$G ESCRIBE=1 DISCO=$G/e.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 2" ":captura e1" \
   ":clic 40 585" ":captura e2" ":clic 80 176" ":pausa 2" ":escribe Querida señora: ¿qué tal está?" ":tecla ret" ":escribe Adiós." ":captura e3" \
   ":tecla f2" ":pausa 1" ":captura e4" ":arrastra 300 75 400 175" ":raton 600 450" ":captura e5" ":doble 400 175" ":pausa 1" ":captura e6" \
@@ -1526,7 +1527,14 @@ mira "«escritorio» en la línea del cargador: el núcleo pone el modo gráfico
   "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha puesto el núcleo, por la VBE de Bochs/QEMU), tapiz 0"
 miracap "el escritorio: el tapiz con el disquete y su nombre, la barra de tareas con «Inicio» y el reloj en la bandeja" e1 tam 800 600 \
   negrita 30 570 46 580 Inicio negrita 630 505 645 520 Hispa-Pentium rgb 400 2 154C9C rgb 300 598 1D5DBA 10 rgb 795 597 3393E0 12
-if cap $G/e1.ppm negrita 740 570 752 580 $hora1 || cap $G/e1.ppm negrita 740 570 752 580 $hora2; then ok "el reloj de la bandeja da la hora del PC (la de la CMOS: $hora1)"
+# (0.8.9) la hora puede ser cualquiera de las de entre que se empieza y que se
+# acaba: probar.sh compila antes la semilla y sus programas (con el PC cargado,
+# más de un minuto, y la hora de antes ya no valía)
+reloj_bien=0
+for ((t = antes; t <= $(date +%s) + 60; t += 60)); do
+  cap $G/e1.ppm negrita 740 570 752 580 $(date -d @$t +%H:%M) && { reloj_bien=1; break; }
+done
+if [ $reloj_bien = 1 ]; then ok "el reloj de la bandeja da la hora del PC (la de la CMOS: $hora1)"
 else ko "el reloj de la bandeja no da la hora ($hora1)"; fi
 miracap "la flecha del ratón está pintada donde está el ratón (y solo ahí)" e2 rgb 40 585 10233F rgb 42 589 FFFFFF nrgb 400 300 10233F
 miracap "el menú Inicio (MENÚ): los fijados a la izquierda, «Todos los programas» abajo, Mis documentos y Configuración a la derecha, y Cerrar sesión, Reiniciar y Apagar equipo en el pie" e2 \
@@ -1598,7 +1606,7 @@ miracap "Ctrl+V lo pega donde está el cursor, y Mayús con la flecha selecciona
 miracap "Ctrl+C copia lo seleccionado y Ctrl+V lo pega; tres clics seleccionan la línea entera" a7 texto 94 146 102 154 "Hola  cruelmundondo" rgb 99 167 $RES rgb 200 180 $RES \
   nrgb 99 151 $RES
 miracap "lo que se teclea sustituye a lo seleccionado; y un clic y Mayús con otro clic seleccionan de uno a otro" a8 texto 94 162 102 170 X notexto 90 160 200 176 segunda \
-  rgb 99 151 $RES rgb 136 164 $RES nrgb 141 151 $RES
+  rgb 99 151 $RES rgb 120 164 $RES nrgb 141 151 $RES       # ((PUNTEROS) 136,164 queda debajo de la flecha nueva, en 138,158)
 miracap "la barra de menús del Bloc (Archivo, Edición, Ayuda): «Edición» abre Cortar, Copiar, Pegar y Seleccionar todo, con sus teclas" a9 \
   texto 178 116 186 124 "Cortar            Ctrl+X" texto 178 140 186 148 "Copiar            Ctrl+C" texto 178 197 186 205 "Seleccionar todo  Ctrl+A" rgb 99 151 $RES
 miracap "arrastrar la esquina de la ventana la cambia de tamaño, y el programa vuelve a pintar lo suyo (el pie, más abajo; el papel, más ancho)" a10 \
