@@ -3,7 +3,8 @@
 # hazi2chid.py - (I2CHID) hace tests/acpi/i2chid-qemu.aml, una SSDT de prueba
 # con dos touchpads HID sobre I2C de mentira, en AML escrito a mano (no hay
 # iasl en el equipo): lo que miran acpi/pentium/i2chid.c (ACPI.BIN) y
-# castel/pruebas_i2chid.sh (con acpi_sim y con QEMU, -acpitable). En ASL:
+# castel/pruebas_i2chid.sh (con acpi_sim y con QEMU, -acpitable); con «null»
+# detrás del nombre, la del ThinkPad E14 (más abajo). En ASL:
 #
 #   Scope (\_SB.PCI0) {
 #     Device (I2C1) {
@@ -163,8 +164,58 @@ i2c1 = dispositivo('I2C1',
                    nombre('FMCN', paquete([entero(128), entero(160), entero(30)])) +
                    tpd0 + tpd1)
 cuerpo = b'\x10' + pkg(b'\x5C\x2E' + seg('_SB') + seg('PCI0') + i2c1)
+ident = b'I2CHIDPR'
 
-cab = bytearray(b'SSDT' + struct.pack('<I', 36 + len(cuerpo)) + bytes([2, 0]) + b'HISPA ' + b'I2CHIDPR' +
+# «null» (el ThinkPad E14 Gen 5, Raptor Lake: las DSDT de Intel ponen
+# «NULL» en la plantilla del I2cSerialBus y el _CRS solo la completa para
+# Windows 8): la controladora es la del padre. En ASL:
+#
+#   Scope (\_SB.PCI0) {
+#     Device (I2C0) {
+#       Name (_ADR, 0x00150000)
+#       Name (FMCN, Package () {100, 214, 28})
+#       Device (TPD0) {
+#         Name (_HID, "ELAN06C6")
+#         Name (_CID, "PNP0C50")
+#         Name (SBFB, ResourceTemplate () {
+#           I2cSerialBusV2 (0x15, ControllerInitiated, 400000, AddressingMode7Bit, "NULL") })
+#         Name (SBFI, ResourceTemplate () { Interrupt (ResourceConsumer, Level, ActiveLow) {16} })
+#         Method (_CRS) { Return (SBFI) }
+#         Method (_DSM, 4) { If (LEqual (Arg2, One)) { Return (One) } Return (Buffer () {0}) }
+#       }
+#     }
+#     Device (I2C3) {                         // sin _ADR: 15.3 por su nombre
+#       Device (TPD3) {
+#         Name (_HID, "SYNA3602")
+#         Name (_CID, "PNP0C50")
+#         Name (SBFB, ResourceTemplate () {
+#           I2cSerialBusV2 (0x2C, ControllerInitiated, 400000, AddressingMode7Bit, "NULL") })
+#         Method (_CRS) { Return (SBFB) }
+#       }
+#     }
+#   }
+if len(sys.argv) > 2 and sys.argv[2] == 'null':
+    tpd0 = dispositivo('TPD0',
+                       nombre('_HID', cadena('ELAN06C6')) +
+                       nombre('_CID', cadena('PNP0C50')) +
+                       nombre('SBFB', buffer(plantilla(i2c(0x15, 400000, 'NULL')))) +
+                       nombre('SBFI', buffer(plantilla(interrupcion(16)))) +
+                       metodo('_CRS', 0, devuelve(seg('SBFI'))) +
+                       metodo('_DSM', 4, si(igual(ARG2, entero(1)), devuelve(entero(1))) + devuelve(buffer(b'\x00'))))
+    i2c0 = dispositivo('I2C0',
+                       nombre('_ADR', entero(0x00150000)) +
+                       nombre('FMCN', paquete([entero(100), entero(214), entero(28)])) +
+                       tpd0)
+    tpd3 = dispositivo('TPD3',
+                       nombre('_HID', cadena('SYNA3602')) +
+                       nombre('_CID', cadena('PNP0C50')) +
+                       nombre('SBFB', buffer(plantilla(i2c(0x2C, 400000, 'NULL')))) +
+                       metodo('_CRS', 0, devuelve(seg('SBFB'))))
+    i2c3 = dispositivo('I2C3', tpd3)
+    cuerpo = b'\x10' + pkg(b'\x5C\x2E' + seg('_SB') + seg('PCI0') + i2c0 + i2c3)
+    ident = b'I2CNULLP'
+
+cab = bytearray(b'SSDT' + struct.pack('<I', 36 + len(cuerpo)) + bytes([2, 0]) + b'HISPA ' + ident +
                 struct.pack('<I', 1) + b'HSPA' + struct.pack('<I', 1))
 t = cab + cuerpo
 t[9] = (-sum(t)) & 0xFF

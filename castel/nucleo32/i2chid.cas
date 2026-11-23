@@ -44,7 +44,7 @@ módulo I2chid
         ss_alto, ss_bajo, ss_ret: nat32 ; SSCN de la controladora (0: no hay)
         fm_alto, fm_bajo, fm_ret: nat32 ; FMCN
         gpio_pin, gpio_modo: nat32      ; su GpioInt (FFFFFFFFh: no tiene); aún no se usa
-        origen: nat32                   ; bit 0: el I2cSerialBus, de su ResourceTemplate (no del _CRS); bit 1: la controladora, por su nombre
+        origen: nat32                   ; bit 0: el I2cSerialBus, de su ResourceTemplate (no del _CRS); bit 1: la controladora, por su nombre; bit 2: la de su padre (la de su I2cSerialBus no existe)
         ruta: arreglo [48] de byte      ; \_SB.PCI0.I2C0.TPD0
         hid: arreglo [16] de byte       ; su _HID (ELAN1200, SYNA2B31...)
         cid: arreglo [16] de byte       ; su _CID
@@ -193,6 +193,7 @@ módulo I2chid
         si fichas[k].sta yb 1 = 0 entonces apunta1(", su _STA dice %Xh: se prueba igual", fichas[k].sta) fin
         si fichas[k].origen yb 1 <> 0 entonces apunta0(", la dirección de su ResourceTemplate") fin
         si fichas[k].origen yb 2 <> 0 entonces apunta0(", la controladora por su nombre") fin
+        si fichas[k].origen yb 4 <> 0 entonces apunta0(", la controladora, su padre en ACPI") fin
         si fichas[k].registro <> 0xFFFFFFFF entonces apunta1(", _DSM: %04Xh", fichas[k].registro) fin
         apunta0(")\n")
         esclavo_acpi := fichas[k].esclavo

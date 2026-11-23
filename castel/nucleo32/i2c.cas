@@ -17,9 +17,10 @@
 ;   - la alimentación (PMCSR, D0) y la orden PCI (memoria y bus);
 ;   - el bloque DesignWare: IC_COMP_TYPE (FCh) dice 44570140h; IC_COMP_PARAM_1
 ;     (F4h), lo hondas que son sus colas; el reloj del bloque no se puede
-;     leer: 120 MHz en las series 100/200, 133 en Apollo/Gemini Lake, 100 en
-;     Elkhart Lake y, en las demás, se supone 216 (si fuera menos, el bus va
-;     más despacio, nunca más deprisa);
+;     leer: el que dice la tabla de intel-lpss-pci de Linux: 120 MHz en las
+;     series 100/200 y en Tiger Lake-LP, 216 en Cannon y Comet Lake, 133 en
+;     Apollo/Gemini Lake, Ice, Jasper, Alder, Raptor y Meteor Lake, 100 en
+;     Elkhart Lake y en los de después;
 ;   - la velocidad: los contadores de la parte alta y baja del reloj SCL
 ;     (IC_SS_SCL_HCNT/LCNT para 100 kHz, IC_FS_SCL_HCNT/LCNT para 400 kHz) y
 ;     el tiempo de retención de SDA. Si ACPI los da (los métodos SSCN y FMCN
@@ -32,9 +33,11 @@
 ;     el estado: cada orden de la cola de salida es un octeto que escribir o
 ;     uno que leer, con «STOP» en la última y «RESTART» en la primera
 ;     lectura.
-;  La zona por encima de los 4 GB (la del ThinkPad E14, el Monovate, OVMF):
-;  la mueve debajo pci_memoria (pci.cas, baja_zona), como la del xHCI, y se
-;  dice en el registro; si no se puede, se dice por qué y no se usa.
+;  La zona por encima de los 4 GB (OVMF): la mueve debajo pci_memoria
+;  (pci.cas, baja_zona), como la del xHCI; la que está sin poner (a 0: el
+;  Monovate 14.1 de Tiger Lake y el ThinkPad E14 Gen 5 de Raptor Lake),
+;  pci_memoria le da dirección (asigna_zona). Antes, a D0. Se dice en el
+;  registro (con lo que decía el registro base); si no se puede, por qué.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo I2c
@@ -131,28 +134,46 @@ módulo I2c
     fin
 
     ; el reloj (kHz) del bloque de un modelo de la tabla; 0: no es una I2C
-    ; de LPSS que se conozca (y no se toca)
+    ; de LPSS que se conozca (y no se toca). Lo que dice la tabla de
+    ; intel-lpss-pci de Linux: 120 MHz (spt_i2c_info), 133 (bxt, apl, glk),
+    ; 216 (cnl) o 100 (ehl)
     función reloj_de(m: nat32): nat32
-        ; las series 100 (SPT-LP 9D60-9D65, SPT-H A160-A163) y 200 (A2E0-A2E3)
-        si (m >= 0x9D60 y m <= 0x9D65) o (m >= 0xA160 y m <= 0xA163) o (m >= 0xA2E0 y m <= 0xA2E3) entonces devolver 120000 fin
-        ; Apollo Lake y Gemini Lake
-        si m >= 0x5AAC y m <= 0x5ABA y m yb 1 = 0 entonces devolver 133000 fin
-        si m >= 0x31AC y m <= 0x31BA y m yb 1 = 0 entonces devolver 133000 fin
-        ; Elkhart Lake
+        variable alto, bajo: nat32
+        alto := m >> 8
+        bajo := m yb 0xFF
+        ; 120 MHz: series 100 (SPT-LP 9D60-9D65, SPT-H A160-A163), 200 (KBL-H
+        ; A2E0-A2E3), Comet Lake-V (A3E0-A3E3) y Tiger Lake-LP (A0C5-A0C6,
+        ; A0D8-A0D9, A0E8-A0EB: el Monovate 14.1)
+        si (m >= 0x9D60 y m <= 0x9D65) o (m >= 0xA160 y m <= 0xA163) o (m >= 0xA2E0 y m <= 0xA2E3) o (m >= 0xA3E0 y m <= 0xA3E3) entonces devolver 120000 fin
+        si alto = 0xA0 y (bajo = 0xC5 o bajo = 0xC6 o bajo = 0xD8 o bajo = 0xD9 o (bajo >= 0xE8 y bajo <= 0xEB)) entonces devolver 120000 fin
+        ; 216 MHz: Cannon Lake (9DC5-9DC6, 9DE8-9DEB; H: A368-A36B) y Comet
+        ; Lake (02C5-02C6, 02E8-02EB; H: 06E8-06EB)
+        si (alto = 0x9D o alto = 0x02) y (bajo = 0xC5 o bajo = 0xC6 o (bajo >= 0xE8 y bajo <= 0xEB)) entonces devolver 216000 fin
+        si (m >= 0x06E8 y m <= 0x06EB) o (m >= 0xA368 y m <= 0xA36B) entonces devolver 216000 fin
+        ; 100 MHz: Elkhart Lake (4B44-4B45, 4B4B-4B4C, 4B78-4B7B) y los de
+        ; después de Meteor Lake (Lunar Lake A850-A851/A878-A87B, Panther
+        ; Lake E350/E450, Wildcat Lake 4D50, Nova Lake 6E4C y D350)
         si (m >= 0x4B78 y m <= 0x4B7B) o m = 0x4B4B o m = 0x4B4C o m = 0x4B44 o m = 0x4B45 entonces devolver 100000 fin
-        ; Cannon Lake, Comet Lake, Ice Lake, Jasper Lake, Tiger Lake, Alder
-        ; Lake y Raptor Lake: las I2C0-3 en xxE8-xxEB y las 4-5 en xxC5-xxC6
-        ; (en algunos, también xxD8-xxD9); Alder/Raptor Lake de sobremesa,
-        ; 7ACC-7ACF/7AFC-7AFD y 7A4C-7A4F/7A7C-7A7D; Meteor Lake, 7E78-7E7B y 7E50-7E51
-        si (m >= 0x7ACC y m <= 0x7ACF) o m = 0x7AFC o m = 0x7AFD entonces devolver 216000 fin
-        si (m >= 0x7A4C y m <= 0x7A4F) o m = 0x7A7C o m = 0x7A7D entonces devolver 216000 fin
-        si (m >= 0x7E78 y m <= 0x7E7B) o m = 0x7E50 o m = 0x7E51 entonces devolver 216000 fin
-        si (m >> 8) = 0x9D o (m >> 8) = 0xA3 o (m >> 8) = 0x02 o (m >> 8) = 0x06 o (m >> 8) = 0x34 o (m >> 8) = 0x4D o (m >> 8) = 0xA0 o (m >> 8) = 0x43 o (m >> 8) = 0x51 o (m >> 8) = 0x54 entonces
-            si (m yb 0xFF) >= 0xE8 y (m yb 0xFF) <= 0xEB entonces devolver 216000 fin
-            si (m yb 0xFF) = 0xC5 o (m yb 0xFF) = 0xC6 o (m yb 0xFF) = 0xD8 o (m yb 0xFF) = 0xD9 entonces devolver 216000 fin
-            ; (Cannon Lake-H: A368-A36B)
-            si (m >> 8) = 0xA3 y (m yb 0xFF) >= 0x68 y (m yb 0xFF) <= 0x6B entonces devolver 216000 fin
+        si (alto = 0xA8 o alto = 0xE3 o alto = 0xE4 o alto = 0x4D o alto = 0xD3) y (bajo = 0x50 o bajo = 0x51 o (bajo >= 0x78 y bajo <= 0x7B)) entonces devolver 100000 fin
+        si (m >= 0x6E4C y m <= 0x6E4F) o m = 0x6E7A o m = 0x6E7B entonces devolver 100000 fin
+        ; 133 MHz: Broxton, Apollo Lake y Gemini Lake (xxAC-xxBA, pares)
+        si (alto = 0x5A o alto = 0x31 o alto = 0x0A o alto = 0x1A) y bajo >= 0xAC y bajo <= 0xBA y m yb 1 = 0 entonces devolver 133000 fin
+        ; 133 MHz: Ice Lake (34xx), Jasper Lake (4Dxx), Alder/Raptor Lake-P
+        ; (51xx: el ThinkPad E14 Gen 5), Alder Lake-M (54xx), Lakefield
+        ; (98xx): las I2C0-3 en xxE8-xxEB y las 4-5 en xxC5-xxC6 (y xxD8-xxD9)
+        si alto = 0x34 o alto = 0x4D o alto = 0x51 o alto = 0x54 o alto = 0x98 entonces
+            si (bajo >= 0xE8 y bajo <= 0xEB) o bajo = 0xC5 o bajo = 0xC6 o bajo = 0xD8 o bajo = 0xD9 entonces devolver 133000 fin
         fin
+        ; Tiger Lake-H (43AD-43AE, 43D8, 43E8-43EB)
+        si m = 0x43AD o m = 0x43AE o m = 0x43D8 o (m >= 0x43E8 y m <= 0x43EB) entonces devolver 133000 fin
+        ; Alder/Raptor Lake de sobremesa (7ACC-7ACF/7AFC-7AFD, 7A4C-7A4F/
+        ; 7A7C-7A7D), Meteor Lake (7E78-7E7B, 7E50-7E51), su PCH (7F4C-7F4F,
+        ; 7F7A-7F7B) y Arrow Lake-H (7750-7751, 7778-777B)
+        si (m >= 0x7ACC y m <= 0x7ACF) o m = 0x7AFC o m = 0x7AFD entonces devolver 133000 fin
+        si (m >= 0x7A4C y m <= 0x7A4F) o m = 0x7A7C o m = 0x7A7D entonces devolver 133000 fin
+        si (m >= 0x7E78 y m <= 0x7E7B) o m = 0x7E50 o m = 0x7E51 entonces devolver 133000 fin
+        si (m >= 0x7F4C y m <= 0x7F4F) o m = 0x7F7A o m = 0x7F7B entonces devolver 133000 fin
+        si m = 0x7750 o m = 0x7751 o (m >= 0x7778 y m <= 0x777B) entonces devolver 133000 fin
         devolver 0
     fin
 
@@ -206,20 +227,41 @@ módulo I2c
             apunta("i2c: controladora %s 8086:%04X: no se usa («sini2c» en la línea del cargador)\n", dd)
             devolver
         fin
-        ; la zona 0; si es de 64 bits y está por encima de los 4 GB, la mueve
-        ; debajo pci_memoria (pci.cas, baja_zona), como la del xHCI
+        ; que esté encendida (D0) antes de mirar su zona: al salir de D3 sin
+        ; «No_Soft_Reset», el aparato se reinicia y pierde lo puesto en sus
+        ; registros base (como Linux: pci_enable_device la enciende primero)
+        pm := pci_capacidad(a, 1)
+        si pm <> 0 entonces
+            v := pci_leer16(a, pm + 4)
+            si v yb 3 <> 0 entonces
+                dd[2] := v yb 3
+                apunta("i2c: controladora %s 8086:%04X: estaba en D%u: a D0\n", dd)
+                pci_escribir16(a, pm + 4, v yb 0xFFFC)
+                dormir(2)
+            fin
+        fin
+        ; la zona 0, tal cual la ha dejado el firmware: si es de 64 bits y
+        ; está por encima de los 4 GB, la mueve debajo pci_memoria (pci.cas,
+        ; baja_zona), como la del xHCI; si está sin poner (a 0: los Tiger y
+        ; Raptor Lake, el Monovate 14.1, el ThinkPad E14 Gen 5), le da
+        ; dirección (asigna_zona)
         v := pci_leer(a, PCI_BAR0)
         alta := 0
         si v yb 7 = 4 entonces alta := pci_leer(a, PCI_BAR0 + 4) fin
         base := pci_memoria(a, 0)
+        dd[2] := v
+        dd[3] := alta
         si base = 0 entonces
             si alta <> 0 entonces
                 dd[2] := alta
                 dd[3] := v yb 0xFFFFFFF0
                 dd[4] := sin_mover_por
                 apunta("i2c: controladora %s 8086:%04X: su zona está por encima de los 4 GB (%X%08Xh) y no se ha podido mover debajo (motivo %u: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja): no se usa\n", dd)
+            sino si v yb 1 = 0 y (v yb 0xFFFFFFF0) = 0 y sin_asignar_aparato = a entonces
+                dd[4] := sin_asignar_por
+                apunta("i2c: controladora %s 8086:%04X: su zona 0 está sin poner (BAR %08Xh, alta %Xh) y no se le ha podido dar dirección (motivo %u: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja): no se usa\n", dd)
             sino
-                apunta("i2c: controladora %s 8086:%04X: sin zona de memoria: no se usa\n", dd)
+                apunta("i2c: controladora %s 8086:%04X: sin zona de memoria (BAR %08Xh, alta %Xh): no se usa\n", dd)
             fin
             devolver
         fin
@@ -228,15 +270,10 @@ módulo I2c
             dd[3] := v yb 0xFFFFFFF0
             dd[4] := base
             apunta("i2c: controladora %s 8086:%04X: su zona estaba por encima de los 4 GB (%X%08Xh): movida a %08Xh\n", dd)
-        fin
-        ; que esté encendida (D0) y atienda en la memoria y en el bus
-        pm := pci_capacidad(a, 1)
-        si pm <> 0 entonces
-            v := pci_leer16(a, pm + 4)
-            si v yb 3 <> 0 entonces
-                pci_escribir16(a, pm + 4, v yb 0xFFFC)
-                dormir(2)
-            fin
+        sino si (v yb 0xFFFFFFF0) = 0 entonces
+            dd[4] := base
+            dd[5] := asignada_tam >> 10
+            apunta("i2c: controladora %s 8086:%04X: su zona 0 estaba sin poner (BAR %08Xh, alta %Xh): puesta en %08Xh (%u K)\n", dd)
         fin
         pci_enciende(a)
         k := cuántas

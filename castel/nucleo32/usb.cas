@@ -906,6 +906,33 @@ módulo Usb
             fin
             apunta0("\n")
         fin
+        ; (I2CHID) las zonas sin poner (a 0) a las que se ha dado dirección
+        si asignadas <> 0 entonces
+            d[0] := (asignada_aparato >> 16) yb 0xFF
+            d[1] := (asignada_aparato >> 11) yb 0x1F
+            d[2] := (asignada_aparato >> 8) yb 7
+            d[3] := asignada_reg
+            apunta("pci: la zona del %02X:%02X.%u (registro %02Xh", d)
+            d[0] := asignada_cruda
+            d[1] := asignada_alta
+            d[2] := asignada_a
+            d[3] := asignada_tam >> 10
+            apunta(": %08Xh, alta %Xh) estaba sin poner: puesta en %08Xh (%u K)", d)
+            apunta1("; puestas, %u\n", asignadas)
+        fin
+        si sin_asignar <> 0 entonces
+            d[0] := (sin_asignar_aparato >> 16) yb 0xFF
+            d[1] := (sin_asignar_aparato >> 11) yb 0x1F
+            d[2] := (sin_asignar_aparato >> 8) yb 7
+            apunta("pci: la zona del %02X:%02X.%u está sin poner y no se le ha podido dar dirección", d)
+            según sin_asignar_por
+                caso 1: apunta0(": no es del bus 0")
+                caso 2: apunta0(": demasiado grande")
+                caso 3: apunta0(": no hay hueco libre")
+                caso 4: apunta0(": no se deja")
+            fin
+            apunta0("\n")
+        fin
         ; (USB) las xHCI que no se han podido poner en marcha, y en qué paso
         c := 0
         mientras c < Xhci.fallidas y c < Xhci.MAX_FALLIDAS hacer

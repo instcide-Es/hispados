@@ -176,6 +176,45 @@ static u32 dsm(ACPI_HANDLE h)
 	return r;
 }
 
+/* el aparato PCI de la controladora hc, en f->pci (y su _ADR en f->adr):
+ * de su _ADR (en el bus 0 o en el de su _BBN) o, sin _ADR (la controladora
+ * en modo ACPI, o la DSDT no lo dice), por su nombre, como las pone Intel:
+ * I2C0-3 en 15.0-15.3, I2C4 en 19.2 y I2C5 en 19.1. «padre»: hc es el padre
+ * del dispositivo, y solo vale si es una I2C (un _ADR del aparato 0, el
+ * puente raíz, no). Da 1 si lo sabe. */
+static int pci_de(ACPI_HANDLE hc, struct pe_i2chid *f, int padre)
+{
+	ACPI_HANDLE pp;
+	ACPI_BUFFER b;
+	char n[8];
+	u32 adr, bus = 0;
+
+	n[0] = 0;
+	b.Length = sizeof n;
+	b.Pointer = n;
+	if (ACPI_FAILURE(AcpiGetName(hc, ACPI_SINGLE_NAME, &b)))
+		n[0] = 0;
+	adr = entero(hc, "_ADR", 0xFFFFFFFFu);
+	if (adr != 0xFFFFFFFFu && (!padre || (adr >> 16 & 0x1F) != 0)) {
+		f->adr = adr;
+		if (ACPI_SUCCESS(AcpiGetParent(hc, &pp)))
+			bus = entero(pp, "_BBN", 0) & 0xFF;
+		f->pci = bus << 16 | ((adr >> 16) & 0x1F) << 11 | (adr & 7) << 8;
+		return 1;
+	}
+	if (adr == 0xFFFFFFFFu && !strncmp(n, "I2C", 3) && n[3] >= '0' && n[3] <= '5') {
+		static const u8 ap[6] = { 0x15, 0x15, 0x15, 0x15, 0x19, 0x19 };
+		static const u8 fu[6] = { 0, 1, 2, 3, 2, 1 };
+		u32 k = n[3] - '0';
+
+		f->adr = adr;
+		f->pci = (u32)ap[k] << 11 | (u32)fu[k] << 8;
+		f->origen |= 2;
+		return 1;
+	}
+	return 0;
+}
+
 static ACPI_STATUS un_dispositivo(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
 {
 	struct busca *bu = ctx;
@@ -185,7 +224,7 @@ static ACPI_STATUS un_dispositivo(ACPI_HANDLE h, UINT32 nivel, void *ctx, void *
 	ACPI_BUFFER b;
 	char ruta[64];
 	const char *hid = 0, *cid = 0;
-	u32 i, adr;
+	u32 i;
 
 	(void)nivel; (void)ret;
 	if (bu->n >= bu->cabe)
@@ -237,32 +276,21 @@ static ACPI_STATUS un_dispositivo(ACPI_HANDLE h, UINT32 nivel, void *ctx, void *
 			f->origen = 1;
 	}
 	f->registro = dsm(h);
-	/* la controladora */
-	if (f->fuente[0] && ACPI_SUCCESS(AcpiGetHandle(NULL, f->fuente, &hc))) {
-		adr = entero(hc, "_ADR", 0xFFFFFFFFu);
-		f->adr = adr;
-		if (adr != 0xFFFFFFFFu) {
-			u32 bus = 0;
-
-			if (ACPI_SUCCESS(AcpiGetParent(hc, &padre)))
-				bus = entero(padre, "_BBN", 0) & 0xFF;
-			f->pci = bus << 16 | ((adr >> 16) & 0x1F) << 11 | (adr & 7) << 8;
-		}
-		if (adr == 0xFFFFFFFFu) {
-			/* sin _ADR (la controladora en modo ACPI, o la DSDT no lo dice):
-			 * por su nombre, como las pone Intel: I2C0-3 en 15.0-15.3, I2C4
-			 * en 19.2 y I2C5 en 19.1 */
-			const char *q = f->fuente + strlen(f->fuente);
-
-			if (q - f->fuente >= 4 && !strncmp(q - 4, "I2C", 3) && q[-1] >= '0' && q[-1] <= '5') {
-				static const u8 ap[6] = { 0x15, 0x15, 0x15, 0x15, 0x19, 0x19 };
-				static const u8 fu[6] = { 0, 1, 2, 3, 2, 1 };
-				u32 k = q[-1] - '0';
-
-				f->pci = (u32)ap[k] << 11 | (u32)fu[k] << 8;
-				f->origen |= 2;
-			}
-		}
+	/* la controladora: la que dice su I2cSerialBus; si no existe (las DSDT
+	 * de Intel traen «NULL» en la plantilla y el _CRS la pone, solo para
+	 * Windows 8: el ThinkPad E14 Gen 5) o no se sabe cuál es, su padre (el
+	 * touchpad cuelga de la suya: \_SB.PC00.I2C0.TPD0), como el ACPI_COMPANION
+	 * de Linux */
+	hc = NULL;
+	if (f->fuente[0] && ACPI_SUCCESS(AcpiGetHandle(NULL, f->fuente, &hc)))
+		pci_de(hc, f, 0);
+	else
+		hc = NULL;
+	if (f->pci == 0xFFFFFFFFu && ACPI_SUCCESS(AcpiGetParent(h, &padre)) && pci_de(padre, f, 1)) {
+		hc = padre;
+		f->origen |= 4;
+	}
+	if (hc) {
 		contadores(hc, "SSCN", f->ss);
 		contadores(hc, "FMCN", f->fm);
 		AcpiEvaluateObject(hc, "_PS0", NULL, NULL);
@@ -271,8 +299,17 @@ static ACPI_STATUS un_dispositivo(ACPI_HANDLE h, UINT32 nivel, void *ctx, void *
 	reg("ACPI: I2C-HID: %s %s%s%s%s, _STA %Xh: I2cSerialBus %Xh a %u Hz%s por %s%s (",
 	    f->ruta, f->hid, f->cid[0] ? " (_CID " : "", f->cid, f->cid[0] ? ")" : "", f->sta, f->esclavo, f->velocidad,
 	    f->diez ? " (10 bits)" : "", f->fuente[0] ? f->fuente : "?", f->origen & 1 ? ", de su ResourceTemplate (no del _CRS)" : "");
+	if (f->origen & 4) {
+		b.Length = sizeof ruta;
+		b.Pointer = ruta;
+		if (ACPI_FAILURE(AcpiGetParent(h, &padre)) || ACPI_FAILURE(AcpiGetName(padre, ACPI_FULL_PATHNAME, &b)))
+			ruta[0] = 0;
+		reg("%s: la de su padre, %s, ", f->fuente[0] ? "no existe" : "no la dice", ruta);
+	}
 	if (f->origen & 2)
 		reg("sin _ADR: %02X.%u por su nombre)", f->pci >> 11 & 0x1F, f->pci >> 8 & 7);
+	else if (f->pci == 0xFFFFFFFFu)
+		reg("no se sabe cuál es)");
 	else
 		reg("_ADR %08Xh)", f->adr);
 	if (f->gpio_pin != 0xFFFFFFFFu)

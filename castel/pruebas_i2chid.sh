@@ -17,8 +17,10 @@
 #      (qué touchpad lleva: SDS0 de la GNVS y los bits ELAN/AWTP del CMOS);
 #   3. en QEMU: sin controladora I2C, el arranque lo dice y no falla; con la
 #      SSDT de prueba, ACPI.BIN halla los dos touchpads y se los da al núcleo
-#      (la llamada 159), que dice que no tiene controladora; y con «sini2c»,
-#      ni se buscan.
+#      (la llamada 159), que dice que no tiene controladora; las zonas PCI
+#      sin poner o por encima de los 4 GB («pci=cero» y «pci=arriba», en las
+#      del USB: como las de las I2C del Monovate y del E14); la SSDT con
+#      «NULL» del E14; y con «sini2c», ni se buscan.
 parte_i2chid() {
 echo "== Hispa-Pentium: los touchpads HID sobre I2C (Intel LPSS DesignWare, ACPI PNP0C50, HID sobre I2C de Microsoft) (I2CHID) =="
 local X=$P/i2chid l S R=$AQUI/.. TB=$AQUI/../tests/acpi/toshiba-nb250 A=$AQUI/../tests/acpi/asus-gl553vd
@@ -99,6 +101,15 @@ if (cd $R && make -s build/acpi_sim) > $X/make.txt 2>&1; then
     "^I2CHID 2: ._SB_.PCI0.I2C1.TPD1 hid=SYNA2393 cid=PNP0C50 sta=0 esclavo=2C velocidad=100000 diez=0 fuente=._SB.PCI0.I2C1 adr=00150001 pci=00A900 registro=20 gpio=-1/0 ss=528/640/30 fm=128/160/30 origen=1$" \
     "^ACPI: I2C-HID: 2 dispositivos HID sobre I2C (PNP0C50)"
   if ! grep -q "ACPI Error\|ACPI Exception" $S; then ok "sin un error de ACPICA"; else ko "errores de ACPICA: $(grep -m2 'ACPI Error\|ACPI Exception' $S)"; fi
+  # la del ThinkPad E14 Gen 5 (Raptor Lake): «NULL» en el I2cSerialBus de la
+  # plantilla (el _CRS solo trae la interrupción): la controladora, su padre
+  python3 -I $R/tests/acpi/hazi2chid.py $X/i2cnull.aml null
+  timeout 120 $R/build/acpi_sim -i2chid -n 1 -o 38 -osi 0 $(tabla $TB/*.BIN) -t $X/i2cnull.aml -e $TB/escenario.txt > $X/simnull.txt 2>&1
+  S=$X/simnull.txt
+  mira "como el ThinkPad E14 Gen 5: su I2cSerialBus dice «NULL» (no existe): la controladora es la de su padre, \\_SB.PCI0.I2C0 (su _ADR: 00:15.0, y su FMCN); sin _ADR, por el nombre del padre (I2C3: 15.3)" \
+    "^ACPI: I2C-HID: ._SB_.PCI0.I2C0.TPD0 ELAN06C6 (_CID PNP0C50), _STA Fh: I2cSerialBus 15h a 400000 Hz por NULL, de su ResourceTemplate (no del _CRS) (no existe: la de su padre, ._SB_.PCI0.I2C0, _ADR 00150000h)" \
+    "^I2CHID 1: ._SB_.PCI0.I2C0.TPD0 hid=ELAN06C6 cid=PNP0C50 sta=F esclavo=15 velocidad=400000 diez=0 fuente=NULL adr=00150000 pci=00A800 registro=1 gpio=-1/0 ss=0/0/0 fm=100/214/28 origen=5$" \
+    "^I2CHID 2: ._SB_.PCI0.I2C3.TPD3 hid=SYNA3602 .*fuente=NULL adr=FFFFFFFF pci=00AB00 .*origen=6$"
   timeout 120 $R/build/acpi_sim -i2chid -n 1 -o 38 -osi 0 $(tabla $TB/*.BIN) -e $TB/escenario.txt > $X/sim0.txt 2>&1
   S=$X/sim0.txt
   mira "el Toshiba NB250 (de 2010) no tiene ninguno" "^ACPI: I2C-HID: 0 dispositivos HID sobre I2C (PNP0C50)"
@@ -147,6 +158,29 @@ mira "QEMU con la SSDT de prueba: ACPI.BIN halla los dos touchpads y se los da a
   "^ACPI: I2C-HID: 2 dispositivos HID sobre I2C (PNP0C50)" \
   "i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$"
 if ! grep -q "excepción\|\*\*\*\|ACPI Error" $S; then ok "sin una excepción del núcleo ni un error de ACPICA"; else ko "hay excepciones: $(grep -m2 'excepción\|\*\*\*\|ACPI Error' $S)"; fi
+# las zonas PCI sin poner (a 0) o por encima de los 4 GB: así dejan los
+# firmware de Tiger y Raptor Lake (el Monovate 14.1, el ThinkPad E14 Gen 5)
+# las de las I2C; QEMU no tiene I2C, así que con «pci=cero» el núcleo pone a
+# 0 la zona 0 de las controladoras USB (la del xHCI es de 64 bits; la del
+# EHCI, de 32) y con «pci=arriba» la del xHCI en lo alto (1 0000 0000h más):
+# pci_memoria tiene que darles dirección o bajarla, y el USB tiene que ir
+MODULOS=$X/ACPI.BIN ARRANQUE="registro pci=cero" QEMU_MAS="-device qemu-xhci,id=u -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0 -device usb-ehci,id=e -device usb-kbd,bus=e.0" \
+  $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" > $X/q3.sal 2>&1
+S=$X/q3.sal
+mira "QEMU con las zonas del xHCI (64 bits) y del EHCI (32) sin poner («pci=cero»): pci_memoria les da dirección debajo de los 4 GB, lo apunta (con lo que decía el registro), y van los teclados y el ratón" \
+  "^pci: la zona del 00:0.\.0 (registro 10h: 0000000[04]h, alta 0h) estaba sin poner: puesta en [0-9A-F]*h ([0-9]* K); puestas, 2$" \
+  "^usb: controladora xHCI 1B36:000D" "^usb: controladora EHCI 8086:24CD" "^usb: 2 teclados, 1 ratones, 0 memorias\.$"
+if ! grep -q "excepción\|\*\*\*\|no se ha podido\|no se le ha podido" $S; then ok "sin una excepción ni una zona sin poner"; else ko "hay quejas: $(grep -m2 'excepción\|\*\*\*\|no se ha podido\|no se le ha podido' $S)"; fi
+MODULOS=$X/ACPI.BIN ARRANQUE="registro pci=arriba" QEMU_MAS="-device qemu-xhci,id=u -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0" \
+  $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" > $X/q4.sal 2>&1
+S=$X/q4.sal
+mira "QEMU por la BIOS con la zona del xHCI por encima de los 4 GB («pci=arriba»): la mueve debajo y va el USB" \
+  "^pci: la zona de memoria del 00:0.\.0 estaba por encima de los 4 GB (1[0-9A-F]*h): movida a [0-9A-F]*h (16 K); movidas, 1$" "^usb: 1 teclados, 1 ratones, 0 memorias\.$"
+MODULOS=$X/ACPI.BIN ARRANQUE="registro" QEMU_MAS="-acpitable file=$X/i2cnull.aml" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" > $X/q5.sal 2>&1
+S=$X/q5.sal
+mira "QEMU con la SSDT como la del ThinkPad E14 («NULL»): ACPI.BIN da la controladora del padre (00:15.0) y el núcleo dice que no está en marcha" \
+  "^ACPI: I2C-HID: ._SB_.PCI0.I2C0.TPD0 ELAN06C6 .*no existe: la de su padre, ._SB_.PCI0.I2C0, _ADR 00150000h" \
+  "i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$"
 MODULOS=$X/ACPI.BIN ARRANQUE="registro sini2c" QEMU_MAS="-acpitable file=$R/tests/acpi/i2chid-qemu.aml" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" > $X/q2.sal 2>&1
 S=$X/q2.sal
 if grep -q "^acpi: el servicio de ACPI (ACPI.BIN) en marcha" $S && ! grep -q "^i2c\|I2C-HID" $S; then ok "con «sini2c» en la línea del cargador, ni el núcleo ni ACPI.BIN buscan nada de I2C"

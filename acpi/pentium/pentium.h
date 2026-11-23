@@ -116,7 +116,7 @@ struct pe_i2chid {
 	u32 registro;		/* el del descriptor HID (_DSM, función 1); FFFFFFFFh no lo dice */
 	u32 ss[3], fm[3];	/* SSCN y FMCN de la controladora: alto, bajo, retención (0: no hay) */
 	u32 gpio_pin, gpio_modo;	/* su GpioInt (FFFFFFFFh: no tiene); modo: disparo | polaridad << 8 */
-	u32 origen;		/* bit 0: el I2cSerialBus no viene del _CRS sino de un ResourceTemplate suyo; bit 1: «pci» por el nombre */
+	u32 origen;		/* bit 0: el I2cSerialBus no viene del _CRS sino de un ResourceTemplate suyo; bit 1: «pci» por el nombre; bit 2: la controladora es su padre (la de su I2cSerialBus no existe: «NULL») */
 	char ruta[48], hid[16], cid[16], fuente[48];
 };
 int i2chid_busca(struct pe_i2chid *f, int cabe);

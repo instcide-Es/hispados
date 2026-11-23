@@ -9781,17 +9781,37 @@ Synopsys **DesignWare** dentro:
   Jasper, Tiger, Alder, Raptor y Meteor Lake (xxE8-xxEB, xxC5-xxC6...). La
   misma clase la llevan otras cosas del PCH (el termómetro, A131 en el ASUS):
   **lo que no está en la tabla no se toca**.
-- Su zona 0 (4 K; si el firmware la pone por encima de los 4 GB, como en
-  el ThinkPad E14 o el Monovate, `pci_memoria` la mueve debajo, como la del
-  xHCI, y el registro dice «su zona estaba por encima de los 4 GB (...):
-  movida a ...»; si no se puede, el motivo y no se usa), encendida (PMCSR a D0) y con la
-  orden PCI; los registros «privados» de LPSS en 200h: **204h, el
+- Primero, **encendida (PMCSR a D0)**: al salir de D3 sin «No_Soft_Reset»
+  el aparato se reinicia y pierde sus registros base, así que antes de
+  mirar o poner la zona (el registro dice «estaba en D3: a D0»).
+- Su zona 0 (4 K). Si el firmware la pone por encima de los 4 GB (OVMF),
+  `pci_memoria` la mueve debajo, como la del xHCI: «su zona estaba por
+  encima de los 4 GB (...): movida a ...». **Si la deja sin poner (a 0)**,
+  que es lo que hacen el Monovate 14.1 (Tiger Lake-UP3, AMI «ALASKA»
+  TN29V2.17) y el ThinkPad E14 Gen 5 (Raptor Lake-U, TP-R2A 1.43) con sus
+  I2C (el registro decía «sin zona de memoria: no se usa» en las cinco del
+  Monovate, A0E8-A0EB y A0C5, y en las del E14, 51E8 y 51EA), `pci_memoria`
+  **le da dirección** (`asigna_zona`, pci.cas, como el
+  `pci_assign_unassigned_resources` de Linux) en el mismo hueco libre que
+  usa para mover (fuera del mapa de memoria, de las zonas de los demás y de
+  las ventanas de los puentes; primero entre y justo encima de las que ha
+  repartido el firmware), y se apunta: «su zona 0 estaba sin poner (BAR
+  00000004h, alta 0h): puesta en ...h (4 K)», y en el resumen del USB «pci:
+  la zona del 00:15.0 (registro 10h: ...) estaba sin poner: puesta en ...;
+  puestas, N». Si no se puede, el motivo y no se usa (y siempre el valor
+  crudo del registro base). Con la orden PCI (memoria y bus); los registros «privados» de LPSS en 200h: **204h, el
   reinicio** (se suelta con 7), y 2FCh, que dice si es una I2C.
 - `IC_COMP_TYPE` (FCh) tiene que decir **44570140h**; `IC_COMP_PARAM_1`,
   lo hondas que son sus colas.
-- **El reloj** del bloque no se puede leer: 120 MHz en las series 100 y 200,
-  133 en Apollo/Gemini Lake, 100 en Elkhart Lake y 216 en las demás (si es
-  menos, el bus va más despacio, nunca más deprisa). Los contadores del
+- **El reloj** del bloque no se puede leer: el de la tabla de
+  `intel-lpss-pci` de Linux, modelo a modelo: **120 MHz** en las series 100
+  y 200, Comet Lake-V y **Tiger Lake-LP** (A0C5-A0C6, A0D8-A0D9, A0E8-A0EB:
+  el Monovate); **216** en Cannon y Comet Lake; **133** en Broxton, Apollo y
+  Gemini Lake, Ice, Jasper, Tiger Lake-H, **Alder y Raptor Lake** (51xx: el
+  E14), Lakefield, Meteor y Arrow Lake; **100** en Elkhart Lake y los de
+  después (Lunar, Panther, Wildcat y Nova Lake). (Antes se suponían 216 en
+  todos los de Cannon Lake en adelante: en el Monovate, el bus habría ido a
+  algo más de la mitad.) Los contadores del
   reloj SCL (`IC_SS_SCL_HCNT/LCNT` a 100 kHz, `IC_FS_SCL_HCNT/LCNT` a 400) y
   la retención de SDA salen de los métodos **SSCN y FMCN** de ACPI si la
   controladora los tiene; si no, se calculan de los tiempos de la norma I2C
@@ -9826,7 +9846,12 @@ lectura de la batería), busca los dispositivos con **_HID o _CID
   (`SBFB`, que su _INI ya ha puesto bien);
 - su **_DSM** de HID sobre I2C (GUID 3CDFF6F7-4267-4555-AD05-B30A3D8938DE,
   revisión 1, función 1): **el registro del descriptor HID**;
-- de la controladora (por la ruta del I2cSerialBus): su **_ADR** (el
+- de la controladora (por la ruta del I2cSerialBus; **si esa ruta no
+  existe** —las DSDT de Intel traen «NULL» en la plantilla y el _CRS solo
+  la completa para Windows 8: el ThinkPad E14 Gen 5— o no se sabe qué
+  aparato PCI es, **la de su padre**, como el `ACPI_COMPANION` de Linux: el
+  touchpad cuelga de la suya, `\_SB.PC00.I2C0.TPD0`; en ACPI.TXT, «por NULL
+  (no existe: la de su padre, \_SB_.PC00.I2C0, _ADR 00150000h)»): su **_ADR** (el
   aparato y la función del PCI; si no lo tiene, por su nombre: I2C0-3 son
   15.0-15.3, I2C4 19.2 e I2C5 19.1), **SSCN y FMCN**, y su _PS0 y el del
   touchpad (como hace Linux al encenderlos).
@@ -9906,9 +9931,16 @@ es el **ELAN1200 en 15h**; cuál es de verdad lo dirá el registro del
 arranque en el equipo.
 
 **El ThinkPad E14 Gen 5** (Raptor Lake-U): el TrackPoint y sus botones van
-por el PS/2 (y funcionan); el touchpad, por I2C (las controladoras 51E8/51E9
-o 51C5/51C6 de su PCH están en la tabla). Faltan sus tablas ACPI para
-mirar su TPD0.
+por el PS/2 (y funcionan); el touchpad, `\_SB_.PC00.I2C0.TPD0` ELAN06C6 en
+15h a 400 kHz (descriptor en 0001h, GpioInt 177), por I2C: sus controladoras
+51E8 y 51EA estaban sin zona (a 0) y su I2cSerialBus dice «NULL» (las dos
+cosas, arregladas el 23/11, arriba).
+
+**El Monovate 14.1** (i3-1115G4, Tiger Lake-UP3): `\_SB_.PC00.I2C0.TPD1`
+SYNA3602 en 2Ch a 400 kHz por `\_SB.PC00.I2C0` (_ADR 00150000h), descriptor
+en 0020h, GpioInt 264; sus cinco I2C, sin zona (a 0): arreglado el 23/11.
+El ASUS GL553VD (ELAN1200 en 15h por la 00:15.0 A160), **funciona en el
+equipo** (se mueve y hace clic) y no cambia: su firmware sí le pone zona.
 
 **Lo que falta**: la **GpioInt** (leer cada 10 ms gasta poco, pero el
 informe llega hasta 10 ms tarde; para usarla hay que saber dónde está la
@@ -9938,7 +9970,15 @@ HID sobre I2C, así que:
    tiene ninguno) y las del ASUS con cada elección de su BIOS;
 3. en QEMU: sin controladora I2C, el arranque lo dice y sigue; con la SSDT
    de prueba (`-acpitable`), ACPI.BIN halla los dos touchpads y se los da al
-   núcleo por la 159, que dice que no hay controladora; con `sini2c`, nada.
+   núcleo por la 159, que dice que no hay controladora; con `sini2c`, nada;
+4. (23/11) las zonas sin poner y las altas, sin I2C en QEMU: en la línea
+   del cargador, **`pci=cero`** pone a 0 la zona 0 de las controladoras USB
+   (la del xHCI, de 64 bits; la del EHCI, de 32) antes de que las pida su
+   driver, y **`pci=arriba`** sube la del xHCI por encima de los 4 GB (por la
+   BIOS); `pci_memoria` tiene que darles dirección o bajarla y el teclado y el
+   ratón USB tienen que ir. Y la SSDT «como la del E14»
+   (`hazi2chid.py ... null`: «NULL» en el I2cSerialBus, un padre con _ADR y
+   otro sin él, I2C3 = 15.3), con acpi_sim y en QEMU.
 
 En el equipo, lo primero que mirar es `ARRANQUE.TXT` (las líneas `i2c:` e
 `i2c-hid:`) y `ACPI.TXT` (las `ACPI: I2C-HID:`).

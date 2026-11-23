@@ -9,7 +9,7 @@
 ; =============================================================================
 módulo Pci
 
-    importar Cpu, Multiboot
+    importar Cpu, Multiboot, Textos32
 
     constante DIRECCIÓN = 0xCF8
     constante DATOS = 0xCFC
@@ -170,6 +170,11 @@ módulo Pci
     ;  bits, dentro de la ventana del puente raíz); si no, de arriba abajo.
     ;  Solo los aparatos del bus 0 (los del chipset: sin puente por medio, la
     ;  dirección les llega sin más).
+    ;  (I2CHID) Y las zonas SIN PONER (a 0): los firmware de Tiger Lake y
+    ;  Raptor Lake (el Monovate 14.1, el ThinkPad E14 Gen 5) no les dan
+    ;  dirección a las controladoras I2C (LPSS) que no usan ellos; Linux se
+    ;  la da (pci_assign_unassigned_resources). Aquí igual: el mismo hueco
+    ;  libre, se pone y se apunta (asigna_zona).
     ; -------------------------------------------------------------------------
     constante MAX_OCUPADAS = 96
     constante TECHO = 0xFC000000
@@ -180,6 +185,10 @@ módulo Pci
     público variable movida_aparato, movida_alta, movida_baja, movida_a, movida_tam: nat32   ; la última
     público variable sin_mover: nat32           ; las que estaban arriba y no se han podido mover
     público variable sin_mover_aparato, sin_mover_alta, sin_mover_por: nat32   ; la última (por: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja)
+    público variable asignadas: nat32           ; las zonas sin poner (a 0) a las que se les ha dado dirección
+    público variable asignada_aparato, asignada_reg, asignada_cruda, asignada_alta, asignada_a, asignada_tam: nat32   ; la última (cruda: lo que decía el registro)
+    público variable sin_asignar: nat32         ; las que estaban sin poner y no se han podido poner
+    público variable sin_asignar_aparato, sin_asignar_por: nat32   ; la última (por: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja)
 
     ; lo de un aparato (no del mapa): también cuenta para lo que abarcan
     función ocupa_aparato(b: nat32, f: nat32)
@@ -297,28 +306,11 @@ módulo Pci
         devolver cierto
     fin
 
-    ; mueve debajo de los 4 GB la zona de 64 bits del registro «reg» del
-    ; aparato a, que está arriba (alta: su parte alta). Da la nueva, o 0.
-    función baja_zona(a: nat32, reg: nat32, alta: nat32): nat32
-        variable orden, lo, hi, t, c, i, techo_ram, f: nat32
+    ; un hueco libre debajo de los 4 GB para una zona de «t» octetos (ya
+    ; redondeado a 4 K o más) del registro «reg» del aparato a; 0 si no hay
+    función busca_hueco(a: nat32, reg: nat32, t: nat32): nat32
+        variable c, i, techo_ram, f: nat32
         variable r: puntero a Región
-        sin_mover_aparato := a
-        sin_mover_alta := alta
-        si (a >> 16) yb 0xFF <> 0 entonces
-            sin_mover := sin_mover + 1
-            sin_mover_por := 1
-            devolver 0
-        fin
-        lo := pci_leer(a, reg)
-        hi := pci_leer(a, reg + 4)
-        t := mide_zona(a, reg, cierto)
-        orden := pci_leer16(a, PCI_ORDEN)
-        si t = 0 o t > 0x4000000 entonces
-            sin_mover := sin_mover + 1
-            sin_mover_por := 2
-            devolver 0
-        fin
-        si t < 0x1000 entonces t := 0x1000 fin
         mira_ocupadas(a, reg)
         ; lo más alto de la memoria libre por debajo de los 4 GB
         techo_ram := 0
@@ -357,16 +349,50 @@ módulo Pci
                 si libre(f, t) entonces c := f sino f := f - t fin
             fin
         fin
+        devolver c
+    fin
+
+    ; pone la zona del registro reg del aparato en c (con la memoria del
+    ; aparato apagada un momento); cierto si se ha quedado puesta
+    función pon_zona(a: nat32, reg: nat32, lo: nat32, de64: bool, c: nat32): bool
+        variable orden: nat32
+        orden := pci_leer16(a, PCI_ORDEN)
+        pci_escribir16(a, PCI_ORDEN, orden yb nob 2)
+        pci_escribir(a, reg, (lo yb 0xF) ob c)
+        si de64 entonces pci_escribir(a, reg + 4, 0) fin
+        pci_escribir16(a, PCI_ORDEN, orden)
+        si (pci_leer(a, reg) yb 0xFFFFFFF0) <> c entonces devolver falso fin
+        si de64 y pci_leer(a, reg + 4) <> 0 entonces devolver falso fin
+        devolver cierto
+    fin
+
+    ; mueve debajo de los 4 GB la zona de 64 bits del registro «reg» del
+    ; aparato a, que está arriba (alta: su parte alta). Da la nueva, o 0.
+    función baja_zona(a: nat32, reg: nat32, alta: nat32): nat32
+        variable lo, hi, t, c: nat32
+        sin_mover_aparato := a
+        sin_mover_alta := alta
+        si (a >> 16) yb 0xFF <> 0 entonces
+            sin_mover := sin_mover + 1
+            sin_mover_por := 1
+            devolver 0
+        fin
+        lo := pci_leer(a, reg)
+        hi := pci_leer(a, reg + 4)
+        t := mide_zona(a, reg, cierto)
+        si t = 0 o t > 0x4000000 entonces
+            sin_mover := sin_mover + 1
+            sin_mover_por := 2
+            devolver 0
+        fin
+        si t < 0x1000 entonces t := 0x1000 fin
+        c := busca_hueco(a, reg, t)
         si c = 0 entonces
             sin_mover := sin_mover + 1
             sin_mover_por := 3
             devolver 0
         fin
-        pci_escribir16(a, PCI_ORDEN, orden yb nob 2)
-        pci_escribir(a, reg, (lo yb 0xF) ob c)
-        pci_escribir(a, reg + 4, 0)
-        pci_escribir16(a, PCI_ORDEN, orden)
-        si (pci_leer(a, reg) yb 0xFFFFFFF0) <> c o pci_leer(a, reg + 4) <> 0 entonces
+        si no pon_zona(a, reg, lo, cierto, c) entonces
             sin_mover := sin_mover + 1
             sin_mover_por := 4
             devolver 0
@@ -380,17 +406,99 @@ módulo Pci
         devolver c
     fin
 
+    ; (I2CHID) la zona del registro «reg» del aparato a está sin poner (a
+    ; 0): se le da dirección, debajo de los 4 GB. Da cuál, o 0 (también si
+    ; el registro no tiene zona: no se deja medir).
+    función asigna_zona(a: nat32, reg: nat32): nat32
+        variable lo, hi, t, c: nat32
+        variable de64: bool
+        lo := pci_leer(a, reg)
+        de64 := (lo yb 6) = 4 y reg < PCI_BAR0 + 20
+        hi := 0
+        si de64 entonces hi := pci_leer(a, reg + 4) fin
+        t := mide_zona(a, reg, de64)
+        si t = 0 entonces devolver 0 fin           ; (no hay zona en ese registro)
+        sin_asignar_aparato := a
+        si (a >> 16) yb 0xFF <> 0 entonces
+            sin_asignar := sin_asignar + 1
+            sin_asignar_por := 1
+            devolver 0
+        fin
+        si t > 0x4000000 entonces
+            sin_asignar := sin_asignar + 1
+            sin_asignar_por := 2
+            devolver 0
+        fin
+        si t < 0x1000 entonces t := 0x1000 fin
+        c := busca_hueco(a, reg, t)
+        si c = 0 entonces
+            sin_asignar := sin_asignar + 1
+            sin_asignar_por := 3
+            devolver 0
+        fin
+        si no pon_zona(a, reg, lo, de64, c) entonces
+            sin_asignar := sin_asignar + 1
+            sin_asignar_por := 4
+            devolver 0
+        fin
+        asignadas := asignadas + 1
+        asignada_aparato := a
+        asignada_reg := reg
+        asignada_cruda := lo
+        asignada_alta := hi
+        asignada_a := c
+        asignada_tam := t
+        devolver c
+    fin
+
+    ; (pruebas) «pci=cero»: la zona 0 de las controladoras USB (clase 0C03),
+    ; a 0, como dejan los firmware de Tiger Lake las de las I2C; «pci=arriba»:
+    ; la de 64 bits, en lo alto (la parte alta a 1, como las del xHCI del
+    ; Monovate). Solo en QEMU: así se ve que se ponen solas y que el USB va.
+    variable probadas: arreglo [8] de nat32
+    variable n_probadas: nat32
+    función prueba_zona(a: nat32, n: nat32)
+        variable i, v, orden: nat32
+        si n <> 0 o (pci_leer(a, PCI_CLASE) >> 16) <> 0x0C03 entonces devolver fin
+        si buscar(línea_del_cargador(), "pci=") = nulo entonces devolver fin
+        para i desde 0 hasta n_probadas hacer
+            si i < n_probadas y probadas[i] = a entonces devolver fin
+        fin
+        si n_probadas < 8 entonces
+            probadas[n_probadas] := a
+            n_probadas := n_probadas + 1
+        fin
+        v := pci_leer(a, PCI_BAR0)
+        si v yb 1 <> 0 entonces devolver fin
+        orden := pci_leer16(a, PCI_ORDEN)
+        si buscar(línea_del_cargador(), "pci=cero") <> nulo entonces
+            pci_escribir16(a, PCI_ORDEN, orden yb nob 2)
+            pci_escribir(a, PCI_BAR0, v yb 0xF)
+            si (v yb 6) = 4 entonces pci_escribir(a, PCI_BAR0 + 4, 0) fin
+            pci_escribir16(a, PCI_ORDEN, orden)
+        sino si buscar(línea_del_cargador(), "pci=arriba") <> nulo y (v yb 6) = 4 entonces
+            pci_escribir16(a, PCI_ORDEN, orden yb nob 2)
+            pci_escribir(a, PCI_BAR0 + 4, 1)
+            pci_escribir16(a, PCI_ORDEN, orden)
+        fin
+    fin
+
     ; la dirección de memoria del registro base número n (0 a 5) del aparato;
-    ; 0 si es de puertos o no está puesta. (USB) Si es de 64 bits y está por
-    ; encima de los 4 GB, se mueve debajo (baja_zona); 0 si no se puede.
+    ; 0 si es de puertos o no tiene zona. (USB) Si es de 64 bits y está por
+    ; encima de los 4 GB, se mueve debajo (baja_zona); (I2CHID) si está sin
+    ; poner (a 0), se le da dirección (asigna_zona); 0 si no se puede.
     público función pci_memoria(a: nat32, n: nat32): nat32
         variable v, hi: nat32
+        prueba_zona(a, n)
         v := pci_leer(a, PCI_BAR0 + n * 4)
         si v yb 1 <> 0 entonces devolver 0 fin
+        hi := 0
         si (v yb 6) = 4 y n < 5 entonces
             hi := pci_leer(a, PCI_BAR0 + n * 4 + 4)
             si hi <> 0 entonces devolver baja_zona(a, PCI_BAR0 + n * 4, hi) fin
         fin
+        ; (I2CHID) sin poner: se le da dirección (asigna_zona)
+        si (v yb 0xFFFFFFF0) = 0 entonces devolver asigna_zona(a, PCI_BAR0 + n * 4) fin
         devolver v yb 0xFFFFFFF0
     fin
 
