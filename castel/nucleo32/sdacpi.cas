@@ -191,34 +191,59 @@ módulo Sdacpi
 
     ; (al arrancar, con las unidades ya montadas) lo aprendido en un arranque
     ; anterior con ACPI: \SDHCI.TXT de la unidad del sistema (o de la X:),
-    ; si es de este mismo equipo. Da cuántos discos nuevos.
+    ; si es de este mismo equipo. Da cuántos discos nuevos. (0.8.10, el Acer
+    ; One 10) Lo que hace con \SDHCI.TXT queda siempre en el registro del
+    ; arranque: que no está, que es de otro equipo o lo que usa.
     público función recuerda(): nat32
-        variable u, m, n, a, b, base, irq, hechas: nat32
+        variable u, m, n, a, b, base, irq, hechas, líneas: nat32
         variable p: puntero a byte
         variable emmc: bool
-        si buscar(línea_del_cargador(), "sinsdhci") <> nulo o buscar(línea_del_cargador(), "sdhciolvida") <> nulo entonces devolver 0 fin
+        si buscar(línea_del_cargador(), "sinsdhci") <> nulo entonces devolver 0 fin
+        si buscar(línea_del_cargador(), "sdhciolvida") <> nulo entonces
+            apunta0("sdhci: «sdhciolvida» en la línea del cargador: no se mira \\SDHCI.TXT\n")
+            devolver 0
+        fin
+        ; en la unidad del sistema (o, si no es FAT, en la X: de la memoria USB)
         u := del_sistema
         si u = NINGUNA o unidades[u].clase <> U_FAT entonces u := por_letra('X') fin
-        si u = NINGUNA entonces devolver 0 fin
-        si unidades[u].clase <> U_FAT entonces devolver 0 fin
+        si u = NINGUNA o unidades[u].clase <> U_FAT entonces
+            apunta0("sdhci: \\SDHCI.TXT: no hay unidad FAT en la que buscarlo (ni la del sistema ni X:)\n")
+            devolver 0
+        fin
         m := abrir_archivo(u, "\\SDHCI.TXT", PARA_LEER)
-        si m >= PRIMER_ERROR entonces devolver 0 fin
+        si m >= PRIMER_ERROR entonces
+            apunta1("sdhci: \\SDHCI.TXT no está en %c: (lo aprende un arranque con ACPI.BIN)\n", unidades[u].letra)
+            devolver 0
+        fin
         n := leer_archivo(m, texto, 599)
         cerrar_archivo(m)
-        si n >= PRIMER_ERROR entonces devolver 0 fin
+        si n >= PRIMER_ERROR entonces
+            apunta1("sdhci: %c:\\SDHCI.TXT no se puede leer\n", unidades[u].letra)
+            devolver 0
+        fin
         texto[n] := 0
         p := buscar(texto, "equipo=")
-        si p = nulo entonces devolver 0 fin
+        si p = nulo entonces
+            apunta1("sdhci: %c:\\SDHCI.TXT no dice «equipo=»: no se usa\n", unidades[u].letra)
+            devolver 0
+        fin
         p := p + 7
         a := número(p, 16)
         mientras p[0] = ' ' hacer p := p + 1 fin
         b := número(p, 16)
         equipo(m, n)
+        dd[0] := unidades[u].letra
+        dd[1] := a
+        dd[2] := b
+        dd[3] := m
+        dd[4] := n
         si a <> m o b <> n entonces
-            apunta0("sdhci: \\SDHCI.TXT es de otro equipo: no se usa\n")
+            apunta("sdhci: %c:\\SDHCI.TXT es de otro equipo (dice %08X %08X; este es %08X %08X): no se usa\n", dd)
             devolver 0
         fin
+        apunta("sdhci: uso %c:\\SDHCI.TXT (de este equipo, %08X %08X)\n", dd)
         hechas := 0
+        líneas := 0
         ; las líneas siguientes: «DIRECCIÓN IRQ sd|emmc»
         mientras cierto hacer
             p := buscar_car(p, '\n')
@@ -226,16 +251,20 @@ módulo Sdacpi
             p := p + 1
             base := número(p, 16)
             si base <> 0 y p[0] = ' ' entonces
+                líneas := líneas + 1
                 p := p + 1
                 irq := número(p, 10)
                 emmc := p[0] = ' ' y p[1] = 'e'
-                si no conocida(base) entonces
+                si conocida(base) entonces
+                    apunta1("sdhci: la de %08X (\\SDHCI.TXT) ya estaba (por el PCI, o dada a mano)\n", base)
+                sino
                     apunta1("sdhci: la de %08X, aprendida de ACPI en otro arranque (\\SDHCI.TXT)\n", base)
                     sabe(base, irq, emmc)
                     si usa(base, irq, emmc) entonces hechas := hechas + 1 fin
                 fin
             fin
         fin
+        si líneas = 0 entonces apunta0("sdhci: \\SDHCI.TXT no trae ninguna controladora\n") fin
         devolver hechas
     fin
 

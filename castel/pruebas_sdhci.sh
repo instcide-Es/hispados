@@ -129,11 +129,22 @@ ESCRIBE=1 SD=$I MODULOS= ARRANQUE="ordenes escritura=usb unidad=X registro sdhci
 S=$X/recuerda.sal
 mira "SDHCI: y en el arranque siguiente, SIN ACPI.BIN («sinacpi», como el Acer One 10), la controladora aprendida sale desde el principio" \
   "^sdhci: la de $base, aprendida de ACPI en otro arranque (.SDHCI.TXT)$" "^disco [0-9]: tarjeta SD QEMU! (SDSC), 64 MB, C: (FAT32) (SD; de ACPI)\.$" "^un velero bergantín\.$"
+# (0.8.10, el Acer One 10 con «sinacpi»: ARRANQUE.TXT no decía nada de
+# \SDHCI.TXT) lo que se hace con él queda siempre en el registro
+saca $X/usb.img ARRANQUE.TXT $X/arranque2.txt
+if grep -q "^sdhci: uso X:.SDHCI.TXT (de este equipo, [0-9A-F]\{8\} [0-9A-F]\{8\})$" $S && grep -q "^sdhci: uso X:.SDHCI.TXT" $X/arranque2.txt \
+  && grep -q "^sdhci: la de $base, aprendida de ACPI en otro arranque" $X/arranque2.txt; then
+  ok "SDHCI: y lo dice en ARRANQUE.TXT («uso X:\\SDHCI.TXT (de este equipo, ...)» y la controladora aprendida)"
+else ko "SDHCI: ARRANQUE.TXT no dice qué hace con \\SDHCI.TXT:"; grep "sdhci" $X/arranque2.txt | sed 's/^/        /' | head -4; fi
 ESCRIBE=1 SD=$I MODULOS= MAQUINA=q35 ARRANQUE="ordenes escritura=usb unidad=X sdhcisinpci sinacpi" QEMU_MAS="$U" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN salir apagar > $X/otro.sal 2>&1
 S=$X/otro.sal
-if grep -q "^sdhci: .SDHCI.TXT es de otro equipo: no se usa$" $S && ! grep -q "aprendida de ACPI" $S; then
+if grep -q "^sdhci: X:.SDHCI.TXT es de otro equipo (dice [0-9A-F]\{8\} [0-9A-F]\{8\}; este es [0-9A-F]\{8\} [0-9A-F]\{8\}): no se usa$" $S && ! grep -q "aprendida de ACPI" $S; then
   ok "SDHCI: en otro equipo (q35: otro puente principal) lo aprendido no se usa (no se tocan direcciones que allí son otra cosa)"
 else ko "SDHCI: lo aprendido se usa en otro equipo:"; grep "sdhci" $S | sed 's/^/        /' | head -4; fi
+cp $X/usb.img $X/usb2.img; mdel -i $X/usb2.img ::SDHCI.TXT
+SD=$I MODULOS= ARRANQUE="ordenes escritura=usb unidad=X sdhcisinpci sinacpi" QEMU_MAS="${U/usb.img/usb2.img}" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN salir apagar > $X/noesta.sal 2>&1
+S=$X/noesta.sal
+mira "SDHCI: sin \\SDHCI.TXT (la memoria grabada otra vez), lo dice: «no está en X:»" "^sdhci: .SDHCI.TXT no está en X: (lo aprende un arranque con ACPI.BIN)$"
 
 # ---- 5. INSTALAR en la tarjeta SD ----
 if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/grub/i386-pc ]; then
