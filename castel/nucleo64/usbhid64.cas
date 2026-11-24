@@ -16,7 +16,7 @@
 ; =============================================================================
 módulo Usbhid64
 
-    importar Cifras64, Es64, Fisica64, Monton64, Hilos64, Xhci64, Usb64, Raton64, Hidesc64
+    importar Cifras64, Es64, Fisica64, Monton64, Hilos64, Xhci64, Usb64, Raton64, Hidesc64, Teclas64
 
     público constante MAX_HID = 8
     público constante H_TECLADO = 1
@@ -49,6 +49,40 @@ módulo Usbhid64
         si pulsada entonces
             uh_teclas := uh_teclas + 1
             uh_última := uso
+        fin
+        tecla_hid(uso, pulsada)
+    fin
+
+    variable leds_vistos: nat32
+    público variable uh_leds: nat64             ; las veces que se han puesto los LED
+
+    ; los LED de cada teclado (SET_REPORT de salida), si han cambiado
+    función pon_los_leds()
+        variable k, n, l, id: nat32
+        variable a: puntero a Aparato
+        variable q: puntero a byte
+        si leds_cambio = leds_vistos entonces devolver fin
+        leds_vistos := leds_cambio
+        l := leds_teclado()
+        k := 0
+        mientras k < MAX_HID hacer
+            si hids[k].hay y hids[k].clase = H_TECLADO y hids[k].leds <> l entonces
+                a := aparato(hids[k].aparato)
+                q := puntero(de_control(a))
+                si hids[k].arranque entonces
+                    q[0] := byte(l)
+                    n := 1
+                sino
+                    n := pon_leds(hids[k].d, l, q)
+                fin
+                si n > 0 entonces
+                    si hids[k].arranque o no hids[k].d.con_id entonces id := 0 sino id := hids[k].d.leds_id fin
+                    u_control(a, 0x21, 0x09, 0x0200 ob id, hids[k].número, n)
+                    uh_leds := uh_leds + 1
+                fin
+                hids[k].leds := l
+            fin
+            k := k + 1
         fin
     fin
 
@@ -274,6 +308,7 @@ módulo Usbhid64
         variable k: nat32
         variable a: puntero a Aparato
         variable r: ent32
+        pon_los_leds()
         k := 0
         mientras k < MAX_HID hacer
             si hids[k].hay entonces

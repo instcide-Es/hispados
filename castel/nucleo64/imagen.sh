@@ -69,7 +69,7 @@ else
   }
   {
     cat <<'CFG'
-# Hispa-64 0.5.0 (etapa 5). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Hispa-64 0.6.0 (etapa 6). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -79,9 +79,12 @@ terminal_output console serial
 set gfxpayload=keep
 if cpuid -l; then
 CFG
-    entrada "Hispa-64 0.5.0 (etapa 5: los discos y los archivos; los discos, solo leer)" ""
-    entrada "Hispa-64: con escritura en los discos (SOLO en VirtualBox o en discos de prueba)" "escribir"
-    entrada "Hispa-64: los discos sin MSI ni MSI-X (si se queda al leer un disco)" "sinmsix sinmsi"
+    entrada "Hispa-64 0.6.0 (etapa 6: USB, teclado, ratón, touchpad y el intérprete; los discos, solo leer)" ""
+    entrada "Hispa-64: con escritura en los discos (SOLO en VirtualBox, en discos de prueba o en memorias USB de prueba)" "escribir"
+    entrada "Hispa-64: el USB sin MSI ni MSI-X (si el teclado o el ratón USB no van)" "sinmsix sinmsi"
+    entrada "Hispa-64: sin USB (si se queda al mirar el USB)" "sinusb"
+    entrada "Hispa-64: sin touchpad I2C (si se queda al buscarlo)" "sini2c"
+    entrada "Hispa-64: prueba del ratón, la tableta y el touchpad (10 s diciendo dónde está el puntero)" "prueba=raton"
     entrada "Hispa-64: sin PCID (si la 1 falla al cambiar de programa)" "sinpcid"
     entrada "Hispa-64: con un solo procesador (si se queda al encender los demás)" "sinsmp"
     entrada "Hispa-64: la tarea ociosa con hlt (si da problemas con mwait)" "ocioso=hlt"
