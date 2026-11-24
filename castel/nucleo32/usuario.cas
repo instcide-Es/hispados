@@ -993,10 +993,21 @@ módulo Usuario
                 si t.servicio entonces devolver t.sello ob 0x80000000 fin
                 devolver t.sello
             caso 220..225:
+                ; (0.8.10, seguridad) leer, cualquiera; lo que escribe (220 con
+                ; EDX = 1: borrar las marcas de los motivos de freno; 225 con
+                ; el bit 1 de EDX: encender la gráfica o su memoria), solo el
+                ; Termómetro arrancado como tal o el modo administrador
+                si ((n = 220 y c = 1) o (n = 225 y c yb 2 <> 0)) y no termo_o_admin() entonces devolver NO_VALE fin
                 devolver atender_termo(n, a, b, c)     ; (TERMO) las temperaturas, solo leer (termo.cas)
             caso 238:
+                ; (0.8.10, seguridad) los discos de dentro, aunque sea solo leer: como la 226
+                si no termo_o_admin() entonces devolver NO_VALE fin
                 devolver atender_tdisco(a, b, c)       ; (TERMO) los discos de dentro: salud y prueba de lectura, solo leer (tdisco.cas)
             caso 226:
+                ; (0.8.10, seguridad) la ventana sobre la RAM alta deja leer lo
+                ; que haya quedado en la memoria: solo con «termo» en la línea
+                ; del cargador (la memoria del Termómetro) o en el modo administrador
+                si no termo_o_admin() entonces devolver NO_VALE fin
                 devolver atender_ram(a, b, c)          ; (RAM) la prueba de la memoria RAM del Termómetro (termoram.cas)
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
@@ -1188,6 +1199,15 @@ módulo Usuario
             devolver falso
         fin
         devolver respuesta = 3
+    fin
+
+    ; (0.8.10, seguridad) lo del Termómetro que mira la memoria o los discos
+    ; o escribe en el equipo: con «termo» en la línea del cargador (la memoria
+    ; USB del Termómetro, en la que no hay nada de nadie) o en el modo
+    ; administrador
+    función termo_o_admin(): bool
+        si actual.admin entonces devolver cierto fin
+        devolver buscar(línea_del_cargador(), "termo") <> nulo
     fin
 
     función pide_admin(a: nat32): nat32
