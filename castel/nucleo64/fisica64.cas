@@ -23,7 +23,7 @@ módulo Fisica64
 
     público constante PÁGINA = 4096
     constante MAX_RAM = 256
-    constante MAX_RES = 32
+    constante MAX_RES = 96                      ; [etapa 8] (eran 32: con 30 módulos del cargador, los últimos no se apartaban y se daban como memoria libre)
 
     público variable ram_ini, ram_fin: arreglo [MAX_RAM] de nat64    ; lo disponible, en páginas enteras
     público variable n_ram: nat32
@@ -71,7 +71,17 @@ módulo Fisica64
 
     ; algo que no se puede dar nunca (antes de prepara): [ini, fin_)
     público función aparta(ini: nat64, fin_: nat64)
-        si fin_ <= ini o n_res >= MAX_RES entonces devolver fin
+        si fin_ <= ini entonces devolver fin
+        ; [etapa 8] seguido del anterior (los módulos, uno tras otro): se junta con él
+        si n_res > 0 y abajo(ini) <= res_fin[n_res - 1] y arriba(fin_) >= res_ini[n_res - 1] entonces
+            si abajo(ini) < res_ini[n_res - 1] entonces res_ini[n_res - 1] := abajo(ini) fin
+            si arriba(fin_) > res_fin[n_res - 1] entonces res_fin[n_res - 1] := arriba(fin_) fin
+            devolver
+        fin
+        si n_res >= MAX_RES entonces
+            detén_ini("demasiadas zonas de memoria apartadas (módulos del cargador)")
+            detén_fin()
+        fin
         res_ini[n_res] := abajo(ini)
         res_fin[n_res] := arriba(fin_)
         n_res := n_res + 1
