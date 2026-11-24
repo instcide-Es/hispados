@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
-# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0 a 8:
+# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0 a 9:
 #   - el núcleo (hispa64.cas) se compila igual con ccastel.py y NASM que con
 #     ensambla.py (y, si se da CASTEL64=ruta y ENSAMB64=ruta, con ellos);
 #   - arranca en QEMU por multiboot (-kernel, con HISPA64.SIM de módulo) con
@@ -97,6 +97,12 @@
 #     Cuentas 2 (guardan en FAT32), Alt+F4, salir del escritorio, el cursor y
 #     cls; los pantallazos, comprobados con pantallazo.py (cuenta, oscuros,
 #     difiere).
+#   - [etapa 9] MRED en cada arranque (los sockets por 127.0.0.1, eventfd,
+#     timerfd, /dev/urandom); y la red de verdad con la de usuario de QEMU:
+#     e1000, e1000e, virtio-net y la Realtek (con la RTL8139C+, «realtek=
+#     ensayo»), con 1, 2, 4 y 8 procesadores: DHCP o IP fija, PING, IFCONFIG,
+#     DESCARGA por HTTP y HTTPS (sha256), DNS, NTP (la hora puesta) y ECO de ida
+#     y vuelta, contra los servidores de prueba del anfitrión; la zona horaria.
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
@@ -110,7 +116,7 @@ OVMF_C=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_V=/usr/share/OVMF/OVMF_VARS_4M.fd
 DBG="-device isa-debug-exit,iobase=0xf4,iosize=0x04"
 
-echo "== Hispa-64, etapas 0 a 8 =="
+echo "== Hispa-64, etapas 0 a 9 =="
 # ---- compilar ----
 if python3 -I "$C/ccastel.py" "$AQUI/hispa64.cas" -o "$T/hispa64.asm" -I "$C/nucleo32" > "$T/comp.txt" 2>&1 \
    && nasm -f bin "$T/hispa64.asm" -o "$T/HISPA64.BIN" 2>> "$T/comp.txt" \
@@ -190,14 +196,14 @@ e3_bien() {   # SALIDA N
     && grep -q "^  y uno interactivo que duerme 10 ms, 10 veces, en ese mismo procesador: se pasa de media [0-9,]* ms (pasa por delante: [1-9][0-9]* expropiaciones)$" <<< "$v" \
     && entre "$s" "se pasa de media " 0 25 \
     && { [ "$n" = 1 ] || grep -q "^  y, ya con el marco nuevo en su TLB (lee 0x2222), quitada con aviso (desmapea: 1 aviso por IPI): al [0-9]* le falla la lectura (fallo de página en 0xFFFFD00100000000, con red), como debe$" <<< "$v"; } \
-    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$v"
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$v"
 }
 # [etapa 4] los programas, con N procesadores
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 30 archivos: " <<< "$v" \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.8.0 x86_64$" <<< "$v" \
+    && grep -q "^Unidad en memoria: 36 archivos: " <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.9.0 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -219,7 +225,7 @@ e4_bien() {   # SALIDA N
     && grep -q "^  la memoria: la de antes; el montón: [0-9]* bloques (los de antes); las pilas: [0-9]* (las de antes)$" <<< "$v" \
     && { [ "$n" = 1 ] || grep -q "^  quitada (desde el procesador [0-9]*, sin el espacio puesto): 1 aviso por IPI; al 1 le falla la lectura: sí" <<< "$v"; } \
     && { [ "$n" -lt 3 ] || grep -q "; al 2, al volver a ponerlo, también: sí$" <<< "$v"; } \
-    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$v"
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$v"
 }
 e4_dice() {   # SALIDA
   serie "$1" | grep -E '^Programa|^HOLA|^MEMORIA|^A la vez|^Malos|^Después|^  la memoria|^  quitada|MAL|parado' | cut -c1-120 | paste -sd '|'
@@ -238,7 +244,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.8.0 x86_64 (etapa 8 (gráficos y ventanas))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.9.0 x86_64 (etapa 9 (la red))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -251,11 +257,12 @@ e7_bien() {   # SALIDA N [avx]
     && [ "$(grep -c "^MMAPA: todo bien (16 pruebas)$" <<< "$v")" = 2 ] \
     && grep -q "^LUA: todo bien (16 pruebas); hoy es " <<< "$v" \
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MRED: todo bien (123 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
     && grep -q "^Después de musl: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas, 0 tuberías; " <<< "$v" \
     && grep -q "^  la memoria: la de antes; el montón: [0-9]* bloques (los de antes); las pilas: [0-9]* (las de antes)$" <<< "$d" \
     && { [ "${3:-}" != avx ] || { grep -q "^  AVX: sí (xsave, XCR0 = " <<< "$v" && [ "$(grep -c "^  AVX: 8 hilos con ymm0 a ymm7 llenos, cediendo el procesador 40 veces: intactos$" <<< "$v")" = 2 ]; }; } \
-    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$v"
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$v"
 }
 e7_ok() {   # SALIDA N QUÉ [avx]
   local v; v=$(serie "$1")
@@ -280,14 +287,14 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.8.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.9.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 12[0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9]* KB usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
    && hay $S "^Páginas: de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día); de 2 MB, también; de 1 GB, no (el procesador no las tiene)$" \
    && hay $S "^  el código del núcleo, sin escribir: sí; los datos, sin ejecutar: sí; la guarda de la pila, sin poner: sí$" \
    && hay $S "^Montón: 2000 reservas y liberaciones al azar .*, comprobadas; al acabar, 0 en uso y la memoria física, la de antes" \
-   && hay $S "Punto de parada (int3) número 1 .*: atendido, sigue." && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "Punto de parada (int3) número 1 .*: atendido, sigue." && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "por multiboot con 128 MB: en la mitad alta, «$(serie $S | grep '^Memoria:')», sin la identidad, las páginas de 4 KB y 2 MB, el montón y «todo en orden» (código 42)"
 else ko "por multiboot con 128 MB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|Páginas|Montón|parado' | paste -sd ' ')"; fi
 # [etapa 2] lo mismo, con «-machine pc» (i440FX y PIIX4: sin MCFG, PCI por los puertos)
@@ -318,7 +325,7 @@ S=$T/q35.txt
 if [ $c = 85 ] && hay $S "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" && hay $S "^  MCFG: PCIe por ECAM en 0xB0000000, segmento 0, buses 0 a 255$" \
    && hay $S "^  FADT: .*8042: sí" && tics_bien $S "el HPET" && hay $S "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" \
    && hay $S "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 puentes$" && hay $S "^  01:00.0 1B36:000D bus serie: USB 3 (xHCI)" \
-   && hay $S "^      BAR0 0x[0-9A-F]*, 16 KB de memoria de 64 bits$" && pci_igual $S -m 256 $PCIQ && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^      BAR0 0x[0-9A-F]*, 16 KB de memoria de 64 bits$" && pci_igual $S -m 256 $PCIQ && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 2, por multiboot, «q35» con 4 procesadores: la MADT con 4, PCIe por ECAM, $(pci_nucleo $S | wc -l) funciones (el puente y el xHCI del bus 1, con su BAR de 64 bits), las mismas que dice QEMU; «$(serie $S | grep '^Tic:')»"
 else ko "etapa 2 con «q35» y 4 procesadores no dice lo que debe (código $c): $(serie $S | grep -E 'MADT|^Tic|^IOAPIC:|^PCI|parado' | paste -sd ' ')"; diff <(pci_nucleo $S) <(pci_qemu -m 256 $PCIQ) | head -5 | sed 's/^/        /'; fi
 if e3_bien $S 4 && hay $S "^  con INIT-SIPI-SIPI y el trampolín en 0x[0-9A-F]* (16, 32 y 64 bits)"; then
@@ -358,7 +365,7 @@ if [ $c = 85 ] && e3_bien $S 4 && hay $S "la tarea ociosa, con mwait, FORZADO (o
   ok "ocioso=mwait con -cpu max y 4 procesadores: la tarea ociosa con monitor/mwait, y todo igual"
 else ko "ocioso=mwait no sale (código $c): $(serie $S | grep -E '^Planificador' | cut -c1-120) $(e3_dice $S)"; fi
 mb1 "apagar sinpruebas sinsmp" "$T/sinsmp.txt" 256 -machine q35 -smp 4; c=$?
-if [ $c = 85 ] && hay "$T/sinsmp.txt" "^Procesadores: 1 en marcha (APIC 0) (sinsmp: los demás, apagados)$" && hay "$T/sinsmp.txt" "^Hispa-64 etapa 8: todo en orden.$"; then
+if [ $c = 85 ] && hay "$T/sinsmp.txt" "^Procesadores: 1 en marcha (APIC 0) (sinsmp: los demás, apagados)$" && hay "$T/sinsmp.txt" "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "sinsmp: con 4 en la MADT, solo el que arranca (los demás, apagados)"
 else ko "sinsmp no sale (código $c): $(serie "$T/sinsmp.txt" | grep -E '^Procesadores|parado' | paste -sd ' ')"; fi
 # el teclado (las teclas, desde el monitor de QEMU), el botón de encendido y apagar por ACPI
@@ -388,13 +395,13 @@ else ko "prueba=acpiapagar no apaga (código $c): $(serie "$T/acpiapagar.txt" | 
 mb1 "apagar sinmusl" "$T/mb3g.txt" 3G -cpu max; c=$?
 S=$T/mb3g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 2,9 GB libres" && hay $S "en páginas de 1 GB: [1-9]" && hay $S "; de 1 GB, también$" \
-   && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "por multiboot con 3 GB y -cpu max: «$(serie $S | grep '^Memoria:' | cut -d';' -f1)»; el mapa directo con páginas de 1 GB; una de 1 GB puesta, leída y quitada"
 else ko "por multiboot con 3 GB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|Páginas|parado' | paste -sd ' ')"; fi
 mb1 "apagar sinmusl" "$T/mb8g.txt" 8G; c=$?
 S=$T/mb8g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 7,9 GB libres en [0-9]* trozos (de 7,9 GB" && hay $S "en páginas de 1 GB: 0; de 2 MB: 4[0-9][0-9][0-9];" \
-   && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "por multiboot con 8 GB (qemu64, sin páginas de 1 GB): «$(serie $S | grep '^Memoria:' | cut -d';' -f1)»; el mapa directo, con páginas de 2 MB"
 else ko "por multiboot con 8 GB no dice lo que debe (código $c): $(serie $S | grep -E 'Memoria:|directo|parado' | paste -sd ' ')"; fi
 mb1 "apagar sinmedir sinpruebas prueba=monton" "$T/monton.txt" 256; c=$?
@@ -550,7 +557,7 @@ sata_bien() {   # IMAGEN
 e5_bien() {   # SALIDA: lo que dice siempre una vuelta de la etapa 5 sin fallos
   local v; v=$(serie "$1")
   grep -q "^Después de los archivos: 0 abiertos, [0-9]* nodos (los de antes: las raíces), el montón como antes$" <<< "$v" \
-    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$v"
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$v"
 }
 e5_dice() { serie "$1" | grep -E '^NVMe|^SATA|^  /|^ARCHIVOS|MAL|^Después de los|parado|^Al apagar' | cut -c1-140 | paste -sd '|'; }
 NVME5="-drive file=$T/w5/nvme.img,if=none,id=n0,format=raw -device nvme,serial=hispa64,drive=n0"
@@ -632,7 +639,7 @@ else ko "etapa 5 sin «escribir» no sale (código $c): $(e5_dice $S)"; fi
 # 5. el núcleo de antes de la etapa 5 no escribía; el de ahora, con los discos y sin pruebas
 # shellcheck disable=SC2086
 mb1 "apagar sinpruebas escribir" "$T/e5n.txt" 256 -machine q35 -smp 4 $NVME5 $CRUDO5 $SATA5; c=$?
-if [ $c = 85 ] && hay "$T/e5n.txt" "^Hispa-64 etapa 8: todo en orden.$" && hay "$T/e5n.txt" "^  4 hilos a la vez"; then
+if [ $c = 85 ] && hay "$T/e5n.txt" "^Hispa-64 etapa 9: todo en orden.$" && hay "$T/e5n.txt" "^  4 hilos a la vez"; then
   ok "sinpruebas con los discos: el disco crudo sí (es del núcleo), los programas no"
 else ko "sinpruebas con los discos no sale (código $c): $(e5_dice "$T/e5n.txt")"; fi
 
@@ -730,12 +737,12 @@ con_usb "$T/e6c.txt" "device_add usb-kbd,bus=xhci.0,id=k9;sendkey c;device_del k
 S=$T/e6c.txt
 if [ $c = 85 ] && hay $S "^USB: se ha enchufado 1-[0-9]: 0627:0001 «QEMU USB Keyboard», .*HID: teclado" && hay $S "^Tecla USB: uso 0x6$" \
    && hay $S "^USB: se ha enchufado 1-[0-9].3: 0627:0001 «QEMU USB Mouse», USB 2.0, velocidad plena .*HID: ratón (por su descriptor, con rueda)$" \
-   && hay $S "^Puntero: (515, 388), botones 0, rueda 0 (ratón)$" && [ "$(serie $S | grep -c '^USB: se ha desenchufado ')" = 3 ] && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^Puntero: (515, 388), botones 0, rueda 0 (ratón)$" && [ "$(serie $S | grep -c '^USB: se ha desenchufado ')" = 3 ] && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 6, enchufar y desenchufar en marcha: un teclado (su tecla llega), un ratón detrás del concentrador, y quitar el concentrador con lo que cuelga (3 desenchufados)"
 else ko "etapa 6, en marcha, no sale (código $c): $(serie $S | grep -E '^USB:|^Tecla|^Puntero' | paste -sd '|')"; fi
 # sinusb: no se toca
 mb1 "apagar sinpruebas sinusb" "$T/e6n.txt" 256 -machine q35 -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0; c=$?
-if [ $c = 85 ] && ! hay "$T/e6n.txt" "^xHCI:" && hay "$T/e6n.txt" "^Hispa-64 etapa 8: todo en orden.$"; then
+if [ $c = 85 ] && ! hay "$T/e6n.txt" "^xHCI:" && hay "$T/e6n.txt" "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 6, sinusb: el xHCI, sin tocar"
 else ko "etapa 6, sinusb, no sale (código $c)"; fi
 
@@ -774,7 +781,7 @@ mb1 "apagar sinpruebas prueba=hid" "$T/e6h.txt" 128 -machine q35; c=$?
 S=$T/e6h.txt
 if [ $c = 85 ] && hay $S "^HID: 16 descriptores de prueba (touchpads de verdad y los aparatos USB de QEMU): 11 ratones, 1 punteros absolutos, 2 teclados (2 con LED), 8 con modo de entrada, 1 mal hechos; 13 informes leídos, 7 descriptores HID de I2C y 6 órdenes$" \
    && hay $S "^i2c: no hay controladora I2C (Intel LPSS)$" && hay $S "^i2c-hid: ACPI no dice ningún dispositivo HID sobre I2C (PNP0C50)$" \
-   && hay $S "^I2C-HID: en las tablas de ACPI (buscado sin AML, en 1 tablas: [0-9]* dispositivos): 0 dispositivos HID sobre I2C (PNP0C50)$" && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^I2C-HID: en las tablas de ACPI (buscado sin AML, en 1 tablas: [0-9]* dispositivos): 0 dispositivos HID sobre I2C (PNP0C50)$" && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 6, HID: los 16 descriptores de prueba, analizados en el arranque; sin controladora I2C ni PNP0C50 (QEMU), lo dice y sigue"
 else ko "etapa 6, HID con prueba=hid no sale (código $c): $(serie $S | grep -E '^HID|^I2C|^i2c|MAL|parado' | paste -sd '|')"; fi
 hid_orden $S "Dell XPS 9360 (Synaptics, 665 octetos): el ratón es el informe 2 y el modo de entrada, el 4; touchpad de precisión" \
@@ -828,7 +835,7 @@ if [ $c = 85 ] && hay $S "^I2C-HID: en las tablas de ACPI (buscado sin AML, en 2
    && hay $S "^    I2cSerialBus 2Ch a 100 kHz por ._SB.PCI0.I2C1, de su plantilla SBFB (su _CRS no es fijo); la controladora: ._SB.PCI0.I2C1, _ADR 00150001h: 00:15.1$" \
    && hay $S "^    Interrupt 16; _DSM: el descriptor HID en 0020h; SSCN 528/640/30; FMCN 128/160/30$" \
    && hay $S "^i2c: no hay controladora I2C (Intel LPSS)$" && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" \
-   && hay $S "^HID: 16 descriptores de prueba " && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^HID: 16 descriptores de prueba " && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 6, I2C-HID con la SSDT de prueba (sin AML): el ELAN1200 (15h, 400 kHz, I2C1 = 00:15.1, GpioInt 55, _DSM 0001h, SSCN/FMCN) y el Synaptics de su plantilla SBFB (2Ch, 100 kHz, _DSM 0020h); sin controladora, lo dice"
 else ko "etapa 6, I2C-HID con la SSDT de prueba no sale (código $c): $(serie $S | grep -E '^I2C|^  ._SB|^    |^i2c|MAL|parado' | paste -sd '|')"; fi
 # como la del ThinkPad E14 Gen 5 (Raptor Lake): «NULL» en el I2cSerialBus: la controladora, su padre
@@ -837,7 +844,7 @@ S=$T/e6n2.txt
 if [ $c = 85 ] && hay $S "^    I2cSerialBus 15h a 400 kHz por NULL, de su plantilla SBFB (su _CRS no es fijo); la controladora: ._SB.PCI0.I2C0 (su padre), _ADR 00150000h: 00:15.0$" \
    && hay $S "^    Interrupt 16; _DSM: el descriptor HID en 0001h; FMCN 100/214/28$" \
    && hay $S "^    I2cSerialBus 2Ch a 400 kHz por NULL, de su plantilla SBFB (su _CRS no es fijo); la controladora: ._SB.PCI0.I2C3 (su padre), por su nombre: 00:15.3$" \
-   && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 6, I2C-HID como el ThinkPad E14 («NULL»): la controladora, la de su padre (I2C0 por su _ADR, 00:15.0; I2C3 por su nombre, 00:15.3)"
 else ko "etapa 6, I2C-HID con «NULL» no sale (código $c): $(serie $S | grep -E '^I2C|^  ._SB|^    |^i2c|MAL|parado' | paste -sd '|')"; fi
 # las tablas de verdad del ASUS GL553VD (su DSDT, partida en SSDT de 60 KB, y sus 10 SSDT)
@@ -854,21 +861,21 @@ if python3 -I "$I2/comossdt.py" "$I2/asus-gl553vd/DSDT.BIN" "$T/asusd"; then
      && hay $S "_DSM: el descriptor HID, en HID2 (lo pone su _INI) (con el GUID de HID sobre I2C)$" \
      && hay $S "^    según el BIOS, su _INI lo hace: SYNA2393 (descriptor en 0020h); 06CB2846 (descriptor en 0020h); ELAN1200 (15h a 400 kHz, descriptor en 0001h); FTE1200 (15h a 400 kHz, descriptor en 0001h)$" \
      && hay $S "^  ._SB.PCI0.I2C1.TPL1: XXXX0000 (_CID PNP0C50)" && hay $S "^    según el BIOS, su _INI lo hace: ATML3432 (4Ch a 400 kHz, descriptor en 0000h); " \
-     && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" && ! hay $S "trozos sin entender" && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+     && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" && ! hay $S "trozos sin entender" && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
     ok "etapa 6, I2C-HID con las tablas de verdad del ASUS GL553VD (sin AML, nada sin entender): TPD0 en I2C0 (00:15.0), su plantilla (20h, 400 kHz) y lo que su _INI hace según el BIOS: el ELAN1200 en 15h con el descriptor en 0001h (y SYNA2393, 06CB2846, FTE1200); TPL1 (la pantalla táctil) en I2C1"
   else ko "etapa 6, I2C-HID con las tablas del ASUS no sale (código $c): $(serie $S | grep -E '^I2C|^  ._SB|^    |^i2c|MAL|parado' | cut -c1-160 | paste -sd '|')"; fi
 else ko "etapa 6, I2C-HID: comossdt.py no parte la DSDT del ASUS"; fi
 # «sini2c»: ni se busca nada de I2C (las pruebas de los descriptores, sí)
 mb1 "apagar sinpruebas sini2c" "$T/e6s.txt" 256 -machine q35 -acpitable file="$I2/i2chid-qemu.aml"; c=$?
 S=$T/e6s.txt
-if [ $c = 85 ] && hay $S "^(sini2c: ni las controladoras I2C ni los touchpads HID sobre I2C)$" && ! hay $S "^I2C-HID\|^i2c" && hay $S "^HID: 16 descriptores" && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+if [ $c = 85 ] && hay $S "^(sini2c: ni las controladoras I2C ni los touchpads HID sobre I2C)$" && ! hay $S "^I2C-HID\|^i2c" && hay $S "^HID: 16 descriptores" && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 6, sini2c: ni las controladoras I2C ni los PNP0C50"
 else ko "etapa 6, sini2c no sale (código $c): $(serie $S | grep -E '^I2C|^i2c|^.sini2c|parado' | paste -sd '|')"; fi
 # una BAR sin poner (como las I2C de Tiger y Raptor Lake): la del edu de QEMU, a 0; Pci64.asigna_bar le da otra
 mb1 "apagar sinpruebas prueba=barcero" "$T/e6b.txt" 256 -machine q35 -device edu; c=$?
 S=$T/e6b.txt
 if [ $c = 85 ] && hay $S "^i2c: (prueba=barcero) la zona 0 de 00:0[0-9A-F].0 1234:11E8 (estaba en 0x[0-9A-F]*), a 0: puesta en 0x[0-9A-F]* (1,0 MB); el aparato dice 0x[0-9A-F]*; se lee bien: sí$" \
-   && hay $S "^Hispa-64 etapa 8: todo en orden.$"; then
+   && hay $S "^Hispa-64 etapa 9: todo en orden.$"; then
   ok "etapa 6, una BAR sin poner (la del edu de QEMU, a 0): $(serie $S | grep -o 'puesta en 0x[0-9A-F]*'), libre, y el aparato se lee bien en ella"
 else ko "etapa 6, prueba=barcero no sale (código $c): $(serie $S | grep -E 'barcero|parado' | paste -sd '|')"; fi
 
@@ -890,7 +897,7 @@ e6c_bien() {   # SALIDA
     && grep -q "^  el hijo cerrado por su señal: estado 11 (SIGSEGV)$" <<< "$v" \
     && grep -q "^  execve de HIJOS en un hijo: sus argumentos y su entorno, lo de O_CLOEXEC cerrado: 42$" <<< "$v" \
     && grep -q "^Después de los hijos: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas; 4[0-9] fork, 1 execve, 4[0-9] recogidos por wait4, 2 huérfanos$" <<< "$v" \
-    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$v"
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$v"
 }
 for x in mb1:1 q35:4 smp8:8 smp2:2; do
   f=$T/${x%%:*}.txt
@@ -925,8 +932,8 @@ TECLAS7+='LUA /PRUEBA.LUA uno dos{intro}{pausa}{pausa}{pausa}{pausa}LUA{intro}{p
 TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{pausa}{pausa}salir{intro}'
 con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
 v=$(serie "$T/e7.txt")
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.8.0, etapa 8 " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  30 archivos (" <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.9.0, etapa 9 " <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  36 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
    && grep -q "^mkdir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
@@ -968,13 +975,13 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   }
   uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.8.0 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.9.0 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
      && grep -q "^Memoria: 1[0-9][0-9],[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
      && grep -q "^ACPI: 2.0 o más, de «BOCHS »; XSDT en 0x[0-9A-F]*, [0-9]* tablas: FACP APIC HPET MCFG .*DSDT (todas con la suma bien)$" <<< "$S" \
-     && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$S"; then
+     && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$S"; then
     ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 128 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
   else ko "por UEFI con 128 MB no dice lo que debe (código $c): $(grep -E 'Memoria:|pantalla, en|parado' <<< "$S" | paste -sd ' ')"; fi
   e7_ok "$T/uefi.txt" 1 "por UEFI (OVMF y GRUB) con 1 procesador y 128 MB"
@@ -986,7 +993,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   S=$(serie "$T/uefi6.txt")
   if [ $c = 85 ] && grep -q "^xHCI: 00:0[0-9A-F].0 1B36:000D en 0x[0-9A-F]\{9,\} (por encima de 4 GB)$" <<< "$S" && grep -q "^USB: 3 aparatos (0 concentradores)" <<< "$S" \
      && grep -q "HID: teclado (por su descriptor, con LED)$" <<< "$S" && grep -q "HID: tableta (por su descriptor, de 0 a 32767)$" <<< "$S" \
-     && grep -q "^  /usb0p1: FAT32 «USBFAT», .*; de solo leer$" <<< "$S" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$S"; then
+     && grep -q "^  /usb0p1: FAT32 «USBFAT», .*; de solo leer$" <<< "$S" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$S"; then
     ok "por UEFI, el USB después de OVMF: «$(grep '^xHCI:' <<< "$S" | cut -d' ' -f4-)», el teclado, la tableta y la memoria (de solo leer)"
   else ko "por UEFI, el USB no sale (código $c): $(grep -E '^xHCI|^USB|^  /usb|parado' <<< "$S" | paste -sd '|')"; fi
   e4_ok "$T/uefi.txt" 1 "por UEFI (GRUB, module2) con 1 procesador"
@@ -995,7 +1002,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   S=$(serie "$T/uefi-max.txt")
   if [ $c = 85 ] && grep -q "páginas de 1 GB: sí" <<< "$S" && grep -q "; 4 procesadores lógicos en el paquete" <<< "$S" \
      && grep -q "^  0x00000001.*disponible$" <<< "$S" && grep -q "^Memoria: 2,9 GB libres" <<< "$S" && grep -q "en páginas de 1 GB: [1-9]" <<< "$S" \
-     && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 8: todo en orden.$" <<< "$S" \
+     && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$S" \
      && grep -q "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" <<< "$S" && tics_bien "$T/uefi-max.txt" "el HPET" 50 \
      && grep -q "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" <<< "$S" \
      && grep -q "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 BAR por encima de 4 GB$" <<< "$S" \
@@ -1206,5 +1213,108 @@ PY
 else
   echo "  (sin OVMF, grub-mkimage o mtools: no se prueba el arranque por UEFI)"
 fi
+
+# ---- [etapa 9] la red: e1000, e1000e, virtio-net y la Realtek (con la
+# RTL8139C+ de QEMU, «realtek=ensayo»), por la red de usuario de QEMU (slirp:
+# el anfitrión es 10.0.2.2), con 1, 2, 4 y 8 procesadores; los servidores de
+# prueba (programas/red/servidores.py) en el anfitrión: HTTP, HTTPS (con una
+# autoridad de prueba), NTP (una hora adelantada), eco y, si se puede, DNS
+# (en 127.0.0.1:53, con IP fija); el eco al revés (el servidor en Hispa-64,
+# por hostfwd); y RED.PRB, las órdenes que corre el núcleo (prred64.cas) ----
+R9=$T/red9; mkdir -p "$R9"; SRV=$AQUI/programas/red/servidores.py; PIDS9=""
+head -c 1048576 /dev/urandom > "$R9/a.bin"; SHA9=$(sha256sum "$R9/a.bin" | cut -c1-64)
+rm -rf "$R9/certs"; python3 -I "$SRV" certs "$R9/certs" anfitrion.prueba > /dev/null 2>&1; cp "$R9/certs/ca.pem" "$R9/CA.PEM" 2> /dev/null
+srv9() {   # VARIABLE MODO ARGUMENTOS...: arranca un servidor y deja su puerto en VARIABLE
+  local v=$1 k=0; shift
+  (cd "$R9" && exec python3 -I "$SRV" "$@") > "$R9/srv_$1.txt" 2>&1 & PIDS9="$PIDS9 $!"
+  until grep -q '^listo' "$R9/srv_$1.txt" 2> /dev/null || [ $k -gt 50 ]; do sleep 0.2; k=$((k + 1)); done
+  eval "$v=$(grep -o '^listo [0-9]*' "$R9/srv_$1.txt" | grep -o '[0-9]*$')"
+}
+PH9=""; PS9=""; PN9=""; PE9=""; PD9=""
+srv9 PH9 http 0 a.bin; srv9 PS9 https 0 a.bin certs/servidor.pem certs/servidor.key; srv9 PN9 ntp 0 3600; srv9 PE9 eco 0
+srv9 PD9 dns 53 10.0.2.2
+red9() {   # SALIDA NIC CPUS LÍNEA [dns]: arranca con RED.PRB y el cliente del eco
+  local s=$1 nic=$2 n=$3 l=$4 m="RED.PRB,CA.PEM"
+  {
+    echo "PING -c 3 -i 200 10.0.2.2"
+    echo "IFCONFIG"
+    echo "DESCARGA http://10.0.2.2:$PH9/a.bin"
+    echo "DESCARGA http://10.0.2.2:$PH9/trozos"
+    echo "DESCARGA -c /CA.PEM -n anfitrion.prueba https://10.0.2.2:$PS9/a.bin"
+    echo "=4 DESCARGA https://10.0.2.2:$PS9/a.bin"
+    if [ "${5:-}" = dns ]; then
+      echo "DESCARGA -o /dev/null -c /CA.PEM https://anfitrion.prueba:$PS9/a.bin"
+      echo "PING -c 1 anfitrion.prueba"
+      echo "=2 DESCARGA http://noexiste.zz/"
+    fi
+    echo "NTP -p $PN9 10.0.2.2"
+    echo "ECO cliente 10.0.2.2 $PE9 1000000"
+    echo "ECO servidor 7000 1"
+  } > "$R9/RED.PRB"
+  for f in "$T"/prog/*; do m="$m,$f"; done
+  rm -f "$s" "$s.eco"
+  ( for i in $(seq 150); do python3 -I -c '
+import socket, sys
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=30); d = bytes(range(256)) * 400; s.sendall(d); s.shutdown(1); r = b""
+while True:
+    x = s.recv(65536)
+    if not x: break
+    r += x
+sys.exit(0 if r == d else 1)' "$((17000 + n))" 2> /dev/null && { echo bien > "$s.eco"; break; }; sleep 1; done ) &
+  local cli=$!
+  (cd "$R9" && timeout 300 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$m" -append "apagar sinmusl $l" -display none -serial file:"$s" \
+    -monitor none $DBG -no-reboot -m 512 -machine q35 -smp "$n" -rtc base="${RTC9:-localtime}" \
+    -nic user,model="$nic",hostfwd=tcp:127.0.0.1:$((17000 + n))-:7000 > /dev/null 2>&1); local c=$?
+  kill $cli 2> /dev/null; wait $cli 2> /dev/null
+  return $c
+}
+red9_bien() {   # SALIDA [dns]
+  local s=$1 v; v=$(serie "$s")
+  [ -n "$PH9" ] && [ -n "$PS9" ] && [ -n "$PN9" ] && [ -n "$PE9" ] \
+    && grep -q "^  eth0: .*, IP 10.0.2.15/24; " <<< "$v" && grep -q "^PING 10.0.2.2: 3 enviados, 3 recibidos, 0 % perdidos" <<< "$v" \
+    && grep -q "^IFCONFIG: 2 interfaces$" <<< "$v" && grep -q "^puerta de enlace: 10.0.2.2 (por eth0)$" <<< "$v" \
+    && [ "$(grep -c "^DESCARGA: 1048576 octetos en .*; sha256 = $SHA9$" <<< "$v")" -ge 3 ] \
+    && grep -q "^DESCARGA: TLS 1.2 (suite 0x[0-9A-F]*), certificado de «anfitrion.prueba» bien$" <<< "$v" \
+    && grep -q "certificado no válido: es de otro nombre" <<< "$v" \
+    && { [ "${2:-}" != dns ] || { grep -q "^PING anfitrion.prueba (10.0.2.2): 56 octetos de datos" <<< "$v" && grep -q "^PING 10.0.2.2: 1 enviados, 1 recibidos" <<< "$v" && grep -q "^Programa «=2 DESCARGA\|^Programa «DESCARGA http://noexiste.zz/»: acaba con el código 2, como debe" <<< "$v" && [ "$(grep -c "^DESCARGA: 1048576 octetos en .*; sha256 = $SHA9$" <<< "$v")" -ge 4 ]; }; } \
+    && grep -q "^NTP: 10.0.2.2:$PN9 dice .*; el reloj iba 36[0-9][0-9][0-9][0-9][0-9] ms atrasado .*; puesto en hora$" <<< "$v" \
+    && grep -q "^ECO: 1000000 octetos de ida y vuelta, iguales" <<< "$v" && grep -q "^ECO: servidor: 1 conexiones, 102400 octetos devueltos$" <<< "$v" \
+    && [ -f "$s.eco" ] \
+    && ! grep -q "^Programa .*: acaba con el código [0-9]*$" <<< "$v" \
+    && grep -q "^Después de la red: 0 sockets (.*0 objetos$" <<< "$v" \
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 9: todo en orden.$" <<< "$v"
+}
+red9_dice() { serie "$1" | grep -E '^Red|^PING [0-9a-z.]*:|^DESCARGA: [0-9c]|^NTP:|^ECO: [0-9s]|^Programa .*código [0-9]*$|MAL|parado|^Después de la red' | cut -c1-140 | paste -sd '|' | cut -c1-1800; }
+red9_ok() {   # SALIDA QUÉ [dns]
+  local v; v=$(serie "$1")
+  if red9_bien "$1" "${3:-}"; then
+    ok "etapa 9, $2: $(grep '^Red: [0-9]' <<< "$v" | head -1 | sed 's/^Red: //; s/ (y «lo».*//'), $(grep -m1 '^Red: 00' <<< "$v" | sed 's/^Red: [0-9A-F:.]* //' | cut -d, -f1); DHCP o IP fija, PING al anfitrión ($(grep '^PING 10.0.2.2:' <<< "$v" | grep -o 'máx = [0-9,/]*')), IFCONFIG, DESCARGA por HTTP, a trozos y por HTTPS (sha256 bien; sin la autoridad, rechazado)$( [ "${3:-}" = dns ] && echo ', por su nombre con DNS (y uno que no existe: código 2)'), NTP ($(grep -o 'iba [0-9]* ms atrasado' <<< "$v"): puesto en hora), ECO de ida y vuelta (1 MB) y de servidor; sin sockets al acabar"
+  else ko "etapa 9, $2 no hace lo que debe: $(red9_dice "$1")"; fi
+}
+if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
+  red9 "$T/e9a.txt" e1000 1 ""
+  red9_ok "$T/e9a.txt" "e1000 (la de VirtualBox), 1 procesador, DHCP"
+  RTC9=utc red9 "$T/e9b.txt" e1000e 2 "cmos=utc zona=UTC"
+  red9_ok "$T/e9b.txt" "e1000e (82574L, con MSI), 2 procesadores"
+  if [ -n "$PD9" ]; then
+    red9 "$T/e9c.txt" virtio-net-pci 4 "ip=10.0.2.15/24,10.0.2.2,10.0.2.2 sindhcp" dns
+    red9_ok "$T/e9c.txt" "virtio-net, 4 procesadores, IP fija y DNS (el de prueba)" dns
+  else
+    red9 "$T/e9c.txt" virtio-net-pci 4 ""
+    red9_ok "$T/e9c.txt" "virtio-net, 4 procesadores (sin el DNS de prueba: el puerto 53 no se deja)"
+  fi
+  red9 "$T/e9d.txt" rtl8139 8 "realtek=ensayo"
+  red9_ok "$T/e9d.txt" "la Realtek RTL8168 (con la RTL8139C+ de QEMU, «realtek=ensayo»), 8 procesadores"
+  # la zona: la hora local con cambio de horario, y el CMOS en UTC o en hora local
+  v=$(serie "$T/e9b.txt"); w=$(serie "$T/e9a.txt")
+  if grep -q "zona UTC (TZ=UTC0), el CMOS en UTC$" <<< "$v" && grep -q "zona Europa/Madrid (TZ=CET-1CEST,M3.5.0,M10.5.0/3), el CMOS en hora local$" <<< "$w" \
+     && grep -q "la hora: [0-9/]* [0-9:]* CE[S]*T (UTC+[12])" <<< "$w"; then
+    ok "etapa 9, la hora: $(grep -o 'la hora: .*' <<< "$w" | cut -d, -f1) (Europa/Madrid, con el CMOS en hora local), y en UTC con «cmos=utc zona=UTC»"
+  else ko "etapa 9, la hora y la zona no salen como deben: $(grep -o 'la hora: .*' <<< "$w") | $(grep -o 'la hora: .*' <<< "$v")"; fi
+else
+  ko "etapa 9: no se arrancan los servidores de prueba (servidores.py): $(cat "$R9"/srv_*.txt 2> /dev/null | head -3 | paste -sd ' ')"
+fi
+# shellcheck disable=SC2086
+kill $PIDS9 2> /dev/null
 echo "== Hispa-64: $BIEN bien, $MAL mal =="
 [ $MAL = 0 ]

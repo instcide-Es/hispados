@@ -266,7 +266,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento; la consola y el intérprete | **hecha (24/11)** | — |
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
-| 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | 6–8 sem. (+ Wi-Fi 3–5 meses) | 12,5 meses |
+| 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
 | 10 | Navegador moderno (Ladybird o WebKit) | 8–12 sem. | 15 meses |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | 4–6 sem. | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
@@ -411,7 +411,14 @@ las ventanas, el SIMD del dibujo y el touchpad en el escritorio del taller.
   resolución del panel (1920×1080 en el ThinkPad).
 - **QEMU**: capturas (`screendump`) comparadas en las pruebas. **Taller**: todos.
 
-### Etapa 9 — la red
+### Etapa 9 — la red (hecha: sección 15)
+
+Lo que cambió del plan al hacerla: la pila TCP/IP es propia, en el núcleo y en
+Castel 64 (la lógica de Hispa-Pentium; sin lwIP); los nombres los resuelve musl;
+la red por USB (RTL8153) queda para la etapa 10, con IPv6 y la escala de
+ventana de TCP; se añadieron virtio-net y la Realtek probada en QEMU con la
+RTL8139C+. Ver la sección 15.
+
 
 - Realtek 8111/8168, Intel I219, USB RTL8153; TCP/IP (lo de Hispa-Pentium o lwIP,
   BSD), DHCP, DNS, `socket` POSIX; TLS con BearSSL (como en Hispa-Pentium).
@@ -2378,3 +2385,182 @@ para 40 s, saca los registros por el monitor (los procesadores, todos en
 - La hora: el reloj de la barra es el del núcleo, que toma el de la CMOS como
   UTC; en los equipos con Windows la CMOS va en hora local (como en
   Hispa-Pentium, habrá que decidir una zona).
+
+---
+
+## 15. La etapa 9, hecha (25/11/2026): la red
+
+### Las decisiones
+
+- **La pila TCP/IP, en el núcleo y en Castel 64**, sin lwIP: la lógica es la de
+  Hispa-Pentium (`castel/nucleo32/rpila.cas` y `rtcp.cas`), escrita otra vez
+  para 64 bits y para un núcleo con varios procesadores. Todo lo de los
+  protocolos y los sockets se toca con **un mutex, el de la red**
+  (`Redbase64.red_m`); lo mueve **un hilo del núcleo, «red»**: lo despierta
+  la interrupción de la tarjeta (o mira cada 10 ms si no llega), recoge lo
+  que haya llegado (de 32 en 32 tramas, soltando el cerrojo entre medias), lo
+  que queda en la cola de `lo`, los plazos (ARP, DHCP, los de TCP) y el enlace
+  (cada medio segundo). Lo que mandan los programas sale desde su llamada,
+  con el mutex cerrado (sin copias de más: la cabecera se pone delante, en el
+  mismo búfer).
+- **Despertar en vez de mirar** (`sondeo64.cas`): hay un número de cambios y
+  una cola de espera; quien cambia algo que se puede esperar (las tuberías,
+  la consola, los sockets, eventfd, la pila al tratar lo que llega) llama a
+  `avisa()`; poll, select, epoll y las esperas de los sockets toman el número
+  antes de mirar y duermen solo si no ha cambiado (con el cerrojo de la cola:
+  nada se pierde). Los timerfd ponen su vencimiento como plazo de la espera.
+  Solo `/dev/input/event0` sigue de 10 en 10 ms (sus avisos vienen con el
+  cerrojo del ratón tomado).
+- **Los sockets, los de Linux** (`red64.cas`): las llamadas 41 a 55 y 288,
+  con sus números y sus formas; AF_INET con SOCK_STREAM (TCP), SOCK_DGRAM
+  (UDP, y los «ping sockets» de ICMP de Linux, que no piden permisos: el
+  núcleo pone el identificador y la suma) y SOCK_RAW de ICMP; AF_INET6 y
+  AF_UNIX dan EAFNOSUPPORT (musl lo entiende). Los nombres los resuelve
+  **musl** (getaddrinfo, con UDP y, si hace falta, TCP): el núcleo da
+  `/etc/resolv.conf` (los DNS de DHCP), `/etc/hosts` (localhost, el equipo y
+  los de `hosts=nombre:ip,...` de la línea del núcleo), `/etc/services`,
+  `/etc/hostname`, `/etc/protocols`, `/proc/net/route` y `/proc/net/dev`
+  (con la forma de Linux), hechos al abrirlos.
+- **TCP sin escala de ventana ni SACK** (64 KB de búfer para cada lado): con
+  la red de casa sobra; la escala, SACK e IPv6 quedan para la etapa 10 (el
+  navegador). Lo desordenado se tira (la otra punta lo repite). El TIME_WAIT
+  dura 5 s.
+- **El azar, con ChaCha20** (`azar64.cas`, RFC 8439, la clave borrada en cada
+  pedido): getrandom, `/dev/urandom` y `/dev/random` (que nunca esperan, como
+  en Linux desde la 5.6), los números de secuencia de TCP, los puertos, los
+  identificadores de DHCP. La clave se mezcla en cada pedido con RDSEED y
+  RDRAND (si los hay), el TSC y el reloj, y con lo que va echando la red.
+- **La hora** (`hora64.cas`): el reloj del sistema es UTC y NTP lo pone
+  (clock_settime, settimeofday); **el CMOS se toma por omisión como hora
+  local** (los equipos del taller tienen Windows; `cmos=utc` si va en UTC);
+  la zona, `zona=Europa/Madrid` (la de por omisión; también Atlántico/
+  Canarias, Europa/Lisboa, Europa/Londres, UTC, los nombres en inglés, o una
+  zona de POSIX tal cual), con el cambio de horario de las reglas «M» de
+  POSIX: el núcleo la usa para leer el CMOS, y los programas la reciben en
+  **TZ** (`TZ=CET-1CEST,M3.5.0,M10.5.0/3`): musl hace lo demás.
+- **Los drivers**, cada uno con sus anillos de descriptores en memoria física
+  y su interrupción (MSI si la tarjeta la tiene; si no, la patilla INTx por
+  la línea que dejó el firmware, que en QEMU llega al IOAPIC por esa misma;
+  y el hilo mira cada 10 ms igual, porque VirtualBox lleva las INTx a otras
+  patillas que dice el AML, y el `_PRT` aún no se lee):
+  - **Intel** (`intel64.cas`): la familia 8254x («e1000»: la 82540EM de QEMU
+    y la **«Intel PRO/1000 MT Desktop», la tarjeta por omisión de VirtualBox**),
+    las 8257x («e1000e»: la 82574L de QEMU, con MSI) y las de los chipsets
+    (ICH y PCH: 82577/8/9, I217, I218, **I219**), todas con los descriptores
+    de siempre.
+  - **Realtek RTL8111/8168** (`rtl64.cas`) y su familia (8101/8102/8105/8106,
+    8169, 8411, 8117): la de Hispa-Pentium con lo aprendido el 24/11 en el
+    ASUS GL553VD (la 8111H): en las 8168G en adelante, el FIFO compartido
+    mirado en LINK_LIST_RDY, sin EEE ni ALDPS ni el paso a L2/L3, y a
+    negociar otra vez; sin ASPM ni CLKREQ. QEMU no tiene la 8168, pero su
+    RTL8139 en «modo C+» usa los mismos descriptores: con `realtek=ensayo` se
+    lleva con este driver, y así se prueban sus anillos.
+  - **virtio-net** (`virtio64.cas`), por la forma de siempre (la de
+    transición, 1AF4:1000): la «paravirtualizada» de QEMU y de VirtualBox.
+- La **red por USB (RTL8153, CDC-ECM/NCM)** no ha entrado: pide elegir otra
+  configuración del aparato (la 1 de la RTL8153 es la propia de Realtek; la
+  de CDC-ECM es otra), la variante 1 de la interfaz de datos y una
+  recepción a granel que no tenga el mutex del aparato mientras espera (hoy
+  `u_granel` lo tiene todo el rato). Queda para la etapa 10 (sección de
+  abajo).
+
+### Qué hace
+
+Hispa-64 0.9.0. Los módulos y programas nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `redbase64.cas` | las interfaces (Ifz), los sockets (Sock: TCP dentro), el mutex de la red, el suceso del hilo, el orden de los octetos, la suma de IP, los anillos de los búferes |
+| `ip64.cas` | Ethernet, ARP (32 vecinos, con el paquete que espera), IPv4, ICMP, UDP, DHCP (con renovación), `lo` (127.0.0.1 y la IP propia), las rutas, `ip=` (IP fija), el hilo «red» |
+| `tcp64.cas` | TCP: conectar, escuchar y aceptar, la ventana, la retransmisión con su plazo medido (de 200 ms a 60 s), la rápida (tres ACK repetidos), la ventana a cero (persist), el cierre en las dos direcciones, RST; `red=traza` dice cada 2 s cómo está cada conexión |
+| `red64.cas` | los sockets de POSIX, sus opciones, FIONREAD, FIONBIO y los SIOCGIF*, poll; los archivos de texto de la red |
+| `sondeo64.cas` | la espera que despierta (arriba) |
+| `objetos64.cas` | eventfd (284, 290), timerfd (283, 286, 287), `/dev/urandom`, `/dev/random` y los textos |
+| `azar64.cas` | ChaCha20 (arriba) |
+| `hora64.cas` | la hora y la zona (arriba) |
+| `intel64.cas`, `rtl64.cas`, `virtio64.cas` | los drivers (arriba) |
+| `prred64.cas` | las pruebas: lo que hay (las tarjetas, el azar, la hora y la zona) y, si en la unidad está `RED.PRB`, sus órdenes, mirando sus códigos; al acabar, que no quede ningún socket |
+| `sistema.cas` | las llamadas nuevas (41-55, 288, 283-290, 227 clock_settime, 164 settimeofday), los sockets y los objetos en read, write, close, dup, fcntl, fstat, lseek, ioctl, poll, select y epoll; el reloj de Hora64; uname 0.9.0 |
+| `procesos.cas` | TZ en el entorno de los programas |
+| `tubos64.cas`, `tty64.cas` | avisan a Sondeo64 |
+| `programas/red/` | PING, IFCONFIG, DESCARGA (HTTP y HTTPS con BearSSL), NTP, ECO y MRED (en C con musl; `hazred.sh`), y `servidores.py`: los servidores de las pruebas (HTTP, HTTPS, NTP, eco, DNS y los certificados) |
+
+Lo que dice al arrancar (QEMU, q35, la e1000):
+
+```
+Red: 00:02.0 8086:100E Intel 82540EM (PRO/1000 MT Desktop, e1000), MAC 52:54:00:12:34:56, INTx por la GSI 11 (y mirando cada 10 ms)
+Red: eth0: enlace a 1000 Mbit/s
+Red: eth0: IP 10.0.2.15/24 (DHCP de 10.0.2.2, 86400 s); puerta 10.0.2.2; DNS 10.0.2.3
+MRED: todo bien (123 pruebas)
+Red: 1 tarjetas (y «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP), los sockets de POSIX
+  el azar: ChaCha20 con RDSEED/RDRAND; la hora: 24/11/2026 23:49:54 CET (UTC+1), zona Europa/Madrid (TZ=CET-1CEST,M3.5.0,M10.5.0/3), el CMOS en hora local
+```
+
+Y con los programas (las órdenes de `RED.PRB` de las pruebas; en el
+intérprete, igual):
+
+```
+PING 10.0.2.2: 3 enviados, 3 recibidos, 0 % perdidos; tiempo mín/media/máx = 0,71/1,74/3,78 ms
+DESCARGA: TLS 1.2 (suite 0xC02C), certificado de «anfitrion.prueba» bien
+DESCARGA: 1048576 octetos en 0,63 s (1,6 MB/s); sha256 = ...
+NTP: 10.0.2.2:55281 dice 24/11/2026 23:50:46 UTC (00:50:46 CET); el reloj iba 3600449 ms atrasado (estrato 2, ida y vuelta 2,9 ms); puesto en hora
+ECO: 1000000 octetos de ida y vuelta, iguales, en 0,80 s
+Después de la red: 0 sockets (15 hechos), 0 procesos; IP 4750 recibidos y 6965 enviados, 0 malos; TCP: 7 conexiones, 1 repeticiones, 6 RST; UDP 4 y 4; 0 objetos
+```
+
+### Cómo se ha probado
+
+(Las cifras de la batería, al final de esta sección.)
+
+- **MRED en cada arranque** (con las demás de musl): 123 pruebas de las
+  llamadas por 127.0.0.1, sin tarjeta: socket, bind (y el puerto que da),
+  listen, connect y accept (bloqueantes y sin esperar: EINPROGRESS, poll
+  POLLOUT y SO_ERROR), getpeername, 256 KB en las dos direcciones a la vez
+  (dos hilos y poll), shutdown, ECONNREFUSED, EADDRINUSE, SO_REUSEADDR con
+  TIME_WAIT, UDP (sendto y recvfrom con quién lo manda, MSG_DONTWAIT,
+  connect, sendmsg y recvmsg con dos trozos), epoll de uno que escucha y de
+  uno conectado, las opciones, getaddrinfo de `localhost`, eventfd, timerfd
+  (con intervalo, poll y gettime) y el azar (`/dev/urandom`, `/dev/random`,
+  getrandom: los 256 valores, distintos cada vez).
+- **La red de verdad, con la de usuario de QEMU** (slirp: el anfitrión es
+  10.0.2.2) y los servidores de prueba en el anfitrión (`servidores.py`:
+  HTTP, HTTPS con una autoridad de prueba hecha con openssl, NTP con la hora
+  adelantada una hora, eco, y un DNS de prueba en 127.0.0.1:53), cuatro
+  vueltas: **e1000** con 1 procesador y DHCP; **e1000e** (MSI) con 2,
+  `cmos=utc zona=UTC`; **virtio-net** con 4, IP fija (`ip=`) y el DNS de
+  prueba; y **la Realtek** (la RTL8139C+ de QEMU con `realtek=ensayo`) con 8.
+  En cada una: PING al anfitrión; IFCONFIG (las dos interfaces, la puerta,
+  los DNS); DESCARGA de 1 MB por HTTP, a trozos (chunked) y por HTTPS (TLS
+  1.2, el certificado comprobado con la autoridad de prueba y el nombre),
+  **con el sha256 igual al del anfitrión**, y sin la autoridad, rechazado
+  (código 4); con DNS, por su nombre (`anfitrion.prueba`) y uno que no
+  existe (código 2); NTP (lo que iba atrasado: una hora, y puesto en hora);
+  ECO de 1 MB de ida y vuelta contra el anfitrión, y de servidor (el
+  anfitrión le habla por `hostfwd`); y después, ni un socket ni un objeto.
+  La hora: en la primera vuelta (el CMOS de QEMU en la hora local del
+  anfitrión, Europa/Madrid) sale la hora local con su zona, y NTP ve solo la
+  hora adelantada del servidor; con `cmos=utc zona=UTC`, igual en UTC.
+- Lo de las etapas 0 a 8, igual (la unidad en memoria lleva ahora 36
+  archivos; uname 0.9.0, «etapa 9 (la red)»).
+
+### Lo que queda para la etapa 10 (y más adelante)
+
+- **La red por USB** (la RTL8153 en CDC-ECM o NCM, y los demás adaptadores
+  CDC): elegir la configuración de CDC (la 1 de la RTL8153 es la de Realtek),
+  la variante 1 de la interfaz de datos, la recepción a granel sin tener el
+  mutex del aparato mientras espera (como los informes de HID: pedir y
+  mirar), y QEMU `-device usb-net` para las pruebas.
+- **IPv6** (la etapa 10 lo pide para el navegador): ND, SLAAC, AF_INET6 en
+  los sockets; y en TCP, la escala de ventana, SACK y los búferes mayores
+  (para descargar deprisa por Internet), y guardar lo que llega desordenado.
+- **Leer el `_PRT` del AML** para las INTx (VirtualBox, los equipos sin MSI):
+  hoy se mira cada 10 ms y va, pero con 10 ms de más.
+- **Las I219 de los portátiles**: el ULP (el PHY dormido al arrancar sin
+  cable) y el K1, como e1000e; probarla en el taller.
+- **El cliente SSH**: el de Hispa-Pentium (`castel/nucleo32/ssh/`) depende de
+  su ventana y sus rutas; hay que separar la capa del terminal (con musl y
+  el terminal de la consola).
+- La **Wi-Fi** (Intel AX201/AX211), en paralelo, como dice el plan.
+- `/etc/localtime` (TZif) para los programas que no miran TZ, y escribir la
+  hora de NTP en el CMOS (con `cmos=` sabiendo cuál es).
+- setitimer (38) y alarm, que MRED usa para su vigilante (hoy -ENOSYS).

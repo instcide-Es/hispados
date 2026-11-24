@@ -8,6 +8,7 @@
 # tienen) y, si no es «prueba» (o con VDI=1), sale también el disco para
 # VirtualBox (hispa64.vdi, con qemu-img).
 # [etapa 8] el primero del menú es el escritorio (VENTANAS, la opción «escritorio»).
+# [etapa 9] y dos más: «cmos=utc» y «sinred».
 # [etapa 7] los programas de musl y Lua (programas/hazmusl.sh) van también en
 # \boot\prog (y el cargador dinámico, ld-musl-x86_64.so.1: en Hispa-64, /lib).
 # [etapa 4] con los programas de prueba (programas/hazlos.sh) en \boot\prog,
@@ -72,7 +73,7 @@ else
   }
   {
     cat <<'CFG'
-# Hispa-64 0.8.0 (etapa 8). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Hispa-64 0.9.0 (etapa 9). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -82,10 +83,12 @@ terminal_output console serial
 set gfxpayload=keep
 if cpuid -l; then
 CFG
-    entrada "Hispa-64 0.8.0 (etapa 8): el escritorio, con Pluma, Cuentas y Notas (los discos, solo leer)" "escritorio"
+    entrada "Hispa-64 0.9.0 (etapa 9): el escritorio, con Pluma, Cuentas y Notas (los discos, solo leer; la red por cable)" "escritorio"
     entrada "Hispa-64: el escritorio, guardando en los discos (SOLO en VirtualBox o en discos de prueba)" "escritorio escribir"
     entrada "Hispa-64: el intérprete de órdenes (sin el escritorio; «VENTANAS» lo abre)" ""
     entrada "Hispa-64: con escritura en los discos (SOLO en VirtualBox, en discos de prueba o en memorias USB de prueba)" "escribir"
+    entrada "Hispa-64: la hora del CMOS en UTC (si la hora sale una o dos horas cambiada)" "cmos=utc"
+    entrada "Hispa-64: sin la red (si se queda al poner en marcha la tarjeta de red)" "sinred"
     entrada "Hispa-64: el USB sin MSI ni MSI-X (si el teclado o el ratón USB no van)" "sinmsix sinmsi"
     entrada "Hispa-64: sin las pruebas de musl (si se queda en ellas)" "sinmusl"
     entrada "Hispa-64: sin USB (si se queda al mirar el USB)" "sinusb"

@@ -76,7 +76,7 @@ módulo Virtio64
 
     función barrera()
         ensamblador
-            mfence
+            db 0x0F, 0xAE, 0xF0         ; mfence
         fin
     fin
 
