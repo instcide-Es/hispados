@@ -660,7 +660,8 @@ con_usb() {   # SALIDA ÓRDENES -- opciones de QEMU (las órdenes, separadas por
   return $c
 }
 con_usb "$T/e6r.txt" "mouse_move 10 20;mouse_move -5 3 1;mouse_button 1;mouse_button 0;sendkey a;sendkey shift-b" -- -device usb-mouse,bus=xhci.0 -device usb-kbd,bus=xhci.0; c=$?
-P=$(serie "$T/e6r.txt" | grep -E '^Puntero: \(|^Tecla USB' | paste -sd '|')
+# (la Mayúscula y la b pueden llegar en el mismo informe: la línea de la Mayúscula, no siempre; las cuenta el resumen)
+P=$(serie "$T/e6r.txt" | grep -E '^Puntero: \(|^Tecla USB' | grep -v '^Tecla USB: uso 0xE1$' | paste -sd '|')
 if [ $c = 85 ] && [ "$P" = "Puntero: (522, 404), botones 0, rueda 0 (ratón)|Puntero: (517, 407), botones 0, rueda 1 (ratón)|Puntero: (517, 407), botones 1, rueda 1 (ratón)|Puntero: (517, 407), botones 0, rueda 1 (ratón)|Tecla USB: uso 0x4|Tecla USB: uso 0x5" ] \
    && hay "$T/e6r.txt" ", 1 clics; teclas USB: 3, LED puestos: "; then
   ok "etapa 6, el ratón USB (mouse_move y mouse_button del monitor): lo movido, la rueda y el clic, exactos; y las teclas del teclado USB (a, Mayúsculas, b)"

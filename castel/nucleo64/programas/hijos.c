@@ -215,7 +215,7 @@ int principal(i64 *sp)
 	/* cinco hijos a la vez; WNOHANG mientras duermen; luego todos */
 	for (i = 0; i < 5; i++) {
 		hijos[i] = sis(S_FORK, 0, 0, 0);
-		if (hijos[i] == 0) { duerme_ms(60 + 15 * i); sal(20 + (int)i); }
+		if (hijos[i] == 0) { duerme_ms(500 + 20 * i); sal(20 + (int)i); }	/* (500 ms: el TCG cargado tarda en hacer los cinco fork) */
 	}
 	mira(espera(-1, &st, 1) == 0, "wait4 con WNOHANG: 0 (ninguno ha acabado)");
 	suma = 0; vistos = 0;
