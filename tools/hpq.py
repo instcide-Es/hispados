@@ -255,8 +255,16 @@ VERSION_TOUCHPAD = VERSION_089
 # pluma 2.0.2, correo 1.0.3 (la 1.0.2 ya estaba publicada) y navega 0.2.3 (con una base de antes, la
 # llamada 177 no hace nada y siguen yendo)
 VERSION_PUNTEROS = VERSION_089
+# (0.8.10, 24/11/2026, pentium-0810: el Termómetro del taller —la batería que
+# se relee, SMI_COUNT, Machine Check, las zonas PCI de 64 bits movidas debajo
+# de los 4 GB, el traspaso del EHCI, sin8042—, los touchpads HID sobre I2C
+# —la llamada 159—, la RTL8111/8168, el Wi-Fi de Intel 7265 (etapa 1) y el
+# eMMC y las SD por SDHCI —la llamada 160, INSTALAR en ellas—). Con
+# Usuario.VERSIÓN_TEXTO («0.8.10»). Suben base, red (rrtl.cas, RED.LOG),
+# wifi (la 7265), paquetes 1.7 (el GRUB.CFG de UEFI) y termo 1.1
+VERSION_0810 = '0.8.10'
 SISTEMA = [
-    ('base', VERSION_089, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_0810, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'), ('RATON.BIN', r'\HISPA\RATON.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
@@ -287,11 +295,13 @@ SISTEMA = [
     # REPARA, ARCHIVOS, SUELTOS, QUITA /DEPENDIENTES y la ventana unificada
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
     # (0.8.9) 1.6: (COMPAT) los ganchos del Asistente al instalar o actualizar win32 (PAQUETES y ACTUALIZ /BANDEJA)
-    ('paquetes', '1.6', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    # (0.8.10) 1.7: (SDHCI, UEFI) el «núcleo de antes» también en un GRUB.CFG con multiboot2 (lo instalado en SD/eMMC por UEFI)
+    ('paquetes', '1.7', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
-    ('red', VERSION_CORTES, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    # (0.8.10) la RTL8111/8168 (rrtl.cas) y RED.LOG con Registro=SI
+    ('red', VERSION_0810, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
@@ -302,7 +312,8 @@ SISTEMA = [
     ('tailscal', '0.8.9', 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia
-    ('wifi', VERSION_CORTES, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    # (0.8.10) (INTEL) la Intel 7265, etapa 1: encuentra las redes (sin el firmware de Intel, que no va en el paquete)
+    ('wifi', VERSION_0810, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
