@@ -86,6 +86,13 @@ Versión 0.10.
   FORMATEA, SISTEMA, PARTIR, REVISAR, ETIQUETA, ATRIBUTO, ARBOL, XCOPIAR,
   MAS, ORDENAR, TECLADO (el teclado español, residente) y PASAR (archivos
   por el puerto serie).
+- **El disquete de Oficina** (`build/oficina-360.img`, sin sistema): **PLUMA**,
+  el procesador de textos (21 K): ajuste de línea, negrita, subrayado y
+  cursiva con atributos de vídeo, párrafos centrados y justificados,
+  documentos mayores que la memoria, deshacer, bloques, buscar sin tildes,
+  la vista de la página, Epson, IBM y texto con la ñ y las tildes bien,
+  exportar a UTF-8 y RTF, y las teclas de WordStar. Está todo en
+  [PLUMA.md](PLUMA.md).
 - **Prueba automática** (`make -C h8086 prueba`): 470 comprobaciones en
   QEMU, en veintiuna partes (y la batería entera se pasa también con el
   núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
@@ -387,7 +394,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **casi**: todas las de MS-DOS 3.3 que hacen falta, EDITAR y TECLADO; falta PASAR por el puerto paralelo (y las menores: IMPRIMIR, COMPARAR, COPIADISCO) |
 | 6 | Modo 286: HMA y memoria extendida | **hecha** (0.10): gestor XMS 2.0 dentro del núcleo, A20, `DOS=ALTO`, DISCORAM `/E`; sin UMB |
 | 7 | Hispa-BASIC | |
-| 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | |
+| 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | **Pluma hecha** (en el disquete de Oficina; [PLUMA.md](PLUMA.md)) |
 | 9 | Juegos, manual, versión estable 1.0 | |
 
 Cada etapa se cierra con sus pruebas automáticas y probada en una máquina real.
@@ -832,7 +839,7 @@ make -C h8086 prueba     # los arranca en QEMU y comprueba la pantalla
 
 Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto, y
 `fsck.fat` (dosfstools) para repasar los discos desde fuera. La prueba va por
-partes (veintiuna) y tarda unos TIEMPO minutos;
+partes (veinticuatro, con las tres de PLUMA) y tarda unos TIEMPO minutos;
 `SOLO="formatea partir" ./prueba/prueba.sh` corre solo las que se digan.
 
 | Archivo | Qué es |
@@ -870,6 +877,8 @@ partes (veintiuna) y tarda unos TIEMPO minutos;
 | `h8086/pon_arranque.py` | pone el sector de arranque conservando la BPB del disquete |
 | `h8086/prueba/haz_duro.py` | hace el disco duro de prueba (una partición FAT16) |
 | `h8086/prueba/xmodem.py` | «el otro ordenador» de la prueba de PASAR |
+| `h8086/pluma/` | PLUMA, el procesador de textos (ver [PLUMA.md](PLUMA.md)), y su manual PLUMA.TXT |
+| `h8086/prueba/partes_pluma.sh` | las partes de la prueba de PLUMA |
 
 ### Cómo reconoce el procesador
 

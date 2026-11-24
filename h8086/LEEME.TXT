@@ -7,3 +7,6 @@ en español.
 Arranca de disquete o de disco duro. AYUDA dice las órdenes; EDITAR es
 el editor; TECLADO pone el teclado español. Para instalarlo en el disco
 duro: PARTIR CREAR y FORMATEA C: /S (borra lo que haya en el disco).
+
+En el disquete de Oficina: PLUMA, el procesador de textos (PLUMA.TXT
+es su manual).
