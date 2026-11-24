@@ -446,7 +446,7 @@ void di_juzga(struct di_disco *d)
 			d->salud = DI_BIEN;
 	}
 	if (!d->porque[0] && d->salud == DI_BIEN)
-		razon(d, DI_BIEN, "nada raro: %s", d->lee.hecha ? "se lee entero sin errores ni atascos" : "lo que dice el disco de sí está bien");
+		razon(d, DI_BIEN, "nada raro: %s", !d->lee.hecha ? "lo que dice el disco de sí está bien" : d->lee.cortada ? "lo leído, sin errores ni atascos (no todo: se acabó el minuto)" : "se lee entero sin errores ni atascos");
 	if (!d->porque[0])
 		razon(d, DI_NOSE, "no se ha podido mirar");
 }
