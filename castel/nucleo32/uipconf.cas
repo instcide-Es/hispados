@@ -72,7 +72,7 @@ módulo Uipconf
         fin
         si info.estado = RED_SIN_TARJETA entonces
             escribir("  No hay ninguna tarjeta de red que Hispa-Pentium sepa llevar\n")
-            escribir("  (las que lleva: Intel PRO/1000, Realtek RTL8139 y Marvell Yukon 88E8059).\n")
+            escribir("  (las que lleva: Intel PRO/1000, Realtek RTL8139 y RTL8111/8168, Marvell Yukon 88E8059).\n")
         sino
             imprimir4("  Tarjeta . . . . . . . : %s (%04X:%04X, IRQ %u)\n", nat32(dirección(info.tarjeta[0])), info.id_pci yb 0xFFFF, info.id_pci >> 16, info.irq)
             imprimir3("  En el bus PCI  . . . : %02X:%02X.%u\n", (info.pci >> 16) yb 0xFF, (info.pci >> 11) yb 31, (info.pci >> 8) yb 7)

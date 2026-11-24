@@ -228,6 +228,9 @@
 #      contra el modelo de la tarjeta (WIFISIM.BIN) con el microcódigo del
 #      disco; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
 #      (la lista, la contraseña con asteriscos, conectar) y Configuración.
+#  53. (INTEL, SOLO=intel) El Wi-Fi de Intel (wifi/nucleo/radio_iwl.c): el lector del
+#      firmware (.ucode) y el controlador de la 7265 contra el modelo de la tarjeta
+#      (tests/wifi/iwl_modelo.c); en QEMU, la e1000 no pone en marcha WIFI.BIN.
 #  28. (ACCESORIOS, SOLO=accesorios) Los accesorios: la Calculadora (CALC.BIN,
 #      con las cuentas decimales de decimal.cas), el Reloj (RELOJ.BIN) y el
 #      Mapa de caracteres (CARACTER.BIN). Con corre32: las cuentas con lo que
@@ -401,6 +404,7 @@
 #   SOLO=protege ./pruebas.sh     la primera y la 25 (PROTEGE: la zona protegida, los secretos y los servicios por su sello)
 #   SOLO=escudo ./pruebas.sh      la primera y la 26 (Escudo, el antivirus)
 #   SOLO=wifi ./pruebas.sh        la primera y la 27 (el Wi-Fi: WIFI.BIN)
+#   SOLO=intel ./pruebas.sh       la primera y la 53 ((INTEL) el Wi-Fi de Intel: el firmware y la 7265 contra su modelo; IWL_FW=archivo.ucode)
 #   SOLO=accesorios ./pruebas.sh  la primera y la 28 (ACCESORIOS: la Calculadora, el Reloj y el Mapa de caracteres)
 #   SOLO=sonido ./pruebas.sh      la primera y la 29 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
@@ -515,7 +519,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3276,6 +3280,35 @@ S=$R/rtl.txt
 mira "la Realtek RTL8139: IPCONFIG y DESCARGAR" "^  Tarjeta . . . . . . . : Realtek RTL8139 (10EC:8139, IRQ [0-9]*)$" "^  Enlace  . . . . . . . : sí, a 100 Mbit/s$" \
   "^  Dirección IP  . . . . : 10.0.2.15$" "^Hecho: GRANDE.BIN, 409600 octetos"
 if saca $R/r.img GRANDE.BIN $R/x.bin && cmp -s $R/x.bin $R/srv/grande.bin; then ok "con la RTL8139, lo descargado es igual octeto a octeto"; else ko "con la RTL8139, lo descargado no es igual"; fi
+# (RTL8168) el controlador de la RTL8111/8168 (rrtl.cas) contra la RTL8139 de
+# QEMU en modo C+ (los mismos descriptores y los mismos registros de los
+# anillos: RealtekEnsayo=SI en RED.INI): por la memoria (BAR1) y por los
+# puertos (RealtekPuertos=SI). Los 400 K de GRANDE.BIN dan muchas vueltas a
+# los dos anillos (16 de recepción, 8 de envío). Lo propio de la 8168 (el XID,
+# el PHY por OCP, RXDV, ASPM) solo se ve en el equipo (el ASUS GL553VD).
+for modo in memoria puertos; do
+  cp $R/d.img $R/k.img
+  if [ $modo = memoria ]; then printf 'RealtekEnsayo=SI\r\n' > $R/red.ini; else printf 'RealtekEnsayo=SI\r\nRealtekPuertos=SI\r\n' > $R/red.ini; fi
+  mcopy -o -i $R/k.img $R/red.ini ::RED.INI
+  ESCRIBE=1 DISCO=$R/k.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0 -device rtl8139,netdev=n0" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 2" \
+    "ping -n 4 10.0.2.2" ":pausa 4" "descargar $U/grande.bin" ":pausa 5" "descargar $U/trozos.bin" ":pausa 4" "ipconfig" "apagar" > $R/r68$modo.sal 2>&1
+  tr -d '\r' < $R/r68$modo.sal > $R/r68$modo.txt
+  S=$R/r68$modo.txt
+  if [ $modo = memoria ]; then m1="^red: realtek: registros en la memoria, [0-9A-F]* (BAR1)$"; else m1="^red: realtek: registros por los puertos, [0-9A-F]*$"; fi
+  mira "(RTL8168) la RTL8111/8168 (rrtl.cas) en ensayo, por $modo: la encuentra, se pone en marcha, DHCP, PING sin perder ninguno y DESCARGAR" \
+    "^red: RED.INI: RealtekEnsayo=SI: la RTL8139 de QEMU, con el controlador de la RTL8168 (modo C+)$" "$m1" \
+    "^red: realtek: revisión PCI 20, TxConfig [0-9A-F]*, XID [0-9A-F]*: RTL8139C+ en modo C+ (ENSAYO)$" "^red: realtek: en marcha (RxConfig 0000E70E, TxConfig [0-9A-F]*, CPlusCmd 0003)$" \
+    "^red: enlace: sí (100 Mbit/s)$" "^red: DHCP: IP 10.0.2.15, máscara 255.255.255.0, puerta 10.0.2.2, DNS 10.0.2.3$" \
+    "^  Tarjeta . . . . . . . : Realtek RTL8139C+ en modo C+ (ENSAYO) (10EC:8139, IRQ [0-9]*)$" "^  MAC . . . . . . . . . : 52:54:00:12:34:56$" \
+    "^    Paquetes: enviados = 4, recibidos = 4, perdidos = 0 (0% perdidos)$" "^Hecho: GRANDE.BIN, 409600 octetos" "^Hecho: TROZOS.BIN, 150001 octetos"
+  if grep -q "^  Tramas  . . . . . . . : [0-9]* recibidas, [0-9]* enviadas, 0 con error$" $S && [ "$(grep "^  Tramas" $S | tail -1 | sed 's/^.*: \([0-9]*\) recibidas.*$/\1/')" -gt 300 ]; then
+    ok "(RTL8168) por $modo: $(grep "^  Tramas" $S | tail -1 | sed 's/^  Tramas[ .]*: //') (los anillos, muchas vueltas)"
+  else ko "(RTL8168) por $modo: las cuentas de tramas no son las que deben:"; grep "^  Tramas" $S | sed 's/^/        /'; fi
+  iguales=1
+  for f in GRANDE.BIN:grande.bin TROZOS.BIN:trozos.bin; do saca $R/k.img ${f%%:*} $R/x.bin && cmp -s $R/x.bin $R/srv/${f##*:} || iguales=0; done
+  if [ $iguales = 1 ]; then ok "(RTL8168) por $modo: lo descargado es igual octeto a octeto"; else ko "(RTL8168) por $modo: lo descargado no es igual"; fi
+done
+S=$R/rtl.txt
 # (el DNS de QEMU le pregunta al de esta máquina: si esta no sale a la red, no se prueba)
 if getent hosts actualiza.hispados.es > /dev/null 2>&1; then
   mira "el DNS (el de QEMU, que pregunta al de esta máquina): un nombre que no existe se dice; uno que sí, se resuelve" \
@@ -5815,6 +5848,46 @@ else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(t
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi)"
 fi   # el Wi-Fi
+# ------------------------------------------ 53. (INTEL) el Wi-Fi de Intel
+# El controlador de las Intel 7265/3165/3168 (wifi/nucleo/radio_iwl.c, como
+# iwlwifi/MVM) y el lector de su firmware (iwl_fw.c). El firmware de Intel no
+# es libre y no está en el repositorio: en el anfitrión, el lector se prueba
+# con firmwares hechos a mano y el controlador entero contra el modelo de la
+# tarjeta (tests/wifi/iwl_modelo.c: ALIVE, NVM, PHY DB, DQA, LAR y un
+# escaneo con tres redes, hasta la lista de w80211.c). Con IWL_FW=archivo
+# (un iwlwifi-7265D-29.ucode bajado aparte), además con sus secciones de
+# verdad. En QEMU (sin la tarjeta): con la e1000, que también es de Intel
+# (clase 0200h), WIFI.BIN no se pone en marcha y la red va como siempre.
+if parte08 intel; then
+echo "== (INTEL) el Wi-Fi de Intel: el lector del firmware y el controlador de la 7265 contra su modelo =="
+Wi=$P/intel
+mkdir -p $Wi
+if make -s -C $AQUI/.. build/iwl_analiza build/iwl_modelo > $Wi/make.txt 2>&1; then
+  if $AQUI/../build/iwl_analiza > $Wi/analiza.txt 2>&1 && grep -q ", 0 fallos$" $Wi/analiza.txt; then ok "(INTEL) $(tail -1 $Wi/analiza.txt)"
+  else ko "(INTEL) el lector del firmware falla:"; tail -5 $Wi/analiza.txt | sed 's/^/        /'; fi
+  if $AQUI/../build/iwl_modelo ${IWL_FW:-} > $Wi/modelo.txt 2>&1 && grep -q ", 0 fallos$" $Wi/modelo.txt; then ok "(INTEL) $(tail -1 $Wi/modelo.txt)"
+  else ko "(INTEL) el controlador contra el modelo falla:"; grep "FALLO\|MODELO" $Wi/modelo.txt | head -8 | sed 's/^/        /'; fi
+  S=$Wi/modelo.txt
+  mira "(INTEL) lo que dice en WIFI.LOG: la 7265D, las dos imágenes, la MAC, la calibración, el país y las redes" \
+    "iwl: Intel Wireless-AC 7265, CSR_HW_REV 00000218 (tipo 021: 7265D, paso 2)$" "iwl: imagen INIT cargada: " "iwl: imagen RT cargada: " \
+    "iwl: MAC 34:e6:ad:12:34:56 (del NVM)$" "iwl: calibrada: 5 trozos del PHY DB" "iwl: país «ES» (estado 0, 51 canales)$" \
+    "iwl: escaneando 13 canales de 2,4 GHz$" "red: canal  6,  -47 dBm, «HispaPrueba», seguridad 3$"
+  if [ -n "${IWL_FW:-}" ]; then
+    $AQUI/../build/iwl_analiza "$IWL_FW" > $Wi/real.txt 2>&1
+    S=$Wi/real.txt
+    mira "(INTEL) el firmware de verdad ($(basename $IWL_FW)): sus imágenes, y escaneo LMAC" "^Imagen RT (la de trabajo): " "^Imagen INIT (la de calibrar): " "^Escaneo: LMAC"
+  else echo "  (sin IWL_FW=iwlwifi-7265D-29.ucode: solo con el firmware de mentira)"; fi
+else ko "(INTEL) no se hacen build/iwl_analiza y build/iwl_modelo: $(tail -3 $Wi/make.txt)"; fi
+if $AQUI/nucleo32/disco.sh $Wi/d.img 16 red > $Wi/disco.txt 2>&1; then
+  DISCO=$Wi/d.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 3" "apagar" > $Wi/e1000.sal 2>&1
+  tr -d '\r' < $Wi/e1000.sal > $Wi/e1000.txt
+  S=$Wi/e1000.txt
+  mira "(INTEL) en QEMU, con la e1000 (de Intel, pero de cable): la red como siempre" "^red: tarjeta 8086:100E en el bus PCI 00:03$" "^red: DHCP: IP 10.0.2.15"
+  if grep -q "Wi-Fi: tarjeta\|WIFI.BIN en marcha" $S; then ko "(INTEL) con la e1000 se pone en marcha WIFI.BIN"; else ok "(INTEL) y WIFI.BIN no se pone en marcha (la e1000 no es Wi-Fi)"; fi
+else ko "(INTEL) no se hace el disco: $(tail -2 $Wi/disco.txt)"; fi
+else
+  echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi de Intel)"
+fi   # el Wi-Fi de Intel
 # ---------------------------------------- 30. (PDF) Hispa-PDF: PDF.BIN y su ventana
 # El núcleo en C de castel/nucleo32/pdf, en el anfitrión (con ASan y UBSan:
 # unir, separar, girar, quitar, comprimir con flujos de objetos, cifrar y

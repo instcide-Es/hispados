@@ -18,6 +18,10 @@
 ;                      ABIERTA que se llama como la WPA2 (una falsa)
 ;    WifiSimulada=CHIP (las pruebas) WIFI.BIN aunque no haya tarjeta en el PCI
 ;                      (es WIFISIM.BIN, con el modelo de la tarjeta dentro)
+;    RealtekEnsayo=SI  (las pruebas; RTL8168) la RTL8139 de QEMU, en modo C+, con
+;                      el controlador de la RTL8168 (rrtl.cas)
+;    RealtekPuertos=SI (RTL8168) los registros de la Realtek, por los puertos
+;    Registro=SI       (RTL8168) lo que apunta RED.BIN, también en RED.LOG (al lado)
 ;  Lo cambian Configuración (el escritorio: un aviso del núcleo) y la
 ;  ventana del Wi-Fi (REDWIFI.BIN: la orden O_WIFI_PREFERIR); se guarda aquí.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -44,6 +48,16 @@ módulo Rwifi
     variable simulada: bool
     variable chip: bool                         ; (WifiSimulada=CHIP)
     variable gemela: bool                       ; (WifiSimulada=GEMELA)
+    ; (RTL8168) RealtekEnsayo=SI (las pruebas: la RTL8139 de QEMU, en modo
+    ; C+, con el controlador de la 8168) y RealtekPuertos=SI (sus registros,
+    ; por los puertos aunque estén en la memoria): rtarjeta.cas y rrtl.cas
+    público variable ensayo_realtek, puertos_realtek: bool
+    ; (RTL8168) Registro=SI: lo que apunta el servicio, también en RED.LOG
+    ; (al lado de RED.INI), para los equipos en los que no se puede escribir
+    ; IPCONFIG /TODO (el ASUS por UEFI, sin teclado)
+    público variable registro_archivo: bool
+    variable registro_guardado: nat32
+    variable registro_fallo: bool
     variable lanzado: bool
     variable hay_tarjeta: bool                  ; una de las que lleva WIFI.BIN, en el PCI
     variable cola: arreglo [COLA] de arreglo [TRAMA] de byte
@@ -74,7 +88,10 @@ módulo Rwifi
                         si fu = 0 entonces romper fin
                         seguir
                     fin
-                    si de_wifi(id) entonces
+                    ; (INTEL) las Wi-Fi de Intel: todas son de la clase 0280h (red,
+                    ; otra); WIFI.BIN dice cuáles sabe llevar (radio_iwl.c) y, de
+                    ; las demás, lo que son en WIFI.LOG
+                    si de_wifi(id) o (id yb 0xFFFF = 0x8086 y (pci_leer(a, 8) >> 16) = 0x0280) entonces
                         apunta4("Wi-Fi: tarjeta %04X:%04X en el bus PCI %02X:%02X", id yb 0xFFFF, id >> 16, bus, ap)
                         devolver cierto
                     fin
@@ -171,6 +188,26 @@ módulo Rwifi
         cerrar(m)
     fin
 
+    ; (RTL8168) con Registro=SI, RED.LOG con lo apuntado (si ha cambiado)
+    público función guarda_registro()
+        variable r: arreglo [24] de byte
+        variable m, n: nat32
+        si no registro_archivo o registro_largo = registro_guardado entonces devolver fin
+        registro_guardado := registro_largo
+        copiar(r, ruta_ini)
+        n := longitud(r)
+        si n < 7 entonces devolver fin
+        copiar(dirección(r[n - 3]), "LOG")
+        m := crear(r)
+        si es_error(m) entonces
+            si no registro_fallo entonces apunta4("RED.LOG: no se puede escribir (%08X)", m, 0, 0, 0) fin
+            registro_fallo := cierto
+            devolver
+        fin
+        escribir_archivo(m, dirección(registro[0]), registro_largo)
+        cerrar(m)
+    fin
+
     función lanza()
         variable t: nat32
         variable args: puntero a byte
@@ -205,6 +242,22 @@ módulo Rwifi
             chip := empieza_por(v, "CHIP")
             gemela := empieza_por(v, "GEMELA")
             si gemela entonces simulada := cierto fin
+        fin
+        ensayo_realtek := falso
+        puertos_realtek := falso
+        si valor_de("RealtekEnsayo", v, 16) entonces
+            a_mayúsculas(v)
+            ensayo_realtek := empieza_por(v, "SI") o empieza_por(v, "1")
+            si ensayo_realtek entonces apunta("RED.INI: RealtekEnsayo=SI: la RTL8139 de QEMU, con el controlador de la RTL8168 (modo C+)") fin
+        fin
+        registro_archivo := falso
+        si valor_de("Registro", v, 16) entonces
+            a_mayúsculas(v)
+            registro_archivo := empieza_por(v, "SI") o empieza_por(v, "1")
+        fin
+        si valor_de("RealtekPuertos", v, 16) entonces
+            a_mayúsculas(v)
+            puertos_realtek := empieza_por(v, "SI") o empieza_por(v, "1")
         fin
         hay_tarjeta := busca_tarjeta()
         si preferir = PREFIERE_CABLE entonces

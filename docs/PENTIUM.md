@@ -3779,6 +3779,7 @@ núcleo) y un fallo de la red acaba con el servicio, no con el sistema.
      rpila.cas   Ethernet, ARP, IPv4, ICMP, UDP, DHCP, DNS
      rtarjeta.cas  las tarjetas (e1000, RTL8139) y lo común
      ryukon.cas  la Marvell Yukon 88E8059 (HP Mini 5103)
+     rrtl.cas    la Realtek RTL8111/8168 (ASUS GL553VD, Toshiba NB250)
      rbase.cas   puertos, PCI, el registro, orden de red, sumas
         │  puertos de E/S (IOPL 3), registros (llamada 95), DMA (94), IRQ (98)
         ▼
@@ -3824,6 +3825,7 @@ no hay tarjeta, sigue en marcha para contestarlo (y no se relanza).
 | Intel PRO/1000 (la familia 8254x, «e1000»: la 82540EM de QEMU y VirtualBox; y la 82574L) | `8086:100E` y otras 30 | registros en memoria (BAR0, 128 K); 32 descriptores de recepción con búferes de 2 K y 8 de envío; la MAC de `RAL`/`RAH` (o de la EEPROM). **Probada en QEMU.** |
 | Realtek RTL8139 (y la D-Link DFE-538TX) | `10EC:8139`, `1186:1300` | por los puertos; anillo de recepción de 8 K (con WRAP) y cuatro búferes de envío. **Probada en QEMU.** |
 | Marvell Yukon 2 «Optima» 88E8059 (la del HP Mini 5103; y la 88E8079) | `11AB:4381`, `11AB:4382` | pasada de la de Hispa-DOS (`drivers/hspred.asm`, docs/RED.md «Marvell Yukon 88E8059»): el mismo orden de registros y los mismos valores, por memoria; tres anillos (estado, recepción, envío) en páginas propias. **Sin probar en el equipo**: QEMU no la emula (y la de Hispa-DOS tampoco se ha probado aún allí). Cada paso de su puesta en marcha se apunta. |
+| Realtek RTL8111/8168 y su familia, «r8169» (la RTL8111H del ASUS GL553VD, 10EC:8168 rev. 15h; la RTL810xE del Toshiba NB250, 10EC:8136; 8169, 8101/8102/8105/8106, 8411, 8117; y la D-Link DGE-528T) | `10EC:8168`, `8169`, `8136`, `8167`, `8161`, `2502`, `2600`; `1186:4300` | `rrtl.cas` (23/11, marcado «(RTL8168)»): pasada de la de Hispa-DOS (`r68_*` de `drivers/hspred.asm`, la que va en el Toshiba) con lo que docs/RED.md, «RTL8168: lo que falta para las revisiones modernas», dice que hace r8169 en las 8111E-VL/F/G/H/EP. Registros por la memoria (el BAR de memoria por debajo de 4 GB: el BAR2 de 64 bits en la 8168) o por los puertos (BAR0; `RealtekPuertos=SI` en `RED.INI` lo obliga); 16 descriptores de recepción con búferes de 2 K y 8 de envío. **Probada en QEMU** contra la RTL8139 en modo C+ (abajo); **sin probar en la 8168 de verdad** (el ASUS). |
 
 Antes de nada, la tarjeta pasa a **D0** (el estado de energía de trabajar) por
 su capacidad PCI de gestión de energía, por si otro sistema la dejó dormida
@@ -3850,6 +3852,57 @@ cerrada, un octeto de vez en cuando para preguntar; lo desordenado se tira (se
 repite el ACK); FIN en los dos sentidos, RST a lo que no es de ninguna
 conexión. Sin escuchar en un puerto (de momento solo se conecta), sin
 reensamblar desordenado ni retransmisión rápida.
+
+### La RTL8111/8168 (rrtl.cas, 23/11)
+
+La tarjeta de cable del **ASUS GL553VD** de Carlos (una RTL8111H, `10EC:8168`
+revisión 15h, en 03:00.0, con el BAR2 de memoria de 64 bits) y la del
+**Toshiba NB250** (`10EC:8136`). Es la de Hispa-DOS pasada a Castel (la
+misma puesta en marcha, que en el Toshiba funciona desde el 15/11) y, solo
+para las familias modernas, lo que hace distinto `r8169` de Linux 6.6 (la
+tabla de docs/RED.md): nada copiado, los números de los registros escritos
+de nuevo.
+
+- **La familia**, por el «XID» (bits 20-31 de `TxConfig` sin el 4 y el 5, la
+  tabla de `HSPRED /INFO`, en el orden en que la mira r8169), en tres grupos:
+  **las de antes** (8169, 810x, 8168B/C/D/DP/E): exactamente lo de Hispa-DOS;
+  **8168E-VL/F y 8411**: además `TXCFG_AUTO_FIFO` (bit 7 de `TxConfig`),
+  `MaxTxPacketSize` 27h, `RxConfig` C70Eh, sin ASPM ni CLKREQ (`Config2`
+  bit 7, `Config5` bit 0), `IntrMitigate` a cero y el PLL encendido (`PMCH`);
+  **8168G/GU/EP/H/M, 8117 y 8411B** (la del ASUS): además `RX_EARLY_OFF`
+  (`RxConfig` CF0Eh) y, antes del reinicio, lo de `rtl_hw_init_8168g`: la
+  puerta de recepción cerrada (`MISC` bit 19, `RXDV_GATED_EN`), esperar a que
+  se vacíen los FIFO, `NOW_IS_OOB` (`MCU` bit 7) quitado y el FIFO
+  compartido rehecho por los registros OCP del MAC (E8DEh, esperando el bit
+  13 de E00Eh); la puerta se **abre** al arrancar (si se queda cerrada no
+  llega nada). El PHY se lee por OCP (`GPHY_OCP`, B8h, el MII en A400h) y no
+  por `PHYAR`: si otro sistema lo dejó apagado (BMCR bit 11) o sin negociar,
+  se enciende y negocia (BMCR 1200h).
+- Todo lo que hace lo **apunta** (`IPCONFIG /TODO`, y el puerto serie):
+  `realtek: revisión PCI 15, TxConfig ..., XID 541: RTL8168H/8111H`, si la
+  encontró en `NOW_IS_OOB`, si el PLL o el PHY estaban apagados, el
+  `PHYstatus` cada vez que cambia y si la tarjeta no suelta un descriptor de
+  envío. Con eso se sabe qué ha pasado en el ASUS. Con **`Registro=SI`** en
+  `RED.INI`, lo apuntado va también a **`RED.LOG`** (al lado de `RED.INI`,
+  cada 2 s si ha cambiado): para los equipos en los que no se puede escribir
+  `IPCONFIG /TODO` (el ASUS por UEFI, sin teclado: la memoria de prueba lo
+  lleva).
+- La interrupción, si su línea está entre la 3 y la 11 (con el APIC de los
+  equipos de ahora suele ser 16 o más: entonces se mira en cada vuelta).
+
+**Probarlo sin la tarjeta**: QEMU no emula la 8168, pero su RTL8139 tiene el
+**modo C+** (el de la RTL8139C+), con **los mismos descriptores** (OWN, EOR,
+FS, LS y el largo; la dirección en las palabras 2 y 3) y los mismos registros
+de los anillos (20h y E4h). Con **`RealtekEnsayo=SI`** en `RED.INI`, la
+RTL8139 de QEMU se lleva con este controlador: el aviso de envío va a D9h (en
+la 8168, 38h), se enciende el C+ en `CPlusCmd` y el enlace se mira en 58h.
+Así se prueban de verdad los anillos, el envío, la recepción, DHCP, PING y
+DESCARGAR (por la memoria y, con `RealtekPuertos=SI`, por los puertos): la
+parte 13 de `castel/pruebas.sh` (`SOLO=red`), con GRANDE.BIN y TROZOS.BIN
+(unas 400 tramas recibidas y 470 enviadas: muchas vueltas a los dos anillos,
+ninguna con error, lo bajado igual octeto a octeto). **Lo que solo se verá en
+el ASUS**: el XID y su grupo, el PHY por OCP, `RXDV_GATED_EN`, `NOW_IS_OOB`,
+el FIFO compartido, ASPM y la velocidad de 1000 Mbit/s.
 
 ### Los programas
 
@@ -4097,8 +4150,8 @@ demás del sistema en el catálogo firmado de `actualiza.sh`.
 Reensamblar lo que llega desordenado y la retransmisión rápida (escuchar en un
 puerto ya va: sección 14 ter); IPv6; una IP puesta a mano (`RED.INI`); varias tarjetas a
 la vez (con el Wi-Fi, una u otra: sección 14 octies); TLS 1.3 (BearSSL no lo tiene), gzip en `Https` y la
-hora por NTP (hecho: la 0.8.7, sección 14 quattuordecies); más tarjetas (la RTL8168 del Toshiba NB250,
-la PCnet, NE2000: Hispa-DOS ya las lleva). (El navegador, encima de esto, ya
+hora por NTP (hecho: la 0.8.7, sección 14 quattuordecies); más tarjetas (la PCnet, NE2000: Hispa-DOS ya las lleva; la RTL8168 ya está:
+«La RTL8111/8168», arriba). (El navegador, encima de esto, ya
 está: sección 14 ter.)
 (Las **actualizaciones** por la red ya van: sección 13.)
 
@@ -6133,6 +6186,131 @@ Hispa-Pentium; en Hispa-486 sí va): la imagen
 con su `LEEME.TXT`: arrancar de la memoria, conectar a su Wi-Fi desde el
 icono, `PING` y Google en el Navegador; si falla, `X:\WIFI.LOG`.
 
+### El Wi-Fi de Intel (radio_iwl.c, 23/11; marcado «(INTEL)»)
+
+Las Wi-Fi de Intel son las más comunes en los portátiles, y las de Carlos lo
+son: el **ASUS GL553VD** lleva una **Wireless-AC 7265** (`8086:095A`, en
+02:00.0), el **Monovate 14.1** (i3-1115G4, Tiger Lake) una CNVi con el
+Bluetooth `8087:0AAA` (una 9560/9462, «Jefferson Peak») y el **ThinkPad E14
+Gen 5** una CNVi con el Bluetooth `8087:0026` (una AX201). No hay controlador
+de Linux que se pueda pasar como `brcmsmac` o `ath9k`: iwlwifi es enorme y
+depende de mac80211. Así que es **un controlador nuevo**, escrito aquí
+(`wifi/nucleo/radio_iwl.c`), que hace lo que hace iwlwifi con el firmware de
+Intel, que es quien hace casi todo (iwlwifi es GPL-2.0/BSD; de allí solo se
+han tomado los hechos —los números de los registros, los bits, la forma y el
+orden de las órdenes—, cada paso con la función de Linux 6.6 de la que sale;
+ni una línea de su código).
+
+**Etapa 1 (hecha): la 7265 encuentra las redes.**
+
+- **La tarjeta**: `iwl_reconoce` (las 7265, 3165 y 3168, y, para decirlo en
+  `WIFI.LOG`, las 7260/3160, 8260/8265, las 9000 y las CNVi de Cannon Lake a
+  Meteor Lake con su plataforma); `CSR_HW_REV` dice si es una **7265D** (tipo
+  210h: `iwlwifi-7265D-29.ucode`) o una 7265 sin «D» (`iwlwifi-7265-17`).
+  `RED.BIN` pone en marcha `WIFI.BIN` con cualquier Intel de la clase 0280h.
+- **El firmware** (`wifi/nucleo/iwl_fw.c`, `iwl_fw.h`): su cabecera y sus TLV;
+  las secciones de las imágenes INIT y RT (con el separador de la CPU2 y la
+  memoria paginada), `PHY_SKU`, `DEF_CALIB`, las capacidades y las versiones
+  de las órdenes. Desconfía de todo el archivo (largos, tablas llenas).
+- **El transporte PCIe «gen1»** (el de la familia 7000): despertarla
+  (`prepare_card_hw`, `apm_init` con lo de APMG, `nic_config` con el PHY_SKU),
+  el «NIC access» pedido una vez y guardado (se sondea: sin ahorro de
+  energía), la cola de recepción (256 RBD con 64 búferes de 4 K de verdad: la
+  ranura *s* usa el *s* mod 64, y el puntero de escritura, de 8 en 8, nunca
+  deja a la tarjeta dos ranuras con el mismo), la cola de órdenes (la 0, en el
+  FIFO 7, por DQA: TFD de 128 octetos, el primer TB con una copia de los
+  primeros 20 octetos, cabecera «ancha» de 8 octetos) y la carga del firmware
+  por el canal de servicio del FH, en trozos de 32 K, con `LMPM_CHICK` en la
+  zona extendida (40000h-57FFFh); al soltar la CPU, el ALIVE (con la base del
+  planificador) y el planificador (SCD) en marcha.
+- **MVM**: con la imagen **INIT**, BT_CONFIG, la MAC del NVM (sección 0,
+  octeto 2Ah, de dos en dos al revés), los canales del NVM (sección 1),
+  TX_ANT, PHY_CONFIGURATION con su calibración y guardar el **PHY DB** hasta
+  INIT_COMPLETE; se para la tarjeta y, con la **RT**, se le devuelve el PHY DB
+  (CFG, NCH, PAPD, TXP), TX_ANT, PHY_CONFIGURATION, BT_CONFIG, **DQA_ENABLE**,
+  la **estación auxiliar** (la 1, con su cola 1 en el FIFO 5: la de los
+  sondeos del escaneo), el contexto PHY 0, POWER_TABLE sin ahorro y el país
+  por **LAR** (`MCC_UPDATE` «ZZ»: sin él el firmware no escanea), que dice qué
+  canales valen.
+- **El escaneo**: este firmware no tiene el escaneo UMAC, así que es la orden
+  **LMAC** (`SCAN_OFFLOAD_REQUEST`, 1.772 octetos): los canales de 2,4 GHz que
+  valen, activo con el SSID comodín, la plantilla del «probe request» con
+  nuestra MAC y las velocidades. Cada baliza llega en dos paquetes: 0xC0 (el
+  PHY: el canal y la energía de las dos antenas; la señal es la mejor) y 0xC1
+  (la trama, con su estado: CRC bien). Van a `w80211.c` como las de las otras
+  tarjetas, con su canal de verdad (`barre_sola` en `struct radio`: es el
+  firmware quien salta de canal). La ventana del Wi-Fi y `REDWIFI /REDES`
+  las enseñan igual.
+- **El firmware de Intel no es libre** (su licencia deja repartirlo sin
+  cambios, pero no es software libre): **no está en el repositorio ni en las
+  imágenes ni en el paquete «wifi»**. `WIFI.BIN` lo busca, con el nombre de
+  linux-firmware, en **`\HISPA\FIRMWARE\`** (o `\FIRMWARE\` en la raíz de
+  la memoria USB; el sistema de archivos abre por nombre largo) y, si no está,
+  lo dice en `WIFI.LOG` con el nombre y de dónde bajarlo
+  (<https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/intel/iwlwifi>).
+  `tools/firmware_intel.sh CARPETA` lo baja con su licencia
+  (`LICENCE.iwlwifi_firmware`) a `CARPETA/FIRMWARE/`. **El plan para el
+  paquete**: un paquete aparte, «fw-intel», del tipo de los opcionales, que
+  no se hace en el repositorio sino al publicar (con ese guion, desde
+  linux-firmware, con la licencia dentro) y se ofrece en «Programas y
+  actualizaciones» con su licencia a la vista; el sistema no lo instala solo.
+- **Memoria**: el firmware (1 MB) se lee al montón de 2 MB de `WIFI.BIN`; las
+  colas, unos 420 K más.
+
+**Probarlo sin la tarjeta** (`castel/pruebas.sh`, parte 53, `SOLO=intel`):
+`build/iwl_analiza` prueba el lector con firmwares hechos a mano (cortados,
+sin magia, con largos que se salen, demasiadas secciones) y, con un archivo,
+dice lo que trae; `build/iwl_modelo` corre el controlador entero contra un
+**modelo de la 7265D** (`tests/wifi/iwl_modelo.c`: sus registros, HBUS, el
+canal de servicio, las colas por DMA y lo que haría el firmware: ALIVE, NVM,
+el PHY DB, las respuestas y un escaneo con tres redes), que comprueba el
+firmware octeto a octeto en su sitio, el «NIC access», las cabeceras, el
+orden de las órdenes y el puntero de recepción, y al final la lista de
+`w80211.c` (17 comprobaciones con el firmware de mentira; 31 si además va el de verdad,
+`IWL_FW=iwlwifi-7265D-29.ucode`, bajado aparte). En QEMU no hay ninguna
+Intel Wi-Fi: se prueba que con la e1000 (de Intel, pero de cable) `WIFI.BIN`
+no se pone en marcha. **Lo que solo se verá en el ASUS**: todo lo de la
+tarjeta de verdad. Lo que la especificación deja SIN CONFIRMAR, y es lo
+primero que mirar en `WIFI.LOG` si no salen redes: si el escaneo LMAC va sin
+un `MAC_CONTEXT` (Linux siempre tiene una interfaz antes de escanear), el
+tamaño del ALIVE (0x44 o 0x74) y si EBS a cero vale.
+
+**Etapa 2: conectarse (la 7265).** Lo que hace falta, con sus órdenes (todas
+del grupo 1): `MAC_CONTEXT_CMD` (28h, una estación, `FW_MAC_TYPE_BSS_STA`),
+`BINDING_CONTEXT_CMD` (2Bh), `TIME_QUOTA_CMD` (2Ch), `ADD_STA` del punto de
+acceso (la 0), las colas de gestión y datos con `SCD_QUEUE_CFG`,
+`TIME_EVENT_CMD` (29h) para que el firmware se quede en el canal durante la
+autenticación y la asociación, `TX_CMD` (1Ch, con la tabla del planificador
+de cada cola de datos al día) y `LQ_CMD` (4Eh, la tabla de velocidades: este
+firmware no la hace solo). Y **WPA2**: el acuerdo de 4 pasos es el de
+`wpa.c`, como hoy; el cifrado CCMP **lo hace la tarjeta** (`ADD_STA_KEY`,
+17h, y `sec_ctl` CCM en `TX_CMD`; el PN lo pone y lo comprueba el
+controlador), así que `wpa.c` solo da las claves. Con eso, `struct radio`
+`enviar` deja de ser «aún no».
+
+**Etapa 3: la 9560 del Monovate (CNVi, Tiger Lake).** Ojo: en Tiger Lake la
+CNVi es `8086:A0F0` y **no** es de la familia 9000 sino de la **22000
+(«QuZ»)**, con transporte **gen2**: la radio JF (la 9560) usa
+`iwlwifi-QuZ-a0-jf-b0-NN.ucode`, la HR (la AX201) `iwlwifi-QuZ-a0-hr-b0-NN`;
+lo dice `CSR_HW_RF_ID` (el Bluetooth `8087:0AAA` es USB y no lo dice). Gen2:
+TFD de 256 octetos con TB de 64 bits, colas que se piden al firmware, la
+recepción multicola (RFH) y el arranque por el **«context info»**: una
+estructura en la memoria con las colas y la lista de las secciones del
+firmware copiadas a la memoria (no por el canal de servicio), cuya dirección
+se escribe en `CSR_CTXT_INFO_BA` antes de `UREG_CPU_INIT_RUN`; firmware
+unificado (sin INIT aparte), escaneo **UMAC** (`SCAN_CFG_CMD` y
+`SCAN_REQ_UMAC` con la versión que dice el TLV 48) y la MAC de los registros
+`CSR` (no del NVM). Las 9560 de Cannon/Coffee Lake (`9DF0`, `A370`) sí son de
+la 9000: transmisión gen1 (lo de ahora), recepción RFH y carga «estilo 8000»
+(secciones seguras, CPU1 y CPU2, `FH_UCODE_LOAD_STATUS`, la memoria
+paginada).
+
+**Etapa 4: la AX201/AX211 del ThinkPad E14 Gen 5** (Raptor Lake: CNVi
+`8086:51F0`/`7A70`…, familia AX210, «So», **gen3**): el context info gen3
+con el IML (TLV 52) y el **PNVM** (`iwlwifi-so-a0-gf-a0.pnvm` /
+`…-hr-b0`), que se carga tras el ALIVE. Es el mismo trabajo que la etapa 3
+más el PNVM: primero la 3.
+
 ### Lo que falta
 
 - **Probarlo en el HP Mini** (y en el Toshiba, con la Atheros) y corregir con
@@ -6141,7 +6319,7 @@ icono, `PING` y Google en el Navegador; si falla, `X:\WIFI.LOG`.
   Hispa-486); con ella, `WIFI.BIN` no daría vueltas sin nada que hacer.
 - Lo que falta también en Hispa-486: 802.11n y 5 GHz, la clave de grupo TKIP
   (los routers en modo mixto), la BCM4313 (su PHY LCN), otras tarjetas
-  (Realtek `rtw88`, Intel `iwlwifi`).
+  (Realtek `rtw88`; las Intel, por etapas: arriba, «El Wi-Fi de Intel»).
 - Redes ocultas por su nombre; una IP puesta a mano por red.
 
 ## 14 nonies. Los accesorios: la Calculadora, el Reloj y el Mapa de caracteres
