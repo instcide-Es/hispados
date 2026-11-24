@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0, 1, 2, 3, 4, 5 y 6 están hechas** (secciones 6 a 12).
+**etapas 0, 1, 2, 3, 4, 5, 6 y 7 están hechas** (secciones 6 a 13).
 
 ---
 
@@ -264,7 +264,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 4 | Anillo 3, syscall/sysret, ELF64, procesos | **hecha (23/11)** | — |
 | 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | **hecha (24/11)** | — |
 | 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento; la consola y el intérprete | **hecha (24/11)** | — |
-| 7 | musl, POSIX, herramientas de compilar cruzado | 6–8 sem. | 9,5 meses |
+| 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | 5–7 sem. | 11 meses |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | 6–8 sem. (+ Wi-Fi 3–5 meses) | 12,5 meses |
 | 10 | Navegador moderno (Ladybird o WebKit) | 8–12 sem. | 15 meses |
@@ -375,7 +375,17 @@ discos en marcha, etapa 7).
 - **QEMU**: `-device qemu-xhci`, `usb-kbd`, `usb-tablet`, `usb-storage`.
   **Taller**: todos (cada uno tiene su touchpad y su teclado).
 
-### Etapa 7 — POSIX y musl
+### Etapa 7 — POSIX y musl (hecha: sección 13)
+
+Lo que cambió del plan al hacerla: **musl no se ha tenido que tocar** (las
+llamadas son las de Linux: se compila tal cual, la 1.2.6 con sus parches de
+seguridad, y el «compilador cruzado» es el guion `musl-gcc` de musl, en el
+árbol de construcción); la herramienta de verdad es **Lua 5.5** (MIT), sin
+cambiar nada (BusyBox es GPL-2.0 *solo*, que no casa con el «o posterior» de
+Hispa; toybox, SQLite y `make`, más adelante); las pruebas de libc-test, en la
+8; se ha añadido **AVX** (xsave) y los **ELF de posición libre** estáticos;
+`mmap` de archivos **copia** lo del archivo (la caché de páginas compartida, más
+adelante); los discos que se enchufan en marcha pasan a la 8.
 
 - musl portada, las llamadas de 2.8 (1 a 6), hilos de POSIX, `epoll`; el compilador
   cruzado `x86_64-linux-musl` (gcc o clang) para hacer programas de Hispa-64 desde el
@@ -1728,3 +1738,336 @@ teclados de los portátiles (cada uno con lo suyo).
   tienen un «touchpad PS/2» (hoy solo el teclado).
 - Los nombres de más de 255 octetos en UTF-8 (exFAT y FAT admiten 255 letras
   UTF-16).
+
+---
+
+## 13. La etapa 7, hecha (24/11/2026): musl y POSIX
+
+### Las decisiones
+
+- **musl tal cual, sin instalar nada.** La 1.2.6 (la estable de musl.libc.org,
+  con su firma comprobada) está entera en `terceros/musl/`, con los tres
+  parches de seguridad que manda poner su página (CVE-2026-107891 de
+  `regcomp`, CVE-2026-40200 de `qsort` y CVE-2026-6042 de `iconv`) y su
+  LEEME. Se compila con el gcc del sistema, para x86-64, en `build/musl-obj`
+  (`make -j1`), y se instala en `build/musl`: las cabeceras, `libc.a`,
+  `libc.so` (que es también el cargador dinámico) y el guion `musl-gcc` de musl,
+  que llama al gcc del sistema con lo de ese árbol. Ese es el **compilador
+  cruzado** de Hispa-64 desde el servidor: como las llamadas al sistema son las
+  de Linux x86-64 (2.6), musl no se ha tenido que tocar ni en una línea. Lo
+  hace `programas/hazmusl.sh` (solo la primera vez: unos minutos).
+- **Lua 5.5.1**, la herramienta de verdad: MIT, pequeña, en C portable, y
+  útil (un lenguaje para guiones). En `terceros/lua/`, sin cambiar nada, se
+  compila con `make linux` y `musl-gcc` (estática) y corre desde ORDENES, con
+  un guion o a mano. BusyBox no: es GPL-2.0 *solo*, y Hispa es «2.0 o
+  posterior»; toybox (0BSD) es la candidata para las órdenes de siempre.
+- **Los hilos, en el hilo del núcleo** (Hilos64.Hilo): su número (el tid, de
+  la misma cuenta que los procesos, como en Linux), sus registros, su FS, su
+  máscara de señales, sus pendientes, su pila de señales, `CLONE_CHILD_CLEARTID`
+  y la lista robusta. El proceso tiene la lista de sus hilos (64 como mucho) y
+  lo compartido: el espacio, los archivos, las acciones de las señales y las
+  pendientes de todo el proceso. `exit` acaba el hilo; el último acaba el
+  proceso; `exit_group` (o una señal que lo cierra) marca el proceso y cada
+  hilo acaba al volver al anillo 3 o de su llamada (a los que duermen se les
+  despierta; a los que corren en otro procesador, un aviso por IPI). `execve`
+  con varios hilos deja solo el que la hace (como Linux).
+- **Las señales, donde las mira Linux: al volver al anillo 3.** Al acabar
+  cada llamada al sistema (`antes_de_volver`) y **al volver de cada
+  interrupción** que llegó en el anillo 3: la salida común de las entradas
+  (`E64_salida`) guarda los quince registros en un marco como el de `syscall` y
+  llama a `al_volver`. Así un `kill` o Ctrl+C le llegan también a un programa
+  que no llama nunca al sistema: en el siguiente tic (o en el aviso de otro
+  procesador). El marco que se pone en la pila del programa es el de Linux
+  (`rt_sigframe`: `pretcode` = `sa_restorer`, el `ucontext` con los registros
+  en el orden de `mcontext_t`, la máscara de antes y el puntero a los de x87,
+  SSE y AVX, y `siginfo`), alineado como lo pide el ABI; `rt_sigreturn` lo
+  deshace y vuelve con `iretq` (para poner también RCX y R11), comprobando
+  antes lo que podría hacer fallar al núcleo (RIP fuera de lo suyo, las
+  banderas, MXCSR y la cabecera de xsave). Una pendiente de cada número (las
+  de tiempo real no se encolan aún).
+- **Las esperas se interrumpen.** El hilo que duerme en una espera de las que
+  se pueden interrumpir (la consola, `wait4`, un futex, una tubería, dormir,
+  `pause`, `sigsuspend`, `poll`) lo dice en `interrumpible`; quien manda la
+  señal lo saca de ella y lo despierta. La llamada devuelve ERESTARTSYS (o
+  ERESTARTNOHAND), que se vuelve EINTR si se entra en una función sin
+  `SA_RESTART`, o se repite (RIP − 2 y RAX = el número) si no hay función o la
+  tiene; `nanosleep` da EINTR y lo que quedaba.
+- **Los fallos del procesador son señales.** Si el programa tiene una función
+  para SIGSEGV, SIGFPE, SIGILL, SIGBUS o SIGTRAP (y no la bloquea), el fallo se
+  le entrega al volver (con `si_addr` y `si_code`: SEGV_MAPERR o SEGV_ACCERR,
+  FPE_INTDIV, ILL_ILLOPN...); si no, se explica en español y se cierra, como
+  desde la etapa 4. Sin función, lo que hace cada señal es lo de Linux (cerrar,
+  o nada para SIGCHLD, SIGURG, SIGWINCH y SIGCONT); sin control de trabajos aún,
+  SIGSTOP y compañía no paran.
+- **futex**, en 64 cubos: la clave es el espacio y la dirección
+  (`FUTEX_PRIVATE_FLAG`, lo de siempre en musl) o la dirección física (entre
+  procesos); lo de cada uno que espera está en su pila mientras espera, y leer
+  el valor y ponerse a esperar se hace con el cerrojo del cubo: un
+  `FUTEX_WAKE` no se puede perder entre medias. WAIT, WAKE, WAIT_BITSET,
+  WAKE_BITSET, REQUEUE y CMP_REQUEUE, con plazo.
+- **fork con copiar al escribir**: `copia_espacio` comparte las páginas, de
+  solo leer y con la marca COPIAR (el bit 9 de la entrada), y una tabla de 4
+  octetos por marco de la RAM dice cuántos más tienen cada uno (se pide de una
+  vez al preparar los procesos: 128 KB con 128 MB). Al escribir (el fallo de
+  página, o el núcleo al escribir en la memoria del programa), `rompe_copia`:
+  si ya no lo tiene nadie más, el mismo marco de escribir; si no, una copia.
+  Soltar una página solo devuelve el marco cuando es el último. Las de
+  `MAP_SHARED` llevan la marca COMPARTIDA (el bit 10) y se comparten de
+  verdad. La memoria de cada proceso lleva un **mutex** (los fallos de página
+  de varios hilos a la vez, `mmap`, `munmap`, `mprotect`, `brk`, `fork`, y las
+  copias del núcleo desde y hacia el programa, para que nadie quite una página
+  mientras se copia).
+- **`clone` con `CLONE_VM` y `CLONE_VFORK`** (el `posix_spawn` de musl, y con
+  él `system` y `popen`): el hijo usa el espacio del padre («prestado») y el
+  padre espera a que el hijo haga `execve` o acabe; ninguno de los dos lo
+  deshace.
+- **`mmap` de un archivo copia lo que tiene**, al hacer el `mmap`: con
+  `MAP_PRIVATE` es justo lo que pide POSIX, y con `MAP_SHARED` de solo leer
+  también, mientras nadie escriba el archivo a la vez; lo de después del final,
+  a cero. `MAP_SHARED` de escribir (que lo escrito vaya al archivo) pide la
+  caché de páginas compartida con el VFS: aún no (da ENODEV; EACCES si el
+  archivo no está abierto para escribir).
+- **ELF de posición libre y dinámicos**: un PIE va en 0x555555554000 y su
+  cargador (PT_INTERP) en 0x7F0000000000 (sin direcciones al azar aún); se
+  empieza en el cargador, con AT_BASE, AT_ENTRY (la del programa), AT_PHDR,
+  AT_HWCAP y AT_MINSIGSTKSZ en el vector auxiliar. El cargador de musl es
+  `/lib/ld-musl-x86_64.so.1`: en Hispa-64, **/lib, /usr y /bin son la unidad en
+  memoria** (donde están los módulos del cargador), y ahí busca también ld-musl
+  las bibliotecas (`/lib`, `/usr/lib`), que carga con `open` y `mmap`.
+- **AVX con xsave**: si el procesador tiene XSAVE y AVX, OSXSAVE y XCR0 con x87,
+  SSE, AVX (y los tres de AVX-512 si están); cada hilo guarda lo que diga
+  CPUID 0xD (832 octetos con AVX), alineado a 64, y la señal lo lleva entero en
+  su marco. Sin AVX, `fxsave` como antes.
+- **Las tuberías** (Tubos64): 64 KB por tubería, PIPE_BUF (4096) de una vez,
+  O_NONBLOCK, EPIPE y SIGPIPE, el fin de archivo cuando ya no hay quien
+  escriba, contadas por cada descriptor de cada extremo (dup, fork).
+- **epoll** (lo que usan los navegadores y casi todo, 2.8): un descriptor
+  con la lista de lo que se mira (hasta 64: el descriptor, lo que se pide y el
+  dato del programa); `epoll_wait` lo mira como `poll` y duerme como `poll`
+  (de 10 en 10 ms si hay tuberías, o hasta que haya teclas; una señal lo
+  despierta). EPOLLONESHOT de verdad; EPOLLET, como si no (avisa mientras esté
+  listo: no se pierde nada, pero despierta más veces).
+- **getrandom**: RDRAND (con sus reintentos), o RDSEED, o, si no hay ninguna
+  (el TCG de QEMU con «pc»), lo del TSC mezclado: entonces **no** es azar de
+  criptografía, y así se dice aquí.
+
+### Qué hace
+
+Hispa-64 0.7.0. Los módulos nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `procesos.cas` | los hilos (`crea_hilo`, `arranca_clon`, `sal_hilo`, `sal`, `solo_este`), las señales (mandarlas a un proceso o a un hilo, `kill`, `tgkill`, Ctrl+C; sacarlas, entregarlas con su marco, lo que hacen sin función, `rt_sigreturn`; las esperas que se interrumpen), los fallos que son señales, el fallo de página con copiar al escribir y el mutex de la memoria, `fork` con copiar al escribir y con el espacio prestado (`CLONE_VFORK`), el cargador de ELF con PIE y PT_INTERP, xsave |
+| `futex64.cas` | `futex`: las esperas por clave, en 64 cubos |
+| `tubos64.cas` | `pipe` y `pipe2` |
+| (en `sistema.cas`) | `epoll` |
+| `espacios.cas` | copiar al escribir (COPIAR, COMPARTIDA, la tabla de compartidos, `rompe_copia`, `suelta_marco_u`), `mapea_u_tal` |
+| `entradas.cas` | `al_volver` en la salida de las interrupciones al anillo 3; la vuelta de `syscall` por `iretq` (rt_sigreturn); XSAVE, XCR0 y lo de CPUID para AT_HWCAP |
+| `hilos64.cas` | lo de POSIX de cada hilo; `interrumpe` (sacarlo de su espera, o avisar a su procesador) |
+| `sistema.cas` | las llamadas nuevas (abajo), `mmap` de archivos y `MAP_SHARED`, `madvise`, las tuberías en `read`, `write`, `poll`, `select`, `fcntl`, `fstat`; Procesos.`antes_de_volver` al acabar cada llamada |
+| `tty64.cas` | la espera de la consola se interrumpe con una señal (SA_RESTART) |
+| `vfs64.cas`, `unidad64.cas` | /lib, /usr y /bin, la unidad; la unidad, hasta 64 archivos (y 64 módulos del cargador) |
+| `prmusl64.cas` | las pruebas de cada arranque con los programas de musl (abajo); «sinmusl» las quita |
+| `programas/hazmusl.sh` | musl y Lua en `build/`; los programas de `programas/musl/` |
+| `programas/musl/` | `mhola.c`, `libsaludo.c`, `mhilos.c`, `msenales.c`, `mprocesos.c`, `mmapa.c`, `mbucle.c`, `prueba.lua` y `comun.h` |
+| `terceros/musl/`, `terceros/lua/` | musl 1.2.6 y Lua 5.5.1, con sus licencias (MIT) y su LEEME |
+
+Las llamadas nuevas: 13 `rt_sigaction` y 14 `rt_sigprocmask` de verdad, 15
+`rt_sigreturn`, 22 `pipe`, 25 `mremap` (ENOMEM: musl copia), 28 `madvise`, 34
+`pause`, 56 `clone` (hilos; `CLONE_VM` con `CLONE_VFORK`; como `fork`), 60
+`exit` (el hilo), 62 `kill`, 95 `umask`, 96 `gettimeofday`, 97 `getrlimit`,
+98 `getrusage`, 99 `sysinfo`, 127 `rt_sigpending`, 130 `rt_sigsuspend`, 131
+`sigaltstack`, 160 `setrlimit`, 186 `gettid` (el del hilo), 200 `tkill`, 201
+`time`, 202 `futex`, 203 y 204 `sched_setaffinity` y `sched_getaffinity`, 218
+`set_tid_address` (del hilo), 229 `clock_getres`, 230 `clock_nanosleep`, 234
+`tgkill`, 273 y 274 `set_robust_list` y `get_robust_list`, 293 `pipe2`, 302
+`prlimit64`, 318 `getrandom`; 213 `epoll_create`, 291 `epoll_create1`, 233
+`epoll_ctl`, 232 `epoll_wait`, 281 `epoll_pwait`; `clock_gettime` con los relojes de CPU; y 324,
+334, 435 y 439 (`membarrier`, `rseq`, `clone3`, `faccessat2`) dan ENOSYS sin
+decirlo (musl se las arregla sin ellas).
+
+Lo que dice (QEMU, q35, por UEFI, 4 procesadores, `-cpu max`; abreviado: de los
+dinámicos, solo lo que cambia):
+
+```
+musl: los programas de C de hoy, con la biblioteca de C de musl (estáticos, dinámicos con ld-musl y PIE)
+  AVX: sí (xsave, XCR0 = 7, 832 octetos por hilo); RDRAND: sí; RDSEED: sí
+MHOLA: hola desde musl (printf); estático
+  uname: Hispa-64 0.7.0 x86_64 (etapa 7 (musl y POSIX))
+  procesadores (sched_getaffinity): 4
+  (esto va por stderr)
+MHOLA: todo bien (19 pruebas)
+Programa «MHOLA uno dos»: acaba con el código 0, como debe (en 747 ms)
+MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000
+  libsaludo.so: hola (42)
+MHOLA: todo bien (20 pruebas)
+MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000
+MHOLA: todo bien (19 pruebas)
+MHILOS: los hilos de POSIX de musl; estático
+  8 hilos que suman 2000 veces con un mutex: 16000 (exacto); tids de 77 a 84
+  un productor y 8 consumidores (pthread_cond_wait, signal y broadcast): la suma, 2001000 (exacta)
+  pthread_cond_timedwait de 50 ms: ETIMEDOUT en 55 ms
+  AVX: 8 hilos con ymm0 a ymm7 llenos, cediendo el procesador 40 veces: intactos
+MHILOS: todo bien (26 pruebas)
+MHILOS: los hilos de POSIX de musl; dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000
+  8 hilos que suman 2000 veces con un mutex: 16000 (exacto); tids de 111 a 118
+  pthread_cond_timedwait de 50 ms: ETIMEDOUT en 51 ms
+MHILOS: todo bien (26 pruebas)
+MSENALES: las señales de verdad; estático
+  raise y kill: la función de la señal, con su siginfo; la coma flotante, intacta
+  sigprocmask: bloqueada no llega (sigpending la tiene); al desbloquearla, llega
+  los fallos (SIGSEGV en 0x10 y en su código, SIGFPE, SIGILL), atendidos y salidos con siglongjmp
+  sigaltstack y SA_ONSTACK: la función corre en la pila de las señales
+  read de una tubería interrumpido: con SA_RESTART se repite; sin él, EINTR
+  SIGCHLD al acabar un hijo: CLD_EXITED, con su pid y su código
+  un hijo que no llama al sistema, cerrado con SIGTERM y con SIGINT
+  SIG_IGN; SIGPIPE: ignorada, EPIPE; sin ignorarla, cierra el proceso
+  pthread_kill (tgkill): la señal la atiende el hilo 153
+MSENALES: todo bien (26 pruebas)
+MSENALES: las señales de verdad; dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000
+  pthread_kill (tgkill): la señal la atiende el hilo 163
+MSENALES: todo bien (26 pruebas)
+MPROCESOS: fork, execve, wait, tuberías y posix_spawn; estático
+  fork con 16 MB: el hijo los lee y los cambia (copiar al escribir); el padre no ve sus cambios, ni el hijo los del padre
+  100 KB por una tubería (y la suma de vuelta por otra, y el fin de archivo)
+  epoll de una tubería: el plazo, EPOLLIN con su dato, EPOLLONESHOT, EPOLLHUP, EPOLL_CTL_DEL
+  fork, dup2 y execve de /MHOLA: «MHOLA (por una tubería): estático, argc 2»
+  posix_spawn (clone con CLONE_VM y CLONE_VFORK) de /MHOLA, con su salida por una tubería; y de uno que no está, ENOENT
+  (el hijo de un proceso con 2 hilos: sigue con uno)
+  fork y execve con varios hilos; cinco hijos con wait
+MPROCESOS: todo bien (24 pruebas)
+MPROCESOS: fork, execve, wait, tuberías y posix_spawn; dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000
+MPROCESOS: todo bien (24 pruebas)
+MMAPA: mmap de archivos y memoria compartida; estático
+  mmap de 46464 octetos del programa: MAP_PRIVATE (de leer, con desplazamiento, de escribir sin cambiar el archivo) y MAP_SHARED de solo leer
+  MAP_SHARED anónima: padre e hijo suman a la vez con atómicos: 40000 (exacto)
+  munmap, mprotect (PROT_NONE y otra vez de leer) y MADV_DONTNEED, con SIGSEGV atendida; 64 MB tocados
+MMAPA: todo bien (16 pruebas)
+MMAPA: mmap de archivos y memoria compartida; dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000
+MMAPA: todo bien (16 pruebas)
+LUA: Lua 5.5 en Hispa-64 (con musl, sin cambiar nada)
+LUA: todo bien (16 pruebas); hoy es 24/11/2026
+Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe (en 1074 ms)
+Después de musl: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas, 0 tuberías; 74 hilos creados, 34 señales entregadas, 6927 esperas de futex, 20812 páginas compartidas al bifurcar (8360 copiadas al escribir, 193 sin copiar)
+  la memoria: la de antes; el montón: 16 bloques (los de antes); las pilas: 15 (las de antes)
+Hispa-64 etapa 7: todo en orden.
+```
+
+### Cómo se ha probado
+
+El núcleo ocupa 336 KB (eran 304).
+
+`castel/nucleo64/pruebas.sh`: **101 pruebas, todas bien** (eran 96), unos 29
+minutos con el servidor. Las de la etapa 7:
+
+- **musl y Lua se compilan** la primera vez (`programas/hazmusl.sh`: `configure`
+  y `make -j1` en `build/musl-obj`, unos cinco minutos; Lua, con `make linux`
+  en `build/lua-obj`) y los programas de prueba van como módulos, con el
+  cargador dinámico (`ld-musl-x86_64.so.1`, la `libc.so` de musl) y
+  `libsaludo.so`: la unidad en memoria tiene 25 archivos;
+- **por multiboot con 1 procesador** («pc», 128 MB), **4** (q35) y **8**
+  (`-cpu max`: con AVX), y **por UEFI** (OVMF y GRUB) **con 1** (128 MB) **y
+  con 4** (`-cpu max`, 3 GB): en todas (`e7_bien`), **MHOLA** tres veces
+  (estático; dinámico, con ld-musl en 0x7F0000000000, el programa en
+  0x555555554000 y `libsaludo.so` cargada por ld-musl con `open` y `mmap`; y
+  estático de posición libre): printf con todos sus formatos, strtod, malloc
+  de 400 KB y realloc a 16 MB (musl prueba `mremap` y copia), qsort de
+  100.000, 1000 malloc y free, calloc, time, nanosleep de 20 ms, fopen y fgets,
+  ENOENT, uname, getpid y gettid, sysconf (el número de procesadores, con
+  `sched_getaffinity`), isatty, getrandom; **MHILOS** dos veces (estático y
+  dinámico): 8 hilos que suman con un mutex (16000, exacto), cada uno con su
+  TLS y su tid, pthread_join con lo que devuelven, un productor y 8
+  consumidores con `pthread_cond` (la suma, exacta), semáforos y una barrera,
+  un hilo suelto que acaba con `pthread_exit`, `pthread_cond_timedwait` de 50
+  ms (ETIMEDOUT a su hora) y, con AVX, 8 hilos con ymm0 a ymm7 llenos que ceden
+  el procesador y dan vueltas sin llamar al sistema: intactos; **MSENALES**
+  dos veces: raise y kill con su siginfo (SI_TKILL, SI_USER, si_pid), la coma
+  flotante intacta al volver de la señal, la máscara (bloqueada no llega,
+  sigpending la tiene, al desbloquearla llega), SIGSEGV en 0x10 (SEGV_MAPERR)
+  y al escribir en su código (SEGV_ACCERR), SIGFPE (FPE_INTDIV) y SIGILL
+  (ILL_ILLOPN) atendidas y salidas con siglongjmp, sigaltstack con
+  SA_ONSTACK, `read` de una tubería interrumpido (con SA_RESTART se repite;
+  sin él, EINTR), nanosleep interrumpido (EINTR y lo que quedaba), SIGCHLD
+  (CLD_EXITED, si_pid, si_status), **un hijo que solo cuenta, sin llamar al
+  sistema, cerrado con SIGTERM y con SIGINT**, sigsuspend (y la máscara de
+  antes al volver), SIG_IGN, SIGPIPE ignorada (EPIPE) y sin ignorar (cierra al
+  hijo), pthread_kill (la atiende ese hilo); **MPROCESOS** dos veces (24 pruebas): fork con
+  16 MB (el hijo los lee y los cambia; el padre no ve sus cambios, ni el hijo
+  los del padre: copiar al escribir), 100 KB por una tubería y la suma de
+  vuelta por otra, el fin de archivo, poll de una tubería, fork + dup2 +
+  execve de /MHOLA con su salida por una tubería, **posix_spawn** (clone con
+  CLONE_VM y CLONE_VFORK) con su salida y de uno que no está (ENOENT),
+  pipe2 con O_CLOEXEC (cerrado en el programa nuevo), cinco hijos con wait y
+  luego ECHILD, fork con dos hilos y execve con tres (los otros acaban) y epoll de una tubería (el plazo, EPOLLIN con su
+  dato, EPOLLONESHOT, EPOLLHUP, EPOLL_CTL_DEL);
+  **MMAPA** dos veces: mmap del propio programa (MAP_PRIVATE de leer, con
+  desplazamiento, de escribir sin cambiar el archivo, MAP_SHARED de solo leer,
+  EACCES al pedir MAP_SHARED de escribir con O_RDONLY), un archivo corto (lo de
+  después del final, a cero), MAP_SHARED anónima entre padre e hijo (40000
+  sumas con atómicos, exactas), munmap y mprotect con SIGSEGV atendida,
+  MADV_DONTNEED, 64 MB tocados y soltados; **Lua** con PRUEBA.LUA (16
+  pruebas: los argumentos, string.format, utf8, table.sort de 10.000, las
+  clausuras, las corrutinas, pcall, gsub, las cuentas, os.time, io.open, load
+  y el recolector); y **después, nada de más**: 0 procesos, 0 espacios, 0
+  tablas, 0 tuberías, y la memoria, el montón y las pilas, los de antes;
+- **el intérprete con las teclas del monitor de QEMU**: además de lo de la
+  etapa 6, `LUA /PRUEBA.LUA uno dos`, **Lua a mano** (`LUA`, su saludo,
+  `print(6 * 7, "ñandú")` da «42 ñandú», y Ctrl+D) y **Ctrl+C a MBUCLE**, que
+  da vueltas sin llamar nunca al sistema: «(MBUCLE se ha cerrado por la
+  señal 2, SIGINT: Ctrl+C)»;
+- las vueltas que no necesitan los programas de musl (sin HPET, con 2
+  procesadores, mwait, 3 y 8 GB, los discos, el USB, UEFI con 8 GB...) llevan
+  «sinmusl»; lo de las etapas 0 a 6, igual (HIJOS, con `fork` ahora de copiar
+  al escribir, igual de bien).
+
+`SOLO=castel64` (con CASTEL64 y ENSAMB64 el núcleo sale igual, octeto a
+octeto, y CASTEL32 con corre32 también): **80 bien y 0 mal** (36 minutos; dentro,
+`nucleo64/pruebas.sh` con CASTEL64 y ENSAMB64: 102 bien y 0 mal). Al hacerlo
+salió que la línea de cada módulo del cargador se cortaba a 63 octetos (con
+`-initrd` y una carpeta de trabajo de ruta larga, los nombres de la unidad
+quedaban en «A», «C»...): ahora, hasta 255.
+
+Las imágenes de la carpeta del taller
+(`Pruebas/Pendientes/VirtualBox/Hispa-64-etapa-7/`): el disco por UEFI en SATA
+(q35, 4 procesadores, `-cpu max`), arrancado en QEMU hasta «todo en orden» y,
+en el intérprete, `LUA` a mano (`print(6 * 7, "ñandú")`: «42 ñandú»), Ctrl+D,
+`MBUCLE` y Ctrl+C («se ha cerrado por la señal 2») y `salir`; y el CD por la
+BIOS, hasta «todo en orden».
+
+Con varios procesadores, el TCG de QEMU hace muy caro lo que los hilos se
+esperan unos a otros (cada FUTEX_WAKE que despierta a uno de otro procesador es
+un IPI y un `hlt`): MHILOS tarda de 0,8 s con uno a 4 s con cuatro, y por UEFI
+con la pantalla del GOP una vez ha llegado a 32 s; en un equipo de verdad son
+milisegundos.
+
+Lo que QEMU no prueba: AVX-512 (el TCG de QEMU 8.2 no lo tiene: XCR0 = 7, 832
+octetos por hilo), PCID con varios hilos, y los procesadores híbridos.
+
+### Lo que queda para la etapa 8 (y más adelante)
+
+- **La caché de páginas compartida con el VFS**: `mmap` de archivos sin copiar
+  (las páginas, al tocarlas, y las mismas para todos los que las lean),
+  `MAP_SHARED` de escribir (que lo escrito vaya al archivo, con `msync`), y
+  los ejecutables y las bibliotecas compartidas de verdad entre procesos (hoy
+  cada uno tiene su copia, compartida solo entre un padre y sus hijos de fork).
+- **Lo que le falta a POSIX**: `rt_sigtimedwait` (`sigwait`), las señales de
+  tiempo real encoladas (hoy, una pendiente de cada número), `setitimer` y
+  `alarm`, el control de trabajos (SIGSTOP, SIGTSTP, SIGCONT de verdad; los
+  grupos en primer plano con Ctrl+Z), la lista robusta recorrida al acabar
+  un hilo, `/dev/null`, `/dev/zero` y `/proc` (lo que miran muchas
+  herramientas), `mremap`, `epoll` con EPOLLET de verdad (hoy avisa mientras
+  esté listo) y sin mirar las tuberías de 10 en 10 ms (también `poll`), `eventfd`, `timerfd` y `signalfd`
+  (los navegadores), los enlaces (`symlink`, `readlink`), los permisos y los
+  usuarios.
+- **La tabla de los descriptores, con su cerrojo**: hoy dos hilos que abren y
+  cierran archivos a la vez pueden pisarse (musl no lo hace en sus pruebas;
+  los navegadores, sí).
+- **Más herramientas de verdad**: toybox (0BSD), SQLite (dominio público),
+  `make`, y las pruebas de libc-test de musl en cada arranque; un
+  `musl-gcc` con `-static-pie` (hoy, a mano).
+- **Direcciones al azar** (ASLR) para la pila, los PIE, el cargador y mmap.
+- Los **discos que se enchufan en marcha** (de la etapa 6) y quitarlos con
+  seguridad.
+- **Gráficos, ventanas y la oficina** (la etapa 8 del plan): el compositor, el
+  ratón, la letra con suavizado y la oficina de Hispa-Pentium; con musl, las
+  bibliotecas de C de siempre (FreeType, libpng, zlib) se pueden traer ya.
