@@ -215,6 +215,49 @@ if len(sys.argv) > 2 and sys.argv[2] == 'null':
     cuerpo = b'\x10' + pkg(b'\x5C\x2E' + seg('_SB') + seg('PCI0') + i2c0 + i2c3)
     ident = b'I2CNULLP'
 
+# «monovate» (0.8.10: el Monovate 14.1, Tiger Lake, con la memoria v2): en
+# la I2C0 el SYNA3602 de verdad (TPD1, _STA Fh, 2Ch, _DSM 0020h) y dos con
+# _STA 0 (TPD0, un ELAN en 15h, y TPL1, en 20h), que con las direcciones de
+# reserva hallaban el mismo de 2Ch y lo arrancaban otra vez; en la I2C1, en
+# la que «otro manda en el bus», un ELAN presente y uno con _STA 0. En ASL:
+#
+#   Scope (\_SB.PCI0) {
+#     Device (I2C0) {
+#       Name (_ADR, 0x00150000)
+#       Device (TPD0) { _HID "ELAN2097", _CID "PNP0C50", _STA 0,
+#         _CRS: I2cSerialBusV2 (0x15, 400000, "\_SB.PCI0.I2C0"), _DSM 1: One }
+#       Device (TPD1) { _HID "SYNA3602", _STA 0x0F, I2cSerialBusV2 (0x2C, ...), _DSM 1: 0x20 }
+#       Device (TPL1) { _HID "WCOM508E", _STA 0, I2cSerialBusV2 (0x20, ...), _DSM 1: One }
+#     }
+#     Device (I2C1) {
+#       Name (_ADR, 0x00150001)
+#       Device (TPD2) { _HID "ELAN0001", _STA 0x0F, I2cSerialBusV2 (0x15, ..., "\_SB.PCI0.I2C1"), _DSM 1: One }
+#       Device (TPD3) { _HID "SYNA0002", _STA 0, I2cSerialBusV2 (0x2C, ..., "\_SB.PCI0.I2C1"), _DSM 1: 0x20 }
+#     }
+#   }
+def simple(n, hid, sta, dirr, fuente, reg):
+    return dispositivo(n,
+                       nombre('_HID', cadena(hid)) +
+                       nombre('_CID', cadena('PNP0C50')) +
+                       metodo('_STA', 0, devuelve(entero(sta))) +
+                       nombre('_CRS', buffer(plantilla(i2c(dirr, 400000, fuente)))) +
+                       metodo('_DSM', 4, si(igual(ARG2, entero(1)), devuelve(entero(reg))) + devuelve(buffer(b'\x00'))))
+
+
+if len(sys.argv) > 2 and sys.argv[2] == 'monovate':
+    f0, f1 = '\\_SB.PCI0.I2C0', '\\_SB.PCI0.I2C1'
+    i2c0 = dispositivo('I2C0',
+                       nombre('_ADR', entero(0x00150000)) +
+                       simple('TPD0', 'ELAN2097', 0, 0x15, f0, 1) +
+                       simple('TPD1', 'SYNA3602', 0x0F, 0x2C, f0, 0x20) +
+                       simple('TPL1', 'WCOM508E', 0, 0x20, f0, 1))
+    i2c1 = dispositivo('I2C1',
+                       nombre('_ADR', entero(0x00150001)) +
+                       simple('TPD2', 'ELAN0001', 0x0F, 0x15, f1, 1) +
+                       simple('TPD3', 'SYNA0002', 0, 0x2C, f1, 0x20))
+    cuerpo = b'\x10' + pkg(b'\x5C\x2E' + seg('_SB') + seg('PCI0') + i2c0 + i2c1)
+    ident = b'I2CMONOV'
+
 cab = bytearray(b'SSDT' + struct.pack('<I', 36 + len(cuerpo)) + bytes([2, 0]) + b'HISPA ' + ident +
                 struct.pack('<I', 1) + b'HSPA' + struct.pack('<I', 1))
 t = cab + cuerpo

@@ -20,7 +20,9 @@
 #      (la llamada 159), que dice que no tiene controladora; las zonas PCI
 #      sin poner o por encima de los 4 GB («pci=cero» y «pci=arriba», en las
 #      del USB: como las de las I2C del Monovate y del E14); la SSDT con
-#      «NULL» del E14; y con «sini2c», ni se buscan.
+#      «NULL» del E14; (0.8.10) con «i2csim» (dos controladoras de mentira)
+#      y la SSDT «monovate», el touchpad de 2Ch se arranca una sola vez y en
+#      la del bus perdido no se prueba más; y con «sini2c», ni se buscan.
 parte_i2chid() {
 echo "== Hispa-Pentium: los touchpads HID sobre I2C (Intel LPSS DesignWare, ACPI PNP0C50, HID sobre I2C de Microsoft) (I2CHID) =="
 local X=$P/i2chid l S R=$AQUI/.. TB=$AQUI/../tests/acpi/toshiba-nb250 A=$AQUI/../tests/acpi/asus-gl553vd
@@ -181,6 +183,30 @@ S=$X/q5.sal
 mira "QEMU con la SSDT como la del ThinkPad E14 («NULL»): ACPI.BIN da la controladora del padre (00:15.0) y el núcleo dice que no está en marcha" \
   "^ACPI: I2C-HID: ._SB_.PCI0.I2C0.TPD0 ELAN06C6 .*no existe: la de su padre, ._SB_.PCI0.I2C0, _ADR 00150000h" \
   "i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$"
+# (0.8.10) el Monovate 14.1 de verdad: el SYNA3602 de la I2C0 (_STA Fh, 2Ch)
+# contestaba bien, pero TPD0 y TPL1 (_STA 0, en la misma) hallaban con las
+# direcciones de reserva el mismo en 2Ch y lo arrancaban otra vez (tres
+# RESET, tres lectores quitándose los informes: la flecha no se movía); en
+# la I2C1, todos daban «otro mandaba en el bus». Con «i2csim», i2c.cas pone
+# dos controladoras de mentira (00:15.0 con un touchpad en 2Ch y 00:15.1 con
+# el bus perdido) y la SSDT «monovate» de hazi2chid.py
+python3 -I $R/tests/acpi/hazi2chid.py $X/i2cmono.aml monovate
+MODULOS=$X/ACPI.BIN ARRANQUE="registro i2csim" QEMU_MAS="-acpitable file=$X/i2cmono.aml" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 8" > $X/q6.sal 2>&1
+S=$X/q6.sal
+mira "como el Monovate («i2csim» y la SSDT «monovate»): las dos controladoras de mentira, ACPI.BIN da los cinco y el SYNA3602 de 2Ch se pone en marcha" \
+  "^i2c: controladora 00:15.0 simulada («i2csim»): un touchpad HID en 2Ch" "^ACPI: I2C-HID: 5 dispositivos HID sobre I2C (PNP0C50)" \
+  "^i2c-hid:   el descriptor HID (2Ch, registro 0020h): bien: 06CB:7E7E" "^i2c-hid:   en marcha"
+l=$(grep -c "^i2c-hid:   en marcha" $S); n=$(grep -c "^i2c-hid:   RESET: contestado" $S)
+if [ "$l" = 1 ] && [ "$n" = 1 ]; then ok "y se arranca UNA sola vez (un RESET, un lector), no una por cada candidato de la I2C0"
+else ko "el touchpad de 2Ch se arranca $l veces ($n RESET)"; fi
+l=$(grep -c "^i2c-hid:   (ya hay un touchpad en marcha en esta controladora: sin las direcciones de reserva)" $S)
+if [ "$l" = 2 ] && [ "$(grep -c "^i2c-hid:   el descriptor HID (2Ch" $S)" = 1 ]; then ok "TPD0 y TPL1 (_STA 0, en la misma I2C0) no prueban las direcciones de reserva"
+else ko "los de _STA 0 prueban las de reserva ($l): $(grep -m3 'descriptor HID' $S)"; fi
+l=$(grep -c "^i2c-hid:   otro mandaba en el bus: en esta controladora no se prueba nada más" $S)
+if [ "$l" = 1 ] && grep -q "): en su controladora otro mandaba en el bus; no se prueba$" $S && [ "$(grep -c 'descriptor HID .*otro mandaba' $S)" = 1 ]; then
+  ok "en la I2C1, tras el primer «otro mandaba en el bus», ni una prueba más (dicho una vez)"
+else ko "en la I2C1 se sigue probando: $(grep -c 'otro mandaba' $S) veces «otro mandaba»"; fi
+if ! grep -q "excepción\|\*\*\*\|ACPI Error" $S; then ok "sin una excepción del núcleo ni un error de ACPICA"; else ko "hay excepciones: $(grep -m2 'excepción\|\*\*\*\|ACPI Error' $S)"; fi
 MODULOS=$X/ACPI.BIN ARRANQUE="registro sini2c" QEMU_MAS="-acpitable file=$R/tests/acpi/i2chid-qemu.aml" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" > $X/q2.sal 2>&1
 S=$X/q2.sal
 if grep -q "^acpi: el servicio de ACPI (ACPI.BIN) en marcha" $S && ! grep -q "^i2c\|I2C-HID" $S; then ok "con «sini2c» en la línea del cargador, ni el núcleo ni ACPI.BIN buscan nada de I2C"

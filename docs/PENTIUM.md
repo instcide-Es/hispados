@@ -10959,6 +10959,26 @@ en 0020h, GpioInt 264; sus cinco I2C, sin zona (a 0): arreglado el 23/11.
 El ASUS GL553VD (ELAN1200 en 15h por la 00:15.0 A160), **funciona en el
 equipo** (se mueve y hace clic) y no cambia: su firmware sí le pone zona.
 
+**El Monovate con la memoria v2 (24/11, para la 0.8.10)**: las controladoras
+ya salen («su zona 0 estaba sin poner (BAR 00000004h, alta 0h): puesta en
+80404000h») y el SYNA3602 de 2Ch contesta bien (0911:5288, descriptor de 475
+octetos, RESET en 10 ms, el modo a ratón, «en marcha»), **pero la flecha no
+se movía**: TPD0 y TPL1, con _STA 0 en la misma I2C0, caían en «se prueba
+igual» con las direcciones de reserva, hallaban **el mismo aparato en 2Ch**
+y lo arrancaban otra vez (tres «en marcha», cada uno con su RESET, que
+deshace el modo del de antes, y tres lectores quitándose los informes). Y en
+la I2C1 todos daban «otro mandaba en el bus» (aborto F801000h: arbitraje
+perdido; sin resistencias de subida o con las patillas sin preparar, porque
+nadie la usa). Desde la 0.8.10 (`i2chid.cas`): (1) uno con _STA 0 en una
+controladora que ya tiene un touchpad en marcha solo prueba lo que dice ACPI,
+sin las direcciones de reserva; (2) la misma pareja (controladora,
+dirección) no se arranca nunca dos veces («es el mismo touchpad que ya está
+en marcha»); (3) tras el primer «otro mandaba en el bus» en una controladora,
+no se prueba nada más en ella y se dice una vez. Se prueba en QEMU con
+`i2csim` en la línea del cargador (`i2c.cas` pone dos controladoras de
+mentira: 00:15.0 con un touchpad HID en 2Ch y 00:15.1 con el bus perdido) y la
+SSDT `monovate` de `tests/acpi/hazi2chid.py` (parte 52).
+
 **Lo que falta**: la **GpioInt** (leer cada 10 ms gasta poco, pero el
 informe llega hasta 10 ms tarde; para usarla hay que saber dónde está la
 patilla en el controlador GPIO de cada PCH, como hace `pinctrl-intel` de

@@ -82,6 +82,10 @@ módulo I2chid
     variable dd: arreglo [10] de nat32
     variable texto: arreglo [16] de byte
     variable teclas_vistas, tecla_cuándo: nat32
+    ; (0.8.10, el Monovate) las controladoras en las que «otro mandaba en el
+    ; bus» (arbitraje perdido: sin resistencias de subida o las patillas sin
+    ; preparar, porque nadie la usa): en ellas no se prueba nada más
+    variable bus_perdido: arreglo [MAX_I2C] de bool
 
     ; -------------------------------------------------------------------------
     ;  Leer y escribir en el touchpad
@@ -164,8 +168,20 @@ módulo I2chid
         devolver cierto
     fin
 
+    ; (0.8.10) ¿hay ya un touchpad en marcha en la controladora c (y, si
+    ; a <> NINGUNA_I2C, en esa dirección)?
+    función ya_en_marcha(c: nat32, a: nat32): bool
+        variable i: nat32
+        para i desde 1 hasta MAX_TP hacer
+            si tps[i - 1].usado y tps[i - 1].c = c entonces
+                si a = NINGUNA_I2C o fichas[tps[i - 1].f].esclavo = a entonces devolver cierto fin
+            fin
+        fin
+        devolver falso
+    fin
+
     función prueba(k: nat32): bool
-        variable c, r, i, n, reg: nat32
+        variable c, r, i, n, reg, último: nat32
         variable ti: nat32
         variable z: arreglo [16] de byte
         si touchpads >= MAX_TP entonces devolver falso fin
@@ -186,6 +202,10 @@ módulo I2chid
             fin
             devolver falso
         fin
+        si bus_perdido[c] entonces
+            apunta0("): en su controladora otro mandaba en el bus; no se prueba\n")
+            devolver falso
+        fin
         tps[ti].c := c
         nombre_pci(fichas[k].pci, texto)
         apunta1("; controladora %s", nat32(dirección(texto)))
@@ -203,8 +223,17 @@ módulo I2chid
         ; 15h y 0001h; Synaptics, 2Ch o 20h y 0020h): hay DSDT que no lo
         ; deciden hasta saber cuál lleva (las de ASUS, por el CMOS)
         r := DI_VACÍO
-        para i desde 0 hasta 6 hacer
-            si r <> DI_BIEN y candidato(fichas[k], i) entonces
+        ; (0.8.10, el Monovate: TPD0 y TPL1 con _STA 0 en la I2C0 del
+        ; SYNA3602 hallaban en 2Ch el mismo touchpad y lo arrancaban otra
+        ; vez) con _STA 0 y ya un touchpad en marcha en esa controladora, solo
+        ; lo que dice ACPI, sin las direcciones de reserva
+        último := 6
+        si fichas[k].sta yb 1 = 0 y ya_en_marcha(c, NINGUNA_I2C) entonces
+            último := 2
+            apunta0("i2c-hid:   (ya hay un touchpad en marcha en esta controladora: sin las direcciones de reserva)\n")
+        fin
+        para i desde 0 hasta último hacer
+            si r <> DI_BIEN y no bus_perdido[c] y candidato(fichas[k], i) entonces
                 llenar(hdb, 30, 0)
                 n := lee_reg(fichas[k], c, cand_reg, hdb, 30)
                 dd[0] := cand_dir
@@ -214,6 +243,10 @@ módulo I2chid
                     dd[3] := i2cs[c].último_aborto
                     apunta("i2c-hid:   el descriptor HID (%02Xh, registro %04Xh): %s (aborto %Xh)\n", dd)
                     fichas[k].esclavo := esclavo_acpi
+                    si n = I2C_PERDIDO entonces
+                        bus_perdido[c] := cierto
+                        apunta0("i2c-hid:   otro mandaba en el bus: en esta controladora no se prueba nada más\n")
+                    fin
                 sino
                     r := lee_desc_i2c(hdb, 30, tps[ti].hd)
                     dd[2] := nat32(qué_desc(r))
@@ -234,6 +267,14 @@ módulo I2chid
             fin
         fin
         si r <> DI_BIEN entonces devolver falso fin
+        ; (0.8.10) la misma pareja (controladora, dirección) no se arranca dos
+        ; veces: cada RESET deshace el modo del de antes y dos lectores se
+        ; quitan los informes
+        si ya_en_marcha(c, fichas[k].esclavo) entonces
+            apunta1("i2c-hid:   es el mismo touchpad que ya está en marcha (%02Xh, en esta controladora): no se arranca otra vez\n", fichas[k].esclavo)
+            fichas[k].esclavo := esclavo_acpi
+            devolver falso
+        fin
         ; encenderlo y reiniciarlo; la contestación del RESET es un informe de largo 0
         orden(fichas[k], tps[ti], OP_SET_POWER, 0)
         dormir(1)

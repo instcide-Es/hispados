@@ -67,7 +67,17 @@ módulo I2c
         velocidad: nat32                ; Hz a los que está puesta (0: aún no)
         transferencias, fallos: nat32
         último_aborto: nat32            ; IC_TX_ABRT_SOURCE del último fallo
+        simulada: nat32                 ; (0.8.10, «i2csim») 0: de verdad; SIM_TP o SIM_PERDIDO
     fin
+
+    ; (0.8.10) «i2csim» en la línea del cargador (las pruebas, en QEMU, que no
+    ; tiene I2C): dos controladoras de mentira, 00:15.0 con un touchpad HID de
+    ; Synaptics en 2Ch (el descriptor HID en 0020h, un ratón de tres botones)
+    ; y 00:15.1, en la que «otro manda en el bus» (como la I2C1 del Monovate)
+    público constante SIM_TP = 1
+    público constante SIM_PERDIDO = 2
+    público variable sim_resets: nat32          ; los RESET que ha recibido el de 2Ch
+    público variable sim_perdidos: nat32        ; las transferencias en la del bus perdido
 
     público variable i2cs: arreglo [MAX_I2C] de Controladora
     público variable cuántas: nat32
@@ -332,9 +342,99 @@ módulo I2c
     fin
 
     ; al arrancar: las controladoras del PCI. Da cuántas hay en marcha.
+    ; (0.8.10) una controladora de mentira (i2csim)
+    función pon_simulada(pci: nat32, cómo: nat32)
+        variable nombre: arreglo [12] de byte
+        si cuántas >= MAX_I2C entonces devolver fin
+        llenar(puntero(nat32(dirección(i2cs[cuántas]))), tamaño(Controladora), 0)
+        i2cs[cuántas].pci := pci
+        i2cs[cuántas].modelo := 0x8086
+        i2cs[cuántas].reloj := 120000
+        i2cs[cuántas].cola_tx := 64
+        i2cs[cuántas].cola_rx := 64
+        i2cs[cuántas].en_marcha := cierto
+        i2cs[cuántas].simulada := cómo
+        cuántas := cuántas + 1
+        nombre_pci(pci, nombre)
+        dd[0] := nat32(dirección(nombre))
+        si cómo = SIM_TP entonces
+            apunta1("i2c: controladora %s simulada («i2csim»): un touchpad HID en 2Ch\n", dd[0])
+        sino
+            apunta1("i2c: controladora %s simulada («i2csim»): otro manda en el bus\n", dd[0])
+        fin
+    fin
+
+    ; los octetos de un texto en hexadecimal («1E00...») en p; da cuántos
+    función de_hex(t: puntero a byte, p: puntero a byte): nat32
+        variable i, n, v, c: nat32
+        i := 0
+        n := 0
+        v := 0
+        mientras t[i] <> 0 hacer
+            c := t[i]
+            si c >= '0' y c <= '9' entonces
+                v := v * 16 + c - '0'
+            sino
+                v := v * 16 + c - 'A' + 10
+            fin
+            si i mod 2 = 1 entonces
+                p[n] := byte(v yb 0xFF)
+                n := n + 1
+                v := 0
+            fin
+            i := i + 1
+        fin
+        devolver n
+    fin
+
+    ; lo que contesta la controladora de mentira
+    variable sim_lee: arreglo [64] de byte
+    función simula(c: nat32, esclavo: nat32, esc: puntero a byte, n_esc: nat32, lee_en: puntero a byte, n_lee: nat32): nat32
+        variable n, reg, i: nat32
+        si i2cs[c].simulada = SIM_PERDIDO entonces
+            sim_perdidos := sim_perdidos + 1
+            i2cs[c].último_aborto := 0x1000
+            i2cs[c].fallos := i2cs[c].fallos + 1
+            devolver I2C_PERDIDO
+        fin
+        si esclavo <> 0x2C entonces
+            i2cs[c].último_aborto := 0x01
+            i2cs[c].fallos := i2cs[c].fallos + 1
+            devolver I2C_NADIE
+        fin
+        llenar(sim_lee, 64, 0)
+        n := 0
+        si n_esc >= 2 entonces
+            reg := nat32(esc[0]) ob (nat32(esc[1]) << 8)
+            ; el descriptor HID (30 octetos): informe de 50 en 0021h, entrada
+            ; en 0022h (hasta 8), órdenes en 0024h, datos en 0025h; 06CB:7E7E
+            si reg = 0x0020 y n_lee > 0 entonces
+                n := de_hex("1E00000132002100220008002300000024002500CB067E7E010000000000", sim_lee)
+            sino si reg = 0x0021 y n_lee > 0 entonces
+                ; el descriptor de informe: el ratón de arranque (tres botones, X e Y de 8 bits)
+                n := de_hex("05010902A1010901A100050919012903150025019503750181029501750581030501093009311581257F750895028106C0C0", sim_lee)
+            sino si reg = 0x0024 y n_esc >= 4 y n_lee = 0 entonces
+                si esc[3] yb 0x0F = 1 entonces sim_resets := sim_resets + 1 fin
+            sino si n_lee > 0 entonces
+                llenar(sim_lee, 64, 0xFF)
+                n := 64
+            fin
+        fin
+        ; (lo que se lee sin escribir antes: el informe de entrada, de largo 0)
+        para i desde 1 hasta n_lee hacer
+            si i <= 64 entonces lee_en[i - 1] := sim_lee[i - 1] sino lee_en[i - 1] := 0 fin
+        fin
+        i2cs[c].transferencias := i2cs[c].transferencias + 1
+        devolver I2C_BIEN
+    fin
+
     público función prepara(): nat32
         variable a: nat32
         si buscar(línea_del_cargador(), "sini2c") <> nulo entonces apagado := cierto fin
+        si no apagado y buscar(línea_del_cargador(), "i2csim") <> nulo entonces
+            pon_simulada(0x00A800, SIM_TP)
+            pon_simulada(0x00A900, SIM_PERDIDO)
+        fin
         a := pci_busca(0x118000, 0xFFFF00, NO_HAY_PCI)
         mientras a <> NO_HAY_PCI hacer
             mira(a)
@@ -367,6 +467,10 @@ módulo I2c
     público función configura(c: nat32, hz: nat32, ss_alto: nat32, ss_bajo: nat32, ss_ret: nat32, fs_alto: nat32, fs_bajo: nat32, fs_ret: nat32): bool
         variable con, ret, h, l: nat32
         si c >= cuántas o no i2cs[c].en_marcha entonces devolver falso fin
+        si i2cs[c].simulada <> 0 entonces
+            si hz >= 400000 entonces i2cs[c].velocidad := 400000 sino i2cs[c].velocidad := 100000 fin
+            devolver cierto
+        fin
         apaga(i2cs[c])
         ; 100 kHz
         h := ss_alto
@@ -416,6 +520,7 @@ módulo I2c
         variable b, tx, pedidas, rx, total, raw, cmd, vueltas, tope, r, v: nat32
         si c >= cuántas o no i2cs[c].en_marcha entonces devolver I2C_NO_HAY fin
         si n_esc + n_lee = 0 entonces devolver I2C_BIEN fin
+        si i2cs[c].simulada <> 0 entonces devolver simula(c, esclavo, esc, n_esc, lee_en, n_lee) fin
         i2cs[c].transferencias := i2cs[c].transferencias + 1
         apaga(i2cs[c])
         v := lee(i2cs[c], IC_CON) yb nob CON_10BITS
