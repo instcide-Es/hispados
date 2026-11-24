@@ -27,6 +27,15 @@ termo_disco_anfitrion() {
   else ko "(DISCOS) disco.c con datos simulados:"; grep -v '^bien' $B/disco.txt | sed 's/^/        /' | head -n 12; fi
 }
 
+# (para TQ_HASTA) ¿está ya escrito el INFORME.TXT con los discos? Al acabar
+# la lectura de los discos («Discos: Hecho»), si la prueba ya había dado su
+# resultado, el informe se vuelve a escribir («informe para el técnico»): hay
+# que esperar a ese, no a la hora (la lectura del IDE de QEMU, en PIO, tarda
+# más o menos según lo ocupado que esté el anfitrión)
+td_informe_hecho() {
+  grep -a 'termo: suceso: ' $1 | awk '/Discos: Hecho: / { d = NR } /informe para el t/ { i = NR } END { exit !(d && i > d) }'
+}
+
 termo_discos() {
   local D=$Y/discos f s0 s1 I L
   rm -rf $D; mkdir -p $D
@@ -38,7 +47,7 @@ termo_discos() {
   s0=$(cat $D/ide.img $D/sata.img $D/nvme.img | sha256sum)
   cp $Y/termo.img $Y/d.img
   mdel -i $Y/d.img@@1M ::TERMO/INFORME.TXT > /dev/null 2>&1
-  TQ_ACPI="-drive file=$D/ide.img,format=raw,if=ide,index=0 -device ahci,id=ah -drive file=$D/sata.img,format=raw,if=none,id=sa -device ide-hd,drive=sa,bus=ah.0,serial=SATA1234ABCD -drive file=$D/nvme.img,format=raw,if=none,id=nv -device nvme,drive=nv,serial=NVME5678WXYZ" \
+  TQ_HASTA=td_informe_hecho TQ_TOPE=600 TQ_ACPI="-drive file=$D/ide.img,format=raw,if=ide,index=0 -device ahci,id=ah -drive file=$D/sata.img,format=raw,if=none,id=sa -device ide-hd,drive=sa,bus=ah.0,serial=SATA1234ABCD -drive file=$D/nvme.img,format=raw,if=none,id=nv -device nvme,drive=nv,serial=NVME5678WXYZ" \
     termo_qemu $Y/d.img td1 300 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "60:$C" "60:o /b 0x71 91" "72:$C" "72:o /b 0x71 50"
   s1=$(cat $D/ide.img $D/sata.img $D/nvme.img | sha256sum)
   if [ "$s0" = "$s1" ]; then ok "(DISCOS) los tres discos de dentro (IDE, SATA y NVMe), sin un solo octeto cambiado"; else ko "(DISCOS) ¡se ha escrito en un disco de dentro!"; fi
@@ -49,18 +58,29 @@ termo_discos() {
     "termo: discos: en pausa mientras dura la prueba de esfuerzo" "termo: suceso: Discos: Hecho: 3 discos"
   I=$D/INFORME.TXT
   mtype -i $Y/d.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' > $I
-  if grep -q '^DISCOS (solo se leen' $I && grep -q '^  Disco 1: QEMU HARDDISK (IDE, 67 MB)' $I && grep -q '^  Disco 2: QEMU HARDDISK (SATA, 67 MB), serie \.\.\.ABCD' $I \
-     && grep -q '^  Disco 3: QEMU NVMe Ctrl (NVMe, SSD, 67 MB), serie \.\.\.WXYZ' $I && [ "$(grep -c '^    Salud: BIEN\.' $I)" = 3 ]; then
-    ok "(DISCOS) INFORME.TXT, «DISCOS»: los tres, con su clase, su tamaño, la serie recortada y «Salud: BIEN» en palabras"
-  else ko "(DISCOS) INFORME.TXT, «DISCOS»:"; sed -n '/^DISCOS/,/^Sectores\|^  Sectores/p' $I | head -n 20 | sed 's/^/        /'; fi
-  if [ "$(grep -c '^    SMART: .*horas encendido; .*encendidos; .*reasignados 0, pendientes 0, incorregibles 0, CRC del cable 0; el disco dice de sí: bien\.' $I)" = 2 ] \
-     && grep -q '^    Salud NVMe: [0-9]* °C; usado 0 % de su vida; reserva [0-9]* %' $I; then
-    ok "(DISCOS) el SMART de IDE y de SATA (IDENTIFY, READ DATA, THRESHOLDS, RETURN STATUS) y la salud de NVMe (Get Log Page 02h)"
-  else ko "(DISCOS) SMART y NVMe:"; grep 'SMART\|NVMe' $I | head -n 6 | sed 's/^/        /'; fi
-  if [ "$(grep -c '^    Prueba de lectura: [0-9]* MB repartidos por todo el disco a [0-9,]* MB/s y [0-9]* MB seguidos a [0-9,]* MB/s; cada lectura de 64 K: media [0-9]* ms, p99 [0-9]* ms, la peor [0-9]* ms; 0 errores, 0 reintentos' $I)" = 3 ] \
-     && [ "$(grep -c '^    Prueba de lectura: 256 MB repartidos.* y 64 MB seguidos' $I)" -ge 2 ] && grep -q 'Sectores escritos en los discos de dentro desde que arrancó la memoria: 0 (como debe ser)' $I; then
-    ok "(DISCOS) la prueba de lectura de los tres (MB/s a saltos y seguido, media, p99 y la peor; SATA y NVMe enteros, el IDE de QEMU, en PIO y lento, puede quedarse en el minuto) y 0 sectores escritos en los discos de dentro"
-  else ko "(DISCOS) la prueba de lectura:"; grep 'Prueba de lectura\|Sectores escritos' $I | head -n 4 | sed 's/^/        /'; fi
+  # (td_hay N REGEX: ¿hay N líneas así en INFORME.TXT (al menos N, con «+N»)?
+  # si no, se apunta en $f lo que falta, para decirlo en el FAIL)
+  td_hay() {
+    local c; c=$(grep -c -- "$2" $I)
+    case $1 in +*) [ "$c" -ge "${1#+}" ] && return;; *) [ "$c" = "$1" ] && return;; esac
+    f="$f «$2» ($c de $1);"
+  }
+  td_falta() { [ -s $I ] || f=" (INFORME.TXT vacío o no está)$f"; if grep -q '^DISCOS' $I; then sed -n '/^DISCOS/,/^Sectores\|^  Sectores/p' $I; else echo "(sin «DISCOS»; lo que hay:)"; head -n 8 $I; fi | head -n 20 | sed 's/^/        /'; }
+  local f=
+  td_hay +1 '^DISCOS (solo se leen'; td_hay 1 '^  Disco 1: QEMU HARDDISK (IDE, 67 MB)'; td_hay 1 '^  Disco 2: QEMU HARDDISK (SATA, 67 MB), serie \.\.\.ABCD'
+  td_hay 1 '^  Disco 3: QEMU NVMe Ctrl (NVMe, SSD, 67 MB), serie \.\.\.WXYZ'; td_hay 3 '^    Salud: BIEN\.'
+  if [ -z "$f" ]; then ok "(DISCOS) INFORME.TXT, «DISCOS»: los tres, con su clase, su tamaño, la serie recortada y «Salud: BIEN» en palabras"
+  else ko "(DISCOS) INFORME.TXT, «DISCOS»: falta$f"; td_falta; fi
+  f=
+  td_hay 2 '^    SMART: .*horas encendido; .*encendidos; .*reasignados 0, pendientes 0, incorregibles 0, CRC del cable 0; el disco dice de sí: bien\.'
+  td_hay 1 '^    Salud NVMe: [0-9]* °C; usado 0 % de su vida; reserva [0-9]* %'
+  if [ -z "$f" ]; then ok "(DISCOS) el SMART de IDE y de SATA (IDENTIFY, READ DATA, THRESHOLDS, RETURN STATUS) y la salud de NVMe (Get Log Page 02h)"
+  else ko "(DISCOS) SMART y NVMe: falta$f"; grep 'SMART\|NVMe' $I | head -n 6 | sed 's/^/        /'; fi
+  f=
+  td_hay 3 '^    Prueba de lectura: [0-9]* MB repartidos por todo el disco a [0-9,]* MB/s y [0-9]* MB seguidos a [0-9,]* MB/s; cada lectura de 64 K: media [0-9]* ms, p99 [0-9]* ms, la peor [0-9]* ms; 0 errores, 0 reintentos'
+  td_hay +2 '^    Prueba de lectura: 256 MB repartidos.* y 64 MB seguidos'; td_hay +1 'Sectores escritos en los discos de dentro desde que arrancó la memoria: 0 (como debe ser)'
+  if [ -z "$f" ]; then ok "(DISCOS) la prueba de lectura de los tres (MB/s a saltos y seguido, media, p99 y la peor; SATA y NVMe enteros, el IDE de QEMU, en PIO y lento, puede quedarse en el minuto) y 0 sectores escritos en los discos de dentro"
+  else ko "(DISCOS) la prueba de lectura: falta$f"; grep 'Prueba de lectura\|Sectores escritos' $I | head -n 4 | sed 's/^/        /'; fi
   if ! grep -q 'SATA1234\|NVME5678\|QM0000' $I && ! mtype -i $Y/d.img@@1M ::TERMO/DISCOS.LOG 2> /dev/null | grep -q 'SATA1234\|NVME5678\|QM0000' && ! grep -q 'SATA1234\|NVME5678' $S; then
     ok "(DISCOS) ningún número de serie entero, ni en INFORME.TXT, ni en DISCOS.LOG, ni por el puerto serie"
   else ko "(DISCOS) sale un número de serie entero"; fi

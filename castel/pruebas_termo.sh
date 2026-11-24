@@ -55,8 +55,15 @@
 
 # termo_qemu IMAGEN NOMBRE SEGUNDOS "CPU" "t:orden del monitor"...
 # (TQ_RED: la red de QEMU; sin red si no se dice. TQ_FIRM: el firmware, OVMF para UEFI)
+# (TQ_HASTA: una función que mira el puerto serie (el archivo, en CP437, como
+# primer argumento) y da 0 cuando ya ha salido lo que se va a comprobar: con
+# ella, SEGUNDOS ya no es cuándo se mata la máquina: después de las órdenes,
+# se sigue hasta que la función diga que sí (y TQ_MARGEN segundos más, 3 si
+# no se dice: lo que se escribe en la memoria después de la línea) o hasta
+# TQ_TOPE segundos (el doble de SEGUNDOS si no se dice). Así no depende de lo
+# deprisa que vaya el anfitrión (otras pruebas con QEMU a la vez, sin KVM)
 termo_qemu() {
-  local img=$1 n=$2 seg=$3 cpu=$4 t=0 o w q; shift 4
+  local img=$1 n=$2 seg=$3 cpu=$4 t=0 o w q ta= sh=0 tope; shift 4
   rm -f $Y/$n.mon
   # shellcheck disable=SC2086
   ${TQ_QEMU:-qemu-system-x86_64} $cpu ${TQ_FIRM:-} ${TQ_RED:--nic none} -m ${TQ_MEM:-512} -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
@@ -65,18 +72,43 @@ termo_qemu() {
   QPID=$q
   sleep 1
   printf 'o /b 0x70 0x63\no /b 0x71 45\n' | socat - UNIX-CONNECT:$Y/$n.mon > /dev/null 2>&1
+  # (las teclas y el ratón, al Termómetro: si con el anfitrión ocupado tarda
+  # en arrancar, irían a nadie. La primera va, como pronto, 4 s después de
+  # «termo: en marcha» (hasta 180 s de espera); lo que la sigue, y el final, se
+  # corren lo mismo: así lo de después (las temperaturas, stop/cont, Esc)
+  # sigue cayendo en el mismo momento de la prueba)
+  tq_hasta_t() { while [ $t -lt $1 ]; do [ -z "$ta" ] && grep -a -q 'termo: en marcha' $Y/$n.sal && ta=$t; sleep 1; t=$((t + 1)); done; }
   for o in "$@"; do
     w=${o%%:*}
-    while [ $t -lt $w ]; do sleep 1; t=$((t + 1)); done
+    case ${o#*:} in
+      sendkey*|mouse_*)
+        if [ "$ta" != hecho ]; then
+          tq_hasta_t $((w + sh))
+          while [ -z "$ta" ] && [ $t -lt $((w + 180)) ]; do grep -a -q 'termo: en marcha' $Y/$n.sal && ta=$t || { sleep 1; t=$((t + 1)); }; done
+          if [ -n "$ta" ] && [ $((ta + 4)) -gt $w ]; then sh=$((ta + 4 - w)); echo "        (${n}: el Termómetro, en marcha a los $ta s: lo de después, $sh s más tarde)"; fi
+          ta=hecho
+        fi;;
+    esac
+    tq_hasta_t $((w + sh))
     printf '%s\n' "${o#*:}" | socat - UNIX-CONNECT:$Y/$n.mon > /dev/null 2>&1
   done
-  while [ $t -lt $seg ]; do sleep 1; t=$((t + 1)); done
+  [ "$ta" != hecho ] && ta=hecho
+  if [ -n "${TQ_HASTA:-}" ]; then
+    tope=$((${TQ_TOPE:-$((seg * 2))} + sh))
+    while [ $t -lt $tope ] && kill -0 $q 2> /dev/null && ! $TQ_HASTA $Y/$n.sal; do sleep 1; t=$((t + 1)); done
+    if $TQ_HASTA $Y/$n.sal; then sleep ${TQ_MARGEN:-3}; else echo "        (${n}: a los $t s, sin lo que se esperaba: $TQ_HASTA)"; fi
+  else
+    tq_hasta_t $((seg + sh))
+  fi
   kill -9 $q 2> /dev/null
   wait $q 2> /dev/null
   QPID=
   tr -d '\r' < $Y/$n.sal | iconv -f CP437 -t UTF-8 > $Y/$n.txt 2> /dev/null || tr -d '\r' < $Y/$n.sal > $Y/$n.txt
   S=$Y/$n.txt
 }
+
+# (para TQ_HASTA) ¿ya ha dicho el Termómetro cómo le ha ido la prueba de escritura?
+tq_escritura() { grep -a -q 'termo: prueba de escritura en X:.TERMO: ' $1; }
 
 # (TERMO) 6c. los parones (el MSI GT80, 23/11/2026: 8,6 s sin poder correr a
 # los 18 s de carga; el núcleo paró la carga y a los demás procesadores, y
@@ -121,11 +153,27 @@ termo_parones() {
   termo_qemu $Y/p.img t17 170 "$cpu" "48:sendkey 1" "50:sendkey c" "66:stop" "80:cont" "110:sendkey esc"
   mira "la máquina entera parada 14 s a mitad de la carga (stop/cont, como un SMI largo): se dice" \
     "termo: suceso: AVISO: \(el equipo entero ha estado parado [0-9]*,[0-9] s\|el reloj del sistema se ha quedado [0-9]* s atrás de golpe\)"
+  # Con KVM, al seguir (cont), quién corre primero lo decide el anfitrión: lo
+  # normal es que los demás procesadores vean antes que nadie su latido viejo
+  # (14 s) y se paren solos, y el Termómetro los vuelve a poner; pero con el
+  # anfitrión muy ocupado (otras pruebas con QEMU a la vez) el Termómetro puede
+  # preguntar antes (el latido cambia y nadie se para: la carga sigue en los
+  # 4) o el núcleo pararla él. Las tres valen; lo que no vale es que la carga
+  # no vuelva entera («NO es completa») o que no se diga el parón
   if [ -n "$kvm" ]; then
-    mira "con KVM (el TSC sigue, como en un SMI): los demás procesadores se paran solos y se vuelven a poner a cargar; el parón, medido con el TSC" \
+    local cg
+    cg=$(grep -a 'termo: suceso: AVISO: la carga se ha' $S)
+    mira "con KVM (el TSC sigue, como en un SMI): el parón, medido con el TSC; y la carga, en los 4 procesadores al acabar" \
       "termo: suceso: AVISO: el equipo entero ha estado parado 1[0-9],[0-9] s en estos 2 s" \
-      "termo: suceso: AVISO: la carga se había parado (.* de los demás procesadores se había.* parado solo.*: no le.* llegaba el latido) y se vuelve a poner en marcha .* en 4 procesadores" \
       "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]"
+    if echo "$cg" | grep -q 'NO es completa'; then ko "con KVM, tras el parón la carga no vuelve entera: $cg"
+    elif echo "$cg" | grep -q 'se había.* parado solo.*: no le.* llegaba el latido) y se vuelve a poner en marcha .* en 4 procesadores'; then
+      ok "con KVM: los demás procesadores se paran solos (su latido, de hace 14 s) y se vuelven a poner a cargar en los 4"
+    elif echo "$cg" | grep -q 'la carga se había parado (el núcleo la para.*) y se vuelve a poner en marcha .* en 4 procesadores'; then
+      ok "con KVM: la carga la ha parado el núcleo (el Termómetro, tarde: el anfitrión ocupado) y se vuelve a poner en los 4"
+    elif [ -z "$cg" ] && grep -a -q 'termo: suceso: AVISO: el equipo entero ha estado parado' $S; then
+      ok "con KVM: el Termómetro ha preguntado antes de que los demás procesadores miraran su latido (el anfitrión ocupado): nadie se para y la carga sigue en los 4"
+    else ko "con KVM, la carga tras el parón: «$cg»"; grep -a 'termo: AP:\|carga se para' $S | head -n 6 | sed 's/^/        /'; fi
   fi
   r=$(termo_dobles $Y/p.img)
   if [ "${r%% *}" = bien ]; then ok "con la máquina parada, ni una línea DATOS doble (${r#* } líneas, seg= siempre sube)"; else ko "con la máquina parada, las líneas DATOS: $r"; fi
@@ -504,11 +552,11 @@ EOF
   /usr/sbin/sshd -f $H/config -E $H/sshd.log
   for _ in $(seq 30); do [ -s $H/sshd.pid ] && break; sleep 0.2; done
   cat > $H/guion.txt <<EOF
-serie termo: en marcha 120
-pausa 4
+serie termo: en marcha 240
+pausa 8
 tecla t
-serie ssh: (TERMO) ventana de 60
-serie ssh: dentro, con la llave propia 60
+serie ssh: (TERMO) ventana de 120
+serie ssh: dentro, con la llave propia 120
 archivo $R FASE colores 30
 pausa 5
 captura vt1
@@ -603,7 +651,9 @@ termo_uefi() {
   # en los Intel nuevos: el ThinkPad E14, el Monovate). El núcleo lo mueve
   # debajo, y va el USB: X:, y el Termómetro guarda
   cp $OV/OVMF_VARS_4M.fd $Y/vars64.fd
-  TQ_FIRM="-machine q35 -drive if=pflash,format=raw,readonly=on,file=$OV/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=$Y/vars64.fd" \
+  # (sin KVM, con OVMF: el arranque es lento y, con el anfitrión ocupado, la
+  # prueba de escritura salía después de los 90 s: se espera a que salga)
+  TQ_HASTA=tq_escritura TQ_TOPE=300 TQ_FIRM="-machine q35 -drive if=pflash,format=raw,readonly=on,file=$OV/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=$Y/vars64.fd" \
     termo_qemu $Y/termo.img t15 90 "-cpu Haswell"
   mira "por UEFI con el xHCI por encima de los 4 GB (OVMF con su ventana de 64 bits): el núcleo lo mueve debajo, va el USB y el Termómetro guarda" \
     "pci: la zona de memoria del 00:..\.. estaba por encima de los 4 GB" "unidades: .*X: (disco 0, USB" "termo: prueba de escritura en X:.TERMO: bien"
