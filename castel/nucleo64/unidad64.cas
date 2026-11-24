@@ -44,7 +44,7 @@ módulo Unidad64
         k := 0
         si lín <> 0 entonces
             i := 0
-            mientras i < 200 y l8(lín + i) <> 0 y l8(lín + i) <> ' ' hacer
+            mientras i < 255 y l8(lín + i) <> 0 y l8(lín + i) <> ' ' hacer
                 si l8(lín + i) = '/' entonces j := i + 1 fin
                 i := i + 1
             fin

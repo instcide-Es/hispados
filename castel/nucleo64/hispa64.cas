@@ -95,7 +95,8 @@ módulo Hispa64
     variable mapa1, mapa1_largo: nat64          ; el mapa de multiboot (virtual)
     variable mod_ini, mod_fin: arreglo [MAX_MÓDULOS] de nat64    ; los módulos (física)
     variable mod_nombre: arreglo [MAX_MÓDULOS] de nat64          ; su línea (virtual: su copia en mod_texto)
-    variable mod_texto: arreglo [MAX_MÓDULOS * 64] de byte       ; (copiada al leerla: la de multiboot no está apartada)
+    constante LARGO_LÍNEA_MOD = 256             ; [etapa 7] (eran 64: las rutas largas de -initrd se cortaban)
+    variable mod_texto: arreglo [MAX_MÓDULOS * LARGO_LÍNEA_MOD] de byte       ; (copiada al leerla: la de multiboot no está apartada)
     variable módulos: nat32
     variable sim_índice: nat32                  ; el módulo de los nombres (HISPA64.SIM)
 
@@ -159,13 +160,13 @@ módulo Hispa64
         mod_fin[módulos] := fin_
         ; (la línea, copiada ya: lo de multiboot que no es la información en sí puede reutilizarse)
         i := 0
-        mientras i < 63 y nombre <> 0 hacer
+        mientras i < LARGO_LÍNEA_MOD - 1 y nombre <> 0 hacer
             si l8(nombre + i) = 0 entonces romper fin
-            mod_texto[módulos * 64 + i] := l8(nombre + i)
+            mod_texto[módulos * LARGO_LÍNEA_MOD + i] := l8(nombre + i)
             i := i + 1
         fin
-        mod_texto[módulos * 64 + i] := 0
-        mod_nombre[módulos] := nat64(dirección(mod_texto[módulos * 64]))
+        mod_texto[módulos * LARGO_LÍNEA_MOD + i] := 0
+        mod_nombre[módulos] := nat64(dirección(mod_texto[módulos * LARGO_LÍNEA_MOD]))
         módulos := módulos + 1
     fin
 
