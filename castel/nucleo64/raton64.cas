@@ -1,0 +1,87 @@
+; =============================================================================
+;  raton64.cas - Hispa-64, etapa 6: el puntero (docs/64/HISPA-64.md, sección
+;  12). Lo que mandan los ratones USB, las tabletas USB (las de QEMU: con
+;  coordenadas absolutas) y los touchpads I2C-HID llega aquí, igual venga de
+;  donde venga: un movimiento relativo (dx, dy, la rueda y los botones) o una
+;  posición absoluta (x e y en la escala del aparato, que se pasa a la de la
+;  pantalla). Aquí se lleva la posición del puntero (en puntos de la
+;  pantalla; sin pantalla, en una de 1024 x 768), los botones, la rueda
+;  acumulada y cuántos sucesos han llegado de cada clase; las ventanas
+;  (etapa 8) leerán de aquí.
+;  Lo llaman las interrupciones y los hilos de los drivers: con un cerrojo.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Raton64
+
+    importar Cifras64, Cerrojo, Pant64
+
+    público variable ptr_x, ptr_y: ent32        ; dónde está (puntos)
+    público variable ptr_botones: nat32         ; bit 0 el izquierdo, 1 el derecho, 2 el del medio
+    público variable ptr_rueda: ent32           ; la rueda, acumulada (hacia arriba, positiva)
+    público variable ptr_relativos, ptr_absolutos, ptr_clics: nat64     ; los sucesos que han llegado
+    público variable ptr_último: nat32          ; de quién es el último: 1 ratón, 2 tableta, 3 touchpad
+    variable cerrojo: nat64
+
+    función ancho(): ent32
+        si hay() entonces devolver ent32(ancho_puntos()) fin
+        devolver 1024
+    fin
+
+    función alto(): ent32
+        si hay() entonces devolver ent32(alto_puntos()) fin
+        devolver 768
+    fin
+
+    función dentro()
+        si ptr_x < 0 entonces ptr_x := 0 fin
+        si ptr_y < 0 entonces ptr_y := 0 fin
+        si ptr_x >= ancho() entonces ptr_x := ancho() - 1 fin
+        si ptr_y >= alto() entonces ptr_y := alto() - 1 fin
+    fin
+
+    función botones(b: nat32)
+        si (b yb (nob ptr_botones)) <> 0 entonces ptr_clics := ptr_clics + 1 fin
+        ptr_botones := b
+    fin
+
+    ; un movimiento relativo (un ratón o un touchpad en modo ratón); quién: 1 o 3
+    público función ratón_mueve(dx: ent32, dy: ent32, rueda: ent32, b: nat32, quién: nat32)
+        variable rf: nat64
+        rf := toma(dirección(cerrojo))
+        ptr_x := ptr_x + dx
+        ptr_y := ptr_y + dy
+        dentro()
+        ptr_rueda := ptr_rueda + rueda
+        botones(b)
+        ptr_relativos := ptr_relativos + 1
+        ptr_último := quién
+        suelta(dirección(cerrojo), rf)
+    fin
+
+    ; una posición absoluta, de 0 a máx en cada eje (una tableta)
+    público función ratón_absoluto(ax: nat32, ay: nat32, máx_x: nat32, máx_y: nat32, rueda: ent32, b: nat32)
+        variable rf: nat64
+        si máx_x = 0 entonces máx_x := 1 fin
+        si máx_y = 0 entonces máx_y := 1 fin
+        rf := toma(dirección(cerrojo))
+        ptr_x := ent32((nat64(ax) * nat64(ancho() - 1)) div nat64(máx_x))
+        ptr_y := ent32((nat64(ay) * nat64(alto() - 1)) div nat64(máx_y))
+        dentro()
+        ptr_rueda := ptr_rueda + rueda
+        botones(b)
+        ptr_absolutos := ptr_absolutos + 1
+        ptr_último := 2
+        suelta(dirección(cerrojo), rf)
+    fin
+
+    ; en medio de la pantalla (al arrancar)
+    público función prepara_ratón()
+        ptr_x := ancho() div 2
+        ptr_y := alto() div 2
+    fin
+
+    público función escribe_ratón()
+        escribir("(", ptr_x, ", ", ptr_y, "), botones ", ptr_botones, ", rueda ", ptr_rueda)
+    fin
+
+fin Raton64.
