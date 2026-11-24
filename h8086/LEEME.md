@@ -5,8 +5,11 @@ El sistema de la familia Hispa para los PC, XT y AT (8086, 8088, V20, 80186 y
 [docs/8086/HISPA-8086.md](../docs/8086/HISPA-8086.md); el estudio previo, en
 [docs/8086/ESTUDIO.md](../docs/8086/ESTUDIO.md).
 
+Las aplicaciones van en un disquete aparte, el de Oficina: **PLUMA**, el
+procesador de textos ([docs/8086/PLUMA.md](../docs/8086/PLUMA.md)).
+
 ```
-make            # los disquetes de 360 K, 720 K, 1,2 M y 1,44 M, en build/
+make            # los disquetes de 360 K, 720 K, 1,2 M y 1,44 M, y el de Oficina, en build/
 make prueba     # los arranca en QEMU y comprueba lo que sale
 ```
 

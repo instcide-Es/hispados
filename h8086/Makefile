@@ -6,6 +6,7 @@
 #                     720 K   3½ doble densidad: XT tardíos, portátiles, PS/2 modelo 30
 #                     1,2 M   5¼ alta densidad: los AT (286)
 #                     1,44 M  3½ alta densidad: 286 tardíos en adelante
+#                   y build/oficina-360.img, el de las aplicaciones (PLUMA...)
 #   make prueba     arranca los cuatro en QEMU y comprueba lo que sale
 #
 # Una unidad no lee más densidad que la suya (la de 360 K no lee 1,2 M, ni la
@@ -85,6 +86,27 @@ $(B)/MAS.COM: ordenes/mas.asm | $(B)
 $(B)/ORDENAR.COM: ordenes/ordenar.asm | $(B)
 	$(CP437) $< $(B)/gen/ordenar.asm && $(NASM) -f bin -o $@ $(B)/gen/ordenar.asm
 
+# ---- PLUMA, el procesador de textos (va en el disquete de Oficina) ----
+PLUMA_FUENTES = pluma/pluma.asm pluma/texto.inc pluma/pantalla.inc pluma/archivo.inc \
+                pluma/imprime.inc pluma/dialogo.inc pluma/letras.inc pluma/variables.inc
+$(B)/PLUMA.COM: $(PLUMA_FUENTES) | $(B)
+	mkdir -p $(B)/gen/pluma
+	for f in $(PLUMA_FUENTES); do $(CP437) $$f $(B)/gen/$$f || exit 1; done
+	cd $(B)/gen/pluma && $(NASM) -f bin -l pluma.lst -o ../../PLUMA.COM pluma.asm
+$(B)/PLUMA.TXT: pluma/PLUMA.TXT | $(B)
+	$(CP437) $< $(B)/gen/pluma.tmp && sed 's/$$/\r/' $(B)/gen/pluma.tmp > $@
+OFICINA += $(B)/PLUMA.COM $(B)/PLUMA.TXT
+# ---- fin de PLUMA ----
+
+# ---- el disquete de Oficina (360 K, sin sistema): las aplicaciones, que
+# cada una añade a OFICINA en su bloque (OFICINA += ...) ----
+$(B)/oficina-360.img: $(OFICINA)
+	rm -f $@
+	mformat -C -f 360 -v OFICINA -i $@ ::
+	mcopy -i $@ $(OFICINA) ::
+all: $(B)/oficina-360.img
+# ---- fin del disquete de Oficina ----
+
 $(B)/HOLA.COM: prueba/hola.asm | $(B)
 	$(CP437) $< $(B)/gen/hola.asm && $(NASM) -f bin -o $@ $(B)/gen/hola.asm
 
@@ -133,7 +155,7 @@ $(B)/BASIC.COM: basic/basic.asm $(wildcard basic/*.inc) | $(B)
 	for f in basic/*.asm basic/*.inc; do $(CP437) $$f $(B)/gen/basic/$$(basename $$f) || exit 1; done
 	cd $(B)/gen/basic && $(NASM) -f bin -l basic.lst -o ../../BASIC.COM basic.asm
 
-prueba: $(DISCOS) $(PRUEBAS)
+prueba: $(DISCOS) $(PRUEBAS) $(B)/PLUMA.COM
 	./prueba/prueba.sh
 	./prueba/basic_compara.sh prueba/basic/b0*.bas
 

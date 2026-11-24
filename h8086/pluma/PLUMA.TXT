@@ -1,0 +1,51 @@
+PLUMA, el procesador de textos de Hispa-8086
+
+Para escribir cartas, trabajos y libros en un PC, un XT o un AT. Funciona
+con 256 K de memoria y con cualquier pantalla de 80 columnas. El documento
+puede ser mayor que la memoria: lo que no cabe se guarda en el disco, a
+trozos, sin que se note.
+
+    PLUMA carta          abre CARTA.PLU (o empieza uno nuevo)
+    PLUMA notas.txt      abre un texto
+    PLUMA /W viejo.doc   abre un documento de WordStar
+
+Se escribe sin pulsar Intro al final de cada línea: las líneas se parten
+solas. Intro acaba el párrafo.
+
+Las teclas
+    F1  la ayuda              F2  guardar          F3  buscar
+    F4  copiar el bloque      F5  cortarlo         F6  pegar
+    F7  marcar un bloque (y otra vez F7 para fijarlo)
+    F8  reemplazar            F9  ver la página    Esc o F10  el menú
+    Alt+N negrita   Alt+S subrayado   Alt+C cursiva   Alt+Q sin formato
+    Alt+I izquierda   Alt+M centrado   Alt+D derecha   Alt+J justificado
+    Alt+G sangría     Alt+P salto de página     Alt+V ver los códigos
+    Alt+T pone tilde a la letra de antes (a á à ä â, A Á, n ñ, c ç, ? ¿)
+    Alt+E el euro     Ctrl+Z deshacer           Alt+X salir
+
+Las de WordStar también valen: ^E ^X ^S ^D para moverse, ^KS guardar,
+^KX guardar y salir, ^KB y ^KK el bloque, ^QF buscar, ^PB negrita...
+Pulse ^K, ^Q, ^O o ^P y la línea de abajo dice lo que sigue.
+
+En la pantalla, la negrita brilla, el subrayado va subrayado (o al revés en
+las de color) y la cursiva, al revés (o con el fondo oscuro). La línea de
+arriba dice qué formato hay donde está el cursor.
+
+Guardar y abrir
+    .PLU es el formato de Pluma (con el formato y la página).
+    .TXT es texto, sin formato.
+    Al guardar, el documento de antes queda como .BAK.
+    Archivo > Exportar: texto de DOS (las líneas como en el papel), texto
+    de hoy (UTF-8, para cualquier ordenador actual) y RTF (para Word o
+    LibreOffice, con el formato).
+
+Imprimir
+    Imprimir > Imprimir pide dónde: PRN es la impresora; otro nombre, un
+    archivo. Página > Impresora: Epson FX (la de 7 bits, con el juego
+    español), Epson moderna (la tabla PC), IBM Proprinter o solo texto.
+    La ñ y las tildes salen bien en todas (las que no tiene la impresora,
+    con la letra y la tilde encima). Página > Márgenes, Ancho, Largo,
+    Encabezado y Pie (# es el número de página).
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+Más en docs/8086/PLUMA.md.

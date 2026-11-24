@@ -11,3 +11,6 @@ BASIC es el BASIC: como GW-BASIC, y también con las órdenes en español
 (IMPRIMIR, SI... ENTONCES, PARA... SIGUIENTE).
 La linea que se escribe se corrige con las flechas, Inicio, Fin, Supr e
 Insert, y las anteriores vuelven con las flechas arriba y abajo.
+
+En el disquete de Oficina: PLUMA, el procesador de textos (PLUMA.TXT
+es su manual).
