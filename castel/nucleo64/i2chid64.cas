@@ -1,0 +1,370 @@
+; =============================================================================
+;  i2chid64.cas - Hispa-64, etapa 6: los touchpads «HID sobre I2C» (ELAN,
+;  Synaptics, ALPS, FocalTech... de los portátiles de 2015 en adelante): la
+;  norma «HID over I2C Protocol Specification» 1.0 de Microsoft. Viene de
+;  i2chid.cas de Hispa-Pentium (el ELAN1200 de un ASUS GL553VD de verdad).
+;
+;  Quién es y dónde está lo dice ACPI: Aml64 lo busca en la DSDT y las SSDT
+;  sin interpretar el AML (las fichas, con sus candidatos: lo que su _INI
+;  elegiría según el BIOS); cuando llegue ACPICA (etapa 11), las fichas las
+;  dará él, evaluando _STA, _INI, _CRS y _DSM, y lo de aquí sigue igual. Las
+;  controladoras, I2c64. Y un hilo del núcleo («i2c-hid»), por cada ficha
+;  (primero las que su _STA da por presentes; luego las demás):
+;   1. pone su controladora a su velocidad (con SSCN/FMCN si los hay);
+;   2. lee el descriptor HID (30 octetos, en el registro del _DSM: se escribe
+;      el registro y se leen detrás) en cada candidato (dirección y registro)
+;      hasta que uno conteste con uno de verdad (30 octetos, versión 1.00);
+;   3. SET_POWER (encendido) y RESET; espera la contestación del RESET (un
+;      informe de largo 0) leyendo, sin la interrupción;
+;   4. lee el descriptor de informe y lo analiza (Hidesc64): el ratón (todo
+;      touchpad de precisión lo lleva) y, si lo tiene, el «modo de entrada»,
+;      que se pone a 0: ratón (SET_REPORT de la característica);
+;   5. y luego, cada 10 ms, lee el registro de entrada (sin escribir antes,
+;      como manda la norma): dos octetos de largo y el informe; si el largo
+;      es 0, no había nada (por eso se puede leer sin la GpioInt). Lo del
+;      ratón va a Raton64.ratón_mueve(..., 3).
+;  «sini2c» en la línea de órdenes: ni se buscan. Y antes, las pruebas de los
+;  descriptores HID (PrHid64; con «prueba=hid», una a una).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo I2chid64
+
+    importar Cifras64, Acpi64, Hilos64, Raton64, Hidesc64, PrHid64, Aml64, I2c64
+
+    constante MAX_TP = 4
+    constante CABE_ENTRADA = 256
+    constante CABE_INFORME = 2048
+    constante MAX_PARES = 24
+
+    tipo Tp = estructura
+        usado: bool
+        f: nat32                        ; su ficha
+        c: nat32                        ; su controladora
+        esclavo: nat32
+        diez: bool
+        hd: Desc_i2c
+        dis: Diseño
+        máx: nat32                      ; lo que se lee cada vez
+        repetidos: nat32
+        sin_repetir: bool
+        último: arreglo [16] de byte
+        último_n: nat32
+    fin
+
+    público variable touchpads: nat32           ; los que van
+    público variable informes, malos, fallos_i2c: nat64
+    variable tps: arreglo [MAX_TP] de Tp
+    variable ent: arreglo [CABE_ENTRADA] de byte
+    variable informe: arreglo [CABE_INFORME] de byte
+    variable buf: arreglo [64] de byte
+    variable hdb: arreglo [32] de byte
+    ; los candidatos de una ficha: dirección y registro
+    variable par_dir, par_reg: arreglo [MAX_PARES] de nat32
+    variable n_pares: nat32
+
+    función hx2(v: nat32)
+        variable d: nat32
+        d := (v >> 4) yb 15
+        si d < 10 entonces escribir_car('0' + d) sino escribir_car('A' + d - 10) fin
+        d := v yb 15
+        si d < 10 entonces escribir_car('0' + d) sino escribir_car('A' + d - 10) fin
+    fin
+
+    función hx4(v: nat32)
+        hx2((v >> 8) yb 0xFF)
+        hx2(v yb 0xFF)
+    fin
+
+    ; ---- leer y escribir en el touchpad ----
+    función lee_reg(ref t: Tp, reg: nat32, p: puntero a byte, n: nat32): nat32
+        buf[0] := byte(reg yb 0xFF)
+        buf[1] := byte((reg >> 8) yb 0xFF)
+        devolver transfiere(t.c, t.esclavo, t.diez, dirección(buf[0]), 2, p, n)
+    fin
+
+    función manda(ref t: Tp, p: puntero a byte, n: nat32): nat32
+        devolver transfiere(t.c, t.esclavo, t.diez, p, n, nulo, 0)
+    fin
+
+    función orden(ref t: Tp, op: nat32, cuál: nat32): nat32
+        variable q: arreglo [8] de byte
+        variable n: nat32
+        n := pon_orden(dirección(q[0]), t.hd.orden_reg, op, cuál, 0)
+        devolver manda(t, dirección(q[0]), n)
+    fin
+
+    función par(a: nat32, r: nat32)
+        variable i: nat32
+        si a = NO_HAY o a = 0 o a > 0x3FF o r > 0xFFFF o n_pares >= MAX_PARES entonces devolver fin
+        i := 0
+        mientras i < n_pares hacer
+            si par_dir[i] = a y par_reg[i] = r entonces devolver fin
+            i := i + 1
+        fin
+        par_dir[n_pares] := a
+        par_reg[n_pares] := r
+        n_pares := n_pares + 1
+    fin
+
+    ; dónde puede estar el descriptor HID: lo que haría su _INI según el BIOS,
+    ; lo del _DSM, los registros de siempre en su dirección y las direcciones
+    ; de siempre (ELAN y FocalTech, 15h y 0001h; Synaptics, 2Ch o 20h y 0020h)
+    función pares(ref f: Ficha)
+        variable i, a: nat32
+        n_pares := 0
+        i := 0
+        mientras i < f.n_cand hacer
+            a := f.cand_esclavo[i]
+            si a = NO_HAY entonces a := f.esclavo fin
+            si f.cand_reg[i] <> NO_HAY entonces par(a, f.cand_reg[i]) fin
+            si f.registro <> NO_HAY entonces par(a, f.registro) fin
+            par(a, 1)
+            par(a, 0x20)
+            i := i + 1
+        fin
+        si f.registro <> NO_HAY entonces par(f.esclavo, f.registro) fin
+        par(f.esclavo, 1)
+        par(f.esclavo, 0x20)
+        par(0x15, 1)
+        par(0x2C, 0x20)
+        par(0x20, 0x20)
+        par(0x2C, 1)
+    fin
+
+    ; ---- ponerlo en marcha ----
+    función prueba(k: nat32): bool
+        variable c, r, i, n, ti, vel: nat32
+        variable z: arreglo [16] de byte
+        si touchpads >= MAX_TP entonces devolver falso fin
+        ti := touchpads
+        tps[ti].usado := falso
+        tps[ti].f := k
+        tps[ti].repetidos := 0
+        tps[ti].sin_repetir := falso
+        tps[ti].último_n := 0
+        escribir("i2c-hid: touchpad ", fichas[k].ruta, " (", fichas[k].hid)
+        c := busca_i2c(fichas[k].pci)
+        si c = NINGUNA_I2C entonces
+            escribir("): su controladora (", fichas[k].ctl, ") no está en marcha\n")
+            devolver falso
+        fin
+        tps[ti].c := c
+        tps[ti].diez := fichas[k].diez <> 0
+        si fichas[k].sta <> STA_MÉTODO y fichas[k].sta yb 1 = 0 entonces escribir(", su _STA dice que no está: se prueba igual") fin
+        escribir(")\n")
+        vel := fichas[k].velocidad
+        si vel = 0 entonces vel := 400000 fin
+        configura(c, vel, dirección(fichas[k].ss[0]), dirección(fichas[k].fm[0]))
+        pares(fichas[k])
+        r := DI_VACÍO
+        i := 0
+        mientras i < n_pares y r <> DI_BIEN hacer
+            tps[ti].esclavo := par_dir[i]
+            n := lee_reg(tps[ti], par_reg[i], dirección(hdb[0]), 30)
+            escribir("i2c-hid:   el descriptor HID (")
+            hx2(par_dir[i])
+            escribir("h, registro ")
+            hx4(par_reg[i])
+            escribir("h): ")
+            si n <> I2C_BIEN entonces
+                escribir(I2c64.qué_fallo(n), "\n")
+            sino
+                r := lee_desc_i2c(dirección(hdb[0]), 30, tps[ti].hd)
+                escribir(Hidesc64.qué_desc(r))
+                si r = DI_BIEN entonces
+                    escribir(": ")
+                    hx4(tps[ti].hd.fabricante)
+                    escribir(":")
+                    hx4(tps[ti].hd.producto)
+                    escribir("; descriptor de informe de ", tps[ti].hd.informe_largo, " octetos; informes de hasta ", tps[ti].hd.entrada_máx)
+                fin
+                escribir("\n")
+            fin
+            i := i + 1
+        fin
+        si r <> DI_BIEN entonces devolver falso fin
+        ; encenderlo y reiniciarlo; la contestación del RESET es un informe de largo 0
+        orden(tps[ti], OP_SET_POWER, 0)
+        duerme_ms(1)
+        n := orden(tps[ti], OP_RESET, 0)
+        si n <> I2C_BIEN entonces escribir("i2c-hid:   RESET: ", I2c64.qué_fallo(n), "\n") fin
+        tps[ti].máx := tps[ti].hd.entrada_máx
+        si tps[ti].máx > CABE_ENTRADA entonces tps[ti].máx := CABE_ENTRADA fin
+        i := 0
+        r := 0
+        mientras i < 100 y r = 0 hacer
+            duerme_ms(10)
+            si transfiere(c, tps[ti].esclavo, tps[ti].diez, nulo, 0, dirección(ent[0]), tps[ti].máx) = I2C_BIEN entonces
+                si ent[0] = 0 y ent[1] = 0 entonces r := 1 fin
+            fin
+            i := i + 1
+        fin
+        si r = 0 entonces escribir("i2c-hid:   RESET: no contesta con el informe vacío en 1 s (se sigue)\n") sino escribir("i2c-hid:   RESET: contestado en ", i * 10, " ms\n") fin
+        ; el descriptor de informe
+        n := tps[ti].hd.informe_largo
+        si n > CABE_INFORME entonces n := CABE_INFORME fin
+        r := lee_reg(tps[ti], tps[ti].hd.informe_reg, dirección(informe[0]), n)
+        si r <> I2C_BIEN entonces
+            escribir("i2c-hid:   el descriptor de informe: ", I2c64.qué_fallo(r), "\n")
+            devolver falso
+        fin
+        analiza(dirección(informe[0]), n, tps[ti].dis)
+        escribir("i2c-hid:   el descriptor de informe, ", n, " octetos, ", tps[ti].dis.informes, " informes")
+        si tps[ti].dis.malo entonces escribir(" (se acaba a medias)") fin
+        si tps[ti].dis.digitalizador = 5 entonces escribir("; un touchpad de precisión") fin
+        si tps[ti].dis.digitalizador = 4 entonces escribir("; una pantalla táctil") fin
+        escribir("\n")
+        si no tps[ti].dis.ratón entonces
+            escribir("i2c-hid:   no tiene informe de ratón (X e Y relativos): no se usa\n")
+            devolver falso
+        fin
+        escribir("i2c-hid:   el ratón: informe ", tps[ti].dis.id, ", ", tps[ti].dis.n_botones, " botones, X e Y de ", tps[ti].dis.eje_bits, " bits, rueda de ", tps[ti].dis.rueda_bits, " bits\n")
+        si tps[ti].dis.modo y tps[ti].dis.modo_largo <= 16 entonces
+            i := 0
+            mientras i < 16 hacer
+                z[i] := 0
+                i := i + 1
+            fin
+            n := pon_característica(dirección(buf[0]), tps[ti].hd, tps[ti].dis.modo_id, dirección(z[0]), tps[ti].dis.modo_largo)
+            r := manda(tps[ti], dirección(buf[0]), n)
+            escribir("i2c-hid:   el modo de entrada (informe ", tps[ti].dis.modo_id, ") a 0, ratón: ", I2c64.qué_fallo(r), "\n")
+        fin
+        tps[ti].usado := cierto
+        touchpads := touchpads + 1
+        escribir("i2c-hid:   en marcha (leyendo cada 10 ms, sin su interrupción)\n")
+        devolver cierto
+    fin
+
+    ; ---- los informes ----
+    función llega(ref t: Tp, p: puntero a byte, n: nat32)
+        variable dx, dy, r, pan: ent32
+        variable b, i: nat32
+        variable igual: bool
+        si no lee_ratón(t.dis, p, n, dx, dy, b, r, pan) entonces devolver fin
+        informes := informes + 1
+        ; el mismo informe, con movimiento, una y otra vez: le hace falta su interrupción
+        igual := n = t.último_n y n <= 16
+        i := 0
+        mientras igual y i < n hacer
+            si p[i] <> t.último[i] entonces igual := falso fin
+            i := i + 1
+        fin
+        si n <= 16 entonces
+            i := 0
+            mientras i < n hacer
+                t.último[i] := p[i]
+                i := i + 1
+            fin
+            t.último_n := n
+        fin
+        si igual y (dx <> 0 o dy <> 0 o r <> 0) entonces
+            t.repetidos := t.repetidos + 1
+            si t.repetidos = 30 y no t.sin_repetir entonces
+                t.sin_repetir := cierto
+                escribir("i2c-hid: el touchpad repite el mismo informe sin parar: desde ahora solo cuenta lo que cambia (le haría falta su interrupción, la GpioInt)\n")
+            fin
+            si t.sin_repetir entonces devolver fin
+        sino
+            t.repetidos := 0
+        fin
+        si r <= -16 o r >= 16 entonces r := 0 fin
+        ratón_mueve(dx, dy, r, b yb 7, 3)
+    fin
+
+    ; el hilo: los pone en marcha y luego lee lo que manden
+    función atiende(nada: nat64)
+        variable k, i, j, largo, r, vez: nat32
+        variable presente, ya: bool
+        vez := 0
+        mientras vez < 2 hacer
+            k := 0
+            mientras k < n_fichas hacer
+                presente := fichas[k].sta = STA_MÉTODO o fichas[k].sta yb 1 = 1
+                si presente = (vez = 0) entonces
+                    ya := falso
+                    i := 0
+                    mientras i < touchpads hacer
+                        si fichas[tps[i].f].pci = fichas[k].pci y fichas[tps[i].f].esclavo = fichas[k].esclavo entonces ya := cierto fin
+                        i := i + 1
+                    fin
+                    si no ya entonces prueba(k) fin
+                fin
+                k := k + 1
+            fin
+            vez := vez + 1
+        fin
+        si touchpads = 0 entonces
+            escribir("i2c-hid: ningún touchpad en marcha\n")
+            devolver
+        fin
+        mientras cierto hacer
+            i := 0
+            mientras i < MAX_TP hacer
+                si tps[i].usado entonces
+                    j := 0
+                    mientras j < 4 hacer
+                        r := transfiere(tps[i].c, tps[i].esclavo, tps[i].diez, nulo, 0, dirección(ent[0]), tps[i].máx)
+                        si r <> I2C_BIEN entonces
+                            fallos_i2c := fallos_i2c + 1
+                            romper
+                        fin
+                        largo := nat32(ent[0]) ob (nat32(ent[1]) << 8)
+                        si largo = 0 o largo = 0xFFFF entonces romper fin
+                        si largo < 2 o largo > tps[i].máx entonces
+                            malos := malos + 1
+                            romper
+                        fin
+                        llega(tps[i], dirección(ent[2]), largo - 2)
+                        j := j + 1
+                    fin
+                fin
+                i := i + 1
+            fin
+            duerme_ms(10)
+        fin
+    fin
+
+    ; ---- al arrancar ----
+    ; las pruebas de los descriptores HID y, si no hay «sini2c», los touchpads
+    ; HID sobre I2C: las fichas de ACPI, las controladoras y el hilo que los lee
+    ; (con «bar_cero», antes, la prueba de dar dirección a una BAR sin poner)
+    público función prepara_i2chid(sin: bool, detalle_hid: bool, bar_cero: bool)
+        variable i, n: nat32
+        si detalle_hid entonces escribir("HID: los descriptores de prueba, uno a uno (prueba=hid):\n") fin
+        prueba_hid(detalle_hid)
+        escribir("HID: ", hid_descriptores, " descriptores de prueba (touchpads de verdad y los aparatos USB de QEMU): ", hid_ratones, " ratones, ")
+        escribir(hid_absolutos, " punteros absolutos, ", hid_teclados, " teclados (", hid_leds, " con LED), ", hid_modos, " con modo de entrada, ", hid_malos, " mal hechos; ")
+        escribir(hid_informes, " informes leídos, ", hid_hid, " descriptores HID de I2C y ", hid_órdenes, " órdenes\n")
+        si sin entonces
+            escribir("(sini2c: ni las controladoras I2C ni los touchpads HID sobre I2C)\n")
+            devolver
+        fin
+        ; las tablas: la DSDT y las SSDT
+        i := 0
+        mientras i < n_tablas hacer
+            si t_firma[i] = 0x54445344 o t_firma[i] = 0x54445353 entonces añade_tabla(t_virt[i], t_largo[i]) fin
+            i := i + 1
+        fin
+        n := busca_pnp0c50()
+        escribir("I2C-HID: en las tablas de ACPI (buscado sin AML, en ", tablas_vistas, " tablas: ", n_disp, " dispositivos")
+        si sin_entender > 0 entonces escribir(", ", sin_entender, " trozos sin entender") fin
+        escribir("): ", n, " dispositivos HID sobre I2C (PNP0C50)\n")
+        i := 0
+        mientras i < n hacer
+            escribe_ficha(i)
+            i := i + 1
+        fin
+        si bar_cero entonces prueba_bar() fin
+        prepara_i2c()
+        si n = 0 entonces
+            escribir("i2c-hid: ACPI no dice ningún dispositivo HID sobre I2C (PNP0C50)\n")
+        sino si cuántas = 0 entonces
+            escribir("i2c-hid: ACPI dice ", n, " dispositivos HID sobre I2C, pero no hay controladora I2C en marcha\n")
+        sino si crea(nat64(dirección(atiende)), 0, "i2c-hid", NORMAL, CUALQUIERA) = nulo entonces
+            escribir("i2c-hid: no se puede crear su hilo\n")
+        sino
+            escribir("i2c-hid: el hilo «i2c-hid» los prueba (lo que diga, más abajo)\n")
+        fin
+    fin
+
+fin I2chid64.

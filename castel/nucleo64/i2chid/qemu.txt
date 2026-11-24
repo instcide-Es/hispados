@@ -1,0 +1,46 @@
+# Los descriptores de los aparatos HID de QEMU (hw/usb/dev-hid.c, sacados del
+# binario de QEMU 8.2: usb-mouse, usb-tablet y usb-kbd), y otros hechos a mano
+# para lo que también usa el HID por USB: la rueda de lado (AC Pan), un
+# teclado con identificador y mapa de bits (NKRO), los LED.
+# Los lee prhid64.cas (con hazdatos.py); lo que debe salir está en pruebas.sh.
+-
+# usb-mouse (52 octetos): 5 botones, X, Y y la rueda, relativos
+d 05 01 09 02 a1 01 09 01 a1 00 05 09 19 01 29 05 15 00 25 01 95 05 75 01 81 02 95 01 75 03 81 01
+d 05 01 09 30 09 31 09 38 15 81 25 7f 75 08 95 03 81 06 c0 c0
+?
+i 01 05 FB 01
+i 12 80 7F FF
+-
+# usb-tablet (74 octetos): 3 botones, X e Y absolutos de 0 a 32767, la rueda
+d 05 01 09 02 a1 01 09 01 a1 00 05 09 19 01 29 03 15 00 25 01 95 03 75 01 81 02 95 01 75 05 81 01
+d 05 01 09 30 09 31 15 00 26 ff 7f 35 00 46 ff 7f 75 10 95 02 81 02 05 01 09 38 15 81 25 7f 35 00
+d 45 00 75 08 95 01 81 06 c0 c0
+?
+a 01 FF 3F FF 7F 01
+a 06 00 00 00 00 FF
+a 01 02
+-
+# usb-kbd (63 octetos): los modificadores, un octeto de relleno, 6 teclas; los 5 LED
+d 05 01 09 06 a1 01 75 01 95 08 05 07 19 e0 29 e7 15 00 25 01 81 02 95 01 75 08 81 01 95 05 75 01
+d 05 08 19 01 29 05 91 02 95 01 75 03 91 01 95 06 75 08 15 00 25 ff 05 07 19 00 29 ff 81 00 c0
+?
+k 02 00 04 05 00 00 00 00
+k 00 00 E1 1D 00 00 00 00
+k 00 00 01 01 01 01 01 01
+k 00 00
+l 3
+l 7
+-
+# un ratón con la rueda de lado (AC Pan), como los de Logitech
+d 05 01 09 02 a1 01 09 01 a1 00 05 09 19 01 29 03 15 00 25 01 95 03 75 01 81 02 95 01 75 05 81 01
+d 05 01 09 30 09 31 09 38 15 81 25 7f 75 08 95 03 81 06 05 0c 0a 38 02 95 01 81 06 c0 c0
+?
+i 04 01 02 FF FE
+-
+# un teclado «NKRO» con identificador: los modificadores y un mapa de 56 teclas (04h a 3Bh); 3 LED
+d 05 01 09 06 a1 01 85 01 05 07 19 e0 29 e7 15 00 25 01 75 01 95 08 81 02 19 04 29 3b 95 38 81 02
+d 05 08 19 01 29 03 95 03 91 02 95 05 91 01 c0
+?
+k 01 02 09 00 00 00 00 00 00
+k 02 02 09 00 00 00 00 00 00
+l 2

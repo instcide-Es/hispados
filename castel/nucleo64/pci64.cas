@@ -13,7 +13,7 @@
 ; =============================================================================
 módulo Pci64
 
-    importar Cifras64, Pagina64, Es64, Acpi64
+    importar Cifras64, Pagina64, Es64, Acpi64, Fisica64
 
     público constante MAX = 160
 
@@ -336,6 +336,169 @@ módulo Pci64
         c := (conf(i, 4) yb 0xFFFF) ob 0x6
         si sin_intx entonces c := c ob 0x400 fin
         pon_conf(i, 4, c)
+    fin
+
+    ; ---- [etapa 6] (I2C-HID) encender un aparato y darle dirección a una BAR sin poner ----
+    ; a D0 (por su capacidad de energía, la 01h) si estaba dormido; da en qué
+    ; estado estaba (0 a 3), o 0 si no tiene la capacidad. (Al salir de D3 sin
+    ; «No_Soft_Reset» se reinicia: se espera y se vuelven a leer sus BAR.)
+    público función pon_d0(i: nat32): nat32
+        variable p, v, k: nat32
+        p := capacidad(i, 0x01)
+        si p = 0 entonces devolver 0 fin
+        v := conf(i, p + 4)
+        si v yb 3 = 0 entonces devolver 0 fin
+        pon_conf(i, p + 4, v yb 0xFFFFFFFC)
+        k := 0
+        mientras k < 10 hacer         ; 10 ms (lo que pide la norma de D3 a D0)
+            espera_tsc_ms()
+            k := k + 1
+        fin
+        devolver v yb 3
+    fin
+
+    ; un milisegundo, más o menos, contado con el TSC a 4 GHz como mucho
+    función espera_tsc_ms()
+        variable t: nat64
+        t := tsc()
+        mientras tsc() - t < 4000000 hacer pausa() fin
+    fin
+
+    público variable sin_poner_por: nat32      ; (asigna_bar) por qué no: 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja
+    constante MAX_OCU = 400
+    constante TECHO = 0xFC000000
+    variable ocu_ini, ocu_fin: arreglo [MAX_OCU] de nat64
+    variable n_ocu: nat32
+    variable zonas_desde, zonas_hasta: nat64
+
+    función ocupa(a: nat64, b: nat64, de_aparato: bool)
+        si b <= a o n_ocu >= MAX_OCU entonces devolver fin
+        ocu_ini[n_ocu] := a
+        ocu_fin[n_ocu] := b
+        n_ocu := n_ocu + 1
+        si de_aparato y a >= 0x10000000 y b <= TECHO entonces
+            si zonas_desde = 0 o a < zonas_desde entonces zonas_desde := a fin
+            si b > zonas_hasta entonces zonas_hasta := b fin
+        fin
+    fin
+
+    función libre(a: nat64, t: nat64): bool
+        variable i: nat32
+        si a < 0x10000000 o a + t > TECHO entonces devolver falso fin
+        i := 0
+        mientras i < n_ocu hacer
+            si a < ocu_fin[i] y ocu_ini[i] < a + t entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; lo ocupado debajo de los 4 GB: la RAM, la ECAM, las BAR de los demás y
+    ; las ventanas de los puentes
+    función mira_ocupado(propio: nat32, kp: nat32)
+        variable i, k, v: nat32
+        n_ocu := 0
+        zonas_desde := 0
+        zonas_hasta := 0
+        i := 0
+        mientras i < n_ram hacer
+            si ram_ini[i] < 0x100000000 entonces ocupa(ram_ini[i], ram_fin[i], falso) fin
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n_mcfg hacer
+            ocupa(mc_base[i] + (nat64(mc_bus_ini[i]) << 20), mc_base[i] + (nat64(mc_bus_fin[i] + 1) << 20), falso)
+            i := i + 1
+        fin
+        i := 0
+        mientras i < pci_n hacer
+            k := 0
+            mientras k < 6 hacer
+                si bar_marcas[i][k] yb 9 = 8 y bar_dir[i][k] <> 0 y bar_dir[i][k] < 0x100000000 y no (i = propio y k = kp) entonces
+                    ocupa(bar_dir[i][k], bar_dir[i][k] + bar_tam[i][k], cierto)
+                fin
+                k := k + 1
+            fin
+            si cab[i] yb 0x7F = 1 entonces
+                v := conf(i, 0x20)
+                si (v >> 20) >= ((v yb 0xFFF0) >> 4) entonces ocupa(nat64((v yb 0xFFF0) << 16), nat64(v yb 0xFFF00000) + 0x100000, cierto) fin
+                v := conf(i, 0x24)
+                si conf(i, 0x28) = 0 y (v >> 20) >= ((v yb 0xFFF0) >> 4) entonces ocupa(nat64((v yb 0xFFF0) << 16), nat64(v yb 0xFFF00000) + 0x100000, cierto) fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; la BAR k del aparato i (de memoria) está sin poner (a 0): se le da una
+    ; dirección libre debajo de los 4 GB, como hace Linux
+    ; (pci_assign_unassigned_resources): primero en un hueco entre las que ha
+    ; repartido el firmware (ahí seguro que llega: está dentro de la ventana
+    ; del puente raíz), luego justo encima de ellas, luego debajo. Solo en el
+    ; bus 0 (sin puentes por medio). Da la dirección, o 0 (y sin_poner_por).
+    ; Así dejan los firmware de Tiger Lake y Raptor Lake las I2C que no usan.
+    público función asigna_bar(i: nat32, k: nat32): nat64
+        variable t, f, c: nat64
+        variable orden, lo: nat32
+        sin_poner_por := 0
+        si k >= 6 o bar_marcas[i][k] yb 9 <> 8 entonces devolver 0 fin
+        si bar_dir[i][k] <> 0 entonces devolver bar_dir[i][k] fin
+        si bus[i] <> 0 entonces
+            sin_poner_por := 1
+            devolver 0
+        fin
+        t := bar_tam[i][k]
+        si t = 0 o t > 0x4000000 entonces
+            sin_poner_por := 2
+            devolver 0
+        fin
+        si t < 0x1000 entonces t := 0x1000 fin
+        mira_ocupado(i, k)
+        c := 0
+        si zonas_hasta > zonas_desde entonces
+            f := (zonas_desde + t - 1) yb (nob (t - 1))
+            mientras c = 0 y f + t <= zonas_hasta hacer
+                si libre(f, t) entonces c := f sino f := f + t fin
+            fin
+            f := (zonas_hasta + t - 1) yb (nob (t - 1))
+            mientras c = 0 y f + t <= TECHO hacer
+                si libre(f, t) entonces c := f sino f := f + t fin
+            fin
+            f := (zonas_desde - t) yb (nob (t - 1))
+            mientras c = 0 y f >= 0x10000000 y f < zonas_desde hacer
+                si libre(f, t) entonces c := f sino f := f - t fin
+            fin
+        fin
+        f := (TECHO - t) yb (nob (t - 1))
+        mientras c = 0 y f >= 0x10000000 hacer
+            si libre(f, t) entonces c := f sino f := f - t fin
+        fin
+        si c = 0 entonces
+            sin_poner_por := 3
+            devolver 0
+        fin
+        orden := conf(i, 4)
+        pon_conf(i, 4, orden yb 0xFFFFFFF9)
+        lo := conf(i, 0x10 + k * 4)
+        pon_conf(i, 0x10 + k * 4, (lo yb 0xF) ob nat32(c))
+        si bar_marcas[i][k] yb 2 <> 0 entonces pon_conf(i, 0x14 + k * 4, 0) fin
+        pon_conf(i, 4, orden)
+        si nat64(conf(i, 0x10 + k * 4) yb 0xFFFFFFF0) <> c entonces
+            sin_poner_por := 4
+            devolver 0
+        fin
+        bar_dir[i][k] := c
+        devolver c
+    fin
+
+    ; la BAR k como la dice ahora el aparato (tras pasar a D0 puede haberse perdido)
+    público función relee_bar(i: nat32, k: nat32): nat64
+        variable v, a: nat32
+        si k >= 6 o bar_marcas[i][k] yb 9 <> 8 entonces devolver 0 fin
+        v := conf(i, 0x10 + k * 4)
+        a := 0
+        si bar_marcas[i][k] yb 2 <> 0 y k < 5 entonces a := conf(i, 0x14 + k * 4) fin
+        bar_dir[i][k] := (nat64(a) << 32) ob (v yb 0xFFFFFFF0)
+        devolver bar_dir[i][k]
     fin
 
     ; el nombre corto «BB:DD.F»

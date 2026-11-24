@@ -1,0 +1,1336 @@
+; =============================================================================
+;  aml64.cas - Hispa-64, etapa 6: los dispositivos HID sobre I2C (los
+;  touchpads: _HID o _CID «PNP0C50» o «ACPI0C50») en las tablas de ACPI (la
+;  DSDT y las SSDT), SIN interpretar el AML (docs/64/HISPA-64.md, sección 8:
+;  ACPICA llega en la etapa 11). Lo que hace ACPICA en Hispa-Pentium
+;  (acpi/pentium/i2chid.c: evaluar _STA, _INI, _CRS y _DSM) aquí se mira «a
+;  ojo», como se busca \_S5 en acpi64.cas:
+;   1. se recorre el AML como un árbol: los Scope, los Device (con su ruta:
+;      \_SB.PCI0.I2C0.TPD0), los Name (su valor: un número, un texto, un
+;      búfer, un paquete), los Method (se saltan enteros: no se ejecutan), los
+;      If y los Else de fuera de los métodos (se entra en los dos: no se sabe
+;      cuál toca), y lo demás que puede haber fuera de un método; lo que no se
+;      entiende se salta hasta el final de su bloque (y se cuenta);
+;   2. de cada dispositivo con PNP0C50: su _HID, su _CID y su _STA (si son
+;      fijos), sus ResourceTemplate (el del Name(_CRS), los búferes de un
+;      método _CRS o los de las plantillas del dispositivo: «SBFB») con su
+;      I2cSerialBusV2 (el descriptor grande 0x8E, tipo 1: la dirección del
+;      esclavo, la velocidad, 7 o 10 bits y la ruta de la controladora) y su
+;      GpioInt o Interrupt; del _DSM (el GUID de HID sobre I2C,
+;      3CDFF6F7-4267-4555-AD05-B30A3D8938DE, función 1), el registro del
+;      descriptor HID, si lo devuelve un número («If (Arg2 == One) Return
+;      (0x20)»);
+;   3. las DSDT de verdad (las de ASUS, las de Intel) no lo dicen fijo: su
+;      _INI elige el touchpad según el BIOS (Store ("ELAN1200", _HID), la
+;      dirección a un CreateWordField de la plantilla, el registro a un Name
+;      que el _DSM pasa a otro método). Eso se apunta como «candidatos», y
+;      I2chid64 los prueba en el equipo, validando lo que conteste;
+;   4. la controladora: el dispositivo de la ruta de su I2cSerialBus (o, si
+;      dice «NULL» o no está, su padre), su _ADR (el aparato y la función del
+;      PCI) o, sin él, su nombre (I2C0-I2C3: 15.0-15.3; I2C4: 19.2; I2C5: 19.1;
+;      I2C6-7: 10.0-10.1), y sus SSCN y FMCN si son paquetes fijos.
+;  Cuando llegue ACPICA (etapa 11), lo mismo saldrá evaluando de verdad
+;  (_STA, _INI, _CRS, _DSM): la Ficha es la que se rellenará entonces.
+;  No usa nada del núcleo (también se prueba en Linux, modelo linux64).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Aml64
+
+    público constante MAX_FICHAS = 8
+    público constante MAX_CAND = 8
+    público constante NO_HAY = 0xFFFFFFFF
+    público constante STA_MÉTODO = 0xFFFFFFFE  ; (sta) lo decide un método: no se sabe sin AML
+    ; (origen) de dónde sale el I2cSerialBus y la controladora
+    público constante OR_PLANTILLA = 1         ; de una plantilla del dispositivo (no de un búfer fijo del _CRS)
+    público constante OR_NOMBRE = 2            ; la controladora, por su nombre (sin _ADR)
+    público constante OR_PADRE = 4             ; la controladora, su padre (la de su I2cSerialBus no está)
+    público constante OR_MÉTODO = 8            ; de un búfer de dentro del método _CRS
+
+    ; un dispositivo HID sobre I2C, como lo dan las tablas (y lo dará ACPICA)
+    público tipo Ficha = estructura
+        ruta: arreglo [48] de byte      ; \_SB.PCI0.I2C0.TPD0
+        hid: arreglo [12] de byte       ; su _HID (el que está escrito; su _INI lo puede cambiar)
+        cid: arreglo [12] de byte       ; su _CID
+        sta: nat32                      ; su _STA, si es fijo; STA_MÉTODO si no
+        esclavo, velocidad, diez: nat32 ; del I2cSerialBus (velocidad 0: no se ha encontrado)
+        fuente: arreglo [48] de byte    ; la controladora, como la dice
+        plantilla: nat32                ; el nombre de la plantilla («SBFB», 4 letras), o 0
+        origen: nat32                   ; OR_...
+        ctl: arreglo [48] de byte       ; la controladora que se usa (su ruta)
+        pci: nat32                      ; su función PCI: bus << 16 ob aparato << 11 ob función << 8; NO_HAY: no se sabe
+        adr: nat32                      ; su _ADR (NO_HAY: no lo tiene)
+        ss, fm: arreglo [3] de nat32    ; SSCN y FMCN de la controladora (0: no hay)
+        gpio_pin, gpio_modo: nat32      ; su GpioInt (NO_HAY: no tiene)
+        irq: nat32                      ; su Interrupt (NO_HAY: no tiene)
+        registro: nat32                 ; el del descriptor HID, del _DSM (NO_HAY: no se sabe)
+        dsm_guid: bool                  ; ¿su _DSM mira el GUID de HID sobre I2C?
+        reg_var: nat32                  ; el Name que el _DSM devuelve como registro («HID2»), o 0
+        ; lo que su _INI puede poner, según el BIOS (NO_HAY: no lo cambia)
+        n_cand: nat32
+        cand_hid: arreglo [MAX_CAND] de arreglo [12] de byte
+        cand_esclavo, cand_vel, cand_reg: arreglo [MAX_CAND] de nat32
+    fin
+
+    público variable fichas: arreglo [MAX_FICHAS] de Ficha
+    público variable n_fichas: nat32
+    público variable n_disp: nat32              ; los dispositivos vistos
+    público variable n_métodos: nat32
+    público variable sin_entender: nat32        ; los bloques de AML que no se han entendido (se saltan)
+    público variable tablas_vistas, octetos_vistos: nat32
+
+    constante FALLO = 0xFFFFFFFF
+    constante MAX_TABLAS = 24
+    constante MAX_HONDO = 10
+    constante MAX_DISP = 600
+    constante MAX_MÉT = 3000
+    constante MAX_GUID = 8
+    constante SEG_HID = 0x4449485F             ; «_HID»
+    constante SEG_CID = 0x4449435F
+    constante SEG_ADR = 0x5244415F
+    constante SEG_STA = 0x4154535F
+    constante SEG_CRS = 0x5352435F
+    constante SEG_INI = 0x494E495F
+    constante SEG_DSM = 0x4D53445F
+    constante SEG_SSCN = 0x4E435353
+    constante SEG_FMCN = 0x4E434D46
+    constante SEG_OSI = 0x49534F5F
+
+    ; las tablas (DSDT y SSDT): dónde y cuánto
+    variable tb_p: arreglo [MAX_TABLAS] de nat64
+    variable tb_n: arreglo [MAX_TABLAS] de nat32
+    variable n_tb: nat32
+    ; la que se recorre ahora
+    variable b: puntero a byte
+    variable bl: nat32
+    variable bt: nat32
+
+    ; los dispositivos: su ruta, su tabla y su cuerpo, y lo que se sabe de ellos
+    variable d_cam: arreglo [MAX_DISP] de arreglo [MAX_HONDO] de nat32
+    variable d_hondo, d_tabla, d_ini, d_fin, d_adr: arreglo [MAX_DISP] de nat32
+    variable d_hid, d_cid: arreglo [MAX_DISP] de arreglo [12] de byte
+    variable d_es, d_cid_es: arreglo [MAX_DISP] de bool
+    variable d_sta: arreglo [MAX_DISP] de nat32
+    variable d_ss, d_fm: arreglo [MAX_DISP] de arreglo [3] de nat32
+    ; los métodos (el último trozo de su nombre y cuántos argumentos), para saltar sus llamadas
+    variable m_seg: arreglo [MAX_MÉT] de nat32
+    variable m_args: arreglo [MAX_MÉT] de byte
+    ; los Name con el GUID de HID sobre I2C («HIDG» en las de ASUS)
+    variable g_seg: arreglo [MAX_GUID] de nat32
+    variable n_guid: nat32
+
+    ; el recorrido: la ruta de ahora, el dispositivo de ahora y qué se hace
+    variable cam: arreglo [MAX_HONDO] de nat32
+    variable hondo: nat32
+    variable actual: nat32
+    variable fase: nat32                        ; 0 los métodos, 1 los dispositivos, 2 lo de uno (dueño)
+    variable dueño: nat32
+    variable prof: nat32                        ; lo hondo de las expresiones
+
+    ; el último nombre leído (NameString)
+    variable nm_abs: bool
+    variable nm_sube, nm_n: nat32
+    variable nm_segs: arreglo [8] de nat32
+    variable pk_tam: nat32
+
+    ; lo de un dispositivo (fase 2)
+    constante MAX_PL = 16
+    constante MAX_ENT = 32
+    constante MAX_CAMPO = 16
+    variable pl_seg, pl_ini, pl_fin, pl_clase: arreglo [MAX_PL] de nat32    ; clase: 0 Name(_CRS), 1 de una plantilla, 2 de dentro del _CRS
+    variable n_pl: nat32
+    variable en_seg, en_val: arreglo [MAX_ENT] de nat32
+    variable n_en: nat32
+    variable ca_buf, ca_índice, ca_seg: arreglo [MAX_CAMPO] de nat32
+    variable n_ca: nat32
+    variable mt_ini, mt_fin: arreglo [4] de nat32   ; _INI, _DSM, _CRS, _STA (0, 0: no)
+    variable i2c_pos: nat32                     ; dónde va el I2cSerialBus en su plantilla
+
+    ; el GUID de HID sobre I2C, como va en un búfer (ToUUID)
+    variable guid: arreglo [16] de byte
+
+    ; ---- leer ----
+    función o8(p: nat32): nat32
+        si p >= bl entonces devolver 0 fin
+        devolver b[p]
+    fin
+
+    función o16(p: nat32): nat32
+        devolver o8(p) ob (o8(p + 1) << 8)
+    fin
+
+    función o32(p: nat32): nat32
+        devolver o16(p) ob (o16(p + 2) << 16)
+    fin
+
+    función ceros(p: puntero a byte, n: nat64)
+        variable i: nat64
+        i := 0
+        mientras i < n hacer
+            p[i] := 0
+            i := i + 1
+        fin
+    fin
+
+    ; la longitud de un paquete (PkgLength) en p; en pk_tam, cuántos octetos ocupa
+    función pkglen(p: nat32): nat32
+        variable c, n, v, i: nat32
+        c := o8(p)
+        n := c >> 6
+        pk_tam := n + 1
+        si n = 0 entonces devolver c yb 0x3F fin
+        v := c yb 0x0F
+        i := 0
+        mientras i < n hacer
+            v := v ob (o8(p + 1 + i) << (4 + 8 * i))
+            i := i + 1
+        fin
+        devolver v
+    fin
+
+    función letra_seg(c: nat32, primera: bool): bool
+        si c = '_' o (c >= 'A' y c <= 'Z') entonces devolver cierto fin
+        devolver no primera y c >= '0' y c <= '9'
+    fin
+
+    función seg_bien(p: nat32): bool
+        devolver letra_seg(o8(p), cierto) y letra_seg(o8(p + 1), falso) y letra_seg(o8(p + 2), falso) y letra_seg(o8(p + 3), falso)
+    fin
+
+    función empieza_nombre(c: nat32): bool
+        devolver c = 0x5C o c = 0x5E o c = 0x2E o c = 0x2F o c = '_' o (c >= 'A' y c <= 'Z')
+    fin
+
+    ; un NameString en p: lo deja en nm_...; da dónde acaba, o FALLO
+    función nombre(p: nat32): nat32
+        variable c, n, i: nat32
+        nm_abs := falso
+        nm_sube := 0
+        nm_n := 0
+        si p >= bl entonces devolver FALLO fin
+        si o8(p) = 0x5C entonces
+            nm_abs := cierto
+            p := p + 1
+        sino
+            mientras o8(p) = 0x5E y p < bl hacer
+                nm_sube := nm_sube + 1
+                p := p + 1
+            fin
+        fin
+        c := o8(p)
+        si c = 0 entonces devolver p + 1 fin
+        n := 1
+        si c = 0x2E entonces
+            n := 2
+            p := p + 1
+        sino si c = 0x2F entonces
+            n := o8(p + 1)
+            p := p + 2
+            si n = 0 entonces devolver FALLO fin
+        sino si no letra_seg(c, cierto) entonces
+            devolver FALLO
+        fin
+        i := 0
+        mientras i < n hacer
+            si p + 4 > bl o no seg_bien(p) entonces devolver FALLO fin
+            si nm_n < 8 entonces
+                nm_segs[nm_n] := o32(p)
+                nm_n := nm_n + 1
+            fin
+            p := p + 4
+            i := i + 1
+        fin
+        devolver p
+    fin
+
+    ; el último trozo del último nombre leído (0 si no hay)
+    función último(): nat32
+        si nm_n = 0 entonces devolver 0 fin
+        devolver nm_segs[nm_n - 1]
+    fin
+
+    ; el nombre leído, aplicado a la ruta de ahora
+    función entra_nombre()
+        variable i: nat32
+        si nm_abs entonces hondo := 0 fin
+        si nm_sube > hondo entonces hondo := 0 sino hondo := hondo - nm_sube fin
+        i := 0
+        mientras i < nm_n hacer
+            si hondo < MAX_HONDO entonces
+                cam[hondo] := nm_segs[i]
+                hondo := hondo + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; el dispositivo con la ruta de ahora (el primero), o NO_HAY
+    función busca_disp(h: nat32, c: puntero a nat32): nat32
+        variable i, k: nat32
+        variable igual: bool
+        i := 0
+        mientras i < n_disp hacer
+            si d_hondo[i] = h entonces
+                igual := cierto
+                k := 0
+                mientras k < h y igual hacer
+                    si d_cam[i][k] <> c[k] entonces igual := falso fin
+                    k := k + 1
+                fin
+                si igual entonces devolver i fin
+            fin
+            i := i + 1
+        fin
+        devolver NO_HAY
+    fin
+
+    ; ---- los métodos: cuántos argumentos lleva el que se llama así ----
+    función args_de(seg: nat32): nat32
+        variable i: nat32
+        si seg = SEG_OSI entonces devolver 1 fin
+        i := 0
+        mientras i < n_métodos hacer
+            si m_seg[i] = seg entonces devolver m_args[i] fin
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    función apunta_método(seg: nat32, args: nat32)
+        variable i: nat32
+        i := 0
+        mientras i < n_métodos hacer
+            si m_seg[i] = seg entonces devolver fin
+            i := i + 1
+        fin
+        si n_métodos < MAX_MÉT entonces
+            m_seg[n_métodos] := seg
+            m_args[n_métodos] := byte(args)
+            n_métodos := n_métodos + 1
+        fin
+    fin
+
+    ; ---- saltar una expresión (TermArg) o una sentencia: da dónde acaba, o FALLO ----
+    ; cuántos operandos (y destinos) lleva cada operador de un octeto; 0xFF: no es uno
+    función operandos(op: nat32): nat32
+        si op = 0x70 o op = 0x80 o op = 0x81 o op = 0x82 o op = 0x86 entonces devolver 2 fin
+        si op = 0x96 o op = 0x97 o op = 0x98 o op = 0x99 o op = 0x9D entonces devolver 2 fin
+        si op = 0x90 o op = 0x91 o op = 0x93 o op = 0x94 o op = 0x95 entonces devolver 2 fin
+        si op = 0x71 o op = 0x75 o op = 0x76 o op = 0x83 o op = 0x87 o op = 0x8E o op = 0x92 o op = 0xA4 entonces devolver 1 fin
+        si (op >= 0x72 y op <= 0x74) o op = 0x77 o (op >= 0x79 y op <= 0x7F) o op = 0x84 o op = 0x85 o op = 0x88 o op = 0x9C entonces devolver 3 fin
+        si op = 0x8A o op = 0x8B o op = 0x8C o op = 0x8D o op = 0x8F entonces devolver 3 fin
+        si op = 0x78 o op = 0x9E entonces devolver 4 fin
+        si op = 0xA5 o op = 0x9F o op = 0xA3 o op = 0xCC entonces devolver 0 fin
+        devolver 0xFF
+    fin
+
+    función operandos_ext(op: nat32): nat32
+        si op = 0x30 o op = 0x31 o op = 0x33 entonces devolver 0 fin
+        si op = 0x21 o op = 0x22 o op = 0x24 o op = 0x26 o op = 0x27 o op = 0x2A entonces devolver 1 fin
+        si op = 0x12 o op = 0x25 o op = 0x28 o op = 0x29 o op = 0x20 entonces devolver 2 fin
+        si op = 0x13 entonces devolver 4 fin
+        si op = 0x1F entonces devolver 6 fin
+        devolver 0xFF
+    fin
+
+    función salta_n(p: nat32, n: nat32): nat32
+        mientras n > 0 y p <> FALLO hacer
+            p := salta(p)
+            n := n - 1
+        fin
+        devolver p
+    fin
+
+    función salta(p: nat32): nat32
+        variable c, n, e: nat32
+        si p >= bl entonces devolver FALLO fin
+        si prof > 48 entonces devolver FALLO fin
+        prof := prof + 1
+        c := o8(p)
+        e := FALLO
+        si c = 0x00 o c = 0x01 o c = 0xFF o (c >= 0x60 y c <= 0x6E y c <> 0x68 - 1) entonces
+            e := p + 1
+        sino si c = 0x0A entonces
+            e := p + 2
+        sino si c = 0x0B entonces
+            e := p + 3
+        sino si c = 0x0C entonces
+            e := p + 5
+        sino si c = 0x0E entonces
+            e := p + 9
+        sino si c = 0x0D entonces
+            e := p + 1
+            mientras e < bl y o8(e) <> 0 hacer e := e + 1 fin
+            e := e + 1
+        sino si c = 0x11 o c = 0x12 o c = 0x13 o c = 0xA0 o c = 0xA1 o c = 0xA2 entonces
+            e := p + 1 + pkglen(p + 1)
+        sino si c = 0x89 entonces
+            ; Match: término, octeto, término, octeto, término, término
+            e := salta(p + 1)
+            si e <> FALLO entonces e := salta(e + 1) fin
+            si e <> FALLO entonces e := salta(e + 1) fin
+            si e <> FALLO entonces e := salta(e) fin
+        sino si c = 0x5B entonces
+            c := o8(p + 1)
+            n := operandos_ext(c)
+            si c = 0x23 entonces
+                e := salta(p + 2)
+                si e <> FALLO entonces e := e + 2 fin
+            sino si c = 0x32 entonces
+                e := salta(p + 7)
+            sino si n <> 0xFF entonces
+                e := salta_n(p + 2, n)
+            fin
+        sino si empieza_nombre(c) entonces
+            e := nombre(p)
+            si e <> FALLO entonces e := salta_n(e, args_de(último())) fin
+        sino
+            n := operandos(c)
+            si n <> 0xFF entonces e := salta_n(p + 1, n) fin
+        fin
+        prof := prof - 1
+        si e <> FALLO y e > bl entonces devolver FALLO fin
+        devolver e
+    fin
+
+    ; un número escrito (Zero, One, Ones, BytePrefix...): da dónde acaba, o FALLO; el valor en «v»
+    función número(p: nat32, ref v: nat32): nat32
+        variable c: nat32
+        c := o8(p)
+        si c = 0x00 entonces
+            v := 0
+            devolver p + 1
+        fin
+        si c = 0x01 entonces
+            v := 1
+            devolver p + 1
+        fin
+        si c = 0xFF entonces
+            v := 0xFFFFFFFF
+            devolver p + 1
+        fin
+        si c = 0x0A entonces
+            v := o8(p + 1)
+            devolver p + 2
+        fin
+        si c = 0x0B entonces
+            v := o16(p + 1)
+            devolver p + 3
+        fin
+        si c = 0x0C entonces
+            v := o32(p + 1)
+            devolver p + 5
+        fin
+        si c = 0x0E entonces
+            v := o32(p + 1)
+            devolver p + 9
+        fin
+        devolver FALLO
+    fin
+
+    ; ---- los identificadores: un texto («ELAN1200») o un EISAID comprimido ----
+    función hexa(v: nat32): byte
+        si v < 10 entonces devolver byte('0' + v) fin
+        devolver byte('A' + v - 10)
+    fin
+
+    ; el identificador de p (un texto o un número EISA) en «t» (12 octetos); falso si no es uno
+    función identificador(p: nat32, t: puntero a byte): bool
+        variable c, i, v: nat32
+        c := o8(p)
+        t[0] := 0
+        si c = 0x0D entonces
+            i := 0
+            mientras i < 11 y o8(p + 1 + i) <> 0 hacer
+                t[i] := byte(o8(p + 1 + i))
+                i := i + 1
+            fin
+            t[i] := 0
+            devolver i > 0
+        fin
+        si c = 0x0C entonces
+            ; EISAID: tres letras de 5 bits y cuatro cifras hexadecimales (en orden de red)
+            c := o8(p + 1)
+            v := o8(p + 2)
+            t[0] := byte(((c >> 2) yb 0x1F) + 0x40)
+            t[1] := byte((((c yb 3) << 3) ob (v >> 5)) + 0x40)
+            t[2] := byte((v yb 0x1F) + 0x40)
+            c := o8(p + 3)
+            v := o8(p + 4)
+            t[3] := hexa(c >> 4)
+            t[4] := hexa(c yb 15)
+            t[5] := hexa(v >> 4)
+            t[6] := hexa(v yb 15)
+            t[7] := 0
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    función igual_texto(a: puntero a byte, b_: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 o b_[i] <> 0 hacer
+            si a[i] <> b_[i] entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    función es_hid(t: puntero a byte): bool
+        devolver igual_texto(t, "PNP0C50") o igual_texto(t, "ACPI0C50")
+    fin
+
+    función copia(a: puntero a byte, de: puntero a byte, cabe: nat32)
+        variable i: nat32
+        i := 0
+        mientras i + 1 < cabe y de[i] <> 0 hacer
+            a[i] := de[i]
+            i := i + 1
+        fin
+        a[i] := 0
+    fin
+
+    ; ---- los ResourceTemplate ----
+    ; ¿es [ini, fin) un ResourceTemplate bien hecho (con su final, 79h)?
+    función plantilla_bien(ini: nat32, fin_: nat32): bool
+        variable p, c: nat32
+        p := ini
+        mientras p < fin_ hacer
+            c := o8(p)
+            si c yb 0x80 = 0 entonces
+                si (c >> 3) yb 0x0F = 0x0F entonces devolver p + 2 = fin_ fin
+                p := p + 1 + (c yb 7)
+            sino
+                si p + 3 > fin_ entonces devolver falso fin
+                p := p + 3 + o16(p + 1)
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; el I2cSerialBus, la GpioInt y la Interrupt de una plantilla, a la ficha
+    ; (lo que ya tenga, no se cambia). Da si trae un I2cSerialBus.
+    función mira_plantilla(ini: nat32, fin_: nat32, ref f: Ficha): bool
+        variable p, c, l, ln, k, i: nat32
+        variable hay: bool
+        hay := falso
+        p := ini
+        mientras p < fin_ hacer
+            c := o8(p)
+            si c yb 0x80 = 0 entonces
+                si (c >> 3) yb 0x0F = 0x0F entonces romper fin
+                p := p + 1 + (c yb 7)
+                seguir
+            fin
+            l := o16(p + 1)
+            si p + 3 + l > fin_ entonces romper fin
+            si c = 0x8E y l >= 15 y o8(p + 5) = 1 entonces
+                si f.velocidad = 0 entonces
+                    ln := o16(p + 10)
+                    f.velocidad := o32(p + 12)
+                    f.esclavo := o16(p + 16)
+                    f.diez := o8(p + 7) yb 1
+                    f.fuente[0] := 0
+                    k := p + 12 + ln
+                    i := 0
+                    mientras k + i < p + 3 + l y o8(k + i) <> 0 y i < 47 hacer
+                        f.fuente[i] := byte(o8(k + i))
+                        i := i + 1
+                    fin
+                    f.fuente[i] := 0
+                    i2c_pos := p - ini
+                fin
+                hay := cierto
+            sino si c = 0x8C y l >= 20 y o8(p + 4) = 0 y f.gpio_pin = NO_HAY entonces
+                k := o16(p + 14)
+                si k + 2 <= l + 3 entonces
+                    f.gpio_pin := o16(p + k)
+                    f.gpio_modo := (o8(p + 7) yb 1) ob (((o8(p + 7) >> 1) yb 3) << 8)
+                fin
+            sino si c = 0x89 y l >= 6 y f.irq = NO_HAY entonces
+                f.irq := o32(p + 5)
+            fin
+            p := p + 3 + l
+        fin
+        devolver hay
+    fin
+
+    ; ---- los Name ----
+    ; un Buffer en p: deja dónde empiezan y acaban sus datos; falso si no es uno
+    función búfer(p: nat32, ref ini: nat32, ref fin_: nat32): bool
+        variable e, q, n: nat32
+        si o8(p) <> 0x11 entonces devolver falso fin
+        e := p + 1 + pkglen(p + 1)
+        q := número(p + 1 + pk_tam, n)
+        si q = FALLO o q > e o e > bl entonces devolver falso fin
+        ini := q
+        fin_ := e
+        devolver cierto
+    fin
+
+    ; un Package de números fijos (SSCN, FMCN): los tres primeros a «v»
+    función paquete(p: nat32, v: puntero a nat32)
+        variable e, q, n, i, x: nat32
+        si o8(p) <> 0x12 entonces devolver fin
+        e := p + 1 + pkglen(p + 1)
+        q := p + 1 + pk_tam
+        n := o8(q)
+        q := q + 1
+        i := 0
+        mientras i < n y i < 3 y q < e hacer
+            q := número(q, x)
+            si q = FALLO entonces devolver fin
+            v[i] := x
+            i := i + 1
+        fin
+    fin
+
+    ; Name (seg, lo que hay en p) en el dispositivo de ahora
+    función un_name(seg: nat32, p: nat32)
+        variable t: arreglo [12] de byte
+        variable v, ini, fin_, i, e, q, n: nat32
+        variable igual: bool
+        ; (fase 1) los Name con el GUID de HID sobre I2C, en cualquier sitio
+        si fase = 1 y búfer(p, ini, fin_) y fin_ - ini = 16 y n_guid < MAX_GUID entonces
+            igual := cierto
+            i := 0
+            mientras i < 16 hacer
+                si o8(ini + i) <> guid[i] entonces igual := falso fin
+                i := i + 1
+            fin
+            si igual entonces
+                g_seg[n_guid] := seg
+                n_guid := n_guid + 1
+            fin
+        fin
+        si actual = NO_HAY entonces devolver fin
+        si fase = 1 entonces
+            si seg = SEG_HID y d_hid[actual][0] = 0 entonces
+                si identificador(p, dirección(t[0])) entonces
+                    copia(dirección(d_hid[actual][0]), dirección(t[0]), 12)
+                    si es_hid(dirección(t[0])) entonces d_es[actual] := cierto fin
+                fin
+            sino si seg = SEG_CID entonces
+                si o8(p) = 0x12 entonces
+                    ; un paquete de identificadores: el de HID, o el primero
+                    e := p + 1 + pkglen(p + 1)
+                    q := p + 1 + pk_tam
+                    n := o8(q)
+                    q := q + 1
+                    i := 0
+                    mientras i < n y q < e y q <> FALLO hacer
+                        si identificador(q, dirección(t[0])) y (d_cid[actual][0] = 0 o es_hid(dirección(t[0]))) entonces
+                            copia(dirección(d_cid[actual][0]), dirección(t[0]), 12)
+                            si es_hid(dirección(t[0])) entonces d_es[actual] := cierto fin
+                        fin
+                        q := salta(q)
+                        i := i + 1
+                    fin
+                sino si identificador(p, dirección(t[0])) y (d_cid[actual][0] = 0 o es_hid(dirección(t[0]))) entonces
+                    copia(dirección(d_cid[actual][0]), dirección(t[0]), 12)
+                    si es_hid(dirección(t[0])) entonces d_es[actual] := cierto fin
+                fin
+            sino si seg = SEG_ADR y d_adr[actual] = NO_HAY entonces
+                si número(p, v) <> FALLO entonces d_adr[actual] := v fin
+            sino si seg = SEG_STA entonces
+                si número(p, v) <> FALLO entonces d_sta[actual] := v fin
+            sino si seg = SEG_SSCN entonces
+                paquete(p, dirección(d_ss[actual][0]))
+            sino si seg = SEG_FMCN entonces
+                paquete(p, dirección(d_fm[actual][0]))
+            fin
+        sino si fase = 2 y actual = dueño entonces
+            si búfer(p, ini, fin_) y plantilla_bien(ini, fin_) y n_pl < MAX_PL entonces
+                pl_seg[n_pl] := seg
+                pl_ini[n_pl] := ini
+                pl_fin[n_pl] := fin_
+                pl_clase[n_pl] := 1
+                si seg = SEG_CRS entonces pl_clase[n_pl] := 0 fin
+                n_pl := n_pl + 1
+            sino si número(p, v) <> FALLO y n_en < MAX_ENT entonces
+                en_seg[n_en] := seg
+                en_val[n_en] := v
+                n_en := n_en + 1
+            fin
+        fin
+    fin
+
+    ; un método: (fase 0) cuántos argumentos; (fase 2) los que se miran
+    función un_método(seg: nat32, args: nat32, ini: nat32, fin_: nat32)
+        variable k: nat32
+        si fase = 0 entonces
+            apunta_método(seg, args)
+            devolver
+        fin
+        si fase = 1 y seg = SEG_STA y actual <> NO_HAY entonces
+            ; un _STA que solo devuelve un número
+            si o8(ini) = 0xA4 y número(ini + 1, k) = fin_ entonces d_sta[actual] := k sino d_sta[actual] := STA_MÉTODO fin
+        fin
+        si fase <> 2 o actual <> dueño entonces devolver fin
+        k := 4
+        si seg = SEG_INI entonces k := 0 fin
+        si seg = SEG_DSM entonces k := 1 fin
+        si seg = SEG_CRS entonces k := 2 fin
+        si seg = SEG_STA entonces k := 3 fin
+        si k < 4 y mt_fin[k] = 0 entonces
+            mt_ini[k] := ini
+            mt_fin[k] := fin_
+        fin
+    fin
+
+    ; ---- el recorrido ----
+    función guarda_ruta(c: puntero a nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < MAX_HONDO hacer
+            c[i] := cam[i]
+            i := i + 1
+        fin
+        devolver hondo
+    fin
+
+    función repón_ruta(c: puntero a nat32, h: nat32)
+        variable i: nat32
+        i := 0
+        mientras i < MAX_HONDO hacer
+            cam[i] := c[i]
+            i := i + 1
+        fin
+        hondo := h
+    fin
+
+    ; recorre los términos de [ini, fin_) (lo de fuera de los métodos)
+    función recorre(ini: nat32, fin_: nat32)
+        variable p, q, e, c, c2, seg, v, a, h, ant: nat32
+        variable copia_cam: arreglo [MAX_HONDO] de nat32
+        p := ini
+        mientras p < fin_ hacer
+            c := o8(p)
+            prof := 0
+            e := FALLO
+            si c = 0x10 o c = 0x14 o c = 0xA0 o c = 0xA1 o c = 0xA2 entonces
+                e := p + 1 + pkglen(p + 1)
+                q := p + 1 + pk_tam
+                si e > fin_ entonces e := FALLO fin
+                si e <> FALLO y c = 0x10 entonces
+                    ; Scope
+                    q := nombre(q)
+                    si q = FALLO entonces
+                        e := FALLO
+                    sino
+                        h := guarda_ruta(dirección(copia_cam[0]))
+                        ant := actual
+                        entra_nombre()
+                        actual := busca_disp(hondo, dirección(cam[0]))
+                        si fase <> 2 entonces recorre(q, e) fin
+                        repón_ruta(dirección(copia_cam[0]), h)
+                        actual := ant
+                    fin
+                sino si e <> FALLO y c = 0x14 entonces
+                    ; Method: no se entra
+                    q := nombre(q)
+                    si q = FALLO entonces e := FALLO sino un_método(último(), o8(q) yb 7, q + 1, e) fin
+                sino si e <> FALLO y (c = 0xA0 o c = 0xA2) entonces
+                    ; If y While: su condición, y lo de dentro
+                    q := salta(q)
+                    si q <> FALLO y q <= e entonces recorre(q, e) sino sin_entender := sin_entender + 1 fin
+                sino si e <> FALLO entonces
+                    ; Else
+                    recorre(q, e)
+                fin
+            sino si c = 0x5B entonces
+                c2 := o8(p + 1)
+                si c2 = 0x82 o c2 = 0x83 o c2 = 0x84 o c2 = 0x85 o c2 = 0x81 o c2 = 0x86 o c2 = 0x87 entonces
+                    e := p + 2 + pkglen(p + 2)
+                    q := p + 2 + pk_tam
+                    si e > fin_ entonces e := FALLO fin
+                    si e <> FALLO y c2 = 0x82 entonces
+                        ; Device
+                        q := nombre(q)
+                        si q = FALLO entonces
+                            e := FALLO
+                        sino si fase = 1 entonces
+                            h := guarda_ruta(dirección(copia_cam[0]))
+                            ant := actual
+                            entra_nombre()
+                            actual := NO_HAY
+                            si n_disp < MAX_DISP entonces
+                                actual := n_disp
+                                n_disp := n_disp + 1
+                                a := 0
+                                mientras a < MAX_HONDO hacer
+                                    d_cam[actual][a] := cam[a]
+                                    a := a + 1
+                                fin
+                                d_hondo[actual] := hondo
+                                d_tabla[actual] := bt
+                                d_ini[actual] := q
+                                d_fin[actual] := e
+                                d_adr[actual] := NO_HAY
+                                d_sta[actual] := NO_HAY
+                            fin
+                            recorre(q, e)
+                            repón_ruta(dirección(copia_cam[0]), h)
+                            actual := ant
+                        sino si fase = 0 entonces
+                            h := guarda_ruta(dirección(copia_cam[0]))
+                            entra_nombre()
+                            recorre(q, e)
+                            repón_ruta(dirección(copia_cam[0]), h)
+                        fin
+                    fin
+                sino si c2 = 0x80 entonces
+                    ; OperationRegion: nombre, espacio, dirección, largo
+                    q := nombre(p + 2)
+                    si q <> FALLO entonces e := salta_n(q + 1, 2) fin
+                sino si c2 = 0x01 entonces
+                    q := nombre(p + 2)
+                    si q <> FALLO entonces e := q + 1 fin
+                sino si c2 = 0x02 entonces
+                    e := nombre(p + 2)
+                sino si c2 = 0x88 entonces
+                    q := nombre(p + 2)
+                    si q <> FALLO entonces e := salta_n(q, 3) fin
+                sino
+                    e := salta(p)
+                fin
+            sino si c = 0x08 entonces
+                ; Name
+                q := nombre(p + 1)
+                si q <> FALLO entonces
+                    seg := último()
+                    e := salta(q)
+                    si e <> FALLO entonces un_name(seg, q) fin
+                fin
+            sino si c = 0x06 entonces
+                q := nombre(p + 1)
+                si q <> FALLO entonces e := nombre(q) fin
+            sino si c = 0x15 entonces
+                q := nombre(p + 1)
+                si q <> FALLO entonces e := q + 2 fin
+            sino si c >= 0x8A y c <= 0x8F y c <> 0x8E entonces
+                ; CreateXxxField (búfer, índice, nombre): (fase 2) los de las plantillas
+                q := salta(p + 1)
+                si q <> FALLO entonces
+                    seg := 0
+                    si empieza_nombre(o8(p + 1)) y nombre(p + 1) <> FALLO entonces seg := último() fin
+                    a := número(q, v)
+                    e := salta(q)
+                    si e <> FALLO entonces
+                        q := e
+                        e := nombre(q)
+                        si e <> FALLO y fase = 2 y actual = dueño y a <> FALLO y n_ca < MAX_CAMPO entonces
+                            ca_buf[n_ca] := seg
+                            ca_índice[n_ca] := v
+                            si c = 0x8D entonces ca_índice[n_ca] := 0xFFFF0000 ob v fin  ; (CreateBitField: el índice va en bits)
+                            ca_seg[n_ca] := último()
+                            n_ca := n_ca + 1
+                        fin
+                    fin
+                fin
+            sino
+                e := salta(p)
+            fin
+            si e = FALLO o e <= p o e > fin_ entonces
+                sin_entender := sin_entender + 1
+                devolver
+            fin
+            p := e
+        fin
+    fin
+
+    ; recorre todas las tablas (cada una con la ruta en la raíz)
+    función recorre_todo()
+        variable i: nat32
+        i := 0
+        mientras i < n_tb hacer
+            b := puntero(tb_p[i])
+            bl := tb_n[i]
+            bt := i
+            hondo := 0
+            actual := NO_HAY
+            recorre(36, bl)
+            i := i + 1
+        fin
+    fin
+
+    ; ---- lo de un dispositivo con PNP0C50 ----
+    ; ¿hay el trozo de nombre «seg» en [ini, fin)?
+    función tiene_seg(ini: nat32, fin_: nat32, seg: nat32): bool
+        variable p: nat32
+        p := ini
+        mientras p + 4 <= fin_ hacer
+            si o32(p) = seg entonces devolver cierto fin
+            p := p + 1
+        fin
+        devolver falso
+    fin
+
+    función tiene_guid(ini: nat32, fin_: nat32): bool
+        variable p, i: nat32
+        variable igual: bool
+        p := ini
+        mientras p + 16 <= fin_ hacer
+            igual := cierto
+            i := 0
+            mientras i < 16 y igual hacer
+                si o8(p + i) <> guid[i] entonces igual := falso fin
+                i := i + 1
+            fin
+            si igual entonces devolver cierto fin
+            p := p + 1
+        fin
+        i := 0
+        mientras i < n_guid hacer
+            si tiene_seg(ini, fin_, g_seg[i]) entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; el campo (CreateWordField...) que se llama «seg», o NO_HAY
+    función campo_de(seg: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < n_ca hacer
+            si ca_seg[i] = seg entonces devolver i fin
+            i := i + 1
+        fin
+        devolver NO_HAY
+    fin
+
+    ; el _DSM: el registro del descriptor HID («If (Arg2 == One) Return (n)»), o el Name que devuelve
+    función mira_dsm(ref f: Ficha)
+        variable ini, fin_, p, q, v, i: nat32
+        ini := mt_ini[1]
+        fin_ := mt_fin[1]
+        si fin_ = 0 entonces devolver fin
+        f.dsm_guid := tiene_guid(ini, fin_)
+        p := ini
+        mientras p + 3 <= fin_ y f.registro = NO_HAY hacer
+            si o8(p) = 0x93 y o8(p + 1) = 0x6A y o8(p + 2) = 0x01 entonces
+                ; detrás, el primer Return
+                q := p + 3
+                mientras q < fin_ y q < p + 24 y o8(q) <> 0xA4 hacer q := q + 1 fin
+                si q < fin_ y o8(q) = 0xA4 y número(q + 1, v) <> FALLO y v >= 1 y v <= 0xFFFF entonces f.registro := v fin
+            fin
+            p := p + 1
+        fin
+        ; el registro, en un Name del dispositivo que el _DSM le pasa a otro método (HIDD (..., HID2))
+        i := 0
+        mientras i < n_en y f.reg_var = 0 hacer
+            si tiene_seg(ini, fin_, en_seg[i]) entonces
+                f.reg_var := en_seg[i]
+                si en_val[i] >= 1 y en_val[i] <= 0xFFFF y f.registro = NO_HAY entonces f.registro := en_val[i] fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; el _INI: lo que pone según el BIOS (Store ("ELAN1200", _HID), Store (0x15, BADR)...)
+    función mira_ini(ref f: Ficha)
+        variable ini, fin_, p, q, v, k, c: nat32
+        variable t: arreglo [12] de byte
+        variable hay: bool
+        ini := mt_ini[0]
+        fin_ := mt_fin[0]
+        si fin_ = 0 entonces devolver fin
+        p := ini
+        mientras p < fin_ hacer
+            si o8(p) = 0x70 entonces
+                si o8(p + 1) = 0x0D y identificador(p + 1, dirección(t[0])) entonces
+                    q := salta(p + 1)
+                    si q <> FALLO y nombre(q) <> FALLO y último() = SEG_HID y f.n_cand < MAX_CAND entonces
+                        k := f.n_cand
+                        copia(dirección(f.cand_hid[k][0]), dirección(t[0]), 12)
+                        f.cand_esclavo[k] := NO_HAY
+                        f.cand_vel[k] := NO_HAY
+                        f.cand_reg[k] := NO_HAY
+                        f.n_cand := f.n_cand + 1
+                    fin
+                sino
+                    q := número(p + 1, v)
+                    si q <> FALLO y q < fin_ y nombre(q) <> FALLO entonces
+                        k := f.n_cand
+                        si k > 0 entonces
+                            k := k - 1
+                            c := campo_de(último())
+                            hay := c <> NO_HAY y ca_buf[c] = f.plantilla
+                            si hay y ca_índice[c] = i2c_pos + 16 entonces f.cand_esclavo[k] := v fin
+                            si hay y ca_índice[c] = i2c_pos + 12 entonces f.cand_vel[k] := v fin
+                            si f.reg_var <> 0 y último() = f.reg_var entonces f.cand_reg[k] := v fin
+                        fin
+                    fin
+                fin
+            fin
+            p := p + 1
+        fin
+    fin
+
+    ; la ruta de un dispositivo, en «t» (\_SB.PCI0.I2C0: sin los «_» de relleno)
+    función ruta_de(i: nat32, t: puntero a byte)
+        variable k, j, n, s, c: nat32
+        n := 0
+        t[n] := 0x5C
+        n := n + 1
+        k := 0
+        mientras k < d_hondo[i] y n < 42 hacer
+            si k > 0 entonces
+                t[n] := '.'
+                n := n + 1
+            fin
+            s := d_cam[i][k]
+            j := 0
+            mientras j < 4 hacer
+                c := (s >> (j * 8)) yb 0xFF
+                ; (el relleno «_» de detrás, fuera; el de delante, «_SB», se queda)
+                si c <> '_' o j = 0 o ((s >> (j * 8 + 8)) yb 0xFF <> '_' y j < 3) entonces
+                    t[n] := byte(c)
+                    n := n + 1
+                fin
+                j := j + 1
+            fin
+            k := k + 1
+        fin
+        t[n] := 0
+    fin
+
+    ; una ruta escrita («\_SB.PCI0.I2C1») a trozos de 4 letras: cuántos (0: no vale)
+    función trozos_de(t: puntero a byte, c: puntero a nat32): nat32
+        variable i, n, k, s: nat32
+        i := 0
+        si t[0] = 0x5C entonces i := 1 fin
+        n := 0
+        mientras t[i] <> 0 y n < MAX_HONDO hacer
+            s := 0x5F5F5F5F
+            k := 0
+            mientras t[i] <> 0 y t[i] <> '.' hacer
+                si k < 4 entonces s := (s yb (nob (nat32(0xFF) << (k * 8)))) ob (nat32(t[i]) << (k * 8)) fin
+                k := k + 1
+                i := i + 1
+            fin
+            si k = 0 o k > 4 entonces devolver 0 fin
+            c[n] := s
+            n := n + 1
+            si t[i] = '.' entonces i := i + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; la función PCI de la controladora i (su _ADR, o su nombre: I2Cn); «padre»: no vale el _ADR del aparato 0 (un puente)
+    función pci_de(i: nat32, ref f: Ficha, padre: bool): bool
+        variable a, s, n: nat32
+        a := d_adr[i]
+        si a <> NO_HAY y (no padre o (a >> 16) yb 0x1F <> 0) entonces
+            f.adr := a
+            f.pci := (((a >> 16) yb 0x1F) << 11) ob ((a yb 7) << 8)
+            devolver cierto
+        fin
+        si a = NO_HAY y d_hondo[i] > 0 entonces
+            s := d_cam[i][d_hondo[i] - 1]
+            si s yb 0xFFFFFF = 0x433249 entonces          ; «I2C» y una cifra
+                n := (s >> 24) - '0'
+                si n <= 7 entonces
+                    si n <= 3 entonces f.pci := (0x15 << 11) ob (n << 8) fin
+                    si n = 4 entonces f.pci := (0x19 << 11) ob (2 << 8) fin
+                    si n = 5 entonces f.pci := (0x19 << 11) ob (1 << 8) fin
+                    si n >= 6 entonces f.pci := (0x10 << 11) ob ((n - 6) << 8) fin
+                    f.adr := NO_HAY
+                    f.origen := f.origen ob OR_NOMBRE
+                    devolver cierto
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    función contadores(i: nat32, ref f: Ficha)
+        variable k: nat32
+        k := 0
+        mientras k < 3 hacer
+            f.ss[k] := d_ss[i][k]
+            f.fm[k] := d_fm[i][k]
+            k := k + 1
+        fin
+    fin
+
+    ; arma la ficha del dispositivo i
+    función haz_ficha(i: nat32, ref f: Ficha)
+        variable k, j, c, h: nat32
+        variable ruta: arreglo [MAX_HONDO] de nat32
+        ceros(puntero(nat64(dirección(f))), tamaño(Ficha))
+        f.pci := NO_HAY
+        f.adr := NO_HAY
+        f.gpio_pin := NO_HAY
+        f.irq := NO_HAY
+        f.registro := NO_HAY
+        f.sta := d_sta[i]
+        si f.sta = NO_HAY entonces f.sta := 0x0F fin      ; (sin _STA: presente)
+        ruta_de(i, dirección(f.ruta[0]))
+        copia(dirección(f.hid[0]), dirección(d_hid[i][0]), 12)
+        copia(dirección(f.cid[0]), dirección(d_cid[i][0]), 12)
+        ; lo de dentro de su cuerpo
+        n_pl := 0
+        n_en := 0
+        n_ca := 0
+        k := 0
+        mientras k < 4 hacer
+            mt_ini[k] := 0
+            mt_fin[k] := 0
+            k := k + 1
+        fin
+        b := puntero(tb_p[d_tabla[i]])
+        bl := tb_n[d_tabla[i]]
+        fase := 2
+        dueño := i
+        actual := i
+        hondo := d_hondo[i]
+        k := 0
+        mientras k < MAX_HONDO hacer
+            cam[k] := d_cam[i][k]
+            k := k + 1
+        fin
+        recorre(d_ini[i], d_fin[i])
+        ; los búferes de dentro del método _CRS (Name (SBUF, ResourceTemplate...) en el método)
+        si mt_fin[2] <> 0 entonces
+            k := mt_ini[2]
+            mientras k < mt_fin[2] hacer
+                si o8(k) = 0x11 y búfer(k, c, h) y h <= mt_fin[2] y plantilla_bien(c, h) y n_pl < MAX_PL entonces
+                    pl_seg[n_pl] := 0
+                    pl_ini[n_pl] := c
+                    pl_fin[n_pl] := h
+                    pl_clase[n_pl] := 2
+                    n_pl := n_pl + 1
+                fin
+                k := k + 1
+            fin
+        fin
+        ; el I2cSerialBus: el del Name(_CRS); el de un búfer del método _CRS; el de una
+        ; plantilla que nombra el _CRS; el de cualquier plantilla del dispositivo
+        j := 0
+        mientras j < 4 y f.velocidad = 0 hacer
+            k := 0
+            mientras k < n_pl y f.velocidad = 0 hacer
+                c := pl_clase[k]
+                si (j = 0 y c = 0) o (j = 1 y c = 2) o (j = 2 y c = 1 y mt_fin[2] <> 0 y tiene_seg(mt_ini[2], mt_fin[2], pl_seg[k])) o (j = 3 y c = 1) entonces
+                    si mira_plantilla(pl_ini[k], pl_fin[k], f) entonces
+                        f.plantilla := pl_seg[k]
+                        si c = 1 entonces f.origen := OR_PLANTILLA fin
+                        si c = 2 entonces f.origen := OR_MÉTODO fin
+                    fin
+                fin
+                k := k + 1
+            fin
+            j := j + 1
+        fin
+        ; la GpioInt o la Interrupt, de las demás plantillas si la suya no la trae
+        k := 0
+        mientras k < n_pl hacer
+            mira_plantilla(pl_ini[k], pl_fin[k], f)
+            k := k + 1
+        fin
+        ; el _DSM y el _INI
+        mira_dsm(f)
+        mira_ini(f)
+        ; la controladora: la de su I2cSerialBus; si no está (o dice «NULL»), su padre
+        h := trozos_de(dirección(f.fuente[0]), dirección(ruta[0]))
+        c := NO_HAY
+        si h > 0 entonces c := busca_disp(h, dirección(ruta[0])) fin
+        si c <> NO_HAY y pci_de(c, f, falso) entonces
+            ruta_de(c, dirección(f.ctl[0]))
+            contadores(c, f)
+        fin
+        si f.pci = NO_HAY y d_hondo[i] > 1 entonces
+            c := busca_disp(d_hondo[i] - 1, dirección(d_cam[i][0]))
+            si c <> NO_HAY y pci_de(c, f, cierto) entonces
+                f.origen := f.origen ob OR_PADRE
+                ruta_de(c, dirección(f.ctl[0]))
+                contadores(c, f)
+            fin
+        fin
+    fin
+
+    ; ---- lo de fuera ----
+    ; una tabla más (la DSDT o una SSDT, con su cabecera): p, su largo
+    público función añade_tabla(p: nat64, largo: nat32)
+        si n_tb >= MAX_TABLAS o largo <= 36 entonces devolver fin
+        tb_p[n_tb] := p
+        tb_n[n_tb] := largo
+        n_tb := n_tb + 1
+    fin
+
+    ; busca los dispositivos HID sobre I2C en las tablas añadidas: da cuántos (en «fichas»)
+    público función busca_pnp0c50(): nat32
+        variable i: nat32
+        variable gu: puntero a byte
+        gu := "\xF7\xF6\xDF\x3C\x67\x42\x55\x45\xAD\x05\xB3\x0A\x3D\x89\x38\xDE"
+        i := 0
+        mientras i < 16 hacer
+            guid[i] := gu[i]
+            i := i + 1
+        fin
+        n_disp := 0
+        n_métodos := 0
+        n_guid := 0
+        n_fichas := 0
+        sin_entender := 0
+        tablas_vistas := n_tb
+        octetos_vistos := 0
+        i := 0
+        mientras i < n_tb hacer
+            octetos_vistos := octetos_vistos + tb_n[i]
+            i := i + 1
+        fin
+        fase := 0
+        recorre_todo()
+        fase := 1
+        sin_entender := 0
+        recorre_todo()
+        i := 0
+        mientras i < n_disp y n_fichas < MAX_FICHAS hacer
+            si d_es[i] entonces
+                haz_ficha(i, fichas[n_fichas])
+                n_fichas := n_fichas + 1
+            fin
+            i := i + 1
+        fin
+        devolver n_fichas
+    fin
+
+    ; ---- decirlo ----
+    función hx2(v: nat32)
+        escribir_car(hexa((v >> 4) yb 15))
+        escribir_car(hexa(v yb 15))
+    fin
+
+    función hx8(v: nat32)
+        hx2((v >> 24) yb 0xFF)
+        hx2((v >> 16) yb 0xFF)
+        hx2((v >> 8) yb 0xFF)
+        hx2(v yb 0xFF)
+    fin
+
+    función hxc(v: nat32)
+        ; sin ceros delante
+        si v >= 0x1000000 entonces hx2((v >> 24) yb 0xFF) fin
+        si v >= 0x10000 entonces hx2((v >> 16) yb 0xFF) fin
+        si v >= 0x100 entonces hx2((v >> 8) yb 0xFF) fin
+        hx2(v yb 0xFF)
+    fin
+
+    función escribe_seg(s: nat32)
+        variable j: nat32
+        j := 0
+        mientras j < 4 hacer
+            escribir_car((s >> (j * 8)) yb 0xFF)
+            j := j + 1
+        fin
+    fin
+
+    función escribe_vel(v: nat32)
+        si v mod 1000 = 0 entonces escribir(v div 1000, " kHz") sino escribir(v, " Hz") fin
+    fin
+
+    función escribe_pci(v: nat32)
+        hx2((v >> 16) yb 0xFF)
+        escribir(":")
+        hx2((v >> 11) yb 0x1F)
+        escribir(".", (v >> 8) yb 7)
+    fin
+
+    ; lo de la ficha k, en unas líneas
+    público función escribe_ficha(k: nat32)
+        variable i: nat32
+        escribir("  ", fichas[k].ruta, ": ", fichas[k].hid)
+        si fichas[k].cid[0] <> 0 entonces escribir(" (_CID ", fichas[k].cid, ")") fin
+        si fichas[k].sta = STA_MÉTODO entonces
+            escribir(", _STA: lo decide un método")
+        sino
+            escribir(", _STA ")
+            hxc(fichas[k].sta)
+            escribir("h")
+        fin
+        escribir("\n    ")
+        si fichas[k].velocidad = 0 entonces
+            escribir("sin I2cSerialBus en sus plantillas")
+        sino
+            escribir("I2cSerialBus ")
+            hx2(fichas[k].esclavo)
+            escribir("h a ")
+            escribe_vel(fichas[k].velocidad)
+            si fichas[k].diez <> 0 entonces escribir(" (10 bits)") fin
+            escribir(" por ", fichas[k].fuente)
+            si fichas[k].origen yb OR_MÉTODO <> 0 entonces escribir(", de un búfer de su método _CRS") fin
+            si fichas[k].origen yb OR_PLANTILLA <> 0 entonces
+                escribir(", de su plantilla ")
+                escribe_seg(fichas[k].plantilla)
+                escribir(" (su _CRS no es fijo)")
+            fin
+        fin
+        si fichas[k].pci = NO_HAY entonces
+            escribir("; la controladora, no se sabe")
+        sino
+            escribir("; la controladora: ", fichas[k].ctl)
+            si fichas[k].origen yb OR_PADRE <> 0 entonces escribir(" (su padre)") fin
+            si fichas[k].adr <> NO_HAY entonces
+                escribir(", _ADR ")
+                hx8(fichas[k].adr)
+                escribir("h: ")
+            sino
+                escribir(", por su nombre: ")
+            fin
+            escribe_pci(fichas[k].pci)
+        fin
+        escribir("\n    ")
+        si fichas[k].gpio_pin <> NO_HAY entonces escribir("GpioInt ", fichas[k].gpio_pin, "; ") fin
+        si fichas[k].irq <> NO_HAY entonces escribir("Interrupt ", fichas[k].irq, "; ") fin
+        si fichas[k].registro <> NO_HAY entonces
+            escribir("_DSM: el descriptor HID en ")
+            hx2(fichas[k].registro >> 8)
+            hx2(fichas[k].registro yb 0xFF)
+            escribir("h")
+        sino si fichas[k].reg_var <> 0 entonces
+            escribir("_DSM: el descriptor HID, en ")
+            escribe_seg(fichas[k].reg_var)
+            escribir(" (lo pone su _INI)")
+        sino si mt_fin[1] = 0 entonces
+            escribir("sin _DSM")
+        sino
+            escribir("_DSM: no se ve el registro")
+        fin
+        si fichas[k].dsm_guid entonces escribir(" (con el GUID de HID sobre I2C)") fin
+        si fichas[k].ss[0] <> 0 entonces escribir("; SSCN ", fichas[k].ss[0], "/", fichas[k].ss[1], "/", fichas[k].ss[2]) fin
+        si fichas[k].fm[0] <> 0 entonces escribir("; FMCN ", fichas[k].fm[0], "/", fichas[k].fm[1], "/", fichas[k].fm[2]) fin
+        escribir("\n")
+        si fichas[k].n_cand > 0 entonces
+            escribir("    según el BIOS, su _INI lo hace:")
+            i := 0
+            mientras i < fichas[k].n_cand hacer
+                si i > 0 entonces escribir(";") fin
+                escribir(" ", fichas[k].cand_hid[i])
+                si fichas[k].cand_esclavo[i] <> NO_HAY o fichas[k].cand_reg[i] <> NO_HAY entonces
+                    escribir(" (")
+                    si fichas[k].cand_esclavo[i] <> NO_HAY entonces
+                        hx2(fichas[k].cand_esclavo[i])
+                        escribir("h")
+                        si fichas[k].cand_vel[i] <> NO_HAY entonces
+                            escribir(" a ")
+                            escribe_vel(fichas[k].cand_vel[i])
+                        fin
+                        si fichas[k].cand_reg[i] <> NO_HAY entonces escribir(", ") fin
+                    fin
+                    si fichas[k].cand_reg[i] <> NO_HAY entonces
+                        escribir("descriptor en ")
+                        hx2(fichas[k].cand_reg[i] >> 8)
+                        hx2(fichas[k].cand_reg[i] yb 0xFF)
+                        escribir("h")
+                    fin
+                    escribir(")")
+                fin
+                i := i + 1
+            fin
+            escribir("\n")
+        fin
+    fin
+
+fin Aml64.

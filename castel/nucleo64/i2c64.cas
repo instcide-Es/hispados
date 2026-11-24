@@ -1,0 +1,464 @@
+; =============================================================================
+;  i2c64.cas - Hispa-64, etapa 6: las controladoras I2C de los PC de ahora:
+;  las Intel LPSS («Low Power Subsystem», desde Skylake: series 100 y 200 del
+;  PCH, Kaby, Coffee/Comet, Ice, Tiger, Alder y Raptor Lake, Meteor Lake, y
+;  los Atom Apollo y Gemini Lake), que llevan dentro el bloque I2C de Synopsys
+;  «DesignWare». De ahí cuelgan los touchpads HID sobre I2C (i2chid64.cas).
+;  Viene de i2c.cas de Hispa-Pentium (probado en un ASUS GL553VD de verdad),
+;  en 64 bits:
+;   - en el PCI son de Intel, clase 1180h («procesado de señal, otro»; en
+;     algunos, 0C80h), y su modelo está en la tabla de reloj_de (lo que no
+;     está, no se toca: con la misma clase van el termómetro del PCH y otros);
+;   - primero, a D0 (al salir de D3 se reinicia y puede perder sus BAR);
+;   - su zona 0 (4 K), donde esté (en 64 bits también por encima de los 4
+;     GB: se ve con mapea_disp sin moverla); si está sin poner (a 0: los
+;     firmware de Tiger y Raptor Lake, el Monovate 14.1, el ThinkPad E14 Gen
+;     5), Pci64.asigna_bar le da dirección;
+;   - los registros privados de LPSS en 200h: 204h, el reinicio (se suelta
+;     con 7), y 2FCh, qué es (bits 7-4: 0, I2C);
+;   - el bloque DesignWare: IC_COMP_TYPE (FCh) dice 44570140h; IC_COMP_PARAM_1
+;     (F4h), lo hondas que son sus colas; el reloj del bloque no se puede leer:
+;     el que dice la tabla de intel-lpss-pci de Linux para cada modelo;
+;   - la velocidad: los contadores de la parte alta y baja del reloj SCL, de
+;     ACPI (SSCN, FMCN) o calculados con los tiempos de la norma de I2C;
+;   - transfiere(): una escritura y, detrás, con «repeated start», una
+;     lectura, sin interrupciones (las del procesador quitadas durante la
+;     transferencia: que no se vacíe la cola a medias) y mirando el estado.
+;  «sini2c» en la línea de órdenes: ni se buscan.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo I2c64
+
+    importar Cifras64, Es64, Pagina64, Pci64, Cerrojo, Reloj64
+
+    público constante MAX_I2C = 8
+    público constante NINGUNA_I2C = 0xFFFFFFFF
+
+    ; lo que puede salir mal (transfiere)
+    público constante I2C_BIEN = 0
+    público constante I2C_NADIE = 1            ; la dirección no contesta (NACK)
+    público constante I2C_DATO = 2             ; no acepta un octeto (NACK del dato)
+    público constante I2C_PERDIDO = 3          ; otro mandaba en el bus (arbitraje perdido)
+    público constante I2C_ABORTA = 4           ; la controladora lo ha dejado por otra cosa
+    público constante I2C_TIEMPO = 5           ; no acaba
+    público constante I2C_NO_HAY = 6           ; esa controladora no está en marcha
+
+    público tipo Controladora = estructura
+        aparato: nat32                  ; el de Pci64
+        pci: nat32                      ; bus << 16 ob aparato << 11 ob función << 8 (como en las fichas de Aml64)
+        modelo: nat32                   ; el del PCI
+        física, regs: nat64             ; la zona 0, y dónde la ve el núcleo
+        reloj: nat32                    ; kHz (el del bloque, supuesto)
+        versión: nat32                  ; IC_COMP_VERSION («1.11*»: 3131312Ah)
+        cola_tx, cola_rx: nat32
+        en_marcha: bool
+        velocidad: nat32                ; Hz a los que está puesta (0: aún no)
+        transferencias, fallos: nat32
+        último_aborto: nat32            ; IC_TX_ABRT_SOURCE del último fallo
+    fin
+
+    público variable i2cs: arreglo [MAX_I2C] de Controladora
+    público variable cuántas: nat32
+    público variable vistas: nat32              ; las de Intel con la clase de LPSS (también las que no se tocan)
+
+    ; ---- los registros DesignWare ----
+    constante IC_CON = 0x00
+    constante IC_TAR = 0x04
+    constante IC_DATA_CMD = 0x10
+    constante IC_SS_HCNT = 0x14
+    constante IC_SS_LCNT = 0x18
+    constante IC_FS_HCNT = 0x1C
+    constante IC_FS_LCNT = 0x20
+    constante IC_INTR_MASK = 0x30
+    constante IC_RAW_INTR = 0x34
+    constante IC_RX_TL = 0x38
+    constante IC_TX_TL = 0x3C
+    constante IC_CLR_INTR = 0x40
+    constante IC_CLR_TX_ABRT = 0x54
+    constante IC_CLR_STOP = 0x60
+    constante IC_ENABLE = 0x6C
+    constante IC_STATUS = 0x70
+    constante IC_RXFLR = 0x78
+    constante IC_SDA_HOLD = 0x7C
+    constante IC_ABRT_SOURCE = 0x80
+    constante IC_ENABLE_STATUS = 0x9C
+    constante IC_PARAM_1 = 0xF4
+    constante IC_VERSION = 0xF8
+    constante IC_TYPE = 0xFC
+    constante TIPO_DW = 0x44570140
+    constante CON_MAESTRO = 0x01
+    constante CON_LENTO = 0x02
+    constante CON_RÁPIDO = 0x04
+    constante CON_10BITS = 0x10
+    constante CON_RESTART = 0x20
+    constante CON_SIN_ESCLAVO = 0x40
+    constante CMD_LEER = 0x100
+    constante CMD_STOP = 0x200
+    constante CMD_RESTART = 0x400
+    constante R_TX_ABRT = 0x40
+    constante R_STOP = 0x200
+    constante S_TFNF = 0x02
+    constante LPSS_RESETS = 0x204
+    constante LPSS_CAPS = 0x2FC
+
+    función lee(ref c: Controladora, r: nat32): nat32
+        devolver m32(c.regs + r)
+    fin
+
+    función pon(ref c: Controladora, r: nat32, v: nat32)
+        pon_m32(c.regs + r, v)
+    fin
+
+    ; el reloj (kHz) del bloque de un modelo; 0: no es una I2C de LPSS que se
+    ; conozca (y no se toca). Lo de la tabla de intel-lpss-pci de Linux.
+    función reloj_de(m: nat32): nat32
+        variable alto, bajo: nat32
+        alto := m >> 8
+        bajo := m yb 0xFF
+        ; 120 MHz: series 100 (9D60-9D65, A160-A163), 200 (A2E0-A2E3), Comet
+        ; Lake-V (A3E0-A3E3) y Tiger Lake-LP (A0C5-A0C6, A0D8-A0D9, A0E8-A0EB)
+        si (m >= 0x9D60 y m <= 0x9D65) o (m >= 0xA160 y m <= 0xA163) o (m >= 0xA2E0 y m <= 0xA2E3) o (m >= 0xA3E0 y m <= 0xA3E3) entonces devolver 120000 fin
+        si alto = 0xA0 y (bajo = 0xC5 o bajo = 0xC6 o bajo = 0xD8 o bajo = 0xD9 o (bajo >= 0xE8 y bajo <= 0xEB)) entonces devolver 120000 fin
+        ; 216 MHz: Cannon Lake y Comet Lake
+        si (alto = 0x9D o alto = 0x02) y (bajo = 0xC5 o bajo = 0xC6 o (bajo >= 0xE8 y bajo <= 0xEB)) entonces devolver 216000 fin
+        si (m >= 0x06E8 y m <= 0x06EB) o (m >= 0xA368 y m <= 0xA36B) entonces devolver 216000 fin
+        ; 100 MHz: Elkhart Lake y los de después de Meteor Lake
+        si (m >= 0x4B78 y m <= 0x4B7B) o m = 0x4B4B o m = 0x4B4C o m = 0x4B44 o m = 0x4B45 entonces devolver 100000 fin
+        si (alto = 0xA8 o alto = 0xE3 o alto = 0xE4 o alto = 0x4D o alto = 0xD3) y (bajo = 0x50 o bajo = 0x51 o (bajo >= 0x78 y bajo <= 0x7B)) entonces devolver 100000 fin
+        si (m >= 0x6E4C y m <= 0x6E4F) o m = 0x6E7A o m = 0x6E7B entonces devolver 100000 fin
+        ; 133 MHz: Broxton, Apollo y Gemini Lake
+        si (alto = 0x5A o alto = 0x31 o alto = 0x0A o alto = 0x1A) y bajo >= 0xAC y bajo <= 0xBA y m yb 1 = 0 entonces devolver 133000 fin
+        ; 133 MHz: Ice, Jasper, Alder/Raptor Lake-P y -M, Lakefield
+        si alto = 0x34 o alto = 0x4D o alto = 0x51 o alto = 0x54 o alto = 0x98 entonces
+            si (bajo >= 0xE8 y bajo <= 0xEB) o bajo = 0xC5 o bajo = 0xC6 o bajo = 0xD8 o bajo = 0xD9 entonces devolver 133000 fin
+        fin
+        ; Tiger Lake-H, Alder/Raptor de sobremesa, Meteor Lake y su PCH, Arrow Lake-H
+        si m = 0x43AD o m = 0x43AE o m = 0x43D8 o (m >= 0x43E8 y m <= 0x43EB) entonces devolver 133000 fin
+        si (m >= 0x7ACC y m <= 0x7ACF) o m = 0x7AFC o m = 0x7AFD entonces devolver 133000 fin
+        si (m >= 0x7A4C y m <= 0x7A4F) o m = 0x7A7C o m = 0x7A7D entonces devolver 133000 fin
+        si (m >= 0x7E78 y m <= 0x7E7B) o m = 0x7E50 o m = 0x7E51 entonces devolver 133000 fin
+        si (m >= 0x7F4C y m <= 0x7F4F) o m = 0x7F7A o m = 0x7F7B entonces devolver 133000 fin
+        si m = 0x7750 o m = 0x7751 o (m >= 0x7778 y m <= 0x777B) entonces devolver 133000 fin
+        devolver 0
+    fin
+
+    ; la controladora de esa función PCI (bus << 16 ob aparato << 11 ob función << 8), o NINGUNA_I2C
+    público función busca_i2c(pci: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < cuántas hacer
+            si i2cs[i].pci = pci y i2cs[i].en_marcha entonces devolver i fin
+            i := i + 1
+        fin
+        devolver NINGUNA_I2C
+    fin
+
+    función espera_enable(ref c: Controladora, quiere: nat32): bool
+        variable k: nat32
+        k := 0
+        mientras k < 20000 hacer
+            si lee(c, IC_ENABLE_STATUS) yb 1 = quiere entonces devolver cierto fin
+            k := k + 1
+        fin
+        devolver falso
+    fin
+
+    función apágala(ref c: Controladora)
+        pon(c, IC_ENABLE, 0)
+        espera_enable(c, 0)
+    fin
+
+    función dice_cuál(i: nat32)
+        escribir("i2c: controladora ")
+        escribe_bdf(i)
+        escribir(" 8086:")
+        hex4(apa_de(i))
+    fin
+
+    ; una controladora del PCI: se mira y, si es de la tabla, se pone en marcha
+    función mira(i: nat32)
+        variable rel, v, d: nat32
+        variable base, era: nat64
+        variable k: nat32
+        si fab_de(i) <> 0x8086 entonces devolver fin
+        vistas := vistas + 1
+        rel := reloj_de(apa_de(i))
+        si rel = 0 o cuántas >= MAX_I2C entonces devolver fin
+        d := pon_d0(i)
+        si d <> 0 entonces
+            dice_cuál(i)
+            escribir(": estaba en D", d, ": a D0\n")
+        fin
+        era := relee_bar(i, 0)
+        base := era
+        si base = 0 entonces
+            base := asigna_bar(i, 0)
+            dice_cuál(i)
+            si base = 0 entonces
+                escribir(": su zona 0 está sin poner y no se le ha podido dar dirección (motivo ", sin_poner_por, ": 1 otro bus, 2 tamaño, 3 sin hueco, 4 no se deja): no se usa\n")
+                devolver
+            fin
+            escribir(": su zona 0 estaba sin poner: puesta en ")
+            hex(base)
+            escribir("\n")
+        fin
+        habilita(i, falso)
+        k := cuántas
+        i2cs[k].aparato := i
+        i2cs[k].pci := (bus_de(i) << 16) ob (disp_de(i) << 11) ob (fun_de(i) << 8)
+        i2cs[k].modelo := apa_de(i)
+        i2cs[k].física := base
+        i2cs[k].reloj := rel
+        i2cs[k].en_marcha := falso
+        i2cs[k].velocidad := 0
+        i2cs[k].transferencias := 0
+        i2cs[k].fallos := 0
+        i2cs[k].regs := mapea_disp(base, 0x1000, sin_caché())
+        si i2cs[k].regs = 0 entonces
+            dice_cuál(i)
+            escribir(": no se puede ver su zona\n")
+            devolver
+        fin
+        ; LPSS: que sea una I2C y fuera del reinicio
+        v := lee(i2cs[k], LPSS_CAPS)
+        si v <> 0xFFFFFFFF y (v >> 4) yb 0xF <> 0 entonces
+            dice_cuál(i)
+            escribir(": LPSS dice que es de la clase ", (v >> 4) yb 0xF, " (no I2C): no se usa\n")
+            devolver
+        fin
+        si lee(i2cs[k], LPSS_RESETS) yb 7 <> 7 entonces
+            pon(i2cs[k], LPSS_RESETS, 0)
+            pon(i2cs[k], LPSS_RESETS, 7)
+            espera_us(1000)
+        fin
+        v := lee(i2cs[k], IC_TYPE)
+        si v <> TIPO_DW entonces
+            dice_cuál(i)
+            escribir(" (zona en ")
+            hex(base)
+            escribir("): no es una DesignWare (dice ")
+            hex(nat64(v))
+            escribir("): no se usa\n")
+            devolver
+        fin
+        v := lee(i2cs[k], IC_PARAM_1)
+        i2cs[k].cola_tx := ((v >> 16) yb 0xFF) + 1
+        i2cs[k].cola_rx := ((v >> 8) yb 0xFF) + 1
+        si i2cs[k].cola_tx < 2 o i2cs[k].cola_tx > 256 entonces i2cs[k].cola_tx := 8 fin
+        si i2cs[k].cola_rx < 2 o i2cs[k].cola_rx > 256 entonces i2cs[k].cola_rx := 8 fin
+        i2cs[k].versión := lee(i2cs[k], IC_VERSION)
+        apágala(i2cs[k])
+        pon(i2cs[k], IC_INTR_MASK, 0)
+        i2cs[k].en_marcha := cierto
+        cuántas := cuántas + 1
+        v := i2cs[k].versión
+        dice_cuál(i)
+        escribir(" (Intel LPSS, zona en ")
+        hex(base)
+        si base >= 0x100000000 entonces escribir(", por encima de 4 GB") fin
+        escribir(", DesignWare ")
+        escribir_car((v >> 24) yb 0xFF)
+        escribir(".")
+        escribir_car((v >> 16) yb 0xFF)
+        escribir_car((v >> 8) yb 0xFF)
+        escribir_car(v yb 0xFF)
+        escribir(", colas de ", i2cs[k].cola_tx, " y ", i2cs[k].cola_rx, ", reloj de ", rel div 1000, " MHz supuesto) en marcha\n")
+    fin
+
+    ; al arrancar: las controladoras del PCI. Da cuántas hay en marcha.
+    público función prepara_i2c(): nat32
+        variable i, c: nat32
+        i := 0
+        mientras i < pci_n hacer
+            c := clase_de(i) >> 8
+            si c = 0x1180 o c = 0x0C80 entonces mira(i) fin
+            i := i + 1
+        fin
+        si cuántas = 0 entonces escribir("i2c: no hay controladora I2C (Intel LPSS)\n") fin
+        devolver cuántas
+    fin
+
+    ; (pruebas, «prueba=barcero») lo de las I2C de Tiger y Raptor Lake, en
+    ; QEMU, que no tiene I2C: la zona 0 del aparato «edu» de QEMU (1234:11E8,
+    ; 1 MB) se pone a 0 y Pci64.asigna_bar le tiene que dar otra, libre
+    público función prueba_bar()
+        variable i, orden: nat32
+        variable a, n: nat64
+        i := 0
+        mientras i < pci_n hacer
+            si fab_de(i) = 0x1234 y apa_de(i) = 0x11E8 entonces
+                a := relee_bar(i, 0)
+                orden := conf(i, 4)
+                pon_conf(i, 4, orden yb 0xFFFFFFF9)
+                pon_conf(i, 0x10, conf(i, 0x10) yb 0xF)
+                pon_conf(i, 4, orden)
+                escribir("i2c: (prueba=barcero) la zona 0 de ")
+                escribe_bdf(i)
+                escribir(" 1234:11E8 (estaba en ")
+                hex(a)
+                escribir("), a 0: ")
+                si relee_bar(i, 0) <> 0 entonces
+                    escribir("no se deja\n")
+                    devolver
+                fin
+                n := asigna_bar(i, 0)
+                si n = 0 entonces
+                    escribir("no se le ha podido dar dirección (motivo ", sin_poner_por, ")\n")
+                sino
+                    escribir("puesta en ")
+                    hex(n)
+                    escribir(" (")
+                    tamaño_legible(bar_largo(i, 0))
+                    escribir("); el aparato dice ")
+                    hex(relee_bar(i, 0))
+                    escribir("; se lee bien: ")
+                    habilita(i, falso)
+                    ; el registro 0 del edu: su identificación, 0x010000ED
+                    si m32(mapea_disp(n, 0x1000, sin_caché())) = 0x010000ED entonces escribir("sí\n") sino escribir("no\n") fin
+                fin
+                devolver
+            fin
+            i := i + 1
+        fin
+        escribir("i2c: (prueba=barcero) no hay aparato edu\n")
+    fin
+
+    ; ---- la velocidad ----
+    función cuenta(khz: nat32, ns: nat32, quita: nat32): nat32
+        variable v: nat32
+        v := nat32((nat64(khz) * ns + 500000) div 1000000)
+        si v <= quita + 6 entonces devolver 6 fin
+        devolver v - quita
+    fin
+
+    ; pone la controladora c a «hz» (400 kHz como mucho); con ss/fs (alto,
+    ; bajo y la retención de SDA) de ACPI si los trae (alto = 0: se calculan)
+    público función configura(c: nat32, hz: nat32, ss: puntero a nat32, fs: puntero a nat32): bool
+        variable con, ret, h, l: nat32
+        si c >= cuántas o no i2cs[c].en_marcha entonces devolver falso fin
+        apágala(i2cs[c])
+        h := ss[0]
+        l := ss[1]
+        si h = 0 o l = 0 entonces
+            h := cuenta(i2cs[c].reloj, 4000 + 300, 8)
+            l := cuenta(i2cs[c].reloj, 4700 + 300, 1)
+        fin
+        pon(i2cs[c], IC_SS_HCNT, h yb 0xFFFF)
+        pon(i2cs[c], IC_SS_LCNT, l yb 0xFFFF)
+        h := fs[0]
+        l := fs[1]
+        si h = 0 o l = 0 entonces
+            h := cuenta(i2cs[c].reloj, 600 + 300, 8)
+            l := cuenta(i2cs[c].reloj, 1300 + 300, 1)
+        fin
+        pon(i2cs[c], IC_FS_HCNT, h yb 0xFFFF)
+        pon(i2cs[c], IC_FS_LCNT, l yb 0xFFFF)
+        con := CON_MAESTRO ob CON_RESTART ob CON_SIN_ESCLAVO
+        si hz >= 400000 entonces
+            con := con ob CON_RÁPIDO
+            ret := fs[2]
+            i2cs[c].velocidad := 400000
+        sino
+            con := con ob CON_LENTO
+            ret := ss[2]
+            i2cs[c].velocidad := 100000
+        fin
+        si ret = 0 entonces ret := (i2cs[c].reloj * 300 + 999999) div 1000000 fin
+        si i2cs[c].versión >= 0x3131312A entonces pon(i2cs[c], IC_SDA_HOLD, (ret yb 0xFFFF) ob 0x10000) fin
+        pon(i2cs[c], IC_CON, con)
+        pon(i2cs[c], IC_TX_TL, i2cs[c].cola_tx div 2)
+        pon(i2cs[c], IC_RX_TL, 0)
+        pon(i2cs[c], IC_INTR_MASK, 0)
+        devolver cierto
+    fin
+
+    ; ---- transferir ----
+    ; a «esclavo» (7 bits; con «diez», 10): escribe n_esc octetos de «esc» y,
+    ; detrás, con repeated start, lee n_lee en «lee_en» (uno de los dos puede
+    ; ser 0). Da I2C_BIEN o lo que ha salido mal.
+    público función transfiere(c: nat32, esclavo: nat32, diez: bool, esc: puntero a byte, n_esc: nat32, lee_en: puntero a byte, n_lee: nat32): nat32
+        variable tx, pedidas, rx, total, raw, cmd, vueltas, tope, r, v: nat32
+        variable rf: nat64
+        si c >= cuántas o no i2cs[c].en_marcha entonces devolver I2C_NO_HAY fin
+        si n_esc + n_lee = 0 entonces devolver I2C_BIEN fin
+        i2cs[c].transferencias := i2cs[c].transferencias + 1
+        apágala(i2cs[c])
+        v := lee(i2cs[c], IC_CON) yb (nob CON_10BITS)
+        si diez entonces v := v ob CON_10BITS fin
+        pon(i2cs[c], IC_CON, v)
+        v := esclavo yb 0x3FF
+        si diez entonces v := v ob 0x1000 fin
+        pon(i2cs[c], IC_TAR, v)
+        lee(i2cs[c], IC_CLR_INTR)
+        pon(i2cs[c], IC_ENABLE, 1)
+        total := n_esc + n_lee
+        tope := 100000 + 4000 * total
+        tx := 0
+        pedidas := 0
+        rx := 0
+        r := I2C_TIEMPO
+        vueltas := 0
+        rf := sin_ints()
+        mientras vueltas < tope hacer
+            raw := lee(i2cs[c], IC_RAW_INTR)
+            si raw yb R_TX_ABRT <> 0 entonces
+                v := lee(i2cs[c], IC_ABRT_SOURCE)
+                i2cs[c].último_aborto := v
+                lee(i2cs[c], IC_CLR_TX_ABRT)
+                si v yb 0x07 <> 0 entonces
+                    r := I2C_NADIE
+                sino si v yb 0x08 <> 0 entonces
+                    r := I2C_DATO
+                sino si v yb 0x1000 <> 0 entonces
+                    r := I2C_PERDIDO
+                sino
+                    r := I2C_ABORTA
+                fin
+                romper
+            fin
+            ; la cola de salida: los octetos que escribir y las órdenes de leer
+            mientras tx + pedidas < total y lee(i2cs[c], IC_STATUS) yb S_TFNF <> 0 hacer
+                si tx < n_esc entonces
+                    cmd := esc[tx]
+                    si tx = n_esc - 1 y n_lee = 0 entonces cmd := cmd ob CMD_STOP fin
+                    tx := tx + 1
+                sino
+                    si pedidas - rx >= i2cs[c].cola_rx entonces romper fin
+                    cmd := CMD_LEER
+                    si pedidas = 0 y n_esc > 0 entonces cmd := cmd ob CMD_RESTART fin
+                    si pedidas = n_lee - 1 entonces cmd := cmd ob CMD_STOP fin
+                    pedidas := pedidas + 1
+                fin
+                pon(i2cs[c], IC_DATA_CMD, cmd)
+            fin
+            mientras rx < n_lee y lee(i2cs[c], IC_RXFLR) <> 0 hacer
+                lee_en[rx] := byte(lee(i2cs[c], IC_DATA_CMD) yb 0xFF)
+                rx := rx + 1
+            fin
+            si tx + pedidas = total y rx = n_lee y raw yb R_STOP <> 0 entonces
+                r := I2C_BIEN
+                romper
+            fin
+            vueltas := vueltas + 1
+        fin
+        lee(i2cs[c], IC_CLR_STOP)
+        apágala(i2cs[c])
+        restaura(rf)
+        si r <> I2C_BIEN entonces i2cs[c].fallos := i2cs[c].fallos + 1 fin
+        devolver r
+    fin
+
+    público función qué_fallo(r: nat32): puntero a byte
+        según r
+            caso I2C_BIEN: devolver "bien"
+            caso I2C_NADIE: devolver "nadie contesta en esa dirección"
+            caso I2C_DATO: devolver "no acepta un octeto"
+            caso I2C_PERDIDO: devolver "otro mandaba en el bus"
+            caso I2C_ABORTA: devolver "la controladora lo ha dejado"
+            caso I2C_TIEMPO: devolver "no acaba"
+            caso I2C_NO_HAY: devolver "la controladora no está en marcha"
+        fin
+        devolver "?"
+    fin
+
+fin I2c64.
