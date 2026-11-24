@@ -65,7 +65,7 @@ esta o9 "Si: fin" "IR A, y SI a==b: "
 noesta o9 "NO DEBE SALIR" ""
 apaga
 QMAS=
-if head -c 15 $T/lpt.txt | grep -qa "Hispa-8086 0.12" && grep -qa "HOLA.COM             206" $T/lpt.txt; then ok "lo mandado a PRN y a LPT1 ha salido por el puerto paralelo"; else ko "PRN: no ha salido lo esperado por el puerto paralelo"; fi
+if head -c 15 $T/lpt.txt | grep -qa "Hispa-8086 0.13" && grep -qa "HOLA.COM             206" $T/lpt.txt; then ok "lo mandado a PRN y a LPT1 ha salido por el puerto paralelo"; else ko "PRN: no ha salido lo esperado por el puerto paralelo"; fi
 if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en el disquete"; else ko "fsck.fat encuentra errores"; cat $T/fsck.txt; fi
 }
 
@@ -299,7 +299,7 @@ pantalla e4
 esta e4 "El sistema de la familia Hispa para los PC, XT y AT: 8086, 8088, V20," "EDIT (el nombre clásico) abre un archivo que ya existe: "
 tecla esc; sleep 1; escribe "ver"
 pantalla e5
-esta e5 "Hispa-8086 versión 0.12" "Esc sale sin preguntar si no hay cambios: "
+esta e5 "Hispa-8086 versión 0.13" "Esc sale sin preguntar si no hay cambios: "
 apaga
 if [ "$(mtype -i $T/a.img ::NOTA.TXT | xxd -p)" = "$(printf 'dos\r\nUnoxtres' | xxd -p)" ]; then ok "lo guardado (F2) es exactamente lo escrito, con sus retornos"; else ko "NOTA.TXT no es lo esperado: $(mtype -i $T/a.img ::NOTA.TXT | xxd -p)"; fi
 if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ningún error en el disquete"; else ko "fsck.fat encuentra errores"; cat $T/fsck.txt; fi

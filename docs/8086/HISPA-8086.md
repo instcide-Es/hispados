@@ -17,11 +17,29 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 ## Dónde estamos
 
 **Etapas 0 a 4 y 6 hechas, y la 5 casi** (`h8086/`, noviembre de 2026).
-Versión 0.11.
+Versión 0.13.
+
+**Lo nuevo en la 0.13**:
+
+- **El disquete de Oficina**, con dos programas para trabajar: **PLUMA**,
+  un procesador de textos (cartas y documentos con negrita, subrayado y
+  cursiva, párrafos centrados o justificados, y documentos más grandes que
+  la memoria), y **CUENTAS**, una hoja de cálculo (sumas que no fallan con
+  los céntimos, fórmulas como las de hoy y como las de VisiCalc y 1-2-3, y
+  abre y guarda .CSV).
+- **El disquete de Juegos**, con dos juegos nuestros: **DERRIBO**, de pala,
+  pelota y ladrillos, y **MARCIANADA**, de marcianitos. Van igual de
+  deprisa en un PC de 1981 que en uno de hoy y se ven bien en un monitor
+  de un solo color.
+- **Un arreglo del disco**: al escribir un archivo grande, en cuanto la
+  lista de los grupos del disco (la FAT) pasaba de un sector al siguiente,
+  el sistema leía el sector que no era; la copia quedaba mal desde la
+  mitad o el archivo se cortaba. Ya no pasa, y si falla la escritura de la
+  FAT, ahora se avisa.
 
 - **Arranque, de disquete o de disco duro**: un solo sector de arranque para
   FAT12 y FAT16, disquetes y particiones, y un sector de particiones (MBR)
-  propio. El núcleo ocupa 13,4 K en el disco. En memoria, el núcleo con
+  propio. El núcleo ocupa 14,9 K en el disco. En memoria, el núcleo con
   sus variables, su pila, la tabla de archivos y la reserva de sectores son
   unos 17 K, y el intérprete de órdenes con su entorno, otros
   13 K: en una máquina de 640 K quedan 607 K para los

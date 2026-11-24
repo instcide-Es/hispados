@@ -1,4 +1,4 @@
-Hispa-8086 0.12
+Hispa-8086 0.13
 
 El sistema de la familia Hispa para los PC, XT y AT: 8086, 8088, V20,
 80186 y 286. Software libre (GPL-2.0 o posterior), hecho desde cero y
@@ -17,3 +17,6 @@ es su manual), y CUENTAS, la hoja de cálculo (CUENTAS hoja; F1, la
 ayuda; /, el menú; abre y guarda .CTA, .CSV y .DIF).
 En el disquete de Juegos: DERRIBO, de pala, pelota y ladrillos, y
 MARCIANA, de marcianitos (JUEGOS.TXT dice cómo se juega).
+
+Lo nuevo en la 0.13: los disquetes de Oficina y de Juegos, y un arreglo
+del disco (al escribir archivos grandes, la copia podía quedar mal).

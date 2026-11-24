@@ -3303,7 +3303,7 @@ c_486       db "80486 o superior", 0
 ; =============================================================================
 t_todos     db "*.*", 0
 t_com       db ".COM", 0
-m_ver       db "Hispa-8086 versión 0.12", 10, 0
+m_ver       db "Hispa-8086 versión 0.13", 10, 0
 m_ayuda     db "Las órdenes de Hispa-8086 (entre paréntesis, el nombre clásico):", 10
             db "  AYUDA  VER  EQUIPO  MEMORIA (MEM)  LIMPIAR (CLS)  ACTUALIZAR", 10
             db "  DIR [ruta] [/P] [/W]   los archivos (LISTAR)    VOL  cómo se llama el disco", 10
