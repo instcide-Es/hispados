@@ -66,7 +66,8 @@ módulo Hispa64
     importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64, Cerrojo, Hilos64, Smp64, PrSmp64
     importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
     importar Msi64, Nvme64, Ahci64, Discos64, Nodos64, Fat64, Exfat64, Vfs64, PrDisc64
-    importar Raton64, Usbvigia
+    importar Raton64, Usbvigia, Usbhid64
+    importar Tty64, Teclas64
 
     constante VERSIÓN = "0.6.0"
     constante MB1 = 0x2BADB002
@@ -580,6 +581,45 @@ módulo Hispa64
         fin
     fin
 
+    ; [etapa 6] «prueba=raton»: 10 s diciendo lo que hace el puntero (las
+    ; pruebas lo mueven con el monitor de QEMU) y las teclas USB que llegan
+    función prueba_ratón()
+        variable px, py, r: ent32
+        variable b, n: nat32
+        variable t0, rel, abs_, tec: nat64
+        escribir("Puntero: 10 s mirando el ratón y la tableta (")
+        escribe_ratón()
+        escribir(")\n")
+        px := ptr_x
+        py := ptr_y
+        b := ptr_botones
+        r := ptr_rueda
+        tec := uh_teclas
+        n := 0
+        t0 := ahora_ns()
+        mientras ahora_ns() - t0 < 10000000000 hacer
+            si ptr_x <> px o ptr_y <> py o ptr_botones <> b o ptr_rueda <> r entonces
+                px := ptr_x
+                py := ptr_y
+                b := ptr_botones
+                r := ptr_rueda
+                escribir("Puntero: ")
+                escribe_ratón()
+                si ptr_último = 2 entonces escribir(" (tableta)") sino escribir(" (ratón)") fin
+                escribir("\n")
+                n := n + 1
+            fin
+            si uh_teclas <> tec entonces
+                tec := uh_teclas
+                escribir("Tecla USB: uso ")
+                hex(nat64(uh_última))
+                escribir("\n")
+            fin
+            duerme_ms(10)
+        fin
+        escribir("Puntero: ", n, " cambios; ", ptr_relativos, " del ratón y ", ptr_absolutos, " de la tableta, ", ptr_clics, " clics; teclas USB: ", uh_teclas, "\n")
+    fin
+
     ; [etapa 5] antes de apagar: lo que quede sin escribir, al disco (sync)
     función al_apagar()
         variable n: nat64
@@ -1055,13 +1095,83 @@ módulo Hispa64
         fin
     fin
 
-    ; en el equipo de verdad (sin «apagar»): la hora y las teclas, hasta el botón
+    ; ---- [etapa 6] la consola, el teclado y los programas que arrancan programas ----
+    variable fallos6: nat32
+
+    función mal6(qué: puntero a byte)
+        fallos6 := fallos6 + 1
+        pon_color(12, 0)
+        escribir("  MAL: ", qué, "\n")
+        pon_color(7, 0)
+    fin
+
+    función etapa6()
+        variable p: puntero a Proceso
+        variable r, t0: nat64
+        prepara_tty()
+        si no prepara_teclas() entonces mal6("no se pone en marcha el hilo del teclado") fin
+        escribir("Consola: una terminal (modo canónico con eco y edición de línea, y crudo), ", columnas, " x ", filas, "; el teclado, con el mapa español (PS/2 y HID)\n")
+        si tiene("sinpruebas") o no tic_va entonces devolver fin
+        si busca_archivo("HIJOS") < 0 entonces
+            escribir("(sin el programa HIJOS en la unidad: sin las pruebas de fork, execve y wait4)\n")
+            devolver
+        fin
+        t0 := ahora_ns()
+        p := lanza("HIJOS")
+        si p = nulo entonces
+            mal6("no arranca HIJOS")
+            devolver
+        fin
+        r := espera_proceso(p)
+        escribir("Programa «HIJOS»: acaba con el código ", r)
+        si r = 0 entonces escribir(", como debe (en ", (ahora_ns() - t0) div 1000000, " ms)\n") sino
+            escribir("\n")
+            mal6("HIJOS no acaba con el código que debe")
+        fin
+        ; (los huérfanos que dejó acaban solos)
+        t0 := ahora_ns()
+        mientras (vivos > 0 o en_tabla > 0) y ahora_ns() - t0 < 3000000000 hacer duerme_ms(10) fin
+        escribir("Después de los hijos: ", vivos, " procesos, ", en_tabla, " en la tabla, ", n_espacios, " espacios, ", tablas_usuario, " tablas de programas; ")
+        escribir(forks, " fork, ", execs, " execve, ", zombis_recogidos, " recogidos por wait4, ", huérfanos_n, " huérfanos\n")
+        si vivos <> 0 o en_tabla <> 0 o n_espacios <> 0 o tablas_usuario <> 0 entonces mal6("quedan procesos, zombis o espacios") fin
+    fin
+
+    ; el intérprete de órdenes (ORDENES, de la unidad) en la consola, hasta que
+    ; acabe («salir») o se pulse el botón de encendido; falso si no está
+    función intérprete(): bool
+        variable p: puntero a Proceso
+        variable r: nat64
+        si busca_archivo("ORDENES") < 0 entonces
+            escribir("(No está el intérprete de órdenes, ORDENES, en la unidad.)\n")
+            devolver falso
+        fin
+        p := lanza("ORDENES")
+        si p = nulo entonces
+            escribir("No se ha podido arrancar el intérprete de órdenes: ", motivo, "\n")
+            devolver falso
+        fin
+        mientras no ha_acabado(p) y no botón hacer duerme_ms(20) fin
+        si botón entonces devolver cierto fin
+        r := espera_proceso(p)
+        escribir("El intérprete de órdenes ha acabado (código ", r, ").\n")
+        devolver cierto
+    fin
+
+    ; en el equipo de verdad (sin «apagar»): el intérprete de órdenes; al
+    ; salir de él (o con el botón de encendido), se apaga el equipo
     función en_marcha()
         variable s, s0: nat32
-        variable k: ent32
         pon_color(14, 0)
-        escribir("(Pulse teclas para ver sus códigos; el botón de encendido apaga el equipo.)\n")
+        escribir("(Hispa-64 en marcha: el intérprete de órdenes; «salir» o el botón de encendido apagan el equipo.)\n")
         pon_color(7, 0)
+        si tic_va y va entonces
+            si intérprete() entonces
+                escribir("\nSe apaga el equipo.\n")
+                al_apagar()
+                apaga_equipo()
+                escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
+            fin
+        fin
         s0 := 99
         mientras cierto hacer
             si botón entonces
@@ -1071,12 +1181,6 @@ módulo Hispa64
                 escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
                 apaga()
                 mientras cierto hacer espera_int() fin
-            fin
-            k := tecla()
-            si k >= 0 entonces
-                escribir("\rTecla: código ")
-                hex(nat64(k))
-                escribir("                    \n")
             fin
             si hay_cmos() entonces
                 s := segundo_cmos()
@@ -1226,6 +1330,7 @@ módulo Hispa64
         etapa5()
         etapa4()
         pruebas5()
+        si tiene("prueba=raton") entonces prueba_ratón() fin
         ; las excepciones: un punto de parada, que se atiende y se sigue
         escribir("Excepciones: las 32 en la IDT, explicadas en español. Una int3 de prueba:\n  ")
         ensamblador
@@ -1233,7 +1338,8 @@ módulo Hispa64
         fin
         provoca()
         pruebas2()
-        si fallos + fallos_proc + fallos_disco > 0 entonces
+        etapa6()
+        si fallos + fallos_proc + fallos_disco + fallos6 > 0 entonces
             pon_color(12, 0)
             escribir("Hispa-64 etapa 6: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
@@ -1247,6 +1353,12 @@ módulo Hispa64
             pon_color(7, 0)
         fin
         al_apagar()
+        ; [etapa 6] con «ordenes» (las pruebas): el intérprete, y al salir, se apaga
+        si apagar_al_fallar y tiene("ordenes") entonces
+            intérprete()
+            al_apagar()
+            devolver 42
+        fin
         si apagar_al_fallar entonces devolver 42 fin
         en_marcha()
         devolver 0

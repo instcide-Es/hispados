@@ -16,7 +16,7 @@
 ; =============================================================================
 módulo Usbhid64
 
-    importar Cifras64, Es64, Fisica64, Monton64, Hilos64, Xhci64, Usb64, Raton64
+    importar Cifras64, Es64, Fisica64, Monton64, Hilos64, Xhci64, Usb64, Raton64, Hidesc64
 
     público constante MAX_HID = 8
     público constante H_TECLADO = 1
@@ -32,6 +32,8 @@ módulo Usbhid64
         pedido: bool
         página: nat64               ; (física) el informe en 0; lo de antes (teclas) en 0x100
         antes: arreglo [8] de byte  ; (teclado) los modificadores y las teclas del informe anterior
+        d: Diseño                   ; lo que dice su descriptor de informe
+        leds: nat32                 ; (teclado) los LED puestos
     fin
 
     variable hids: arreglo [MAX_HID] de Hid
@@ -53,15 +55,42 @@ módulo Usbhid64
     ; el informe de arranque del teclado: los modificadores (bits de 0xE0 a
     ; 0xE7) y hasta 6 teclas; lo que cambia respecto del anterior
     función teclado_arranque(h: nat32, n: nat32)
-        variable k, j, u: nat32
-        variable está: bool
+        variable t: arreglo [8] de byte
+        variable k: nat32
         si n < 3 entonces devolver fin
         ; (un informe de «demasiadas teclas»: 0x01 en todas; se tira)
         si h8(h, 2) = 1 entonces devolver fin
+        k := 0
+        mientras k < 8 hacer
+            si k < n entonces t[k] := byte(h8(h, k)) sino t[k] := 0 fin
+            k := k + 1
+        fin
+        teclas_cambian(h, dirección(t[0]))
+    fin
+
+    ; el teclado por su descriptor: lo que dice, como el de arranque
+    función teclado_informe(h: nat32, n: nat32)
+        variable t: arreglo [8] de byte
+        variable mods, cuántas, k: nat32
+        k := 0
+        mientras k < 8 hacer
+            t[k] := 0
+            k := k + 1
+        fin
+        si no lee_teclado(hids[h].d, puntero(virt(hids[h].página)), n, mods, dirección(t[2]), cuántas) entonces devolver fin
+        t[0] := byte(mods)
+        teclas_cambian(h, dirección(t[0]))
+    fin
+
+    ; lo que ha cambiado del teclado (t: los modificadores y, desde el 2, hasta 6 teclas)
+    función teclas_cambian(h: nat32, t: puntero a byte)
+        variable k, j, u, n: nat32
+        variable está: bool
+        n := 8
         ; los modificadores
         k := 0
         mientras k < 8 hacer
-            si ((h8(h, 0) xob hids[h].antes[0]) >> k) yb 1 <> 0 entonces tecla_usb(0xE0 + k, (h8(h, 0) >> k) yb 1 <> 0) fin
+            si ((t[0] xob hids[h].antes[0]) >> k) yb 1 <> 0 entonces tecla_usb(0xE0 + k, (t[0] >> k) yb 1 <> 0) fin
             k := k + 1
         fin
         ; las soltadas: las de antes que no están
@@ -72,7 +101,7 @@ módulo Usbhid64
                 está := falso
                 j := 2
                 mientras j < n y j < 8 hacer
-                    si h8(h, j) = u entonces está := cierto fin
+                    si t[j] = u entonces está := cierto fin
                     j := j + 1
                 fin
                 si no está entonces tecla_usb(u, falso) fin
@@ -82,7 +111,7 @@ módulo Usbhid64
         ; las pulsadas: las de ahora que no estaban
         k := 2
         mientras k < n y k < 8 hacer
-            u := h8(h, k)
+            u := t[k]
             si u > 3 entonces
                 está := falso
                 j := 2
@@ -96,7 +125,7 @@ módulo Usbhid64
         fin
         k := 0
         mientras k < 8 hacer
-            si k < n entonces hids[h].antes[k] := byte(h8(h, k)) sino hids[h].antes[k] := 0 fin
+            hids[h].antes[k] := t[k]
             k := k + 1
         fin
     fin
@@ -116,12 +145,34 @@ módulo Usbhid64
 
     ; un informe que ha llegado
     función procesa(h: nat32, n: nat32)
+        variable dx, dy, rueda, pan: ent32
+        variable b, ax, ay: nat32
+        variable p: puntero a byte
         uh_informes := uh_informes + 1
-        si hids[h].clase = H_TECLADO entonces
-            teclado_arranque(h, n)
+        p := puntero(virt(hids[h].página))
+        si hids[h].arranque entonces
+            si hids[h].clase = H_TECLADO entonces teclado_arranque(h, n) sino ratón_arranque(h, n) fin
+        sino si hids[h].clase = H_TECLADO entonces
+            teclado_informe(h, n)
         sino si hids[h].clase = H_RATÓN entonces
-            ratón_arranque(h, n)
+            si lee_ratón(hids[h].d, p, n, dx, dy, b, rueda, pan) entonces ratón_mueve(dx, dy, rueda, b, 1) fin
+        sino si hids[h].clase = H_TABLETA entonces
+            si lee_absoluto(hids[h].d, p, n, ax, ay, b, rueda) entonces
+                ratón_absoluto(ax, ay, nat32(hids[h].d.ax_máx - hids[h].d.ax_mín), nat32(hids[h].d.ay_máx - hids[h].d.ay_mín), rueda, b)
+            fin
         fin
+    fin
+
+    ; lee su descriptor de informe y lo analiza: cierto si se entiende
+    función descriptor(h: nat32, a: puntero a Aparato, i: nat32): bool
+        variable largo: nat32
+        variable r: ent32
+        largo := a.interfaces[i].largo_informe
+        si largo = 0 o largo > 2048 entonces largo := 2048 fin
+        r := u_control(a, 0x81, PIDE_DESCRIPTOR, 0x2200, hids[h].número, largo)
+        si r <= 0 entonces devolver falso fin
+        si no analiza(puntero(de_control(a)), nat32(r), hids[h].d) entonces devolver falso fin
+        devolver no hids[h].d.malo
     fin
 
     ; la interfaz i del aparato ai, si es HID con un extremo de interrupción de entrada
@@ -142,8 +193,28 @@ módulo Usbhid64
         hids[k].pedido := falso
         hids[k].página := página_de(a.ctl)
         si hids[k].página = 0 entonces devolver falso fin
-        k := k
-        ; (por ahora, el protocolo de arranque)
+        ; por su descriptor de informe (el protocolo de informes)
+        hids[k].arranque := falso
+        hids[k].largo := a.ext[e].paquete
+        si hids[k].largo > 64 entonces hids[k].largo := 64 fin
+        si descriptor(k, a, i) y (hids[k].d.teclado o hids[k].d.ratón o hids[k].d.absoluto) entonces
+            si hids[k].d.teclado entonces
+                hids[k].clase := H_TECLADO
+                uh_teclados := uh_teclados + 1
+            sino si hids[k].d.absoluto entonces
+                hids[k].clase := H_TABLETA
+                uh_tabletas := uh_tabletas + 1
+            sino
+                hids[k].clase := H_RATÓN
+                uh_ratones := uh_ratones + 1
+            fin
+            si a.interfaces[i].subclase = 1 entonces u_control(a, 0x21, 0x0B, 1, hids[k].número, 0) fin      ; SET_PROTOCOL (informes)
+            u_control(a, 0x21, 0x0A, 0, hids[k].número, 0)            ; SET_IDLE
+            hids[k].hay := cierto
+            a.dueño := DE_HID
+            devolver cierto
+        fin
+        ; si no, el protocolo de arranque
         si a.interfaces[i].subclase = 1 y a.interfaces[i].protocolo = 1 entonces
             hids[k].clase := H_TECLADO
             hids[k].largo := 8
@@ -238,7 +309,15 @@ módulo Usbhid64
                     caso H_RATÓN: escribir("ratón")
                     caso H_TABLETA: escribir("tableta")
                 fin
-                si hids[k].arranque entonces escribir(" (protocolo de arranque)") fin
+                si hids[k].arranque entonces
+                    escribir(" (protocolo de arranque)")
+                sino
+                    escribir(" (por su descriptor")
+                    si hids[k].clase = H_RATÓN y hids[k].d.rueda_bits <> 0 entonces escribir(", con rueda") fin
+                    si hids[k].clase = H_TABLETA entonces escribir(", de 0 a ", hids[k].d.ax_máx) fin
+                    si hids[k].clase = H_TECLADO y hids[k].d.leds entonces escribir(", con LED") fin
+                    escribir(")")
+                fin
             fin
             k := k + 1
         fin

@@ -111,8 +111,8 @@ módulo Usbvigia
 
     función enchufado(i: nat32)
         uv_enchufados := uv_enchufados + 1
-        escribir("USB: enchufado")
-        escribe_aparato(i)
+        escribir("USB: se ha enchufado ")
+        escribe_ficha(i)
         hid_nuevo(i)
         escribe_clase(i)
         escribir("\n")

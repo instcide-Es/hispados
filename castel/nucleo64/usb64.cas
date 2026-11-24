@@ -556,9 +556,13 @@ módulo Usb64
     fin
 
     público función escribe_aparato(i: nat32)
+        escribir("  ")
+        escribe_ficha(i)
+    fin
+
+    público función escribe_ficha(i: nat32)
         variable a: puntero a Aparato
         a := aparatos[i]
-        escribir("  ")
         escribe_sitio(i)
         escribir(": ")
         hex4u(a.fabricante)
