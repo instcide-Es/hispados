@@ -197,6 +197,8 @@ G
       # ACPI pero sin mirar sus dispositivos
       menu_efi "Termometro SIN el 8042 (UEFI)" ESCRIT8.BIN "escritorio $N sin8042 termo" "$M2" auto
       menu_efi "Termometro con ACPI sin mirar sus dispositivos (UEFI)" ESCRIT8.BIN "escritorio $N acpisindisp termo" "$M2" auto
+      # (RAM) la prueba completa de la memoria, sola al abrirse (termo/ram.c)
+      menu_efi "Termometro + prueba COMPLETA de la memoria RAM (UEFI; sola, de 15 min a 1 h)" ESCRIT8.BIN "escritorio $N amedida termo ramcompleta" "$M2" auto
     fi
     # (SDHCI) con PRUEBA_SDHCI=1, la memoria de prueba del eMMC y la tarjeta SD
     # (las tabletas Bay Trail: Acer One 10, Medion S2217), primero: sin ACPI
@@ -272,6 +274,7 @@ G
     entrada "Termometro (800 x 600)" ESCRIT8.BIN "escritorio $N termo"
     entrada "Termometro SIN ACPI (si se queda colgado al arrancar: sin zonas ni bateria)" ESCRIT8.BIN "escritorio $N sinacpi termo"
     entrada "Termometro SIN el 8042 (el teclado y el raton PS/2)" ESCRIT8.BIN "escritorio $N sin8042 termo"
+    entrada "Termometro + prueba COMPLETA de la memoria RAM (sola al abrirse; de 15 min a 1 h)" ESCRIT8.BIN "escritorio $N termo ramcompleta" "1920x1080x32,1920x1080x24,1366x768x32,1366x768x24,1024x768x32,1024x768x24,auto"
   fi
   # (SDHCI) la memoria de prueba del eMMC y la SD, por la BIOS (el Medion con la HispaBIOS)
   if [ -n "${PRUEBA_SDHCI:-}" ]; then

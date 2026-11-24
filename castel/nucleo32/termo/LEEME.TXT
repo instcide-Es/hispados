@@ -278,4 +278,31 @@ con él encendido simplemente no arranca esta memoria.
   los equipos ya medidos con esta memoria (la referencia, 100, es el HP Mini
   5103, cuando se haya medido).
 
+
+10. «MEMORIA RAM» (SI SE CONGELA O NO CARGA WINDOWS)
+---------------------------------------------------
+  La tecla M (o el botón «Memoria RAM», en pantallas anchas) prueba la
+  memoria RAM en menos de 2 minutos: hágalo ANTES de «Calentar» (la prueba
+  de la memoria también calienta). Primero con TODOS los núcleos a la vez
+  (cada uno su trozo: calor y tráfico, para ver los fallos del controlador
+  de memoria o de la temperatura) y luego con uno, con más pruebas (la
+  dirección propia, unos y ceros andantes, 0x55/0xAA, moving inversions).
+  Esc la para. Mientras, no se puede «Calentar».
+  La completa (dos pasadas de todo, de 15 min a 1 h): en el menú negro del
+  arranque, «Termometro + prueba COMPLETA de la memoria RAM»; empieza sola.
+  Se prueba toda la memoria que se puede: también la de por encima de los
+  4 GB. No se prueba lo que usa el propio Hispa-Pentium (unos cientos de MB
+  de abajo) ni lo que se queda la BIOS: lo dice, con cuánto.
+  El resultado: TERMO\RAM.TXT y, en INFORME.TXT, «MEMORIA RAM: BIEN» o
+  «MEMORIA RAM: MAL», escrito, con el porqué: el mismo bit siempre (un chip
+  del módulo), direcciones que se pisan (módulo mal asentado), una zona
+  pequeña (celdas de un módulo), fallos dispersos o solo con todos los
+  núcleos (controlador, calor, tensión). Los módulos (ranura, tamaño,
+  velocidad, fabricante; nunca el número de serie) salen de la BIOS, y la
+  ranura de un fallo, si la BIOS lo dice, es APROXIMADA: para estar seguro,
+  pruebe con un solo módulo cada vez.
+  Si el equipo se cuelga probando la memoria, al volver a arrancar el
+  Termómetro lo dice (y en qué trozo estaba): eso ya apunta a la RAM o a su
+  controlador.
+
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

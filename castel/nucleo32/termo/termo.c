@@ -35,12 +35,17 @@
 #include "veredicto.h"
 #include "envio.h"
 #include "rendimiento.h"
+#include "ram.h"
 
 static int mas_caliente(void);
 static void mira_envio(void);
 static int en_reposo(void);
 static int informe_frenos(char *d, int cabe);
 static void mira_mide(void);
+static void mira_ram(void);
+static void empieza_ram(void);
+static void lanza_ram(int completa);
+static int ram_simula;	/* (RAM) «ramsimula» en la línea del cargador: un fallo de mentira (las pruebas) */
 static int midiendo;
 static u32 t_mide;
 static char aviso_mide[320];
@@ -2287,7 +2292,7 @@ static void informe_autonomia(char *b, size_t cabe)
 
 static void escribe_informe(void)
 {
-	static char t[6000];
+	static char t[24000];
 	char r[120], g1[24], g2[24], g3[24];
 	u32 a, me, d, h, mi, se;
 	int n = 0, k;
@@ -2391,7 +2396,8 @@ static void escribe_informe(void)
 		IN("\r\nQUÉ APUNTA A LA ALIMENTACIÓN Y QUÉ NO (sin sacar conclusiones antes de tiempo)\r\n");
 		IN("A favor de un problema de alimentación:\r\n%s", fav ? f : "  (nada visto)\r\n");
 		IN("En contra, o que no dice nada de ella:\r\n%s", c[0] ? c : "  (nada visto)\r\n");
-		IN("  Falta, para otra vez: una prueba de la memoria RAM y una lectura larga del disco (si fuera la alimentación, también fallarían).\r\n");
+		IN("  Falta, para otra vez: %suna lectura larga del disco (si fuera la alimentación, también fallarían).\r\n",
+		   ram_resultado() < 0 ? "una prueba de la memoria RAM (tecla M) y " : "");	/* (RAM) la de la memoria, si ya se ha hecho: ver MEMORIA RAM */
 	}
 	/* (TERMO) los parones (el MSI GT80): para el técnico */
 	if (parones || bloqueos || cmos_atras_dicho || smi_total || carga_vueltas) {
@@ -2454,7 +2460,19 @@ static void escribe_informe(void)
 	if (cpu.aproximada)
 		IN("Nota: el sensor de este procesador (Atom) es aproximado.\r\n");
 	IN("No se puede leer sin su controlador la temperatura de las tarjetas gráficas (NVIDIA/AMD), salvo que la BIOS la dé como zona ACPI.\r\n");
+	{	/* (RAM) la memoria: su sección y, en el resultado, lo que dice */
+		static char ri[17000];
+
+		ram_informe(ri, sizeof ri);
+		IN("%s", ri);
+	}
 	IN("\r\nRESULTADO\r\n---------\r\n%s\r\n", resumen);
+	{
+		char rv[400];
+
+		if (ram_veredicto(rv, sizeof rv))
+			IN("%s\r\n", rv);
+	}
 	IN("\r\nLos datos son los que dan los sensores del propio equipo; el registro completo (cada 2 s) está en los .CSV y .LOG de esta carpeta, y la pantalla con la gráfica en INFORME.BMP.\r\n");
 	IN("Hecho con el Termómetro de Hispa-Pentium (GPL-2.0 o posterior). No contiene datos personales.\r\n");
 #undef IN
@@ -2932,6 +2950,7 @@ static void pulso(void)
 		mira_frenos();
 		mira_envio();
 		mira_mide();
+		mira_ram();
 		if (!csv_listo && !csv_malo && cuenta_s >= 6)
 			csv_cabecera();
 		apunta_historia();
@@ -3019,7 +3038,7 @@ static const char *nucleos_texto(void)
 
 /* ---------------------------------------------------------------- pintar */
 struct boton { int x, y, an, al; const char *t; int id; };
-enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA, B_ENVIAR, B_TERMINAL, B_MIDE };
+enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA, B_ENVIAR, B_TERMINAL, B_MIDE, B_RAM };
 static struct boton bot[12];
 static int nbot;
 
@@ -3439,10 +3458,14 @@ static void pinta(void)
 		xb += 102;
 		boton(xb, yb, 96, 32, "15 min (3)", B_15, fase != F_CARGA, minutos == 15);
 		xb += 112;
-		boton(xb, yb, 120, 32, "Parar (Esc)", B_PARAR, fase == F_CARGA || fase == F_ENFRIA || midiendo, 0);
+		boton(xb, yb, 120, 32, "Parar (Esc)", B_PARAR, fase == F_CARGA || fase == F_ENFRIA || midiendo || ram_activa(), 0);
 		xb += 130;
 		if (W >= 1000) {
 			boton(xb, yb, 150, 32, "Rendimiento (R)", B_MIDE, !midiendo && fase != F_CARGA && fase != F_ENFRIA, midiendo);
+			xb += 160;
+		}
+		if (W >= 1280) {	/* (RAM) (más estrecho, solo la tecla M: que quepan «Enviar a Carlos» y «Terminal») */
+			boton(xb, yb, 150, 32, "Memoria RAM (M)", B_RAM, !ram_activa() && !midiendo && fase != F_CARGA && fase != F_ENFRIA, ram_activa());
 			xb += 160;
 		}
 		{
@@ -3461,8 +3484,8 @@ static void pinta(void)
 			if (puede_terminal && xb + an_ter <= W)
 				boton(xb, yb, an_ter, 32, "Terminal", B_TERMINAL, 1, 0);
 		}
-		lz_texto(&LZ, 12, H - 20, midiendo || aviso_mide[0] ? aviso_mide : aviso_envio[0] ? aviso_envio : aviso_archivo,
-			 midiendo || aviso_mide[0] || aviso_envio[0] || informe_dicho[0] ? C_TINTA : C_GRIS, 1);
+		lz_texto(&LZ, 12, H - 20, ram_activa() ? ram_aviso() : midiendo || aviso_mide[0] ? aviso_mide : aviso_envio[0] ? aviso_envio : ram_aviso()[0] ? ram_aviso() : aviso_archivo,
+			 ram_activa() || ram_aviso()[0] || midiendo || aviso_mide[0] || aviso_envio[0] || informe_dicho[0] ? C_TINTA : C_GRIS, 1);
 		/* (TERMO) no se puede guardar en la memoria: en grande, en rojo,
 		 * encima de la línea de abajo (y lo que se ha hecho en su lugar) */
 		if (guarda_aviso[0]) {
@@ -3576,6 +3599,53 @@ static void mira_envio(void)
 	}
 	if ((int)(jg_tics() - t_envio) > 900 * (int)jg_hz)
 		enviando = 0;
+}
+
+/* (RAM) «Memoria RAM»: TERMO.BIN /RAM, una tarea hija (ram.c); lo que va
+ * diciendo, en RAM.EST (al .LOG, cada cambio: si el equipo se cuelga, queda
+ * qué se estaba probando); al acabar, su sección en INFORME.TXT */
+static void lanza_ram(int completa)
+{
+	if (ram_activa() || midiendo || fase == F_CARGA || fase == F_ENFRIA || !carpeta[0])
+		return;
+	if (ram_lanza(carpeta, completa, ram_simula))
+		suceso_log("EMPIEZA la prueba de la memoria RAM (TERMO.BIN /RAM%s; %s; Esc la para)", completa ? " /COMPLETA" : "",
+			   completa ? "la completa: dos pasadas de todo" : "la rápida: menos de 2 min");
+	jg_cambio = 1;
+}
+
+static void mira_ram(void)
+{
+	char t[420];
+	int acabada;
+
+	if (!ram_mira(t, sizeof t, &acabada))
+		return;
+	suceso_log("memoria RAM: %s", t);
+	if (acabada)
+		ram_pon_en_informe(carpeta);
+	jg_cambio = 1;
+}
+
+/* al abrir: lo de la vez anterior y, si el menú del arranque lo pide
+ * («ramcompleta», «ramrapida»), la prueba, sola */
+static void empieza_ram(void)
+{
+	char t[600];
+
+	if (!carpeta[0])
+		return;
+	if (ram_al_abrir(carpeta, t, sizeof t)) {
+		suceso_log("AVISO: %s", t);
+		if (strlen(anterior) + strlen(t) + 4 < sizeof anterior)
+			snprintf(anterior + strlen(anterior), sizeof anterior - strlen(anterior), "%s%s", anterior[0] ? " " : "", t);
+		ver_anterior = 1;
+	}
+	ram_simula = ram_linea("ramsimula");
+	if (ram_linea("ramcompleta"))
+		lanza_ram(1);
+	else if (ram_linea("ramrapida"))
+		lanza_ram(0);
 }
 
 /* (TERMO) «Medir rendimiento»: TERMO.BIN /MIDE, una tarea hija; lo que va
@@ -3742,6 +3812,10 @@ static void haz(int id)
 {
 	switch (id) {
 	case B_CALENTAR:
+		if (ram_activa()) {	/* (RAM) primero, que acabe la de la memoria (o Esc) */
+			suceso_log("Calentar: espere a que acabe la prueba de la memoria RAM (Esc la para)");
+			break;
+		}
 		if (fase != F_CARGA) {
 			fase = F_REPOSO;
 			empieza();
@@ -3751,7 +3825,9 @@ static void haz(int id)
 	case B_10: pide_minutos(10); break;
 	case B_15: pide_minutos(15); break;
 	case B_PARAR:
-		if (midiendo)
+		if (ram_activa())
+			ram_para();
+		else if (midiendo)
 			para_mide();
 		else if (fase == F_CARGA)
 			para_carga(0, 1);
@@ -3771,6 +3847,9 @@ static void haz(int id)
 		break;
 	case B_MIDE:
 		lanza_mide();
+		break;
+	case B_RAM:
+		lanza_ram(0);
 		break;
 	}
 	jg_cambio = 1;
@@ -3799,6 +3878,7 @@ static void suceso(const struct suceso *s)
 		case 'e': case 'E': if (puede_enviar) lanza_envio(); break;
 		case 't': case 'T': if (puede_terminal) lanza_terminal(); break;
 		case 'r': case 'R': lanza_mide(); break;
+		case 'm': case 'M': lanza_ram(0); break;
 		default:
 			if (ES_INTRO(s->a) && fase == F_RESULTADO) {
 				fase = F_REPOSO;
@@ -3898,6 +3978,8 @@ int principal(void)
 		snprintf(eq, sizeof eq, "%s %s", hay_zonas ? za.t.fabricante : "", hay_zonas ? za.t.producto : "equipo");
 		return carpeta[0] ? rendimiento_principal(carpeta, eq, cpu.marca) : 1;
 	}
+	if (arg_aqui("/RAM"))	/* (RAM) la prueba de la memoria, en una tarea hija (ram.c) */
+		return carpeta[0] ? ram_principal(carpeta, arg_aqui("/COMPLETA"), arg_aqui("/SIMULAFALLO")) : 1;
 	if (arg_aqui("/ENVIAR")) {
 		if (!carpeta[0]) {
 			sc(SC_ESCRIBIR, (u32)"TERMO: no hay carpeta TERMO.\n", 29, 0);
@@ -3965,6 +4047,7 @@ int principal(void)
 	if (anterior[0])
 		serie("termo: aviso: %s\n", anterior);
 	mira_mca(0);
+	empieza_ram();
 	jg_correr(&J);
 	sc(SC_CARGA, 1, 0, 0);
 	return 0;
