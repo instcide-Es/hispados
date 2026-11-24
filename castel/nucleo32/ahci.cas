@@ -95,6 +95,9 @@ módulo Ahci
     constante ORDEN_ASENTAR = 0xE7
     constante ORDEN_ASENTAR48 = 0xEA
 
+    constante ORDEN_SMART = 0xB0                ; (TERMO) solo sus subórdenes de leer: orden_salud
+    variable rasgo_smart: nat32
+
     constante POR_VEZ = 8                       ; los sectores de cada orden (una página)
 
     público tipo Sata = estructura
@@ -255,6 +258,10 @@ módulo Ahci
         fin
         fis[12] := n
         fis[13] := n >> 8
+        si orden = ORDEN_SMART entonces          ; (TERMO) SMART: su subordén, y el aparato como lo manda smartctl
+            fis[3] := rasgo_smart
+            fis[7] := 0xA0
+        fin
         ; el único trozo de memoria: la página de datos
         si octetos <> 0 entonces
             prd := puntero(b + 0x580)
@@ -671,6 +678,54 @@ módulo Ahci
         bien := manda(s, orden, 0, 0, 0, falso)
         soltar(cerrojo)
         devolver bien
+    fin
+
+    ; (TERMO) para el Termómetro (tdisco.cas), SOLO LEER: qué = 1, IDENTIFY;
+    ; 2, SMART READ DATA (B0h/D0h); 3, SMART READ THRESHOLDS (D1h); 4, SMART
+    ; RETURN STATUS (DAh); 5, el registro de errores resumido (SMART READ
+    ; LOG, D5h, el 01h). Con 1, 2, 3 y 5, 512 octetos a destino. Da 0 bien
+    ; (con 4: 0, sin umbrales pasados; 1, con algún umbral pasado; 2, no se
+    ; sabe), o 0xFFFFFFFF si el disco la rechaza o no está. Ninguna otra
+    ; subórden de SMART (ni encenderlo, ni las pruebas, ni escribir
+    ; registros): no se pueden pedir.
+    público función orden_salud(s: nat32, qué: nat32, destino: puntero a byte): nat32
+        variable bien: bool
+        variable r: nat32
+        variable d2h: puntero a byte
+        si s >= MAX_SATA entonces devolver 0xFFFFFFFF fin
+        si no satas[s].hay o qué < 1 o qué > 5 entonces devolver 0xFFFFFFFF fin
+        tomar(cerrojo)
+        d2h := puntero(satas[s].tablas + 0x440)
+        llenar(d2h, 20, 0)
+        según qué
+            caso 1: bien := manda(s, ORDEN_IDENTIFICAR, 0, 0, SECTOR, falso)
+            caso 2:
+                rasgo_smart := 0xD0
+                bien := manda(s, ORDEN_SMART, 0xC24F00, 1, SECTOR, falso)
+            caso 3:
+                rasgo_smart := 0xD1
+                bien := manda(s, ORDEN_SMART, 0xC24F01, 1, SECTOR, falso)
+            caso 4:
+                rasgo_smart := 0xDA
+                bien := manda(s, ORDEN_SMART, 0xC24F00, 0, 0, falso)
+            caso 5:
+                rasgo_smart := 0xD5
+                bien := manda(s, ORDEN_SMART, 0xC24F01, 1, SECTOR, falso)
+        fin
+        rasgo_smart := 0
+        r := 0
+        si no bien entonces
+            r := 0xFFFFFFFF
+        sino si qué = 4 entonces
+            ; lo dice el disco en el LBA de su FIS de vuelta: 4Fh/C2h, bien; F4h/2Ch, umbral pasado
+            r := 2
+            si d2h[0] = 0x34 y d2h[5] = 0x4F y d2h[6] = 0xC2 entonces r := 0 fin
+            si d2h[0] = 0x34 y d2h[5] = 0xF4 y d2h[6] = 0x2C entonces r := 1 fin
+        sino
+            copiar_memoria(destino, puntero(satas[s].datos), SECTOR)
+        fin
+        soltar(cerrojo)
+        devolver r
     fin
 
     ; -------------------------------------------------------------------------

@@ -1,0 +1,223 @@
+; =============================================================================
+;  tdisco.cas - (TERMO) los discos de dentro del equipo, para el Termómetro
+;  (TERMO.BIN, termo/disco.c): quiénes son, su salud (SMART de los SATA e
+;  IDE, el registro de salud de los NVMe, el desgaste que dice el eMMC) y
+;  una prueba de lectura que mide lo que tardan. SOLO LEE, y lo leído no
+;  sale del núcleo: se lee a un sitio suyo y se tira (el programa solo
+;  sabe si ha ido bien y lo que ha tardado). Del número de serie, solo las
+;  4 últimas letras (privacidad: los equipos son de otras personas).
+;
+;  No hay aquí ningún camino para escribir: los SATA e IDE, por
+;  Discos.leer_sectores y su orden_salud (que solo deja IDENTIFY y las
+;  subórdenes de SMART que leen); los NVMe, por nvme.cas (que solo deja
+;  Read, Identify y Get Log Page). Y, de salvaguarda, la llamada 4 dice
+;  cuántos sectores se han escrito en los discos de dentro desde que
+;  arrancó el sistema: el Termómetro lo apunta (debe ser 0).
+;
+;  La llamada 238 (usuario.cas):
+;   EBX = 0: la ficha del disco número ECX (Ficha_td, 64 octetos) a EDX
+;            -> 1; 0 si no hay tantos (con ECX = 0 se mira otra vez la lista:
+;            la primera vez, también se ponen en marcha los NVMe)
+;   EBX = 1: su salud: EDX, un Pedido_salud (qué, adónde, cuánto cabe).
+;            qué = 1, IDENTIFY (512; NVMe: Identify de la controladora,
+;            4096); 2, SMART READ DATA; 3, SMART READ THRESHOLDS; 4, SMART
+;            RETURN STATUS (sin datos: 0 bien, 1 umbral pasado, 2 no se
+;            sabe); 5, el registro de errores resumido de SMART; 6 (NVMe),
+;            el registro SMART/Health (Get Log Page 02h, 512)
+;            -> 0 (o lo de 4); 0xFFFFFFFF, el disco no lo da; NO_VALE
+;   EBX = 2: medir una lectura: EDX, un Pedido_lee (el primer sector y
+;            cuántos, de 512, hasta 128) -> 0 bien, 1 mal; en el pedido,
+;            los reintentos y fallos que ha contado el controlador
+;   EBX = 3: lo visto al poner en marcha los NVMe (texto), a EDX (caben ECX)
+;   EBX = 4: los sectores escritos en los discos de dentro desde el arranque
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Tdisco
+
+    importar Discos, Ata, Ahci, Sdhci, Nvme, Tareas, Paginas, Mem32, Textos32
+
+    constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
+    constante MAX_TD = 8
+    público constante TD_IDE = 1
+    público constante TD_SATA = 2
+    público constante TD_EMMC = 7
+    público constante TD_NVME = 8
+
+    público tipo Ficha_td = estructura          ; 64 octetos
+        clase: nat32                            ; TD_IDE, TD_SATA, TD_EMMC o TD_NVME
+        sectores: nat32                         ; de 512 (hasta 2 TB)
+        bloque: nat32                           ; lo que mide su sector
+        vida: nat32                             ; (eMMC) Sdhci.vida
+        modelo: arreglo [48] de byte
+    fin
+    tipo Pedido_salud = estructura
+        qué, destino, cabe: nat32
+    fin
+    tipo Pedido_lee = estructura
+        lba, n, fallos: nat32
+    fin
+
+    variable clases: arreglo [MAX_TD] de nat32
+    variable cuál: arreglo [MAX_TD] de nat32    ; el disco de discos.cas, o el NVMe
+    variable n_td: nat32
+    variable cerrojo: Cerrojo
+    variable tirar: arreglo [32768] de byte     ; adonde se lee (y ahí se queda): 64 sectores
+    variable página: arreglo [4096] de byte
+
+    función mín(a: nat32, b: nat32): nat32
+        si a < b entonces devolver a fin
+        devolver b
+    fin
+
+    función haz_lista()
+        variable d, k: nat32
+        n_td := 0
+        para d desde 0 hasta MAX_DISCOS - 1 hacer
+            si Discos.discos[d].hay y n_td < MAX_TD entonces
+                si Discos.discos[d].clase = DE_ATA entonces
+                    clases[n_td] := TD_IDE
+                    cuál[n_td] := d
+                    n_td := n_td + 1
+                sino si Discos.discos[d].clase = DE_AHCI entonces
+                    clases[n_td] := TD_SATA
+                    cuál[n_td] := d
+                    n_td := n_td + 1
+                sino si Discos.discos[d].clase = DE_EMMC entonces
+                    clases[n_td] := TD_EMMC
+                    cuál[n_td] := d
+                    n_td := n_td + 1
+                fin
+            fin
+        fin
+        Nvme.prepara()
+        k := 0
+        mientras k < Nvme.cuántos y n_td < MAX_TD hacer
+            si nvmes[k].hay entonces
+                clases[n_td] := TD_NVME
+                cuál[n_td] := k
+                n_td := n_td + 1
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; el número de serie de un IDENTIFY de ATA (palabras 10 a 19, cada par de
+    ; letras al revés): solo las 4 últimas, las demás con «*»
+    función recorta_ata(id: puntero a byte)
+        variable i, n: nat32
+        n := 20
+        mientras n > 0 y (id[20 + ((n - 1) xob 1)] = ' ' o id[20 + ((n - 1) xob 1)] = 0) hacer n := n - 1 fin
+        para i desde 0 hasta 19 hacer
+            si i + 4 < n y id[20 + (i xob 1)] <> ' ' entonces id[20 + (i xob 1)] := '*' fin
+        fin
+    fin
+
+    ; la orden de salud qué del disco k a página: 0 (o el estado), 0xFFFFFFFF
+    función pide_salud(k: nat32, qué: nat32): nat32
+        variable d, r: nat32
+        d := cuál[k]
+        llenar(página, 4096, 0)
+        si clases[k] = TD_NVME entonces
+            si qué = 1 entonces
+                si Nvme.identify(d, página) entonces devolver 0 fin
+                devolver 0xFFFFFFFF
+            fin
+            si qué = 6 y Nvme.salud(d, página) entonces devolver 0 fin
+            devolver 0xFFFFFFFF
+        fin
+        si qué > 5 entonces devolver 0xFFFFFFFF fin
+        si clases[k] = TD_SATA entonces
+            r := Ahci.orden_salud(Discos.discos[d].cuál, qué, página)
+        sino si clases[k] = TD_IDE entonces
+            r := Ata.orden_salud(Discos.discos[d].cuál, qué, página)
+        sino
+            devolver 0xFFFFFFFF                 ; (eMMC: lo que dice, en la ficha)
+        fin
+        si r = 0 y qué = 1 entonces recorta_ata(página) fin
+        devolver r
+    fin
+
+    función fallos_de(k: nat32): nat32
+        si clases[k] = TD_NVME entonces devolver Nvme.fallos(cuál[k]) fin
+        si clases[k] = TD_SATA entonces devolver Ahci.fallos_de_disco fin
+        si clases[k] = TD_IDE entonces devolver Ata.fallos_de_disco fin
+        devolver Sdhci.fallos_de_disco
+    fin
+
+    ; lo escrito en los discos de dentro desde el arranque (salvaguarda: el
+    ; Termómetro lo apunta; NVMe no escribe nunca)
+    público función escritos_dentro(): nat32
+        devolver Ata.sectores_escritos + Ahci.sectores_escritos + Sdhci.sectores_escritos
+    fin
+
+    público función atender_tdisco(a: nat32, b: nat32, c: nat32): nat32
+        variable f: puntero a Ficha_td
+        variable ps: puntero a Pedido_salud
+        variable pl: puntero a Pedido_lee
+        variable r, cabe, f0: nat32
+        variable bien: bool
+        según a
+            caso 0:
+                si no usuario_puede(actual.cr3, c, tamaño(Ficha_td), cierto) entonces devolver NO_VALE fin
+                tomar(cerrojo)
+                si b = 0 entonces haz_lista() fin
+                si b >= n_td entonces
+                    soltar(cerrojo)
+                    devolver 0
+                fin
+                f := puntero(c)
+                llenar(puntero(c), tamaño(Ficha_td), 0)
+                f.clase := clases[b]
+                f.bloque := 512
+                si clases[b] = TD_NVME entonces
+                    f.sectores := nvmes[cuál[b]].sectores
+                    f.bloque := nvmes[cuál[b]].bloque
+                    copiar_hasta(dirección(f.modelo[0]), dirección(nvmes[cuál[b]].modelo[0]), 41)
+                sino
+                    f.sectores := Discos.discos[cuál[b]].sectores
+                    copiar_hasta(dirección(f.modelo[0]), dirección(Discos.discos[cuál[b]].modelo[0]), 41)
+                    si clases[b] = TD_EMMC entonces f.vida := Sdhci.vida(Discos.discos[cuál[b]].cuál) fin
+                fin
+                soltar(cerrojo)
+                devolver 1
+            caso 1:
+                si no usuario_puede(actual.cr3, c, tamaño(Pedido_salud), falso) entonces devolver NO_VALE fin
+                ps := puntero(c)
+                si b >= n_td o ps.qué < 1 o ps.qué > 6 entonces devolver NO_VALE fin
+                cabe := 512
+                si ps.qué = 1 y clases[b] = TD_NVME entonces cabe := 4096 fin
+                si ps.qué = 4 entonces cabe := 0 fin
+                si ps.cabe < cabe entonces devolver NO_VALE fin
+                si cabe > 0 y no usuario_puede(actual.cr3, ps.destino, cabe, cierto) entonces devolver NO_VALE fin
+                tomar(cerrojo)
+                r := pide_salud(b, ps.qué)
+                si r <> 0xFFFFFFFF y cabe > 0 entonces copiar_memoria(puntero(ps.destino), página, cabe) fin
+                soltar(cerrojo)
+                devolver r
+            caso 2:
+                si no usuario_puede(actual.cr3, c, tamaño(Pedido_lee), cierto) entonces devolver NO_VALE fin
+                pl := puntero(c)
+                si b >= n_td o pl.n = 0 o pl.n > 128 entonces devolver NO_VALE fin
+                tomar(cerrojo)
+                f0 := fallos_de(b)
+                si clases[b] = TD_NVME entonces
+                    bien := Nvme.leer(cuál[b], pl.lba, pl.n)
+                sino
+                    bien := Discos.leer_sectores(cuál[b], pl.lba, mín(pl.n, 64), tirar)
+                    si bien y pl.n > 64 entonces bien := Discos.leer_sectores(cuál[b], pl.lba + 64, pl.n - 64, tirar) fin
+                fin
+                pl.fallos := fallos_de(b) - f0
+                soltar(cerrojo)
+                si bien entonces devolver 0 fin
+                devolver 1
+            caso 3:
+                si b = 0 o no usuario_puede(actual.cr3, c, b, cierto) entonces devolver NO_VALE fin
+                copiar_hasta(puntero(c), Nvme.informe, b)
+                devolver longitud(Nvme.informe)
+            caso 4:
+                devolver escritos_dentro()
+        fin
+        devolver NO_VALE
+    fin
+
+fin Tdisco.

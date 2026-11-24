@@ -39,6 +39,8 @@
 #     ninguna NVIDIA, que lo dice sin colgarse.
 #  7. Por UEFI (OVMF, q35, -smp 2): el Termómetro, las zonas y la carga.
 #  8. «Rendimiento» (R): las medidas en RENDIMIE.TXT, y que Esc la para.
+# 10. (DISCOS) los discos de dentro: IDE, SATA y NVMe en QEMU, solo leer
+#     (pruebas_termo_disco.sh; y en la 0, disco.c con datos simulados).
 # Necesita ser root (usb.sh), qemu-system-x86_64, socat, mtools y fsck.fat;
 # para la 0, gcc; para la 4, php y openssl; para la 5, sshd (OpenSSH).
 
@@ -266,12 +268,15 @@ termo_anfitrion() {
   else echo "  (sin php o sin curl: sin el receptor de «Enviar a Carlos»)"; fi
 }
 
+. $AQUI/pruebas_termo_disco.sh   # (DISCOS) termo_disco_anfitrion y termo_discos
+
 parte_termo() {
 echo "== (TERMO) Hispa-Pentium: el Termómetro (TERMO.BIN) y su memoria USB =="
 local Y=$P/termo S C="o /b 0x70 0x63" L N
 mkdir -p $Y
 export MTOOLS_SKIP_CHECK=1
 termo_anfitrion
+termo_disco_anfitrion   # (DISCOS) disco.c con datos simulados
 if [ "$(id -u)" != 0 ] || ! command -v qemu-system-x86_64 > /dev/null; then echo "  (sin ser root o sin qemu-system-x86_64: sin el Termómetro en QEMU)"; return; fi
 python3 -I $AQUI/../tests/acpi/termo-qemu.py $Y/termo.aml
 if TERMO=1 USB_MB=32 TERMO_PARA=$Y/para.txt bash $AQUI/nucleo32/usb.sh $Y/termo.img > $Y/usb.txt 2>&1 && mtype -i $Y/termo.img@@1M ::boot/grub/grub.cfg | grep -q "escritorio .*termo"; then
@@ -389,6 +394,8 @@ termo_uefi
 termo_enviar
 # 5. «Terminal»
 termo_terminal
+# 10. (DISCOS) tres discos de dentro (IDE, SATA y NVMe): salud, lectura, sin escribir
+termo_discos
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $Y/ssh/*.ppm $Y/envio/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 }
 

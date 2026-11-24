@@ -1,0 +1,405 @@
+; =============================================================================
+;  nvme.cas - (TERMO) los discos NVMe, SOLO PARA LEER, y solo para el
+;  Termómetro (tdisco.cas): saber quién es el disco (Identify), su salud (el
+;  registro SMART/Health, Get Log Page 02h) y leer sectores para medir lo que
+;  tarda. No es un disco del sistema (no va en la tabla de discos.cas, no se
+;  monta) y NO tiene ninguna orden de escribir: de las del disco (las de
+;  E/S), solo Read (02h); de las de administración, solo Identify (06h), Get
+;  Log Page (02h) y crear la cola de E/S (05h y 01h: memoria del núcleo, no
+;  del disco). Cualquier otra se niega en manda() (salvaguarda).
+;
+;  Según «NVM Express Base 1.4»: la controladora se ve por su registro base 0
+;  (PCI clase 01 08 02). Se pone en marcha solo cuando el Termómetro lo pide
+;  (prepara()): se para (CC.EN = 0) si la BIOS la dejó en marcha, se le dan
+;  la cola de administración (16 entradas) y una de E/S (16 entradas), y se
+;  arranca otra vez (CC.EN = 1). Sin interrupciones: se mira la cola de
+;  respuestas (el bit de fase). Los datos: hasta 64 K por orden, en 16
+;  páginas del núcleo (PRP1 y una lista PRP).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Nvme
+
+    importar Pci, Paginas, Marcos, Tareas, Mem32, Formato, Textos32
+
+    público constante MAX_NVME = 2              ; las controladoras que se llevan
+    constante COLA = 16                         ; las entradas de cada cola
+    constante PÁGINAS_DATOS = 16                ; 64 K por orden
+
+    ; ---- los registros ----
+    constante R_CAP = 0x00
+    constante R_VS = 0x08
+    constante R_CC = 0x14
+    constante R_CSTS = 0x1C
+    constante R_AQA = 0x24
+    constante R_ASQ = 0x28
+    constante R_ACQ = 0x30
+
+    ; ---- las órdenes que se dejan (no hay más) ----
+    constante A_CREA_SQ = 0x01
+    constante A_LOG = 0x02
+    constante A_CREA_CQ = 0x05
+    constante A_IDENTIFY = 0x06
+    constante E_LEER = 0x02
+
+    público tipo Controladora = estructura
+        hay: bool                               ; lista para leer
+        aparato: nat32
+        reg: puntero a nat32
+        zancada: nat32                             ; lo que separa los timbres (4 << DSTRD)
+        espera_cs: nat32                        ; lo que puede tardar en pararse o arrancar (CAP.TO)
+        asq, acq, iosq, iocq: nat32             ; las colas (marcos del núcleo)
+        a_cola, a_cabeza, a_fase: nat32         ; la de administración: dónde va
+        e_cola, e_cabeza, e_fase: nat32         ; la de E/S
+        cid: nat32
+        prp: nat32                              ; la página de la lista PRP
+        datos: arreglo [16] de nat32            ; las páginas de los datos
+        id: nat32                               ; la página de Identify (y del registro)
+        sectores: nat32                         ; los del espacio 1, de 512 (hasta 2 TB)
+        bloque: nat32                           ; lo que mide su sector (512 o 4096)
+        lbads: nat32
+        modelo: arreglo [41] de byte
+        último: nat32                           ; el estado de la última orden que ha fallado
+        fallos: nat32
+    fin
+    público variable nvmes: arreglo [MAX_NVME] de Controladora
+    público variable cuántos: nat32
+    variable mirado: bool
+    variable cerrojo: Cerrojo
+
+    ; ---- lo que se ha visto (TDISCO.LOG del Termómetro) ----
+    público constante CABE_INFORME = 1500
+    público variable informe: arreglo [CABE_INFORME] de byte
+    variable informe_largo: nat32
+    variable renglón: arreglo [160] de byte
+    variable dd: arreglo [6] de nat32
+
+    función di(plantilla: puntero a byte, a: nat32, b: nat32, c: nat32, d: nat32)
+        variable i: nat32
+        dd[0] := a
+        dd[1] := b
+        dd[2] := c
+        dd[3] := d
+        formatear(renglón, 160, plantilla, dd)
+        i := 0
+        mientras renglón[i] <> 0 y informe_largo + 1 < CABE_INFORME hacer
+            informe[informe_largo] := renglón[i]
+            informe_largo := informe_largo + 1
+            i := i + 1
+        fin
+        informe[informe_largo] := 0
+    fin
+
+    función lee(c: puntero a Controladora, d: nat32): nat32
+        devolver c.reg[d >> 2]
+    fin
+
+    función pon(c: puntero a Controladora, d: nat32, v: nat32)
+        c.reg[d >> 2] := v
+    fin
+
+    ; espera (hasta cs centésimas) a que CSTS.RDY valga «listo»; falso si
+    ; se pasa o si la controladora dice que ha fallado (CSTS.CFS)
+    función espera_rdy(c: puntero a Controladora, listo: nat32, cs: nat32): bool
+        variable tope, v, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras cierto hacer
+            v := lee(c, R_CSTS)
+            si v = 0xFFFFFFFF entonces devolver falso fin
+            si v yb 2 <> 0 entonces devolver falso fin
+            si v yb 1 = listo entonces devolver cierto fin
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 100000000 entonces devolver falso fin
+        fin
+        devolver falso
+    fin
+
+    ; manda una orden por la cola de administración (admin = cierto) o por la
+    ; de E/S y espera su respuesta (hasta 5 s). Da el estado (0: bien;
+    ; 0xFFFFFFFF: no ha contestado). SOLO las órdenes de leer de arriba.
+    función manda(c: puntero a Controladora, admin: bool, opc: nat32, nsid: nat32, prp1: nat32, prp2: nat32, d10: nat32, d11: nat32, d12: nat32): nat32
+        variable sq, cq: puntero a nat32
+        variable cola, cabeza, fase, timbre_sq, timbre_cq, tope, e, vueltas: nat32
+        ; (salvaguarda) nada que escriba en el disco
+        si admin y opc <> A_IDENTIFY y opc <> A_LOG y opc <> A_CREA_CQ y opc <> A_CREA_SQ entonces devolver 0xFFFFFFFE fin
+        si no admin y opc <> E_LEER entonces devolver 0xFFFFFFFE fin
+        si admin entonces
+            sq := puntero(c.asq)
+            cq := puntero(c.acq)
+            cola := c.a_cola
+            cabeza := c.a_cabeza
+            fase := c.a_fase
+            timbre_sq := 0x1000
+            timbre_cq := 0x1000 + c.zancada
+        sino
+            sq := puntero(c.iosq)
+            cq := puntero(c.iocq)
+            cola := c.e_cola
+            cabeza := c.e_cabeza
+            fase := c.e_fase
+            timbre_sq := 0x1000 + 2 * c.zancada
+            timbre_cq := 0x1000 + 3 * c.zancada
+        fin
+        c.cid := (c.cid + 1) yb 0xFFFF
+        llenar(puntero(dirección(sq[cola * 16])), 64, 0)
+        sq[cola * 16] := opc ob (c.cid << 16)
+        sq[cola * 16 + 1] := nsid
+        sq[cola * 16 + 6] := prp1
+        sq[cola * 16 + 8] := prp2
+        sq[cola * 16 + 10] := d10
+        sq[cola * 16 + 11] := d11
+        sq[cola * 16 + 12] := d12
+        cola := (cola + 1) mod COLA
+        pon(c, timbre_sq, cola)
+        tope := tics + 500
+        vueltas := 0
+        mientras (cq[cabeza * 4 + 3] >> 16) yb 1 <> fase hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 400000000 entonces
+                c.fallos := c.fallos + 1
+                c.hay := falso                  ; (no contesta: no se le pide más)
+                di("nvme: la orden %02X no contesta (CSTS %08X)\n", opc, lee(c, R_CSTS), 0, 0)
+                devolver 0xFFFFFFFF
+            fin
+        fin
+        e := (cq[cabeza * 4 + 3] >> 17) yb 0x7FFF
+        cabeza := cabeza + 1
+        si cabeza = COLA entonces
+            cabeza := 0
+            fase := fase xob 1
+        fin
+        pon(c, timbre_cq, cabeza)
+        si admin entonces
+            c.a_cola := cola
+            c.a_cabeza := cabeza
+            c.a_fase := fase
+        sino
+            c.e_cola := cola
+            c.e_cabeza := cabeza
+            c.e_fase := fase
+        fin
+        si e <> 0 entonces
+            c.último := e
+            c.fallos := c.fallos + 1
+        fin
+        devolver e
+    fin
+
+    ; pone en marcha la controladora a (del PCI) en la ficha c
+    función arranca(c: puntero a Controladora, a: nat32): bool
+        variable base, v, cap_lo, cap_hi, i, e: nat32
+        variable id: puntero a byte
+        variable lista: puntero a nat32
+        c.hay := falso
+        c.aparato := a
+        base := pci_memoria(a, 0)
+        si base = 0 entonces
+            di("nvme: %02X:%02X: el registro base no vale\n", (a >> 16) yb 0xFF, (a >> 11) yb 0x1F, 0, 0)
+            devolver falso
+        fin
+        pci_enciende(a)
+        v := mapear_aparato(base, 0x2000)
+        si v = 0 entonces devolver falso fin
+        c.reg := puntero(v)
+        cap_lo := lee(c, R_CAP)
+        cap_hi := lee(c, R_CAP + 4)
+        di("nvme: %02X:%02X.%u: CAP %08X", (a >> 16) yb 0xFF, (a >> 11) yb 0x1F, (a >> 8) yb 7, cap_hi)
+        di("%08X, VS %08X, CC %08X, CSTS %08X\n", cap_lo, lee(c, R_VS), lee(c, R_CC), lee(c, R_CSTS))
+        si cap_lo = 0xFFFFFFFF entonces devolver falso fin
+        ; los timbres, cada 4 << DSTRD (que quepan en lo visto: hasta 0x2000)
+        si (cap_hi yb 0x0F) > 8 entonces
+            di("nvme: los timbres están demasiado separados (DSTRD %u)\n", cap_hi yb 0x0F, 0, 0, 0)
+            devolver falso
+        fin
+        c.zancada := nat32(4) << (cap_hi yb 0x0F)
+        si 0x1000 + 4 * c.zancada > 0x2000 entonces devolver falso fin
+        ; páginas de 4 K (MPSMIN = 0) y el juego de órdenes NVM (CSS bit 0)
+        si (cap_hi >> 16) yb 0x0F <> 0 o (cap_hi >> 5) yb 1 = 0 entonces
+            di("nvme: no admite páginas de 4 K o el juego de órdenes NVM\n", 0, 0, 0, 0)
+            devolver falso
+        fin
+        c.espera_cs := ((cap_lo >> 24) yb 0xFF) * 50 + 50
+        si c.espera_cs > 3000 entonces c.espera_cs := 3000 fin
+        ; la memoria: las cuatro colas, la lista PRP, los datos y Identify
+        si c.asq = 0 entonces
+            c.asq := reservar_marco()
+            c.acq := reservar_marco()
+            c.iosq := reservar_marco()
+            c.iocq := reservar_marco()
+            c.prp := reservar_marco()
+            c.id := reservar_marco()
+            para i desde 0 hasta PÁGINAS_DATOS - 1 hacer c.datos[i] := reservar_marco() fin
+        fin
+        si c.asq = 0 o c.acq = 0 o c.iosq = 0 o c.iocq = 0 o c.prp = 0 o c.id = 0 o c.datos[PÁGINAS_DATOS - 1] = 0 entonces devolver falso fin
+        llenar(puntero(c.asq), 4096, 0)
+        llenar(puntero(c.acq), 4096, 0)
+        llenar(puntero(c.iosq), 4096, 0)
+        llenar(puntero(c.iocq), 4096, 0)
+        lista := puntero(c.prp)
+        para i desde 1 hasta PÁGINAS_DATOS - 1 hacer
+            lista[(i - 1) * 2] := c.datos[i]
+            lista[(i - 1) * 2 + 1] := 0
+        fin
+        ; 1. parada (si la BIOS la dejó en marcha)
+        si lee(c, R_CC) yb 1 <> 0 entonces
+            pon(c, R_CC, lee(c, R_CC) yb nob 1)
+        fin
+        si no espera_rdy(c, 0, c.espera_cs) entonces
+            di("nvme: no se para (CSTS %08X)\n", lee(c, R_CSTS), 0, 0, 0)
+            devolver falso
+        fin
+        ; 2. la cola de administración
+        pon(c, R_AQA, ((COLA - 1) << 16) ob (COLA - 1))
+        pon(c, R_ASQ, c.asq)
+        pon(c, R_ASQ + 4, 0)
+        pon(c, R_ACQ, c.acq)
+        pon(c, R_ACQ + 4, 0)
+        c.a_cola := 0
+        c.a_cabeza := 0
+        c.a_fase := 1
+        c.e_cola := 0
+        c.e_cabeza := 0
+        c.e_fase := 1
+        ; 3. en marcha: entradas de 64 (2^6) y 16 (2^4) octetos, páginas de 4 K
+        pon(c, R_CC, 0x00460001)
+        si no espera_rdy(c, 1, c.espera_cs) entonces
+            di("nvme: no arranca (CSTS %08X)\n", lee(c, R_CSTS), 0, 0, 0)
+            devolver falso
+        fin
+        c.hay := cierto
+        ; 4. quién es (Identify, CNS 1): el modelo, octetos 24 a 63
+        e := manda(c, cierto, A_IDENTIFY, 0, c.id, 0, 1, 0, 0)
+        si e <> 0 entonces
+            di("nvme: Identify falla (%04X)\n", e, 0, 0, 0)
+            c.hay := falso
+            devolver falso
+        fin
+        id := puntero(c.id)
+        para i desde 0 hasta 39 hacer c.modelo[i] := id[24 + i] fin
+        i := 40
+        mientras i > 0 y (c.modelo[i - 1] = ' ' o c.modelo[i - 1] = 0) hacer i := i - 1 fin
+        c.modelo[i] := 0
+        ; 5. el espacio 1: cuántos sectores y de cuánto (Identify, CNS 0)
+        e := manda(c, cierto, A_IDENTIFY, 1, c.id, 0, 0, 0, 0)
+        si e <> 0 entonces
+            di("nvme: Identify del espacio 1 falla (%04X)\n", e, 0, 0, 0)
+            c.hay := falso
+            devolver falso
+        fin
+        id := puntero(c.id)
+        c.lbads := id[128 + (id[26] yb 0x0F) * 4 + 2]
+        si c.lbads < 9 o c.lbads > 12 entonces
+            di("nvme: sectores de 2^%u octetos: no se llevan\n", c.lbads, 0, 0, 0)
+            c.hay := falso
+            devolver falso
+        fin
+        c.bloque := nat32(1) << c.lbads
+        lista := puntero(c.id)
+        v := lista[0]                           ; NSZE (lo bajo)
+        si lista[1] <> 0 o v >= (0xFFFFFFFF >> (c.lbads - 9)) entonces
+            c.sectores := 0xFFFFFFFF
+        sino
+            c.sectores := v << (c.lbads - 9)
+        fin
+        ; 6. la cola de E/S (la 1): primero la de respuestas, luego la de órdenes
+        e := manda(c, cierto, A_CREA_CQ, 0, c.iocq, 0, ((COLA - 1) << 16) ob 1, 1, 0)
+        si e = 0 entonces e := manda(c, cierto, A_CREA_SQ, 0, c.iosq, 0, ((COLA - 1) << 16) ob 1, 0x10001, 0) fin
+        si e <> 0 entonces
+            di("nvme: no se puede crear la cola de E/S (%04X)\n", e, 0, 0, 0)
+            c.hay := falso
+            devolver falso
+        fin
+        di("nvme: disco %s, %u MB, sectores de %u\n", nat32(dirección(c.modelo[0])), c.sectores div 2048, c.bloque, 0)
+        devolver cierto
+    fin
+
+    ; busca las controladoras NVMe y las pone en marcha (una vez). Da cuántas
+    ; están listas.
+    público función prepara(): nat32
+        variable a: nat32
+        tomar(cerrojo)
+        si no mirado entonces
+            mirado := cierto
+            cuántos := 0
+            a := pci_busca(0x010802, 0xFFFFFF, NO_HAY_PCI)
+            si a = NO_HAY_PCI entonces di("nvme: no hay controladoras NVMe en el PCI\n", 0, 0, 0, 0) fin
+            mientras a <> NO_HAY_PCI y cuántos < MAX_NVME hacer
+                si arranca(puntero(dirección(nvmes[cuántos])), a) entonces cuántos := cuántos + 1 fin
+                a := pci_busca(0x010802, 0xFFFFFF, a)
+            fin
+        fin
+        soltar(cerrojo)
+        devolver cuántos
+    fin
+
+    ; Identify de la controladora (4096 octetos) a destino. El número de
+    ; serie (octetos 4 a 23) sale recortado: solo sus 4 últimas letras.
+    público función identify(k: nat32, destino: puntero a byte): bool
+        variable c: puntero a Controladora
+        variable bien: bool
+        variable i, n: nat32
+        variable id: puntero a byte
+        si k >= cuántos entonces devolver falso fin
+        c := puntero(dirección(nvmes[k]))
+        si no c.hay entonces devolver falso fin
+        tomar(cerrojo)
+        bien := manda(c, cierto, A_IDENTIFY, 0, c.id, 0, 1, 0, 0) = 0
+        si bien entonces
+            id := puntero(c.id)
+            n := 20
+            mientras n > 0 y (id[4 + n - 1] = ' ' o id[4 + n - 1] = 0) hacer n := n - 1 fin
+            para i desde 0 hasta 19 hacer
+                si i + 4 < n entonces id[4 + i] := '*' fin
+            fin
+            copiar_memoria(destino, id, 4096)
+        fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; el registro SMART/Health (Get Log Page 02h, 512 octetos) a destino
+    público función salud(k: nat32, destino: puntero a byte): bool
+        variable c: puntero a Controladora
+        variable bien: bool
+        si k >= cuántos entonces devolver falso fin
+        c := puntero(dirección(nvmes[k]))
+        si no c.hay entonces devolver falso fin
+        tomar(cerrojo)
+        llenar(puntero(c.id), 512, 0)
+        ; NUMDL = 512 / 4 - 1 = 127 (en los bits 16-27), LID = 2
+        bien := manda(c, cierto, A_LOG, 0xFFFFFFFF, c.id, 0, 0x007F0002, 0, 0) = 0
+        si bien entonces copiar_memoria(destino, puntero(c.id), 512) fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; lee n sectores de 512 (hasta 128, múltiplo de los del disco) desde el
+    ; lba (de 512), a las páginas del núcleo (se miran y se tiran: es para
+    ; medir). Falso si el disco da un error o no contesta.
+    público función leer(k: nat32, lba: nat32, n: nat32): bool
+        variable c: puntero a Controladora
+        variable bien: bool
+        variable por, slba, nlb, prp2: nat32
+        si k >= cuántos o n = 0 o n > 128 entonces devolver falso fin
+        c := puntero(dirección(nvmes[k]))
+        si no c.hay entonces devolver falso fin
+        si lba >= c.sectores o n > c.sectores - lba entonces devolver falso fin
+        por := c.bloque div 512
+        si lba mod por <> 0 o n mod por <> 0 entonces devolver falso fin
+        slba := lba div por
+        nlb := n div por
+        prp2 := 0
+        si n > 8 y n <= 16 entonces prp2 := c.datos[1] fin
+        si n > 16 entonces prp2 := c.prp fin
+        tomar(cerrojo)
+        bien := manda(c, falso, E_LEER, 1, c.datos[0], prp2, slba, 0, nlb - 1) = 0
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    público función fallos(k: nat32): nat32
+        si k >= cuántos entonces devolver 0 fin
+        devolver nvmes[k].fallos
+    fin
+
+fin Nvme.

@@ -278,4 +278,20 @@ con él encendido simplemente no arranca esta memoria.
   los equipos ya medidos con esta memoria (la referencia, 100, es el HP Mini
   5103, cuando se haya medido).
 
+10. LOS DISCOS DEL PORTÁTIL (SOLO SE LEEN)
+-----------------------------------------
+  Al abrirse, el Termómetro mira solo los discos de dentro (SATA, IDE, NVMe
+  y eMMC) SIN ESCRIBIR NADA en ellos: lo que dicen de su salud (SMART: los
+  sectores reasignados y pendientes, las horas, los encendidos, la
+  temperatura, el desgaste de los SSD; en los NVMe, su registro de salud;
+  en los eMMC, su desgaste) y una prueba de lectura de hasta 1 minuto por
+  disco (256 trozos de 1 MB repartidos por todo el disco y 256 MB seguidos:
+  los MB/s, lo que tarda cada lectura y si se atasca). Lo leído no sale del
+  núcleo: ni se guarda ni se mira. Del número de serie, solo las 4 últimas
+  letras. Mientras dura la prueba de esfuerzo (o «Rendimiento»), espera.
+  Cada disco sale en INFORME.TXT, en «DISCOS», con BIEN, ATENCIÓN o MAL y el
+  porqué; y, si está mal, también en el resultado (p. ej. «el disco tiene 12
+  sectores pendientes: puede ser la causa de los parones»). El detalle de
+  cada atributo, en TERMO\DISCOS.LOG.
+
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

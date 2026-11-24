@@ -448,7 +448,7 @@ int rendimiento_principal(const char *carpeta_termo, const char *equipo, const c
 		k += snprintf(t + k, sizeof t - (size_t)k, "  Memoria USB (archivo de prueba propio): leer seguido %s MB/s, a saltos de 4 K %s lecturas/s\r\n", d1(usb), d1(usb4k));
 	else
 		k += snprintf(t + k, sizeof t - (size_t)k, "  Memoria USB: no se ha podido medir\r\n");
-	k += snprintf(t + k, sizeof t - (size_t)k, "  Disco del equipo: no se mide (no se escribe nunca en él, y su sistema de archivos no lo lee Hispa-Pentium)\r\n");
+	k += snprintf(t + k, sizeof t - (size_t)k, "  Disco del equipo: lo mide el Termómetro aparte, solo leyendo (TERMO\\DISCOS.TXT y en INFORME.TXT, «DISCOS»)\r\n");
 	k += snprintf(t + k, sizeof t - (size_t)k, "  Pintar: %s Mpíxeles/s (sin aceleración: mide la CPU pintando, no la tarjeta gráfica)\r\n", d1(pint));
 	if (calor >= 5)
 		k += snprintf(t + k, sizeof t - (size_t)k, "  PUNTUACIÓN BAJADA POR CALOR: la coma flotante, al final, un %s %% menos que al principio\r\n", d1(calor));
