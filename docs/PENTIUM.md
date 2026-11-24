@@ -4762,6 +4762,80 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.10** (24/11, rama `pentium-0810`: las ramas `termometro` —la de
+después de la 0.8.9: la batería que se relee, SMBIOS 3, MSDM fuera, las zonas
+PCI de 64 bits movidas debajo de los 4 GB, SMI_COUNT, Machine Check, el
+traspaso del EHCI, «sin8042»...—, `prueba-asus-i2c` —el I2C-HID, probado en el
+ASUS GL553VD—, `pentium-intelwifi` —la RTL8111/8168 y la Intel 7265, etapa
+1— y `pentium-sdhci` —el eMMC y las SD, probado en el Acer One 10—, por ese
+orden; y en la misma rama, lo que se vio en los equipos de verdad mientras
+se juntaban). Lo que se tocó al juntar:
+
+- **Una sola versión**: `VERSION_0810` en `hpq.py` y `Usuario.VERSIÓN_TEXTO`
+  («0.8.10»: el tercer número de dos cifras, que `arreglo_de_la_versión` y
+  `compara` de PAQUETES ya leen bien).
+- **Las llamadas 159 (I2C-HID) y 160 (SDHCI)**, las dos en ACPI.BIN
+  (`acpi/pentium/hacer.sh` compila `i2chid.c` y `sdhci.c`; `servicio.c` da
+  primero los touchpads —«sini2c»— y luego las SD —«sinsdhci»—), en
+  `usuario.cas` y en la tabla de las llamadas.
+- **`registro_luego`** (semilla.cas): el bucle de los dos minutos de
+  `termometro` y, al medio minuto, lo del USB y lo del I2C-HID.
+- **Las partes**: 52 (`i2chid`), 53 (`sdhci`) y 54 (`intel`: las dos ramas
+  la numeraban 53). La sección del I2C-HID es la **14 duodetricies** (la
+  rama la llamaba 14 quinvicies, que es el Asistente).
+- **I2C-HID, el Monovate con la memoria v2** (en su sección): el touchpad
+  se arranca una sola vez (los de _STA 0 de la misma controladora ya no
+  prueban las direcciones de reserva; la misma pareja controladora y
+  dirección, nunca dos veces; tras «otro mandaba en el bus», nada más en esa
+  controladora). La parte 52 lo prueba con «i2csim» (dos controladoras de
+  mentira en `i2c.cas`) y la SSDT «monovate».
+- **SDHCI, el Acer One 10 instalado en el eMMC** («No se puede abrir
+  \EQUIPO.BIN: no hay disco»: arrancado sin ACPI, el núcleo no sabía de la
+  controladora): INSTALAR lleva `\SDHCI.TXT` a la raíz y su controladora a la
+  línea del núcleo de GRUB.CFG (« sdhci=9094F000:e,9094D000»; «:e», un eMMC),
+  PAQUETES la conserva en la entrada del núcleo de antes, y si por UEFI no
+  se ve ningún disco el núcleo dice por qué puede ser. Lo que se hace con
+  `\SDHCI.TXT` queda siempre en ARRANQUE.TXT («no está en X:», «es de otro
+  equipo (dice ...; este es ...)», «uso X:\SDHCI.TXT»). Parte 53: instalar
+  con `\SDHCI.TXT` y arrancar lo instalado con su línea, «sdhcisinpci
+  sinacpi».
+- **Bloq Num empieza apagado** (el Acer One 10: el firmware lo deja
+  encendido y el teclado del dock, USB 06CB:2968, emula el teclado numérico
+  y da 4 5 6 1 2 3 0 en U I O J K L M): al 8042, EDh; cada teclado USB, el
+  SET_REPORT de sus luces al ponerse en marcha y cada vez que cambian (antes
+  no se mandaba nunca). Panel de control › Teclado › «Bloq Num al arrancar»:
+  apagado (por omisión), encendido o como lo dejó el firmware (la BIOS:
+  0x417; por UEFI no se sabe). Parte 06: las luces que siguen a Bloq Num.
+- **La RTL8168H del ASUS GL553VD**: el FIFO compartido se mira en
+  LINK_LIST_RDY (MCU, bit 1, como r8169: con el OCP E00Eh decía «no dice que
+  esté listo» las dos veces); la 8168G/H sin EEE ni ALDPS ni el paso a L2/L3
+  (el enlace se caía y bajaba a 100 y a 10 Mbit/s), y a negociar otra vez; el
+  reparto de la red no elige un Wi-Fi que no está listo (sin firmware, MAC a
+  0); el ACK de DHCP repetido no se dice dos veces.
+- **La Intel 7265 del ASUS** (con su firmware ya escanea: 8 redes): el
+  firmware se busca en X:\FIRMWARE, \FIRMWARE, \HISPA\FIRMWARE, C:\FIRMWARE y
+  C:\HISPA\FIRMWARE, por su nombre largo o cualquier .UCO con la cabecera de
+  iwlwifi, y si falta, WIFI.LOG dice dónde ha mirado y con qué nombres; la
+  respuesta al escaneo sin estado no es un fallo. **Privacidad**: en WIFI.LOG,
+  del BSSID solo los dos últimos octetos y el nombre solo de la red pedida
+  (los BSSID y los nombres de los vecinos sitúan la casa en un mapa, y los
+  registros van en los informes).
+- **USB**: el aparato que no se deja enumerar, hasta dos reintentos (el
+  segundo, tras medio segundo y con más tiempo tras el reinicio del puerto).
+- **Las pruebas que cambian**: la 06 con lo de `termometro` (el traspaso de
+  la BIOS en la línea del EHCI; ARRANQUE.TXT está en la 437: con LC_ALL=C);
+  la 52 y la 53 con el singular («1 teclado, 1 ratón») y el SCR que dé
+  QEMU (la 10.2 del PC da otro que la 8.2 del VPS); la del Panel, con algo
+  más de margen para la hora (con el PC cargado quedan tres minutos de los
+  cinco).
+
+Los paquetes: base **0.8.10**, paquetes **1.7** (el núcleo de antes también con
+multiboot2 y con « sdhci=»), red y wifi **0.8.10**, termo **1.1** (pide la base
+0.8.10: SMI_COUNT, Machine Check y la llamada 220 con EBX = 5, 6 y 7); lo
+demás, tal cual lo publicado (tailscal sigue en la 0.8.9).
+
+<!-- PRUEBAS_0810 -->
+
 **La 0.8.9** (23/11, rama `pentium-089`: las ramas `pentium-uefi` —dentro de
 `termometro`—, `termometro`, `compat`, `touchpad` y `punteros`, y luego en la
 misma rama el reposo con MWAIT y el estado P; la `termometro` de después —el
