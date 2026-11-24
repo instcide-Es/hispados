@@ -30,8 +30,11 @@
 ;        que dio el servicio (1024 octetos) -> 1, o 0 si aún no hay; ECX = 1
 ;        (solo el servicio de ACPI) lo da él, desde EBX -> 1 si alguien lo ha
 ;        pedido en los últimos 10 s (si no, no hace falta que lo lea)
-;   225  (TERMO) la temperatura de las gráficas NVIDIA Maxwell: «Las
-;        gráficas NVIDIA», abajo
+;   225  (TERMO) las gráficas NVIDIA (Maxwell y Pascal) y los puertos PCI
+;        Express: «Las gráficas NVIDIA», abajo (lo único que puede escribir el
+;        núcleo aquí, y solo si el Termómetro lo pide: lo volátil que hace
+;        nouveau para encender el sensor, y el bit «memoria» y D3hot->D0 de
+;        pci_enable_device; se pierde al apagar)
 ;   224  la prueba de esfuerzo: EBX = 1, ECX 1 o 0 (cargar o parar); EBX = 0
 ;        -> 1 si hay que seguir cargando (y el Termómetro ha preguntado por
 ;        las zonas hace menos de 6 s: si se cuelga o se cierra, la carga para);
@@ -561,42 +564,92 @@ módulo Termo
     fin
 
     ; =========================================================================
-    ;  (TERMO) La temperatura de las gráficas NVIDIA Maxwell (GM204: GTX
-    ;  970M/980M del MSI GT80; y GM107), SOLO LEER, como nouveau y envytools
-    ;  (ptherm.xml): de cada aparato 10DE de clase 03, las comprobaciones de
-    ;  antes (encendida en D0, la memoria activada, BAR0 de memoria de 32 bits,
-    ;  PMC_BOOT_0 de un GM204 o GM107, el fusible del sensor calibrado y el
-    ;  sensor encendido y sin forzar) y solo entonces la temperatura
-    ;  (BAR0+20400h). Nunca se escribe en la tarjeta: si el sensor está apagado
-    ;  o forzado, se dice. Solo se leen estos desplazamientos del BAR0: 0,
-    ;  212A8h, 20008h, 20400h, 20408h, 20074h, 20414h, 204C0h y 20480h; y, en
-    ;  las Pascal (GP10x, 13xh: la GTX 1050 del ASUS GL553V), 20460h (válida
-    ;  si el bit 29). Antes de nada, el puerto del que cuelga: si su enlace
-    ;  está apagado o no activo (Optimus: la gráfica dormida), no se toca
-    ;  nada (ni se la despierta: ni _PS0 ni _DSM ni PMCSR).
+    ;  (TERMO) Las gráficas NVIDIA (Maxwell GM107/GM108/GM20x: GTX 970M/980M
+    ;  del MSI GT80; Pascal GP10x: GTX 1050 del ASUS GL553V), como nouveau
+    ;  (nvkm/subdev/therm, fuse) y envytools (ptherm.xml). Se recorren TODOS
+    ;  los buses (0 a 255, todas las funciones: también detrás de los puertos
+    ;  raíz y de los conmutadores PLX/PEX) y, de cada aparato 10DE de clase
+    ;  03, se dice qué se ve (ID, subsistema, BAR0, estado de energía, el
+    ;  enlace PCIe) y, si se puede, la temperatura:
+    ;   - Maxwell (nvkm g84_temp_get, la de gm107/gm200): el fusible 1A8h
+    ;     (BAR0+212A8h, la ventana del fuse de GM107 es 21100h) igual a 1 y
+    ;     la temperatura en BAR0+20400h (°C). Si el sensor está apagado (20008h
+    ;     bit 31 a 0) o forzado (bit 15), nouveau (g84_sensor_setup, al
+    ;     arrancar en todas) hace 20008h <- (v y no 80008000h) o 80000000h y
+    ;     2000Ch <- v y no 80000003h, y espera 20 ms: con c bit 1, se hace
+    ;     igual, UNA vez (registros de la tarjeta: se pierde al apagar).
+    ;   - Pascal (nvkm gp100_temp_get): BAR0+20460h, válida si el bit 29;
+    ;     (v y 1FFF8h) >> 8 en °C. nouveau no escribe nada.
+    ;   - Una lectura 0BADFxxxh (el «priv ring» de NVIDIA: el bloque sin reloj
+    ;     o sin iniciar) no es una temperatura: se dice.
+    ;  Lo único más que puede escribir (con c bit 1, todo volátil: se pierde
+    ;  al apagar; como pci_enable_device de Linux): el bit «memoria» de la
+    ;  orden PCI si el BAR0 está puesto dentro de la ventana del puente; y
+    ;  D3hot -> D0 solo si la tarjeta dice No_Soft_Reset (no pierde su
+    ;  configuración; espera 10 ms). Nunca relojes, voltajes ni ventiladores,
+    ;  ni la VBIOS. En D3cold (Optimus: el puerto con el enlace caído) la
+    ;  tarjeta ni contesta: no se la despierta (no se llama a _PS0/_ON).
     ;  La llamada 225: EBX el número de la gráfica (0, 1...), ECX dónde dejar
-    ;  32 octetos (Ficha_gpu: el bus/aparato/función, el fabricante y el
-    ;  modelo, el estado (0 bien; 1 apagada (D3), 2 sin la memoria activada,
-    ;  3 BAR0 raro, 4 no es un GM204/GM107 ni una Pascal, 5 sin fusible, 6
-    ;  sensor apagado, 7 sensor forzado, 8 lectura imposible, 9 dormida (el
-    ;  enlace del puerto, apagado: Optimus)), PMC_BOOT_0, el sensor (20008h), la
-    ;  temperatura, el crítico (20408h) y el frenado (20074h)) -> 1, o 0 si no
-    ;  hay tantas
+    ;  la ficha (32 octetos con EDX bit 0 a 0, los de siempre; 96 con EDX bit
+    ;  0 a 1: Ficha_gpu de nvidia.h), EDX bit 1: se permiten las escrituras
+    ;  volátiles de arriba -> 1, o 0 si no hay tantas. Con EBX = 100h + k:
+    ;  el puerto PCI Express k (raíz o de bajada de un conmutador; 96
+    ;  octetos, Ficha_puerto de nvidia.h) -> 1, o 0 si no hay tantos.
+    ;  Estados: 0 bien; 1 apagada (D3); 2 sin la memoria activada; 3 BAR0
+    ;  raro o sin asignar; 4 no es Maxwell ni Pascal; 5 sin fusible; 6 sensor
+    ;  apagado; 7 sensor forzado; 8 lectura imposible; 9 dormida (el enlace
+    ;  del puerto, caído: Optimus); 10 lectura 0BADFxxxh (el bloque, sin reloj)
     ; =========================================================================
     constante GPU_MAX = 4
+    constante PUERTO_MAX = 16
     variable gpu_bdf: arreglo [4] de nat32
     variable gpu_pag0, gpu_pag20, gpu_pag21: arreglo [4] de nat32     ; las páginas del BAR0, vistas (0: sin ver)
     variable gpu_cuantas: nat32
-    variable gpu_puerto: arreglo [4] de nat32     ; el puente del que cuelga (bus/aparato/función; 0: ninguno)
+    variable gpu_puerto: arreglo [4] de nat32     ; el puente del que cuelga (bus/aparato/función ob 80000000h; 0: ninguno)
+    variable gpu_hecho: arreglo [4] de nat32      ; las escrituras volátiles hechas (bits de la ficha, palabra 15)
+    variable gpu_orden0: arreglo [4] de nat32     ; la orden PCI como estaba al verla la primera vez
     variable gpu_buscado: bool
+    variable puertos: arreglo [16] de nat32
+    variable puertos_n: nat32
 
-    ; el puente del bus 0 cuyo bus de detrás es «bus» (0 si no hay)
+    función escribe_pci(d: nat32, v: nat32)
+        variable b: nat32
+        b := sin_interrupciones()
+        escribe_puerto(0xCF8, 4, 0x80000000 ob (d yb 0x00FFFFFC))
+        escribe_puerto(0xCFC, 4, v)
+        reponer(b)
+    fin
+
+    ; la capacidad «cuál» (01 energía, 10h PCI Express) del aparato d (0: no la tiene)
+    función capacidad(d: nat32, cuál: nat32): nat32
+        variable cap, n, v: nat32
+        si lee_pci(d ob 4) yb 0x00100000 = 0 entonces devolver 0 fin
+        cap := lee_pci(d ob 0x34) yb 0xFC
+        n := 0
+        mientras cap >= 0x40 y n < 48 hacer
+            v := lee_pci(d ob cap)
+            si v yb 0xFF = cuál entonces devolver cap fin
+            cap := (v >> 8) yb 0xFC
+            n := n + 1
+        fin
+        devolver 0
+    fin
+
+    ; el puente (de cualquier bus) cuyo bus de detrás es «bus» (0 si no hay)
     función puerto_de(bus: nat32): nat32
-        variable ap, f, d: nat32
-        para ap desde 0 hasta 31 hacer
-            para f desde 0 hasta 7 hacer
-                d := (ap << 11) ob (f << 8)
-                si lee_pci(d) yb 0xFFFF <> 0xFFFF y (lee_pci(d ob 0x0C) >> 16) yb 0x7F = 1 y (lee_pci(d ob 0x18) >> 8) yb 0xFF = bus entonces devolver d ob 0x80000000 fin
+        variable b, ap, f, d, v: nat32
+        para b desde 0 hasta 255 hacer
+            para ap desde 0 hasta 31 hacer
+                para f desde 0 hasta 7 hacer
+                    d := (b << 16) ob (ap << 11) ob (f << 8)
+                    v := lee_pci(d) yb 0xFFFF
+                    si v = 0xFFFF o v = 0 entonces
+                        si f = 0 entonces romper fin
+                    sino
+                        si (lee_pci(d ob 0x0C) >> 16) yb 0x7F = 1 y (lee_pci(d ob 0x18) >> 8) yb 0xFF = bus entonces devolver d ob 0x80000000 fin
+                        si f = 0 y (lee_pci(d ob 0x0C) >> 16) yb 0x80 = 0 entonces romper fin
+                    fin
+                fin
             fin
         fin
         devolver 0
@@ -605,39 +658,51 @@ módulo Termo
     ; ¿está despierto el enlace del puerto? (su capacidad PCI Express, la 10h:
     ; Link Disable apagado y, si sabe decirlo, el enlace de datos activo)
     función enlace_vivo(p: nat32): bool
-        variable d, cap, n, v: nat32
+        variable d, cap: nat32
         si p = 0 entonces devolver cierto fin
         d := p yb 0x00FFFFFF
-        si lee_pci(d ob 4) yb 0x00100000 = 0 entonces devolver cierto fin
-        cap := lee_pci(d ob 0x34) yb 0xFC
-        n := 0
-        mientras cap >= 0x40 y n < 48 hacer
-            v := lee_pci(d ob cap)
-            si v yb 0xFF = 0x10 entonces
-                si lee_pci(d ob (cap + 0x10)) yb 0x10 <> 0 entonces devolver falso fin      ; Link Disable
-                si lee_pci(d ob (cap + 0x0C)) yb 0x00100000 <> 0 y lee_pci(d ob (cap + 0x10)) yb 0x20000000 = 0 entonces devolver falso fin   ; DLL Link Active
-                devolver cierto
-            fin
-            cap := (v >> 8) yb 0xFC
-            n := n + 1
-        fin
+        cap := capacidad(d, 0x10)
+        si cap = 0 entonces devolver cierto fin
+        si lee_pci(d ob (cap + 0x10)) yb 0x10 <> 0 entonces devolver falso fin      ; Link Disable
+        si lee_pci(d ob (cap + 0x0C)) yb 0x00100000 <> 0 y lee_pci(d ob (cap + 0x10)) yb 0x20000000 = 0 entonces devolver falso fin   ; DLL Link Active
         devolver cierto
     fin
 
-    ; las NVIDIA de clase 03 de los buses 0 a 63 (función 0)
+    ; todos los buses y todas las funciones: las NVIDIA de clase 03 (03xxxx:
+    ; la VGA, 0300h, y la «3D», 0302h, la segunda del SLI) y los puertos PCI
+    ; Express (raíz, 4; de bajada de un conmutador, 6)
     función busca_gpu()
-        variable bus, ap, v, c: nat32
+        variable bus, ap, f, d, v, c, cab, cap: nat32
         gpu_buscado := cierto
         gpu_cuantas := 0
-        para bus desde 0 hasta 63 hacer
+        puertos_n := 0
+        para bus desde 0 hasta 255 hacer
             para ap desde 0 hasta 31 hacer
-                v := lee_pci((bus << 16) ob (ap << 11))
-                si v yb 0xFFFF = 0x10DE y gpu_cuantas < GPU_MAX entonces
-                    c := lee_pci((bus << 16) ob (ap << 11) ob 8)
-                    si c >> 24 = 3 entonces
-                        gpu_bdf[gpu_cuantas] := (bus << 16) ob (ap << 11)
-                        si bus <> 0 entonces gpu_puerto[gpu_cuantas] := puerto_de(bus) sino gpu_puerto[gpu_cuantas] := 0 fin
-                        gpu_cuantas := gpu_cuantas + 1
+                para f desde 0 hasta 7 hacer
+                    d := (bus << 16) ob (ap << 11) ob (f << 8)
+                    v := lee_pci(d)
+                    si v yb 0xFFFF = 0xFFFF o v yb 0xFFFF = 0 entonces
+                        si f = 0 entonces romper fin
+                    sino
+                        cab := (lee_pci(d ob 0x0C) >> 16) yb 0xFF
+                        c := lee_pci(d ob 8)
+                        si v yb 0xFFFF = 0x10DE y c >> 24 = 3 y gpu_cuantas < GPU_MAX entonces
+                            gpu_bdf[gpu_cuantas] := d
+                            si bus <> 0 entonces gpu_puerto[gpu_cuantas] := puerto_de(bus) sino gpu_puerto[gpu_cuantas] := 0 fin
+                            gpu_orden0[gpu_cuantas] := lee_pci(d ob 4)
+                            gpu_cuantas := gpu_cuantas + 1
+                        fin
+                        si cab yb 0x7F = 1 y puertos_n < PUERTO_MAX entonces
+                            cap := capacidad(d, 0x10)
+                            si cap <> 0 entonces
+                                v := (lee_pci(d ob cap) >> 20) yb 0xF
+                                si v = 4 o v = 6 entonces
+                                    puertos[puertos_n] := d
+                                    puertos_n := puertos_n + 1
+                                fin
+                            fin
+                        fin
+                        si f = 0 y cab yb 0x80 = 0 entonces romper fin
                     fin
                 fin
             fin
@@ -657,50 +722,151 @@ módulo Termo
         devolver p[0]
     fin
 
-    función atender_gpu(i: nat32, dest: nat32): nat32
+    función gpu_escribe(i: nat32, des: nat32, v: nat32)
         variable p: puntero a nat32
-        variable d, v, cap, n, bar, boot, chip: nat32
-        si no usuario_puede(actual.cr3, dest, 32, cierto) entonces devolver NO_VALE fin
+        p := puntero(gpu_pag20[i] + (des - 0x20000))
+        p[0] := v
+    fin
+
+    ; ¿es una lectura del «priv ring» que no ha contestado (0BADFxxxh)?
+    función badf(v: nat32): bool
+        devolver v yb 0xFFF00000 = 0xBAD00000
+    fin
+
+    ; el puerto k: Ficha_puerto (nvidia.h)
+    función ficha_puerto(k: nat32, dest: nat32): nat32
+        variable p: puntero a nat32
+        variable d, cap, sec: nat32
+        si k >= puertos_n entonces devolver 0 fin
+        p := puntero(dest)
+        d := puertos[k]
+        p[0] := d
+        p[1] := lee_pci(d)
+        cap := capacidad(d, 0x10)
+        p[2] := lee_pci(d ob cap)
+        p[3] := lee_pci(d ob (cap + 0x0C))
+        p[4] := lee_pci(d ob (cap + 0x10))
+        p[5] := lee_pci(d ob (cap + 0x14))
+        p[6] := lee_pci(d ob (cap + 0x18))
+        p[7] := lee_pci(d ob 0x18)
+        sec := (p[7] >> 8) yb 0xFF
+        p[8] := 0xFFFFFFFF
+        p[9] := 0
+        si sec <> 0 entonces
+            p[8] := lee_pci(sec << 16)
+            si p[8] yb 0xFFFF <> 0xFFFF entonces p[9] := lee_pci((sec << 16) ob 8) fin
+        fin
+        p[10] := 0xFFFFFFFF
+        si lee_pci(0) yb 0xFFFF = 0x8086 entonces p[10] := lee_pci(0x54) fin     ; DEVEN del 0:0.0 de Intel (qué puertos PEG ha dejado la BIOS)
+        p[11] := lee_pci(d ob 4)
+        p[12] := lee_pci(d ob 0x20)
+        devolver 1
+    fin
+
+    función atender_gpu(i: nat32, dest: nat32, c: nat32): nat32
+        variable p: puntero a nat32
+        variable d, v, cap, bar, boot, chip, tam, pm, pu, ventana: nat32
+        variable escribe: bool
+        tam := 32
+        si c yb 1 <> 0 entonces tam := 96 fin
+        escribe := c yb 2 <> 0
+        si no usuario_puede(actual.cr3, dest, tam, cierto) entonces devolver NO_VALE fin
         si no gpu_buscado entonces busca_gpu() fin
+        si i >= 0x100 entonces
+            si tam <> 96 entonces devolver NO_VALE fin
+            llenar(puntero(dest), 96, 0)
+            devolver ficha_puerto(i - 0x100, dest)
+        fin
         si i >= gpu_cuantas entonces devolver 0 fin
         p := puntero(dest)
-        llenar(puntero(dest), 32, 0)
+        llenar(puntero(dest), tam, 0)
         d := gpu_bdf[i]
         p[0] := d
+        pu := gpu_puerto[i] yb 0x00FFFFFF
+        si tam = 96 entonces
+            p[9] := gpu_orden0[i]
+            p[14] := gpu_puerto[i]
+            p[15] := gpu_hecho[i]
+            si gpu_puerto[i] <> 0 entonces
+                cap := capacidad(pu, 0x10)
+                si cap <> 0 entonces
+                    p[20] := lee_pci(pu ob (cap + 0x10))
+                    p[21] := lee_pci(pu ob (cap + 0x18))
+                fin
+            fin
+        fin
         ; 1. (Optimus) el enlace del puerto, despierto; y la gráfica, contestando
-        si no enlace_vivo(gpu_puerto[i]) o lee_pci(d) yb 0xFFFF = 0xFFFF entonces
+        si no enlace_vivo(gpu_puerto[i]) entonces
+            p[2] := 9
+            devolver 1
+        fin
+        si lee_pci(d) yb 0xFFFF = 0xFFFF entonces
             p[2] := 9
             devolver 1
         fin
         p[1] := lee_pci(d)
-        ; 2. encendida (D0), por su capacidad de energía (la 01)
-        si lee_pci(d ob 4) yb 0x00100000 <> 0 entonces
-            cap := lee_pci(d ob 0x34) yb 0xFC
-            n := 0
-            mientras cap >= 0x40 y n < 48 hacer
-                v := lee_pci(d ob cap)
-                si v yb 0xFF = 1 entonces
-                    si lee_pci(d ob (cap + 4)) yb 3 <> 0 entonces
-                        p[2] := 1
-                        devolver 1
-                    fin
-                    n := 48
-                sino
-                    cap := (v >> 8) yb 0xFC
-                    n := n + 1
+        si tam = 96 entonces
+            p[8] := lee_pci(d ob 0x2C)
+            p[10] := lee_pci(d ob 0x10)
+            p[19] := lee_pci(d ob 8)
+            p[11] := 0xFFFFFFFF
+            cap := capacidad(d, 1)
+            si cap <> 0 entonces p[11] := lee_pci(d ob (cap + 4)) fin
+            cap := capacidad(d, 0x10)
+            si cap <> 0 entonces
+                p[12] := lee_pci(d ob (cap + 0x0C))
+                p[13] := lee_pci(d ob (cap + 0x10))
+            fin
+        fin
+        ; 2. encendida (D0), por su capacidad de energía (la 01); de D3hot a
+        ; D0 solo con No_Soft_Reset (bit 3: no pierde la configuración)
+        cap := capacidad(d, 1)
+        si cap <> 0 entonces
+            pm := lee_pci(d ob (cap + 4))
+            si pm yb 3 <> 0 entonces
+                si escribe y pm yb 3 = 3 y pm yb 8 <> 0 y gpu_hecho[i] yb 2 = 0 entonces
+                    escribe_pci(d ob (cap + 4), pm yb 0xFFFF7FFC)     ; (sin tocar PME_Status, bit 15: se borra escribiendo 1)
+                    espera_us(10000)
+                    gpu_hecho[i] := gpu_hecho[i] ob 2
+                    imprimir2("termo: GPU %u: de D3 a D0 (No_Soft_Reset: sin perder la configuración; volátil)\n", i + 1, 0)
+                fin
+                si lee_pci(d ob (cap + 4)) yb 3 <> 0 entonces
+                    si pm yb 8 = 0 entonces gpu_hecho[i] := gpu_hecho[i] ob 0x10 fin
+                    si tam = 96 entonces p[15] := gpu_hecho[i] fin
+                    p[2] := 1
+                    devolver 1
                 fin
             fin
         fin
-        ; 3. la memoria, activada (no se activa)
-        si lee_pci(d ob 4) yb 2 = 0 entonces
-            p[2] := 2
-            devolver 1
-        fin
-        ; 4. BAR0: de memoria, 32 bits, sin «prefetch», alineado a 16 MB
+        ; 3. BAR0: de memoria, 32 bits, sin «prefetch», alineado a 16 MB
         bar := lee_pci(d ob 0x10)
         si bar yb 0xF <> 0 o bar yb 0x00FFFFFF <> 0 o bar = 0 entonces
             p[2] := 3
             devolver 1
+        fin
+        ; 4. la memoria, activada; si no, como pci_enable_device: solo si el
+        ; BAR0 cae en la ventana de memoria del puente y el puente la tiene
+        si lee_pci(d ob 4) yb 2 = 0 entonces
+            si escribe y gpu_hecho[i] yb 1 = 0 entonces
+                si gpu_puerto[i] = 0 entonces
+                    ventana := 1
+                sino
+                    v := lee_pci(pu ob 0x20)
+                    ventana := 0
+                    si lee_pci(pu ob 4) yb 2 <> 0 y bar >= (v yb 0xFFF0) << 16 y bar + 0xFFFFFF <= (v yb 0xFFF00000) ob 0xFFFFF entonces ventana := 1 fin
+                    si ventana = 0 entonces gpu_hecho[i] := gpu_hecho[i] ob 0x20 fin
+                fin
+                si ventana = 1 entonces
+                    escribe_pci(d ob 4, (lee_pci(d ob 4) yb 0xFFFF) ob 2)      ; (la mitad alta, el estado: se borra escribiendo 1; no se toca)
+                    gpu_hecho[i] := gpu_hecho[i] ob 1
+                    imprimir2("termo: GPU %u: la memoria activada (bit 1 de la orden PCI; volátil, como pci_enable_device)\n", i + 1, 0)
+                fin
+            fin
+            si lee_pci(d ob 4) yb 2 = 0 entonces
+                si tam = 96 entonces p[15] := gpu_hecho[i] fin
+                p[2] := 2
+                devolver 1
+            fin
         fin
         si gpu_pag0[i] = 0 entonces
             gpu_pag0[i] := mapear_aparato(bar, 4096)
@@ -711,14 +877,19 @@ módulo Termo
             p[2] := 3
             devolver 1
         fin
-        ; 5. PMC_BOOT_0: un GM204 (124h) o un GM107 (117h)
+        ; 5. PMC_BOOT_0: Pascal (GP10x, 13xh), Maxwell (GM107/GM108, 117h y
+        ; 118h; GM200/GM204/GM206, 120h, 124h, 126h)
         boot := gpu_lee(i, 0)
         p[3] := boot
         chip := (boot yb 0x1FF00000) >> 20
         si boot <> 0xFFFFFFFF y chip >= 0x130 y chip <= 0x13B entonces
-            ; las Pascal (GP10x): 20460h, válida si el bit 29; (v y 1FFF8h) >> 8, °C
             v := gpu_lee(i, 0x20460)
             p[4] := v
+            si tam = 96 entonces p[18] := v fin
+            si badf(v) entonces
+                p[2] := 10
+                devolver 1
+            fin
             si v yb 0x20000000 = 0 entonces
                 p[2] := 6
                 devolver 1
@@ -728,18 +899,38 @@ módulo Termo
             si v > 130 entonces p[2] := 8 fin
             devolver 1
         fin
-        si boot = 0xFFFFFFFF o (chip <> 0x124 y chip <> 0x117) entonces
+        si boot = 0xFFFFFFFF o (chip <> 0x124 y chip <> 0x117 y chip <> 0x118 y chip <> 0x120 y chip <> 0x126) entonces
             p[2] := 4
             devolver 1
         fin
-        ; 6. el fusible del sensor calibrado
-        si gpu_lee(i, 0x212A8) <> 1 entonces
+        ; 6. el fusible del sensor calibrado (nvkm_fuse_read(1A8h), GM107: 21100h + 1A8h)
+        v := gpu_lee(i, 0x212A8)
+        si tam = 96 entonces p[16] := v fin
+        si v <> 1 entonces
             p[2] := 5
+            si badf(v) entonces p[2] := 10 fin
             devolver 1
         fin
-        ; 7. el sensor: encendido (bit 31) y sin forzar (bit 15)
+        ; 7. el sensor: encendido (bit 31) y sin forzar (bit 15); si no, lo de
+        ; nouveau (g84_sensor_setup), una vez y solo con permiso
         v := gpu_lee(i, 0x20008)
+        si escribe y gpu_hecho[i] yb 4 = 0 y no badf(v) y (v yb 0x80000000 = 0 o v yb 0x8000 <> 0) entonces
+            gpu_escribe(i, 0x20008, (v yb 0x7FFF7FFF) ob 0x80000000)
+            gpu_escribe(i, 0x2000C, gpu_lee(i, 0x2000C) yb 0x7FFFFFFC)
+            espera_us(20000)
+            gpu_hecho[i] := gpu_hecho[i] ob 4
+            imprimir2("termo: GPU %u: el sensor de temperatura encendido como nouveau (20008h era %xh; volátil)\n", i + 1, v)
+            v := gpu_lee(i, 0x20008)
+        fin
         p[4] := v
+        si tam = 96 entonces
+            p[15] := gpu_hecho[i]
+            p[17] := gpu_lee(i, 0x2000C)
+        fin
+        si badf(v) entonces
+            p[2] := 10
+            devolver 1
+        fin
         si v yb 0x80000000 = 0 entonces
             p[2] := 6
             devolver 1
@@ -748,14 +939,19 @@ módulo Termo
             p[2] := 7
             devolver 1
         fin
-        v := gpu_lee(i, 0x20400) yb 0xFF
+        v := gpu_lee(i, 0x20400)
+        si tam = 96 entonces p[18] := v fin
+        si badf(v) entonces
+            p[2] := 10
+            devolver 1
+        fin
+        v := v yb 0xFF
         p[5] := v
         si v > 130 entonces p[2] := 8 fin
         p[6] := gpu_lee(i, 0x20408)
         p[7] := gpu_lee(i, 0x20074)
         devolver 1
     fin
-
     ; las llamadas 220 a 224 (usuario.cas)
     público función atender_termo(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable p: puntero a nat32
@@ -797,7 +993,7 @@ módulo Termo
                 copiar_memoria(puntero(a), puntero(dirección(bloque)), TAM_BLOQUE)
                 devolver 1
             caso 225:
-                devolver atender_gpu(a, b)              ; (TERMO) las gráficas NVIDIA, solo leer
+                devolver atender_gpu(a, b, c)           ; (TERMO) las gráficas NVIDIA (c: la ficha larga, las escrituras volátiles)
             caso 224:
                 ; (TERMO) 2: los tics de la tarea ociosa; 3: los del reloj (la
                 ; ocupación del procesador: lo que no ha corrido la ociosa)

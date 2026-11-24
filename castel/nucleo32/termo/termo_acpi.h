@@ -68,7 +68,31 @@ struct termo_acpi {
 	/* (TERMO) el voltaje de ahora de la primera batería (mV, el 4.º valor
 	 * de _BST); 0 si no lo dice */
 	uint32_t bat_mv;
+	/* (TERMO) (NVIDIA) los puertos PCI Express del bus 0 que el ACPI
+	 * declara (el dispositivo con el _ADR del puente, hijo del puente raíz)
+	 * y su hijo de _ADR 0 (la gráfica, si la hay): qué objetos de energía
+	 * tienen (TA_PEG_*: solo se mira si existen, sin llamarlos); el _PSC del
+	 * hijo (0 D0 ... 3 D3; 0xF no lo tiene o falla) en los bits 0-3 de
+	 * «estado» y en los 4-5 el _STA del primer recurso de _PR0 (del hijo o
+	 * del puerto: 1 encendido, 2 apagado, 0 no hay). Se evalúan solo _ADR,
+	 * _PSC, _PR0 y _STA, para leer: nunca _PS0, _ON, _OFF ni _DSM (encender
+	 * o apagar la gráfica es cosa de su controlador). (Cabe justo: quedan 8
+	 * octetos de TA_TAM.) */
+	uint32_t npeg;
+	struct ta_peg {
+		uint8_t ap_fun;		/* aparato << 3 | función, en el bus 0 */
+		uint8_t puerto, hijo;	/* TA_PEG_* */
+		uint8_t estado;
+	} peg[4];
 };
+#define TA_PEG_PR0 0x01
+#define TA_PEG_PR3 0x02
+#define TA_PEG_PS0 0x04
+#define TA_PEG_PS3 0x08
+#define TA_PEG_DSM 0x10
+#define TA_PEG_ON 0x20
+#define TA_PEG_OFF 0x40
+#define TA_PEG_HAY 0x80	/* (hijo) hay un hijo de _ADR 0 */
 
 _Static_assert(sizeof(struct termo_acpi) <= TA_TAM, "termo_acpi: no cabe en lo que copia el núcleo");
 #endif

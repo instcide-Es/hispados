@@ -36,7 +36,8 @@
 #     el tamaño nuevo al cambiar la ventana (window-change: la ventana
 #     empieza de 640 x 380 y se agranda con Alt+Espacio, «Tamaño» y las flechas).
 #  6. -smp 4 (con y sin KVM): la carga en los demás procesadores; y sin
-#     ninguna NVIDIA, que lo dice sin colgarse.
+#     ninguna NVIDIA, que lo dice sin colgarse («no hay gráficas NVIDIA», también
+#     en INFORME.TXT); y en el anfitrión, nvidia.c con fichas de mentira.
 #  7. Por UEFI (OVMF, q35, -smp 2): el Termómetro, las zonas y la carga.
 #  8. «Rendimiento» (R): las medidas en RENDIMIE.TXT, y que Esc la para.
 # 10. (DISCOS) los discos de dentro: IDE, SATA y NVMe en QEMU, solo leer
@@ -197,6 +198,12 @@ termo_anfitrion() {
      && ! grep -q 'La temperatura en carga es buena' $B/rota.txt; then
     ok "la carga rota por un parón (el MSI GT80) y que no vuelve entera: el resultado dice desde cuándo y no da la temperatura por buena"
   else ko "la carga rota: $(head -c 400 $B/rota.txt)"; fi
+  # (NVIDIA) nvidia.c con fichas de mentira: Maxwell (GM204 del GT80) y Pascal
+  # (GP107 del GL553VD), el sensor apagado o forzado, 0BADFxxxh, la 2.ª tarjeta
+  # sin enlace, Optimus y nada
+  if gcc -O1 -Wall -Wextra -DNV_ANFITRION -I$T $T/pruebas/nvidia_prueba.c $T/nvidia.c -o $B/nvidia_prueba 2> $B/gccnv.txt && $B/nvidia_prueba > $B/nvidia.txt; then
+    ok "las gráficas NVIDIA (nvidia.c, sin NVIDIA de verdad): $(grep -c '^bien' $B/nvidia.txt) comprobaciones bien (la temperatura de Maxwell y Pascal como nouveau, «GPU 1» y «GPU 2» del GT80, mínima/media/máxima, más de 90 °C, la tarjeta que no enlaza, Optimus)"
+  else ko "las gráficas NVIDIA: $(head -n 2 $B/gccnv.txt) $(grep '^mal' $B/nvidia.txt | head -n 3)"; fi
   if $B/tjmax > $B/tjmax.txt; then ok "la TjMax de los Intel que no la dicen: $(grep -c '^bien' $B/tjmax.txt) procesadores bien (el Atom N455 del HP Mini y del Toshiba, 100 °C; los N270, 90)"
   else ko "la TjMax: $(grep '^mal' $B/tjmax.txt | head -n 2)"; fi
   # el terminal de SSH.BIN
@@ -368,7 +375,9 @@ fi
 termo_parones
 termo_qemu $Y/termo.img t6 70 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "56:$C" "56:o /b 0x71 91"
 mira "con un solo procesador: lo dice y carga solo este" "termo: suceso: la carga, en este procesador solo: los demás no (ningún otro procesador ha contestado"
-mira "(NVIDIA) sin gráficas NVIDIA (QEMU): lo dice, sin colgarse" "termo: suceso: gráficas NVIDIA Maxwell: ninguna en el PCI"
+mira "(NVIDIA) sin gráficas NVIDIA (QEMU): lo dice, sin colgarse" "termo: suceso: gráficas NVIDIA: no hay gráficas NVIDIA (ninguna en el PCI"
+if mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q 'No hay gráficas NVIDIA en el PCI'; then ok "(NVIDIA) INFORME.TXT: «GRÁFICAS (NVIDIA)» dice «No hay gráficas NVIDIA en el PCI»"
+else ko "(NVIDIA) INFORME.TXT sin «No hay gráficas NVIDIA»: $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -A3 'GRÁFICAS' | tr '\n' ' ')"; fi
 # 8. (TERMO) «Rendimiento» (la tecla R): las medidas, en RENDIMIE.TXT; y Esc la para
 local cpum="-smp 2 -cpu Haswell"
 [ -w /dev/kvm ] && cpum="-enable-kvm -cpu host -smp 2"

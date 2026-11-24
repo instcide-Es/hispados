@@ -36,6 +36,7 @@
 #include "envio.h"
 #include "rendimiento.h"
 #include "disco.h"
+#include "nvidia.h"
 
 static int mas_caliente(void);
 static void mira_envio(void);
@@ -319,62 +320,49 @@ static int lee_cpu(u32 msr)
 }
 
 /* ---------------------------------------------------------------- las NVIDIA
- * (TERMO) Las gráficas NVIDIA Maxwell (GTX 970M/980M del MSI GT80): el
- * núcleo hace las comprobaciones de nouveau y lee la temperatura (la 225,
- * solo leer). Aquí, «GPU 1», «GPU 2»... con su estado si no se puede. */
-struct ficha_gpu { u32 bdf, id, estado, boot, crudo, temp, critico, frena; };
-static const char *const estado_gpu[] = { "bien", "apagada (D3)", "sin la memoria activada", "BAR0 raro", "no es una Maxwell GM204/GM107",
-					  "sin sensor calibrado", "sensor apagado", "sensor forzado", "lectura imposible", "dormida (Optimus)" };
-static int gpu_estado[MAXS], gpu_frena[MAXS], gpu_critico[MAXS], hay_gpus;
-
-static const char *modelo_gpu(u32 id)
-{
-	switch (id >> 16) {
-	case 0x13D7: return "GTX 980M";
-	case 0x13D8: return "GTX 970M";
-	case 0x13D9: return "GTX 965M";
-	case 0x1C8C: return "GTX 1050 Ti";
-	case 0x1C8D: return "GTX 1050";
-	}
-	return "";
-}
+ * (TERMO) (NVIDIA) Las gráficas NVIDIA (Maxwell: las GTX 970M/980M del MSI
+ * GT80; Pascal: la GTX 1050 del ASUS GL553V): lo hace nvidia.c (con el
+ * núcleo, la 225). Aquí, «GPU 1», «GPU 2»... como sensores. Con «sololeer»
+ * no se escribe nada en ellas (ni lo volátil de nouveau) */
+static struct nv_todo NV;
+static int gpu_estado[MAXS], gpu_frena[MAXS], gpu_critico[MAXS], hay_gpus, nv_sololeer;
 
 static void mira_gpus(void)
 {
-	struct ficha_gpu f;
-	u32 i;
+	int i;
 
-	for (i = 0; i < 4; i++) {
-		char n[48], c[16];
+	nv_busca(&NV, !nv_sololeer);
+	for (i = 0; i < NV.n; i++) {
+		char n[48], c[16], l[900];
+		const char *m = nv_modelo(NV.g[i].f.id);
 		int k;
-		u32 r = sc(SC_GPU, i, (u32)&f, 0);
 
-		if (r != 1)
-			break;
-		snprintf(n, sizeof n, "GPU %u (NVIDIA %s)", i + 1, modelo_gpu(f.id)[0] ? modelo_gpu(f.id) : "10DE");
-		snprintf(c, sizeof c, "GPU %u", i + 1);
+		snprintf(n, sizeof n, "GPU %d (NVIDIA %s)", i + 1, m[0] ? m + (strncmp(m, "GeForce ", 8) ? 0 : 8) : "10DE");
+		snprintf(c, sizeof c, "GPU %d", i + 1);
 		k = nuevo_sensor(n, c, CL_GPU, NO, 0);
 		if (k < 0)
 			break;
-		S[k].zona = (int)i;
+		S[k].zona = i;
 		hay_gpus++;
-		serie("termo: GPU %u: PCI %02X:%02X, %04X:%04X, PMC_BOOT_0 %08Xh, sensor %08Xh: %s\n", i + 1, f.bdf >> 16 & 0xFF, f.bdf >> 11 & 31, f.id & 0xFFFF,
-		      f.id >> 16, f.boot, f.crudo, f.estado < 10 ? estado_gpu[f.estado] : "?");
+		nv_describe(&NV, i, l, sizeof l);
+		serie("termo: %s\n", l);
+	}
+	for (i = 0; i < NV.np; i++) {
+		char l[600];
+
+		nv_describe_puerto(&NV, i, l, sizeof l);
+		serie("termo: %s\n", l);
 	}
 }
 
 static void lee_gpu(int k)
 {
-	struct ficha_gpu f;
+	const struct nv_ficha *f = &NV.g[S[k].zona].f;
 
-	if (sc(SC_GPU, (u32)S[k].zona, (u32)&f, 0) != 1) {
-		S[k].t = NO;
-		return;
-	}
-	gpu_estado[k] = (int)f.estado;
-	gpu_critico[k] = f.estado == 0 && (f.critico & 1);
-	gpu_frena[k] = f.estado == 0 && ((f.frena >> 24) & 7);
-	S[k].t = f.estado == 0 && f.temp <= 130 ? (int)f.temp * 10 : NO;
+	S[k].t = nv_lee(&NV, S[k].zona, !nv_sololeer);
+	gpu_estado[k] = (int)f->estado;
+	gpu_critico[k] = f->estado == 0 && ((f->boot >> 20) & 0x1F0) != 0x130 && (f->critico & 1);
+	gpu_frena[k] = f->estado == 0 && ((f->boot >> 20) & 0x1F0) != 0x130 && ((f->frena >> 24) & 7);
 }
 
 /* ---------------------------------------------------------------- ACPI y la batería */
@@ -1071,7 +1059,7 @@ static void mira_cambios(void)
 	}
 	for (k = 0; k < ns && cuenta_s == 4; k++)
 		if (S[k].clase == CL_GPU && S[k].t == NO)
-			suceso_log("sensor «%s»: sin dato: %s (no se escribe nada en la tarjeta)", S[k].nombre, gpu_estado[k] < 10 ? estado_gpu[gpu_estado[k]] : "?");
+			suceso_log("sensor «%s»: sin dato: %s", S[k].nombre, nv_estado((u32)gpu_estado[k]));
 	/* (TERMO) sin batería (la Medion S2217, con la suya muerta: se apaga al
 	 * desenchufar): que se diga, en el .LOG y en el informe. A los 20 s, con
 	 * la primera lectura de ACPI.BIN ya hecha */
@@ -1087,8 +1075,22 @@ static void mira_cambios(void)
 				 e2.fase == 3 ? "ACPI no va en este equipo" : e2.fase == 0 ? "ACPI aún no ha acabado de leerla" : "el equipo la declara, pero dice que no está puesta (_STA)");
 		suceso_log("batería: %s", sin_bat_texto);
 	}
-	if (cuenta_s == 4 && !hay_gpus)
-		suceso_log("gráficas NVIDIA Maxwell: ninguna en el PCI%s", busca(za.t.producto, "GT80") ? " (en el GT80: el interruptor de gráficos las apaga)" : "");
+	if (cuenta_s == 4) {	/* (TERMO) (NVIDIA) cada gráfica y cada puerto PCI Express, con lo del ACPI */
+		char l[900];
+
+		if (hay_zonas)
+			nv_acpi(&NV, &za.t);
+		if (!NV.n)
+			suceso_log("gráficas NVIDIA: no hay gráficas NVIDIA (ninguna en el PCI, mirados todos los buses)");
+		for (k = 0; k < NV.n; k++) {
+			nv_describe(&NV, k, l, sizeof l);
+			suceso_log("gráficas NVIDIA: %s", l);
+		}
+		for (k = 0; k < NV.np; k++) {
+			nv_describe_puerto(&NV, k, l, sizeof l);
+			suceso_log("gráficas NVIDIA: %s", l);
+		}
+	}
 	if (hay_zonas && za.t.asus_hay && cuenta_s == 6)
 	{
 		char v1[16], v2[16];
@@ -2289,7 +2291,7 @@ static void informe_autonomia(char *b, size_t cabe)
 
 static void escribe_informe(void)
 {
-	static char t[6000 + 8000];	/* (TERMO) + los discos */
+	static char t[32000];	/* (TERMO) los discos, (NVIDIA) «GRÁFICAS», (POTENCIA) y (RAM): todo junto (escribe_informe mira que quepa) */
 	char r[120], g1[24], g2[24], g3[24];
 	u32 a, me, d, h, mi, se;
 	int n = 0, k;
@@ -2461,7 +2463,12 @@ static void escribe_informe(void)
 	}
 	if (cpu.aproximada)
 		IN("Nota: el sensor de este procesador (Atom) es aproximado.\r\n");
-	IN("No se puede leer sin su controlador la temperatura de las tarjetas gráficas (NVIDIA/AMD), salvo que la BIOS la dé como zona ACPI.\r\n");
+	if (hay_zonas)
+		nv_acpi(&NV, &za.t);
+	n += nv_informe(&NV, t + n, (int)sizeof t - n);		/* (NVIDIA) «GRÁFICAS» */
+	n = n < (int)sizeof t ? n : (int)sizeof t - 1;
+	if (!NV.n)
+		IN("No se puede leer sin su controlador la temperatura de las tarjetas gráficas que no son NVIDIA Maxwell o Pascal (AMD...), salvo que la BIOS la dé como zona ACPI.\r\n");
 	IN("\r\nRESULTADO\r\n---------\r\n%s\r\n", resumen);
 	IN("\r\nLos datos son los que dan los sensores del propio equipo; el registro completo (cada 2 s) está en los .CSV y .LOG de esta carpeta, y la pantalla con la gráfica en INFORME.BMP.\r\n");
 	IN("Hecho con el Termómetro de Hispa-Pentium (GPL-2.0 o posterior). No contiene datos personales.\r\n");
@@ -2488,6 +2495,7 @@ static void escribe_resumen(void)
 	mira_mca(1);
 	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
 	disco_veredicto(carpeta, resumen, (int)sizeof resumen, parones || bloqueos);	/* (TERMO) lo de los discos */
+	nv_veredicto(&NV, resumen + strlen(resumen), (int)(sizeof resumen - strlen(resumen)));	/* (NVIDIA) más de 90 °C, no responde */
 	for (k = 0; k < ns && k < VE_MAXS; k++)
 		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
 	escribe_informe();
@@ -2863,8 +2871,10 @@ static void lee_todo(void)
 	for (k = 0; k < ns; k++)
 		if (S[k].clase == CL_CPU)
 			S[k].t = lee_cpu((u32)S[k].zona);
-		else if (S[k].clase == CL_GPU)
+		else if (S[k].clase == CL_GPU) {
 			lee_gpu(k);
+			nv_apunta(&NV.g[S[k].zona], fase, S[k].t);	/* (NVIDIA) mínima, media y máxima de cada fase */
+		}
 	lee_ap();
 	if (simula)
 		simula_paso();
@@ -3333,8 +3343,8 @@ static void pinta(void)
 			lz_texto(&LZ, cn + ancho_texto(s->nombre, 1) + 6, y + (fila - 16) / 2, "(fija, no cambia)", C_GRIS, 1);
 		if (s->clase == CL_CPU && (s->zona & 0x10000) && s->t == NO)
 			lz_texto(&LZ, ca, y + (fila - 16) / 2, "solo en la carga", C_GRIS, 1);
-		else if (s->clase == CL_GPU && s->t == NO && gpu_estado[k] > 0 && gpu_estado[k] < 10)
-			lz_texto(&LZ, ca, y + (fila - 16) / 2, estado_gpu[gpu_estado[k]], C_GRIS, 1);
+		else if (s->clase == CL_GPU && s->t == NO && gpu_estado[k] > 0 && gpu_estado[k] < NV_E_N)
+			lz_texto(&LZ, ca, y + (fila - 16) / 2, nv_estado((u32)gpu_estado[k]), C_GRIS, 1);
 		else
 			lz_negrita(&LZ, ca, y + (fila - 16) / 2, s->no_fiable ? "sin lectura fiable" : grados(g, s->t), s->no_fiable ? C_PELIGRO : C_TINTA, 1);
 		lz_texto(&LZ, cmi, y + (fila - 16) / 2, grados(g, s->min), C_TINTA, 1);
@@ -3381,9 +3391,9 @@ static void pinta(void)
 		lineas += nota(y + 4 + 16 * lineas, "La BIOS de este equipo no tiene zonas térmicas de ACPI.", C_GRIS);
 	if (!hay_gpus) {
 		if (busca(za.t.producto, "GT80"))
-			snprintf(a, sizeof a, "GPU NVIDIA desactivada (interruptor de gráficos del GT80): con las NVIDIA encendidas se miden aquí.");
+			snprintf(a, sizeof a, "No se ve ninguna NVIDIA: en INFORME.TXT («GRÁFICAS»), cómo está cada puerto PCI Express.");
 		else
-			snprintf(a, sizeof a, "Gráfica dedicada: las NVIDIA Maxwell (GTX 9xxM) se miden; las demás, solo si la BIOS las da como zona ACPI.");
+			snprintf(a, sizeof a, "Gráfica dedicada: las NVIDIA Maxwell y Pascal se miden; las demás, solo si la BIOS las da como zona ACPI.");
 		lineas += nota(y + 4 + 16 * lineas, a, C_GRIS);
 	} else {
 		for (k = 0; k < ns; k++)
@@ -3970,6 +3980,7 @@ int principal(void)
 	/* (los argumentos, para arg_entero: jg_correr los vuelve a leer) */
 	memcpy(jg_args, args, sizeof args);
 	simula = arg_aqui("/SIMULA");
+	nv_sololeer = arg_aqui("/SOLOLEER");	/* (NVIDIA) ni lo volátil de nouveau */
 	dura_s = arg_entero("/DURA", minutos * 60);
 	enfria_max = arg_entero("/ENFRIA", 180);
 	mira_procesador();

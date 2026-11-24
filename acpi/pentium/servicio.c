@@ -865,6 +865,128 @@ static void ta_equipo(void)
 	reg("ACPI: (TERMO) en \\TERMO\\EQUIPO: %u tablas ACPI y la lista PCI%s\n", ta.equipo_tablas, ta.equipo_pci ? "" : " (NO)");
 }
 
+/* (TERMO) (NVIDIA) los puertos PCI Express del bus 0 en el ACPI (los de la
+ * gráfica: PEG0, RP01...) y su hijo de _ADR 0: qué objetos de energía tienen
+ * (sin llamarlos) y, para leer, el _PSC del hijo y el _STA del primer
+ * recurso de _PR0. Nunca _PS0, _ON, _OFF ni _DSM: encender o apagar la
+ * gráfica (Optimus) es cosa de su controlador */
+static uint8_t ta_peg_objetos(ACPI_HANDLE h)
+{
+	static const struct { const char *n; uint8_t b; } o[] = {
+		{ "_PR0", TA_PEG_PR0 }, { "_PR3", TA_PEG_PR3 }, { "_PS0", TA_PEG_PS0 }, { "_PS3", TA_PEG_PS3 },
+		{ "_DSM", TA_PEG_DSM }, { "_ON_", TA_PEG_ON }, { "_OFF", TA_PEG_OFF },
+	};
+	ACPI_HANDLE x;
+	uint8_t r = 0;
+	unsigned i;
+
+	for (i = 0; i < sizeof o / sizeof o[0]; i++)
+		if (ACPI_SUCCESS(AcpiGetHandle(h, (char *)o[i].n, &x)))
+			r |= o[i].b;
+	return r;
+}
+
+static int ta_adr(ACPI_HANDLE h, UINT64 *adr)
+{
+	ACPI_BUFFER e;
+	ACPI_OBJECT x;
+
+	e.Length = sizeof x;
+	e.Pointer = &x;
+	if (ACPI_FAILURE(AcpiEvaluateObjectTyped(h, "_ADR", NULL, &e, ACPI_TYPE_INTEGER)))
+		return 0;
+	*adr = x.Integer.Value;
+	return 1;
+}
+
+/* el _STA del primer recurso de energía de _PR0 de h: 1 encendido, 2 apagado, 0 no hay */
+static uint8_t ta_pr0_sta(ACPI_HANDLE h)
+{
+	ACPI_BUFFER b, e;
+	ACPI_OBJECT *o, x;
+	uint8_t r = 0;
+
+	b.Length = ACPI_ALLOCATE_BUFFER;
+	b.Pointer = NULL;
+	if (ACPI_FAILURE(AcpiEvaluateObjectTyped(h, "_PR0", NULL, &b, ACPI_TYPE_PACKAGE)))
+		return 0;
+	o = b.Pointer;
+	if (o->Package.Count >= 1 && o->Package.Elements[0].Type == ACPI_TYPE_LOCAL_REFERENCE && o->Package.Elements[0].Reference.Handle) {
+		e.Length = sizeof x;
+		e.Pointer = &x;
+		if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(o->Package.Elements[0].Reference.Handle, "_STA", NULL, &e, ACPI_TYPE_INTEGER)))
+			r = (x.Integer.Value & 1) ? 1 : 2;
+	}
+	ACPI_FREE(b.Pointer);
+	return r;
+}
+
+static ACPI_HANDLE ult_padre;
+static int ult_raiz;
+
+static ACPI_STATUS ta_un_peg(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	ACPI_HANDLE padre, hijo = NULL, gpu = NULL;
+	ACPI_DEVICE_INFO *info;
+	ACPI_BUFFER b, e;
+	ACPI_OBJECT x;
+	UINT64 adr, a2;
+	struct ta_peg *p;
+	char ruta[48];
+	int raiz;
+	u32 dis, fun;
+
+	(void)nivel; (void)ctx; (void)ret;
+	if (ta.npeg >= sizeof ta.peg / sizeof ta.peg[0])
+		return AE_CTRL_TERMINATE;
+	if (!ta_adr(h, &adr) || adr == 0 || (adr >> 16) > 31 || (adr & 0xFFFF) > 7)
+		return AE_OK;
+	if (ACPI_FAILURE(AcpiGetParent(h, &padre)))
+		return AE_OK;
+	if (padre != ult_padre) {		/* (el mismo padre, PCI0, para casi todos: una vez) */
+		if (ACPI_FAILURE(AcpiGetObjectInfo(padre, &info)))
+			return AE_OK;
+		ult_padre = padre;
+		ult_raiz = (info->Flags & ACPI_PCI_ROOT_BRIDGE) != 0;
+		ACPI_FREE(info);
+	}
+	raiz = ult_raiz;
+	dis = (u32)(adr >> 16);
+	fun = (u32)(adr & 7);
+	/* (solo los puentes PCI-PCI del bus 0 que están) */
+	if (!raiz || (ta_pci(0, dis, fun, 0) & 0xFFFF) == 0xFFFF || ((ta_pci(0, dis, fun, 0x0C) >> 16) & 0x7F) != 1)
+		return AE_OK;
+	p = &ta.peg[ta.npeg++];
+	p->ap_fun = (uint8_t)(dis << 3 | fun);
+	p->puerto = ta_peg_objetos(h);
+	while (ACPI_SUCCESS(AcpiGetNextObject(ACPI_TYPE_DEVICE, h, hijo, &hijo)))
+		if (ta_adr(hijo, &a2) && a2 == 0) {
+			gpu = hijo;
+			break;
+		}
+	p->estado = 0x0F;
+	if (gpu) {
+		p->hijo = (uint8_t)(ta_peg_objetos(gpu) | TA_PEG_HAY);
+		if (p->hijo & TA_PEG_PS0) {
+			e.Length = sizeof x;
+			e.Pointer = &x;
+			if (ACPI_SUCCESS(AcpiEvaluateObjectTyped(gpu, "_PSC", NULL, &e, ACPI_TYPE_INTEGER)) && x.Integer.Value <= 3)
+				p->estado = (uint8_t)x.Integer.Value;
+		}
+		if (p->hijo & TA_PEG_PR0)
+			p->estado |= (uint8_t)(ta_pr0_sta(gpu) << 4);
+	}
+	if (!(p->estado & 0x30) && (p->puerto & TA_PEG_PR0))
+		p->estado |= (uint8_t)(ta_pr0_sta(h) << 4);
+	b.Length = sizeof ruta;
+	b.Pointer = ruta;
+	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
+		pon_texto(ruta, "?", sizeof ruta);
+	reg("ACPI: (TERMO) puerto PCI Express 00:%02X.%u = %s: objetos %02Xh, hijo %02Xh, _PSC %u, recurso _PR0 %u\n", dis, fun, ruta, p->puerto, p->hijo,
+	    p->estado & 0xF, p->estado >> 4);
+	return AE_OK;
+}
+
 static void ta_lee(void)
 {
 	u32 i;
@@ -877,6 +999,9 @@ static void ta_lee(void)
 		if (apm.fase != FASE_ERROR || mq_rsdp()) {
 			AcpiWalkNamespace(ACPI_TYPE_THERMAL, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_una_zona, NULL, NULL, NULL);
 			AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_un_ventilador, NULL, NULL, NULL);
+			ec_solo_lectura = 1;	/* (TERMO) (NVIDIA) los puertos de las gráficas (solo leer) */
+			AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, ta_un_peg, NULL, NULL, NULL);
+			ec_solo_lectura = 0;
 		}
 		reg("ACPI: (TERMO) %u zonas térmicas y %u ventiladores\n", ta.nzonas, ta.nvent);
 		ta.asus_hay = ACPI_SUCCESS(AcpiGetHandle(ACPI_ROOT_OBJECT, "\\_SB.ATKD", &ta_atkd)) && ACPI_SUCCESS(AcpiGetHandle(ta_atkd, "WMNB", &(ACPI_HANDLE){ 0 }));
