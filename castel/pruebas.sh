@@ -5612,7 +5612,7 @@ if $AQUI/nucleo32/disco.sh $E/d.img 32 escudo > $E/disco.txt 2>&1 && mmd -i $E/d
     }
     # a) sin CORTAFUE.INI: lo de fábrica deja entrar a SSH desde la red local
     PH=$((40000 + RANDOM % 20000))
-    ( saludo 110 $PH > $E/cfa.host ) &
+    ( saludo 240 $PH > $E/cfa.host ) &
     FUERA=$!
     cp $E/cf.img $E/cfa.img
     DISCO=$E/cfa.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-netdev user,id=n0,hostfwd=tcp:127.0.0.1:$PH-:22 -device e1000,netdev=n0" \
@@ -5625,7 +5625,7 @@ if $AQUI/nucleo32/disco.sh $E/d.img 32 escudo > $E/disco.txt 2>&1 && mmd -i $E/d
     [ "$(cat $E/cfa.host)" = sí ] && ok "y la conexión desde la red local entra (llega el saludo de SSHD)" || ko "con lo de fábrica, la conexión a SSH no entra"
     # b) con «regla=tcp 22 nadie»: no entra, sin contestar, y se apunta
     PH=$((40000 + RANDOM % 20000))
-    ( saludo 110 $PH > $E/cfb.host ) &
+    ( saludo 240 $PH > $E/cfb.host ) &
     FUERA=$!
     cp $E/cf.img $E/cfb.img
     printf 'activo=si\r\nping=red\r\navisar=si\r\nregla=tcp 22 nadie\r\n' > $E/CORTAFUE.INI
