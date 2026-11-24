@@ -8,14 +8,16 @@ El sistema de la familia Hispa para los PC, XT y AT (8086, 8088, V20, 80186 y
 Las aplicaciones van en un disquete aparte, el de Oficina: **PLUMA**, el
 procesador de textos ([docs/8086/PLUMA.md](../docs/8086/PLUMA.md)), y
 **CUENTAS**, la hoja de cálculo ([docs/8086/CUENTAS.md](../docs/8086/CUENTAS.md)).
+Y los juegos, en el suyo, el de Juegos: **DERRIBO**, de pala, pelota y
+ladrillos ([docs/8086/JUEGO-DERRIBO.md](../docs/8086/JUEGO-DERRIBO.md)), y
+**MARCIANADA** (`MARCIANA`), de marcianitos
+([docs/8086/JUEGO-MARCIANADA.md](../docs/8086/JUEGO-MARCIANADA.md)).
 
 ```
-make            # en build/: los disquetes del sistema (hispa8086-NNN.img) y los
-                # de Oficina (oficina8086-NNN.img), en 360 K, 720 K, 1,2 M y 1,44 M
+make            # en build/: los disquetes del sistema (hispa8086-NNN.img), los de
+                # Oficina (oficina8086-NNN.img) y los de Juegos (juegos8086-NNN.img),
+                # en 360 K, 720 K, 1,2 M y 1,44 M
 make prueba     # los arranca en QEMU y comprueba lo que sale
 ```
-
-Juegos, en su propio disquete (`build/juegos8086-360.img`): DERRIBO, de pala
-y ladrillos ([docs/8086/JUEGO-DERRIBO.md](../docs/8086/JUEGO-DERRIBO.md)).
 
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

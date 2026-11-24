@@ -95,6 +95,10 @@ Versión 0.11.
   RTF, y las teclas de WordStar (todo en [PLUMA.md](PLUMA.md)); y
   **CUENTAS**, la hoja de cálculo, con su ejemplo GASTOS.CSV (ver
   «CUENTAS», más abajo, y [CUENTAS.md](CUENTAS.md)).
+- **El disquete de Juegos** (`build/juegos8086-NNN.img`, sin sistema, en las
+  mismas cuatro medidas): **DERRIBO**, de pala, pelota y ladrillos, y
+  **MARCIANADA**, de marcianitos, con sus instrucciones en `JUEGOS.TXT`
+  (ver «Juegos», más abajo).
 - **Prueba automática** (`make -C h8086 prueba`): 470 comprobaciones en
   QEMU, en veintiuna partes (y la batería entera se pasa también con el
   núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
@@ -397,7 +401,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 6 | Modo 286: HMA y memoria extendida | **hecha** (0.10): gestor XMS 2.0 dentro del núcleo, A20, `DOS=ALTO`, DISCORAM `/E`; sin UMB |
 | 7 | Hispa-BASIC | **primera entrega** (0.11): `BASIC.COM`, compatible con GW-BASIC (lee sus programas en texto y en binario) y con las órdenes también en español; ver docs/8086/BASIC.md. Faltan la 0.12 (doble precisión completa, PRINT USING, archivos, ON ERROR) y la 0.13 (pantalla y sonido) |
 | 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | **oficina hecha** (0.13): PLUMA, el procesador de textos, y CUENTAS, la hoja de cálculo, en el disquete de Oficina ([PLUMA.md](PLUMA.md), [CUENTAS.md](CUENTAS.md)); faltan Fichas, Gestor y el Escritorio |
-| 9 | Juegos, manual, versión estable 1.0 | |
+| 9 | Juegos, manual, versión estable 1.0 | **empezada** (0.13): dos juegos, DERRIBO y MARCIANADA, en el disquete de Juegos; faltan el manual y la 1.0 |
 
 Cada etapa se cierra con sus pruebas automáticas y probada en una máquina real.
 La compatibilidad se mide como en Hispa-386: con programas de la época que
@@ -883,23 +887,26 @@ formato (.CTA), en .CSV con «;» y en .DIF, según la extensión. Con `/G` o
 `/I` convierte o imprime sin pantalla. Ocupa 16,4 K (16.790 octetos). La historia de las hojas
 de cálculo de entonces, lo que tomamos de ellas y lo que hacemos mejor están
 en [CUENTAS.md](CUENTAS.md).
-## Juegos: DERRIBO
 
-El primer juego de Hispa-8086 va en su propio disquete de 360 K
-(`build/juegos8086-360.img`, con unas instrucciones en `JUEGOS.TXT`):
-**DERRIBO**, un juego nuestro de pala, pelota y ladrillos, con diez muros
-propios. CGA de 320×200 a cuatro colores (y EGA y VGA), o texto con MDA y
-Hercules; un modo monocromo (`DERRIBO /M`) para los monitores de fósforo;
-la misma velocidad en cualquier máquina (el 8254 a 72,8 tics por segundo);
-ladrillos y premios que se distinguen por la forma y por una letra, no por
-el color; teclado, ratón y palanca; la mejor puntuación en `DERRIBO.REC`.
-Ocupa 6 K. Cómo se hacían estos juegos en el PC de 1981 a 1986, qué hace
-DERRIBO y cómo se prueba: [JUEGO-DERRIBO.md](JUEGO-DERRIBO.md).
+## Juegos (el disquete de Juegos)
+
+Los juegos van en su propio disquete (`build/juegos8086-NNN.img`, sin
+sistema, con las instrucciones para jugar en `JUEGOS.TXT`). Se arranca con
+el de Hispa-8086 y se pone en B: (con una sola disquetera, el sistema lo
+pide cuando hace falta). Los dos van a la misma velocidad en cualquier
+máquina (los lleva el reloj del equipo, el 8254, no el procesador), se
+juegan con teclado o palanca y no distinguen nada solo por el color: cada
+cosa tiene su forma.
+
+| Juego | Qué es |
+|---|---|
+| `DERRIBO.COM` | **Derribo**, un juego nuestro de pala, pelota y ladrillos, con diez muros propios. CGA de 320×200 a cuatro colores (y EGA y VGA), o texto con MDA y Hercules; monocromo con `/M` para los monitores de fósforo; ladrillos y premios que se distinguen por la forma y por una letra; también con ratón; la mejor puntuación en `DERRIBO.REC`. 6 K. Cómo se hacían estos juegos en el PC de 1981 a 1986, qué hace DERRIBO y cómo se prueba: [JUEGO-DERRIBO.md](JUEGO-DERRIBO.md) |
+| `MARCIANA.COM` | **Marcianada**, de marcianitos: la flota que baja, la churrera y las murallas. CGA (o EGA, VGA), MDA o Hercules en modo texto, monocromo con `/M`; el récord en `MARCIANA.REC`. 6,2 K. Ver [JUEGO-MARCIANADA.md](JUEGO-MARCIANADA.md) |
 
 ## Cómo se construye y se prueba
 
 ```
-make -C h8086            # los cuatro disquetes, en h8086/build/
+make -C h8086            # los disquetes (sistema, Oficina y Juegos), en h8086/build/
 make -C h8086 prueba     # los arranca en QEMU y comprueba la pantalla
 ```
 
@@ -938,8 +945,6 @@ partes (veinticuatro, con las tres de PLUMA) y tarda unos TIEMPO minutos;
 | `h8086/prueba/cuenta.asm`, `saludo.asm` | la cuenta de sectores leídos y un controlador de carácter, para la prueba |
 | `h8086/prueba/partes_09.sh`, `partes_10.sh` | las partes de la prueba que llegaron con la 0.9 y con la 0.10 |
 | `h8086/prueba/partes_11.sh`, `v86_flechas.js` | las teclas de cursor: en la línea de órdenes, BASIC, INKEY$ y EDITAR, con las teclas grises y las del teclado numérico, sin TECLADO y con él; y lo mismo en el emulador v86 |
-| `h8086/juegos/derribo.asm`, `JUEGOS.TXT` | DERRIBO, el juego de pala y ladrillos, y las instrucciones del disquete de juegos |
-| `h8086/prueba/partes_juegos.sh` | la parte de la prueba de los juegos (DERRIBO, con su prueba del motor) |
 | `h8086/prueba/xms.asm` | XMS.COM: prueba del gestor de memoria extendida, de A20 y de la HMA |
 | `h8086/prueba/v86_teclado.js`, `v86_discos.js` | TECLADO y dos disqueteras en el emulador v86 de la web (opcional) |
 | `h8086/programas/cuentas.asm`, `programas/cuentas/*.inc` | CUENTAS, la hoja de cálculo (ver [CUENTAS.md](CUENTAS.md)) |
@@ -950,6 +955,10 @@ partes (veinticuatro, con las tres de PLUMA) y tarda unos TIEMPO minutos;
 | `h8086/prueba/xmodem.py` | «el otro ordenador» de la prueba de PASAR |
 | `h8086/pluma/` | PLUMA, el procesador de textos (ver [PLUMA.md](PLUMA.md)), y su manual PLUMA.TXT |
 | `h8086/prueba/partes_pluma.sh` | las partes de la prueba de PLUMA |
+| `h8086/juegos/derribo.asm` | DERRIBO, el juego de pala y ladrillos (`DERRIBO /P`: la prueba del motor) |
+| `h8086/juegos/marciana.asm` | MARCIANADA (con `-DPRUEBA`, `MARPRUEB.COM`: la prueba del motor) |
+| `h8086/juegos/JUEGOS.TXT` | las instrucciones de los juegos, que van en el disquete de Juegos |
+| `h8086/prueba/partes_juegos.sh`, `partes_marcianos.sh` | las partes de la prueba de DERRIBO y de MARCIANADA |
 
 ### Cómo reconoce el procesador
 

@@ -15,3 +15,5 @@ Insert, y las anteriores vuelven con las flechas arriba y abajo.
 En el disquete de Oficina: PLUMA, el procesador de textos (PLUMA.TXT
 es su manual), y CUENTAS, la hoja de cálculo (CUENTAS hoja; F1, la
 ayuda; /, el menú; abre y guarda .CTA, .CSV y .DIF).
+En el disquete de Juegos: DERRIBO, de pala, pelota y ladrillos, y
+MARCIANA, de marcianitos (JUEGOS.TXT dice cómo se juega).

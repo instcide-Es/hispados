@@ -181,16 +181,35 @@ clean:
 
 .PHONY: all prueba clean
 
-# ---- el disquete de juegos (build/juegos8086-360.img): DERRIBO ----
-# Va aparte del sistema (que tiene que caber solo en 360 K). La prueba de
-# DERRIBO está en prueba/partes_juegos.sh.
-JUEGOS = $(B)/DERRIBO.COM juegos/JUEGOS.TXT
+# ---- el disquete de Juegos (sin sistema): DERRIBO y MARCIANADA ----
+# Va aparte del sistema (que tiene que caber solo en 360 K): se arranca con
+# el de Hispa-8086 y se pone en B: (o, con una sola disquetera, cuando lo
+# pida). En las cuatro medidas, como el del sistema y el de Oficina:
+# build/juegos8086-NNN.img. Cada juego se añade a JUEGOS en su bloque
+# (JUEGOS += ...). Las pruebas: prueba/partes_juegos.sh (DERRIBO) y
+# prueba/partes_marcianos.sh (MARCIANADA).
+$(B)/JUEGOS.TXT: juegos/JUEGOS.TXT | $(B)
+	$(CP437) $< $(B)/gen/juegos.tmp && sed 's/$$/\r/' $(B)/gen/juegos.tmp > $@
+JUEGOS = $(B)/JUEGOS.TXT
+
+# DERRIBO, pala, pelota y ladrillos (juegos/derribo.asm; DERRIBO /P es la
+# prueba del motor)
 $(B)/DERRIBO.COM: juegos/derribo.asm | $(B)
 	$(CP437) $< $(B)/gen/derribo.asm && $(NASM) -f bin -o $@ $(B)/gen/derribo.asm
-$(B)/juegos8086-360.img: $(JUEGOS)
+JUEGOS += $(B)/DERRIBO.COM
+
+# MARCIANADA, de marcianitos (juegos/marciana.asm). MARPRUEB.COM es el mismo
+# fuente con -DPRUEBA: la prueba del motor (no va en el disquete)
+$(B)/MARCIANA.COM: juegos/marciana.asm | $(B)
+	$(CP437) $< $(B)/gen/marciana.asm && $(NASM) -f bin -o $@ $(B)/gen/marciana.asm
+$(B)/MARPRUEB.COM: juegos/marciana.asm | $(B)
+	$(CP437) $< $(B)/gen/marprueb.asm && $(NASM) -f bin -DPRUEBA -o $@ $(B)/gen/marprueb.asm
+JUEGOS += $(B)/MARCIANA.COM
+
+JUEGOSIMG = $(foreach m,$(MEDIDAS),$(B)/juegos8086-$(m).img)
+$(B)/juegos8086-%.img: $(JUEGOS)
 	rm -f $@
-	$(CP437) juegos/JUEGOS.TXT $(B)/gen/juegos.tmp && sed 's/$$/\r/' $(B)/gen/juegos.tmp > $(B)/gen/JUEGOS.TXT
-	mformat -C -f 360 -v JUEGOS -i $@ ::
-	mcopy -i $@ $(B)/DERRIBO.COM $(B)/gen/JUEGOS.TXT ::
-all: $(B)/juegos8086-360.img
-prueba: $(B)/juegos8086-360.img
+	mformat -C -f $* -v JUEGOS -i $@ ::
+	mcopy -i $@ $(JUEGOS) ::
+all: $(JUEGOSIMG)
+prueba: $(JUEGOSIMG) $(B)/MARPRUEB.COM

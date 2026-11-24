@@ -1,5 +1,9 @@
-Hispa-8086: el disquete de juegos
+Juegos de Hispa-8086
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+Arranque con el disquete de Hispa-8086, ponga este en la unidad B: (o,
+con una sola disquetera, cuando el sistema lo pida) y escriba B:DERRIBO
+o B:MARCIANA.
 
 DERRIBO   pala, pelota y ladrillos
 
@@ -29,3 +33,44 @@ DERRIBO   pala, pelota y ladrillos
   Va igual de deprisa en cualquier máquina, de un PC de 4,77 MHz a uno de
   hoy. La mejor puntuación se guarda en DERRIBO.REC, en el directorio en
   que se esté al jugar (si el disquete está protegido, no se guarda).
+
+MARCIANA  Marcianada, de marcianitos
+
+  Una flota de bichos baja en formación y usted, con su churrera, les
+  tira churros desde abajo. Cuatro murallas le cubren, pero se desgastan
+  con cada golpe (suyo o de ellos).
+
+    Boina ....... 30 puntos   (arriba)
+    Botijo ...... 20 puntos   (en medio)
+    Abanico ..... 10 puntos   (abajo; desde la oleada 3 alguno se suelta
+                              y baja dando bandazos: 50 puntos)
+    Casco ....... desde la oleada 2 las Boinas lo llevan: dos tiros
+    Bombona ..... cruza por arriba: de 50 a 300 puntos, y suelta un premio
+    Corazón ..... una vida más (hasta seis)
+    Churros ..... quince segundos de tiro doble
+
+  Ellos tiran aceitunas (redondas, caen despacio) y guindillas (en
+  zigzag, caen deprisa). Si la flota llega al suelo, se acaba la partida.
+
+    Flechas, o Z y X ........ mover
+    Espacio (o flecha arriba,
+    o Control) .............. disparar
+    P ....................... pausa
+    S ....................... sonido sí o no
+    Esc ..................... acabar la partida (en la portada, salir)
+
+  También vale la palanca de juegos del PC, si la hay.
+
+    MARCIANA /M   monocromo: para un monitor de fósforo verde o ámbar con
+                  la CGA (todo en el color más claro, murallas rayadas)
+    MARCIANA /T   en modo texto, con letras gráficas (con una MDA o una
+                  Hercules se pone solo)
+    MARCIANA /S   empieza sin sonido
+
+  Nada se distingue solo por el color: cada bicho, cada disparo y cada
+  premio tiene su forma. El récord se guarda en MARCIANA.REC, al lado del
+  programa (si el disquete está protegido contra escritura, no se guarda).
+
+  Va igual de deprisa en un PC de 4,77 MHz que en uno moderno: el ritmo lo
+  lleva el reloj del equipo, no el procesador. Le bastan unos 16 K de
+  memoria y una CGA, EGA o VGA (o una MDA o Hercules, en modo texto).
