@@ -17,7 +17,7 @@
 ; =============================================================================
 módulo Exfat64
 
-    importar Cifras64, Es64, Monton64, Bloques64, Archivos64
+    importar Cifras64, Es64, Monton64, Discos64, Nodos64
 
     público variable ex_error: ent64
     público variable ex_sumas_mal: nat64        ; los grupos de entradas con la suma mal (no se ven)

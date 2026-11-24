@@ -17,13 +17,13 @@
 ;     pread y pwrite), lseek, getdents64, stat/fstat/newfstatat (la estructura
 ;     de Linux x86-64), mkdir, unlink y rmdir, rename (también entre
 ;     carpetas), ftruncate, fsync y sync. Los errores, los de Linux.
-;  Todo con el mutex del VFS (Archivos64): una operación a la vez; los discos
+;  Todo con el mutex del VFS (Nodos64): una operación a la vez; los discos
 ;  (la caché, NVMe, SATA) tienen sus propios cerrojos.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Vfs64
 
-    importar Cifras64, Es64, Monton64, Hilos64, Sinc64, Bloques64, Unidad64, Archivos64, Fat64, Exfat64
+    importar Cifras64, Es64, Monton64, Hilos64, Sinc64, Discos64, Unidad64, Nodos64, Fat64, Exfat64
 
     público constante O_ACCESO = 3
     público constante O_RDONLY = 0
@@ -142,7 +142,7 @@ módulo Vfs64
                         si n > 1 entonces n := n - 1 fin
                     fin
                 sino
-                    si j - i >= Archivos64.LARGO_NOMBRE entonces devolver falso fin
+                    si j - i >= Nodos64.LARGO_NOMBRE entonces devolver falso fin
                     si n + (j - i) + 2 >= LARGO_RUTA entonces devolver falso fin
                     si n > 1 entonces
                         t[n] := '/'

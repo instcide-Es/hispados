@@ -1,5 +1,5 @@
 ; =============================================================================
-;  prdisco64.cas - Hispa-64, etapa 5: las pruebas de los discos y los archivos
+;  prdisc64.cas - Hispa-64, etapa 5: las pruebas de los discos y los archivos
 ;  de cada arranque (docs/64/HISPA-64.md, sección 11):
 ;   - cada disco se lee igual por la caché que a pelo (los 8 primeros sectores);
 ;   - en un disco «crudo» de pruebas (el que empieza por «HISPA64 CRUDO»; en
@@ -14,9 +14,9 @@
 ;     el montón.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo PrDisco64
+módulo PrDisc64
 
-    importar Cifras64, Es64, Fisica64, Monton64, PorCpu64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64, Bloques64, Archivos64, Vfs64, Unidad64, Procesos
+    importar Cifras64, Es64, Fisica64, Monton64, PorCpu64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64, Discos64, Nodos64, Vfs64, Unidad64, Procesos
 
     constante TROZO = 64                        ; páginas de la memoria de prueba (256 KB)
 
@@ -259,4 +259,4 @@ módulo PrDisco64
         fin
     fin
 
-fin PrDisco64.
+fin PrDisc64.

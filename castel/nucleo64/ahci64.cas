@@ -471,7 +471,7 @@ módulo Ahci64
         fin
     fin
 
-    ; ---- lo que piden los discos (Bloques64) ----
+    ; ---- lo que piden los discos (Discos64) ----
     público función sata_sector(d: nat32): nat32
         devolver d_sector[d]
     fin

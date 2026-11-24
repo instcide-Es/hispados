@@ -444,7 +444,7 @@ módulo Nvme64
         fin
     fin
 
-    ; ---- lo que piden los discos (Bloques64) ----
+    ; ---- lo que piden los discos (Discos64) ----
     público función nvme_sector(d: nat32): nat32
         devolver d_sector[d]
     fin

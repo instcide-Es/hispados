@@ -1284,12 +1284,12 @@ Hispa-64 0.5.0. Los módulos nuevos y lo que cambia:
 | `msi64.cas` | MSI-X (la tabla de su BAR) y MSI (la capacidad de PCI), hacia el procesador que arranca; los vectores de los aparatos, desde 0x50 |
 | `nvme64.cas` | NVMe: reiniciar, la cola de administración, Identify (la controladora y los espacios de nombres), una cola de E/S por procesador, Read/Write con PRP y lista de PRP, Flush; la interrupción (MSI-X) o mirar la cola |
 | `ahci64.cas` | SATA por AHCI: el traspaso de la BIOS, cada puerto como dice la norma (con el COMRESET), IDENTIFY, READ/WRITE DMA EXT, FLUSH CACHE EXT; MSI o mirar el puerto; la memoria de paso sin S64A |
-| `bloques64.cas` | los discos y las particiones (GPT con su CRC32 y la copia del final; MBR con las lógicas de la extendida; un volumen sin tabla), la caché de bloques con escritura diferida y el hilo vaciador |
-| `archivos64.cas` | lo común: los nodos, los montajes, los errores de Linux, los nombres (UTF-8/UTF-16, sin mirar mayúsculas), la hora del DOS, el mutex del VFS |
+| `discos64.cas` | los discos y las particiones (GPT con su CRC32 y la copia del final; MBR con las lógicas de la extendida; un volumen sin tabla), la caché de bloques con escritura diferida y el hilo vaciador |
+| `nodos64.cas` | lo común: los nodos, los montajes, los errores de Linux, los nombres (UTF-8/UTF-16, sin mirar mayúsculas), la hora del DOS, el mutex del VFS |
 | `fat64.cas` | FAT32: montar, buscar, listar, leer, escribir, acortar, crear, borrar, renombrar y mover, carpetas; vaciar (FSInfo) |
 | `exfat64.cas` | exFAT, para leer: montar (con la suma), buscar, listar, leer |
 | `vfs64.cas` | el VFS: los montajes, las rutas, lo abierto, open/read/write/lseek/getdents64/stat/mkdir/unlink/rmdir/rename/ftruncate/fsync/sync, chdir; cargar un archivo entero (para arrancar un programa de un disco) |
-| `prdisco64.cas` | las pruebas de cada arranque (abajo) |
+| `prdisc64.cas` | las pruebas de cada arranque (abajo) |
 | `sistema.cas` | las llamadas nuevas: 4 stat, 5 fstat, 6 lstat, 17 pread64, 18 pwrite64, 19 readv, 21 access, 32 dup, 33 dup2, 72 fcntl, 74 fsync, 75 fdatasync, 76 truncate, 77 ftruncate, 79 getcwd, 80 chdir, 81 fchdir, 82 rename, 83 mkdir, 84 rmdir, 87 unlink, 162 sync, 217 getdents64, 258 mkdirat, 262 newfstatat, 263 unlinkat (con AT_REMOVEDIR), 264 renameat, 269 faccessat, 292 dup3, 316 renameat2 (sin marcas); open y openat ya con O_CREAT, O_EXCL, O_TRUNC, O_APPEND y O_DIRECTORY; read y write a archivos |
 | `procesos.cas` | los descriptores (32) apuntan a lo abierto del VFS y se cierran al salir; la carpeta actual; arrancar un programa por su ruta |
 | `sinc64.cas`, `hilos64.cas` | esperar un suceso con plazo (`espera_plazo`, `duerme_en_hasta`) |
@@ -1411,8 +1411,10 @@ se instala nada):
   arrancado desde ella (`programa=/sata0p1/boot/prog/HOLACAS`), la partición de
   pruebas escrita por ARCHIVOS, y fsck.fat bien en las dos.
 
-`SOLO=castel64` (CASTEL64 y ENSAMB64 sacan el núcleo igual, octeto a octeto): ver
-abajo. `ensambla.py` da los mismos octetos que NASM (hubo que cambiar un `si` de
+`SOLO=castel64` (con CASTEL64 y ENSAMB64 el núcleo sale igual, octeto a octeto, y
+sus 63 pruebas, bien): **80 bien y 0 mal** (15 minutos). Los módulos nuevos se
+llaman con 8 letras como mucho (Discos64, Nodos64, PrDisc64...): CASTEL64 los busca
+con los nombres del DOS. `ensambla.py` da los mismos octetos que NASM (hubo que cambiar un `si` de
 `lista_apic`: con el núcleo más grande, NASM y ensambla.py elegían distinto un salto
 que quedaba justo a 127 octetos; y `mfence`, que no saben ensambla.py ni ENSAMB64, va
 en `db`). Las imágenes de la carpeta del taller (el VDI por UEFI en SATA, con 4
@@ -1426,7 +1428,7 @@ en el TCG de QEMU no se llega a 1 GB/s; eso, en el ThinkPad y el Monovate.
 
 ### Lo que queda para la etapa 6 (y más adelante)
 
-- **USB de almacenamiento** (con xHCI, etapa 6): un disco más de Bloques64 (la clase
+- **USB de almacenamiento** (con xHCI, etapa 6): un disco más de Discos64 (la clase
   D_USB), con lo mismo encima (particiones, FAT32, exFAT); y entonces **escribir en
   exFAT** (el mapa de bits, las sumas, el «hash» del nombre) y **FAT12/FAT16** (las
   particiones EFI pequeñas y las memorias viejas).

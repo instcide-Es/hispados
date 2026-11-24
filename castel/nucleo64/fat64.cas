@@ -3,7 +3,7 @@
 ;  sección 11), según «Microsoft FAT Specification» (la de 2005). Es lo que
 ;  traen las memorias USB, las tarjetas y la partición EFI.
 ;
-;  Todo pasa por la caché de bloques (Bloques64.cb_lee y cb_escribe: con
+;  Todo pasa por la caché de bloques (Discos64.cb_lee y cb_escribe: con
 ;  escritura diferida), así que aquí se lee y se escribe por octetos del
 ;  volumen. Lo que hace:
 ;   - montar: el sector de arranque (BPB), las FAT (todas sus copias se
@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo Fat64
 
-    importar Cifras64, Es64, Monton64, Reloj64, Bloques64, Archivos64
+    importar Cifras64, Es64, Monton64, Reloj64, Discos64, Nodos64
 
     constante FIN_CADENA = 0x0FFFFFF8
     constante MARCA_FIN = 0x0FFFFFFF

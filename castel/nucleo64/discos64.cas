@@ -1,5 +1,5 @@
 ; =============================================================================
-;  bloques64.cas - Hispa-64, etapa 5: los discos, sus particiones y la caché de
+;  discos64.cas - Hispa-64, etapa 5: los discos, sus particiones y la caché de
 ;  bloques (docs/64/HISPA-64.md, sección 11).
 ;
 ;  Los discos: los de NVMe (Nvme64) y los de SATA (Ahci64), con su nombre
@@ -28,7 +28,7 @@
 ;  interno de un equipo del taller).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo Bloques64
+módulo Discos64
 
     importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64
 
@@ -762,4 +762,4 @@ módulo Bloques64
         fin
     fin
 
-fin Bloques64.
+fin Discos64.

@@ -52,9 +52,9 @@
 ;   - [etapa 5] los discos y los archivos: las interrupciones por mensaje
 ;     (msi64.cas), NVMe (nvme64.cas), SATA por AHCI (ahci64.cas), los discos,
 ;     sus particiones (GPT y MBR) y la caché de bloques con escritura diferida
-;     (bloques64.cas), lo común de los sistemas de archivos (archivos64.cas),
+;     (discos64.cas), lo común de los sistemas de archivos (nodos64.cas),
 ;     FAT32 (fat64.cas), exFAT (exfat64.cas), el VFS (vfs64.cas: los montajes,
-;     las rutas, lo abierto) y sus pruebas (prdisco64.cas, con el programa
+;     las rutas, lo abierto) y sus pruebas (prdisc64.cas, con el programa
 ;     ARCHIVOS); al apagar, lo que quede en la caché, al disco.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -65,7 +65,7 @@ módulo Hispa64
     importar Cifras64, Cpu64, Pant64, Excep64, Gdt64, Fisica64, Pagina64, Monton64, Nombre64, PrMem64
     importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64, Cerrojo, Hilos64, Smp64, PrSmp64
     importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
-    importar Msi64, Nvme64, Ahci64, Bloques64, Archivos64, Fat64, Exfat64, Vfs64, PrDisco64
+    importar Msi64, Nvme64, Ahci64, Discos64, Nodos64, Fat64, Exfat64, Vfs64, PrDisc64
 
     constante VERSIÓN = "0.5.0"
     constante MB1 = 0x2BADB002
