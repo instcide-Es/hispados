@@ -265,7 +265,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | **hecha (24/11)** | — |
 | 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento; la consola y el intérprete | **hecha (24/11)** | — |
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
-| 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha en lo principal (24/11)**; lo que falta, en la 8 bis | — |
+| 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | 6–8 sem. (+ Wi-Fi 3–5 meses) | 12,5 meses |
 | 10 | Navegador moderno (Ladybird o WebKit) | 8–12 sem. | 15 meses |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | 4–6 sem. | (en paralelo) |
@@ -394,7 +394,7 @@ adelante); los discos que se enchufan en marcha pasan a la 8.
   `make` corriendo en Hispa-64; las pruebas de libc-test de musl.
 - **QEMU**: las pruebas de libc-test. **Taller**: la misma imagen.
 
-### Etapa 8 — gráficos, ventanas y la oficina (hecha en lo principal: sección 14)
+### Etapa 8 — gráficos, ventanas y la oficina (hecha: sección 14)
 
 Lo que cambió del plan al hacerla: el compositor es **un programa del anillo 3**
 (VENTANAS, en C con musl), no parte del núcleo: el núcleo da la pantalla
@@ -402,7 +402,7 @@ Lo que cambió del plan al hacerla: el compositor es **un programa del anillo 3*
 y la memoria compartida con nombre (`/dev/shm`), como Linux; el protocolo de
 las ventanas es propio, por memoria compartida y futex. La oficina de
 Hispa-Pentium (Pluma 2 y Cuentas 2) se compila **tal cual** con musl y
-`so_hispa64.c`. Quedan para la 8 bis: el lector de PDF, la transparencia de
+`so_hispa64.c`. Quedan para más adelante (sección 14): el lector de PDF, la transparencia de
 las ventanas, el SIMD del dibujo y el touchpad en el escritorio del taller.
 
 - Compositor, ventanas, cursor, la letra con suavizado (TTF de la oficina), el
@@ -2083,7 +2083,7 @@ octetos por hilo), PCID con varios hilos, y los procesadores híbridos.
 
 ---
 
-## 14. La etapa 8, hecha en lo principal (24/11/2026): la pantalla para los programas, las ventanas y la oficina
+## 14. La etapa 8, hecha (24/11/2026): la pantalla para los programas, las ventanas y la oficina
 
 ### Las decisiones
 
@@ -2201,6 +2201,20 @@ octetos por hilo), PCID con varios hilos, y los procesadores híbridos.
   ahora, los últimos (`libsaludo.so`) se daban como memoria libre y se
   pisaban. Ahora son 96, las seguidas se juntan en una, y si no caben se
   para diciéndolo.
+- Y uno de la etapa 4, que salió al pasar la batería con el servidor
+  cargado: **`p.hilo` se ponía después de encolar el primer hilo** de un
+  proceso (en `lanza` y en `fork`). El hilo puede correr y acabar en otro
+  procesador en cuanto está en la cola: un programa que fallaba al momento
+  (MALO, con 4 u 8 procesadores) se veía como «un hilo más», se soltaba
+  solo, y `espera_proceso` hacía `une` de un hilo ya soltado: se quedaba
+  esperando para siempre (los procesadores, todos en `hlt`) o lo liberaba
+  dos veces. Ahora `crea_de_programa` lo apunta antes de encolarlo (y
+  `vivos` se suma antes). Con tres QEMU a la vez (8, 8 y 4 procesadores),
+  24 arranques de 24 bien; el núcleo de la etapa 7, en las mismas, fallaba
+  en la mitad.
+- Y una carrera de la propia prueba de MSENALES: el hijo que debía morir
+  por SIGPIPE podía escribir antes de que el padre cerrase su lado de
+  leer (con 8 procesadores, pasaba); ahora se cierra antes del `fork`.
 
 ### Qué hace
 
@@ -2216,6 +2230,8 @@ Hispa-64 0.8.0. Los módulos y programas nuevos y lo que cambia:
 | `tty64.cas` | `ESC [ J`, `K`, `H`, `A`, `B`, `C`, `? 25 h/l` |
 | `smp64.cas` | el aviso de la TLB, 2 s otra vez |
 | `tubos64.cas` | la carrera al cerrar (arriba) |
+| `hilos64.cas`, `procesos.cas` | `crea_de_programa` apunta el hilo antes de encolarlo (arriba) |
+| `fisica64.cas` | las zonas apartadas, hasta 96 (arriba) |
 | `hispa64.cas` | el hilo «pantalla», la opción `escritorio`, 0.8.0 |
 | `programas/ventanas/` | `hv.h` (el protocolo), `hdisp.h` (fbdev y evdev para musl), `ventanas.c` (VENTANAS), `notas.c` (NOTAS) |
 | `programas/hazventanas.sh` | VENTANAS, NOTAS, PLUMA y CUENTAS, con musl y la biblioteca común de la oficina (los objetos, en `build/ventanas-obj`) |
@@ -2223,3 +2239,142 @@ Hispa-64 0.8.0. Los módulos y programas nuevos y lo que cambia:
 | `nucleo32/oficina/comun/so_hispa64.c` | la capa «so» de la oficina para Hispa-64 |
 | `pantallazo.py` | el comparador: `foto`, `cuenta` (los puntos de un color en un rectángulo), `oscuros`, `difiere` |
 | `programas/teclas.py` | `{ctrl-LETRA}`, `{alt-f4}`, `{logo}`, `{ctrl-esc}` |
+
+
+Lo que dice al arrancar (lo nuevo; QEMU, q35, por UEFI):
+
+```
+MDISP: los dispositivos (/dev/shm, /dev/fb0, /dev/input/event0, /dev/null, /dev/zero); estático
+  /dev/shm: 256 KB compartidos con otro programa (execve), por su nombre
+  /dev/fb0: 1280x800, 32 bits, 5120 octetos por línea, 8000 KB (con el búfer de atrás)
+  /dev/input/event0: «Hispa-64: teclado y puntero»
+MDISP: todo bien (29 pruebas)
+```
+
+Y en el escritorio (la salida de VENTANAS, por el puerto serie):
+
+```
+VENTANAS: en marcha: 1280x800, 1280 puntos por línea; el protocolo en /dev/shm/hispa-ventanas (293 KB)
+VENTANAS: arranca /NOTAS (proceso 4)
+VENTANAS: ventana nueva «Notas - NOTA.TXT» del proceso 4: 768x459
+NOTAS: guardado (46 octetos)
+VENTANAS: ventana «Notas - NOTA.TXT» movida a (240, 148)
+VENTANAS: menú Inicio abierto
+VENTANAS: arranca /PLUMA (proceso 5)
+VENTANAS: ventana nueva «Pluma» del proceso 5: 1152x689
+pluma: guardado C:\DOCUMENT\carta.PLU (PLU)
+VENTANAS: Alt+F4: cerrar «carta.PLU - Pluma»
+cuentas: guardado C:\DOCUMENT\libro.HOJ
+VENTANAS: salir del escritorio
+VENTANAS: fuera; la pantalla vuelve a la consola
+```
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **105 pruebas, todas bien** (eran 101),
+unos 31 minutos con el servidor. Lo de la etapa 8:
+
+- **MDISP en cada arranque** (con las demás de musl, por multiboot sin
+  pantalla —`/dev/fb0` da ENXIO, como debe— y por UEFI con ella): `/dev/null`
+  y `/dev/zero`; **`/dev/shm` entre dos programas que no son padre e hijo**
+  (el otro es el mismo MDISP arrancado con `execve`, que la abre por su
+  nombre, comprueba los 256 KB y escribe los suyos, que el primero ve),
+  O_EXCL (EEXIST), `shm_unlink` (luego ENOENT), `ftruncate` más corto con
+  ella puesta; `/dev/fb0`: los dos ioctl, `mmap` de la pantalla y del búfer
+  de atrás, **otro proceso no puede tenerla a la vez (EBUSY)**, un dibujo en
+  el búfer de atrás copiado con `FBIO_HISPA_COPIA` y comprobado en la
+  pantalla, `FBIOPAN_DISPLAY`; `/dev/input/event0`: EVIOCGNAME,
+  EVIOCGVERSION, EAGAIN, `poll` con plazo, EVIOCGRAB. Y después, **nada de
+  más**: «Después de musl» comprueba también que no queda memoria
+  compartida, y la memoria (con el búfer de atrás ya soltado), la de antes.
+- **Por UEFI, con el teclado del monitor de QEMU y la tableta USB por QMP**
+  (una sola vuelta de unos 3 minutos, con un disco FAT32 con DOCUMENT y otro
+  exFAT hecho con hazexfat.py):
+  - `MDISP sucesos 7`: **la a** (KEY_A pulsada, EV_LETRA 97, KEY_A soltada),
+    **la tableta en (640, 400)** (EV_ABS exactos) y **la ñ** (KEY_SEMICOLON:
+    el sitio de la ñ);
+  - `VENTANAS NOTAS=/sata2/NOTA.TXT`: escribir «Hola, exFAT: ñandú y
+    pingüino.», Intro y otra línea, Ctrl+G: **NOTA.TXT en el disco exFAT,
+    comprobado con miraexfat.py** (el volumen bien y lo escrito, con ñ y ü);
+    el pantallazo: el título de la activa (unos 17.000 puntos del azul
+    oscuro), la letra (cientos de puntos oscuros) y el botón Inicio;
+  - **arrastrar la ventana** por el título con la tableta (de (300, 33) a
+    (500, 133)): «movida a (240, 148)», y en el pantallazo el título está
+    donde debe (y cambian unos 340.000 puntos);
+  - **el menú Inicio con el ratón** (en el pantallazo, su cabecera) y desde
+    él **Pluma 2**: escribir, Ctrl+G, «carta» e Intro: **DOCUMENT/carta.PLU
+    en el disco FAT32** (1758 octetos); el pantallazo: la página blanca y lo
+    escrito; Alt+F4 («pluma: adiós»);
+  - **Cuentas 2** desde el menú: 12, 30 y `=A1*A2+1` (en el pantallazo, las
+    cifras de A1 a A3), Ctrl+G, «libro»: **DOCUMENT/libro.HOJ**; Alt+F4;
+    `fsck.fat -n` sin quejas;
+  - **salir del escritorio** desde el menú: la consola vuelve entera (unos
+    27.000 puntos grises en el pantallazo); **`cls` la borra de verdad**
+    (quedan 32 puntos: «/> » y **el cursor, una raya de 8 × 2 justo debajo
+    de la casilla 3**).
+- Lo de las etapas 0 a 7, igual (las cuentas de la unidad en memoria, 30
+  archivos ahora; uname 0.8.0); el aviso de la TLB con su plazo de 2 s otra
+  vez, sin pasarse en ninguna de las vueltas (con varios procesadores, por
+  UEFI y con MALO a la vez).
+
+`SOLO=castel64` (con CASTEL64 y ENSAMB64 el núcleo sale igual, octeto a
+octeto): **80 bien y 0 mal** (36 minutos; dentro, `nucleo64/pruebas.sh` con
+CASTEL64 y ENSAMB64: 106 bien y 0 mal). Una primera pasada, a la vez que
+los arranques del CD y del disco de la entrega y las pruebas de otras
+sesiones, dio 79 y 1: tres cosas de tiempos con el servidor muy cargado
+(un «dormir» que se pasó 72 ms, una tecla del monitor perdida); repetida
+sin nada más mío a la vez, todo bien.
+
+Los pantallazos se comprueban por lo que tienen (cuántos puntos de un color
+en cada sitio, cuántos oscuros, cuántos cambian de uno a otro), no punto a
+punto con uno guardado: el reloj de la barra cambia, y así una mejora del
+dibujo no rompe las pruebas.
+
+Las imágenes de la carpeta del taller
+(`Pruebas/Pendientes/VirtualBox/Hispa-64-etapa-8/`): el disco por UEFI (q35, 2 procesadores,
+`-cpu max`, la tableta USB), arrancado en QEMU con la entrada 1 hasta el
+escritorio y el menú Inicio abierto con Ctrl+Esc (en el pantallazo: Pluma,
+Cuentas, Notas y «Salir del escritorio»); y el CD por la BIOS, hasta el
+escritorio también («VENTANAS: en marcha: 1280x800»). En la carpeta, un
+LEEME.TXT con cómo crear la máquina, qué probar y qué devolver si falla
+(el puerto serie a un archivo, una foto y el VBox.log).
+
+Con varios procesadores y el servidor cargado salió el fallo de `p.hilo`
+(arriba): la primera pasada dio 101 bien y 4 mal (todo en la vuelta de 8
+procesadores: el de MSENALES), la segunda 96 y 9 (dos vueltas colgadas en
+MALO); reproducido con tres QEMU a la vez y un guion que, si la salida se
+para 40 s, saca los registros por el monitor (los procesadores, todos en
+`hlt`), y también con el núcleo de la etapa 7. Arreglado: 105 y 0.
+
+### Lo que queda para la etapa 9 (y más adelante)
+
+- **La red** (la etapa 9 del plan): los drivers de cable (Realtek
+  8111/8168, Intel I219 y e1000e en QEMU, USB RTL8153), TCP/IP con DHCP y
+  DNS, `socket`, `connect`, `bind`, `accept` de POSIX (con `poll` y
+  `epoll`), y TLS con BearSSL como en Hispa-Pentium; se verá con una
+  descarga por HTTPS, NTP y SSH. La Wi-Fi (Intel AX201/AX211), en paralelo.
+  `getrandom` ya está; faltan `/dev/urandom`, `eventfd` y `timerfd` (los
+  piden las bibliotecas de red y los navegadores).
+- **Despertar en vez de mirar**: `/dev/input/event0`, `poll`, `epoll` y el
+  servidor de ventanas miran de 10 en 10 ms; con la red hará falta una
+  espera que despierte desde los drivers (sin el cerrojo del ratón tomado).
+- **El lector de PDF y abrir docx y xlsx de verdad en el taller**: Pluma y
+  Cuentas ya los leen (su código es el de Hispa-Pentium); falta probarlos
+  con archivos del taller y el lector de PDF (Hispa-PDF) con su capa «so».
+- **El touchpad y el ratón del taller en el escritorio**: en QEMU va la
+  tableta; el touchpad I2C-HID y los ratones USB dan EV_ABS igual (el núcleo
+  lleva la posición), pero falta verlo en los portátiles. El ratón PS/2
+  aún no está (en VirtualBox, «Tableta USB»).
+- El dibujo con **SIMD** (copiar y mezclar con SSE2/AVX2), la
+  **transparencia** de las ventanas y las sombras; **cambiar el tamaño**
+  también por los bordes (hoy, la esquina); más **formas del puntero**.
+- Una **consola en una ventana** (un emulador de terminal sobre `/dev/pts`):
+  hoy, para volver al intérprete hay que salir del escritorio.
+- **La caché de páginas compartida** (de la etapa 7): `mmap` de archivos sin
+  copiar y los ejecutables compartidos entre procesos (Pluma y Cuentas,
+  estáticas, ocupan 0,8 MB cada una por proceso).
+- Lo demás de la etapa 7 que sigue pendiente (control de trabajos,
+  `/proc`, la tabla de descriptores con cerrojo, ASLR...).
+- La hora: el reloj de la barra es el del núcleo, que toma el de la CMOS como
+  UTC; en los equipos con Windows la CMOS va en hora local (como en
+  Hispa-Pentium, habrá que decidir una zona).
