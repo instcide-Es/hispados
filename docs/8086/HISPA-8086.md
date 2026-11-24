@@ -823,6 +823,19 @@ de verdad en 1Ah los pierde (los de texto y los programas, no).
 Pendiente: el puerto paralelo (más rápido, y lo tienen todas estas máquinas)
 y un XMODEM de bloques de 1 K.
 
+## Juegos: DERRIBO
+
+El primer juego de Hispa-8086 va en su propio disquete de 360 K
+(`build/juegos8086-360.img`, con unas instrucciones en `JUEGOS.TXT`):
+**DERRIBO**, un juego nuestro de pala, pelota y ladrillos, con diez muros
+propios. CGA de 320×200 a cuatro colores (y EGA y VGA), o texto con MDA y
+Hercules; un modo monocromo (`DERRIBO /M`) para los monitores de fósforo;
+la misma velocidad en cualquier máquina (el 8254 a 72,8 tics por segundo);
+ladrillos y premios que se distinguen por la forma y por una letra, no por
+el color; teclado, ratón y palanca; la mejor puntuación en `DERRIBO.REC`.
+Ocupa 6 K. Cómo se hacían estos juegos en el PC de 1981 a 1986, qué hace
+DERRIBO y cómo se prueba: [JUEGO-DERRIBO.md](JUEGO-DERRIBO.md).
+
 ## Cómo se construye y se prueba
 
 ```
@@ -864,6 +877,8 @@ partes (veintiuna) y tarda unos TIEMPO minutos;
 | `h8086/prueba/BUCLE.BAT`, `SUB.BAT`, `SUB2.BAT` | los lotes de la prueba de FOR, LLAMAR y DESPLAZAR |
 | `h8086/prueba/cuenta.asm`, `saludo.asm` | la cuenta de sectores leídos y un controlador de carácter, para la prueba |
 | `h8086/prueba/partes_09.sh`, `partes_10.sh` | las partes de la prueba que llegaron con la 0.9 y con la 0.10 |
+| `h8086/juegos/derribo.asm`, `JUEGOS.TXT` | DERRIBO, el juego de pala y ladrillos, y las instrucciones del disquete de juegos |
+| `h8086/prueba/partes_juegos.sh` | la parte de la prueba de los juegos (DERRIBO, con su prueba del motor) |
 | `h8086/prueba/xms.asm` | XMS.COM: prueba del gestor de memoria extendida, de A20 y de la HMA |
 | `h8086/prueba/v86_teclado.js`, `v86_discos.js` | TECLADO y dos disqueteras en el emulador v86 de la web (opcional) |
 | `h8086/prueba/prueba.sh` | la prueba automática, por partes: `SOLO="partir sistema" ./prueba/prueba.sh` corre solo esas |

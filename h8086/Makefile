@@ -133,3 +133,17 @@ clean:
 	rm -rf $(B)
 
 .PHONY: all prueba clean
+
+# ---- el disquete de juegos (build/juegos8086-360.img): DERRIBO ----
+# Va aparte del sistema (que tiene que caber solo en 360 K). La prueba de
+# DERRIBO está en prueba/partes_juegos.sh.
+JUEGOS = $(B)/DERRIBO.COM juegos/JUEGOS.TXT
+$(B)/DERRIBO.COM: juegos/derribo.asm | $(B)
+	$(CP437) $< $(B)/gen/derribo.asm && $(NASM) -f bin -o $@ $(B)/gen/derribo.asm
+$(B)/juegos8086-360.img: $(JUEGOS)
+	rm -f $@
+	$(CP437) juegos/JUEGOS.TXT $(B)/gen/juegos.tmp && sed 's/$$/\r/' $(B)/gen/juegos.tmp > $(B)/gen/JUEGOS.TXT
+	mformat -C -f 360 -v JUEGOS -i $@ ::
+	mcopy -i $@ $(B)/DERRIBO.COM $(B)/gen/JUEGOS.TXT ::
+all: $(B)/juegos8086-360.img
+prueba: $(B)/juegos8086-360.img
