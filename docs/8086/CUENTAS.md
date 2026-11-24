@@ -5,7 +5,7 @@
 CUENTAS es la hoja de cálculo de Hispa-8086. Está pensada para un PC o un XT
 con un 8088 a 4,77 MHz, 256 K de memoria y cualquier tarjeta de vídeo (MDA,
 Hercules, CGA, EGA o VGA) en 80 columnas, y cabe en un disquete de 360 K.
-Es un solo programa, `CUENTAS.COM`, de **16,7 K**, escrito entero en
+Es un solo programa, `CUENTAS.COM`, de **16,4 K** (16.790 octetos), escrito entero en
 ensamblador de 8086. Está en el disquete de Oficina, aparte del sistema.
 
 Este documento cuenta tres cosas: qué hojas de cálculo había entre 1979 y
@@ -269,7 +269,7 @@ Se elige por la extensión, al abrir y al guardar. Sin extensión, `.CTA`.
 
 ## 6. Memoria y medidas
 
-- `CUENTAS.COM`: **16.660 octetos**. En memoria, el programa con sus búferes y
+- `CUENTAS.COM`: **16.790 octetos**. En memoria, el programa con sus búferes y
   su pila ocupa unos 26 K.
 - Lo demás se pide al sistema y se reparte así: una décima parte para cada
   búfer de deshacer, otra para el índice y el resto para las celdas (hasta

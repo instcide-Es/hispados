@@ -236,6 +236,8 @@ falta:
         ret
 
 expr:
+        cmp sp, pila_ini + 512      ; (demasiados paréntesis: no cabe en la pila)
+        jb sintaxis
         call e_suma
         call blancos
         mov ah, 1

@@ -841,7 +841,7 @@ de las dependencias, y avisa de las referencias circulares. Tiene deshacer
 (Ctrl+Z); copiar con referencias relativas y fijas (`$A$1`); formatos de
 euros, pesetas, tanto por ciento y fecha; ordenar e imprimir. Guarda en su
 formato (.CTA), en .CSV con «;» y en .DIF, según la extensión. Con `/G` o
-`/I` convierte o imprime sin pantalla. Ocupa 16,7 K. La historia de las hojas
+`/I` convierte o imprime sin pantalla. Ocupa 16,4 K (16.790 octetos). La historia de las hojas
 de cálculo de entonces, lo que tomamos de ellas y lo que hacemos mejor están
 en [CUENTAS.md](CUENTAS.md).
 

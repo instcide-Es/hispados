@@ -2164,8 +2164,12 @@ c_pegar:
         mov [o_f], dx
         mov al, bl
         sub al, [q_c1]
+        mov ah, al
+        cmp byte [p_ancho], 0       ; (las 256 columnas: sin vuelta)
+        je .c0
         xor ah, ah
         div byte [p_ancho]
+.c0:
         add ah, [k_c1]
         mov [o_c], ah
         pop bx
@@ -2796,5 +2800,6 @@ en_texto    resb 1
 sin_calc    resb 1
 t_dec       resb 1
 alignb 2
+pila_ini:
             resb 2048
 pila_fin:
