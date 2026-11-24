@@ -1985,6 +1985,8 @@ for hc in xhci ehci; do
     "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
     "^carpetas: 70 archivos en PD: 70 hechos; la carpeta tiene 72 entradas" "^escribe: todo queda como estaba (los mismos clusters libres): cierto$" \
     "; archivos abiertos: 0$" "^\[código 5\]"
+  mira "$que: (0.8.10) el teclado USB empieza con Bloq Num apagado: SET_REPORT de las luces a 0 al ponerse en marcha (el Acer One 10: su firmware lo deja encendido)" \
+    "^teclado: la BIOS deja Bloq Num apagado$" "^usb: teclado (aparato [0-9]*): Bloq Num apagado (SET_REPORT de las luces: bien)$"
   if sano $N/u$hc.img; then ok "$que: la memoria USB queda sana (fsck.fat: $(tail -n 1 $P/fsck.txt | sed 's/^[^:]*: //'))"
   else ko "$que: fsck.fat encuentra mal la memoria USB:"; sed 's/^/        /' $P/fsck.txt | head -12; fi
   saca $N/u$hc.img TEXTOS/LARGO.TXT $N/largo.txt; saca $N/u$hc.img COPIA.TXT $N/copia.txt; saca $N/u$hc.img MARIA.TXT $N/maria.txt
@@ -1992,6 +1994,14 @@ for hc in xhci ehci; do
     ok "$que: mtools ve en la memoria lo copiado (igual que el original) y lo tecleado (con sus letras)"
   else ko "$que: lo escrito en la memoria USB no está bien"; fi
 done
+# 6 bis. (0.8.10) las luces del teclado USB siguen a Bloq Num del sistema:
+# con Bloq Num, SET_REPORT con el bit 0 (y el teclado numérico da números);
+# sin él, a 0 otra vez
+MODULOS= MAQUINA=pc,i8042=off QEMU_MAS="-device qemu-xhci,id=u -device usb-kbd,bus=u.0" \
+  $AQUI/nucleo32/probar.sh "" ":pausa 1" ":tecla num_lock" ":pausa 1" ":tecla kp_4 kp_2 ret" ":tecla num_lock" ":pausa 1" apagar > $N/luces.sal 2>&1
+S=$N/luces.sal
+mira "(0.8.10) las luces del teclado USB siguen a Bloq Num: encendido, SET_REPORT con 01h (y 4 y 2 del teclado numérico dan «42»); apagado, 00h" \
+  "^usb: teclado (aparato 0): Bloq Num apagado (SET_REPORT de las luces: bien)$" "usb: teclado (aparato 0): luces 01h " "^42$" "usb: teclado (aparato 0): luces 00h "
 # 7. detrás de un concentrador (aparatos de USB 1.1), con el xHCI
 ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off QEMU_MAS="-device qemu-xhci,id=u -device usb-hub,bus=u.0,port=1 -device usb-kbd,bus=u.0,port=1.1 -device usb-mouse,bus=u.0,port=1.2 -drive id=mu,file=$P/d16.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,port=1.3,drive=mu" \
   $AQUI/nucleo32/probar.sh "" "lanzar prueba.bin" :espera "lanzar hola.bin" apagar > $N/hub.sal 2>&1

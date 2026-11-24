@@ -52,6 +52,7 @@ módulo Usbhid
     variable último_ratón: arreglo [8] de byte  ; el último informe de un ratón, tal cual
     variable último_largo: nat32
     variable informes_dichos: nat32             ; (TERMO) los primeros informes, al registro
+    variable luces_dichas: nat32                ; (0.8.10) los cambios de las luces, al registro (los 16 primeros)
     variable hids: arreglo [MAX_HID] de Hid
     variable n_hids: nat32                      ; los que hay (en «hids», donde haya sitio)
     variable en_marcha: bool                    ; la tarea que los atiende
@@ -317,7 +318,13 @@ módulo Usbhid
             fin
             ; (0.8.10) las luces, si han cambiado (Bloq Num, Bloq Mayús)
             para i desde 0 hasta MAX_HID - 1 hacer
-                si hids[i].usado y hids[i].teclado y hids[i].luces <> 0xFF y hids[i].luces <> luces_usb() entonces pon_luces(hids[i]) fin
+                si hids[i].usado y hids[i].teclado y hids[i].luces <> 0xFF y hids[i].luces <> luces_usb() entonces
+                    pon_luces(hids[i])
+                    si luces_dichas < 16 entonces
+                        luces_dichas := luces_dichas + 1
+                        apunta2("usb: teclado (aparato %u): luces %02Xh (bit 0, Bloq Num; bit 1, Bloq Mayús)\n", hids[i].aparato, luces_usb())
+                    fin
+                fin
             fin
             ; la tecla que sigue pulsada se repite
             si repite <> 0 y tics >= repite_cuándo entonces
