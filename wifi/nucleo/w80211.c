@@ -180,6 +180,13 @@ static const char *nombre_seg(int s)
 	return n[s];
 }
 
+static int mismo_nombre(const o8 *a, const o8 *b)
+{
+	while (*a && *a == *b)
+		a++, b++;
+	return *a == *b;
+}
+
 static void fin_barrido(void)
 {
 	int i;
@@ -188,11 +195,17 @@ static void fin_barrido(void)
 	if (w.r->barrido)
 		w.r->barrido(0);
 	hl_log(2, "802.11: búsqueda terminada, %d redes\n", w.nredes);
+	/* (0.8.10, privacidad) el BSSID entero y los nombres de las redes de
+	 * los vecinos sitúan la casa en un mapa (las bases de datos públicas de
+	 * Wi-Fi) y WIFI.LOG se manda en los informes: del BSSID, los dos
+	 * últimos octetos; el nombre, solo el de la red que se ha pedido */
 	for (i = 0; i < w.nredes; i++) {
 		struct w_red *r = &w.redes[i];
-		hl_log(2, "  %02x:%02x:%02x:%02x:%02x:%02x canal %2d %4d dBm %-17s «%s»\n",
-		       r->bssid[0], r->bssid[1], r->bssid[2], r->bssid[3], r->bssid[4], r->bssid[5],
-		       r->canal, r->senal, nombre_seg(r->seguridad), r->ssid);
+		int nuestra = w.ssid[0] && mismo_nombre(r->ssid, w.ssid);
+
+		hl_log(2, "  ...:%02x:%02x canal %2d %4d dBm %-17s %s%s%s\n",
+		       r->bssid[4], r->bssid[5], r->canal, r->senal, nombre_seg(r->seguridad),
+		       nuestra ? "«" : "(otra red)", nuestra ? (const char *)r->ssid : "", nuestra ? "»" : "");
 	}
 	if (w.estado == W_CONECTADO) {
 		w.r->canal(w.ap.canal);
@@ -420,8 +433,8 @@ static void empieza_conexion(void)
 	}
 	w.ap = *m;
 	w.senal = m->senal;
-	hl_log(2, "802.11: conectando con «%s» (%02x:%02x:%02x:%02x:%02x:%02x, canal %d, %d dBm, %s)\n",
-	       w.ap.ssid, m->bssid[0], m->bssid[1], m->bssid[2], m->bssid[3], m->bssid[4], m->bssid[5],
+	hl_log(2, "802.11: conectando con «%s» (...:%02x:%02x, canal %d, %d dBm, %s)\n",
+	       w.ap.ssid, m->bssid[4], m->bssid[5],
 	       m->canal, m->senal, nombre_seg(m->seguridad));
 	w.r->canal(w.ap.canal);
 	w.r->bss(w.ap.bssid, 0, w.ap.intervalo, (w.ap.capacidad & 0x0400) != 0, w.ap.velocidades, w.ap.nvel);

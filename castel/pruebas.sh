@@ -5816,14 +5816,14 @@ MEMORIA=64 ESCRIBE=1 DISCO=$Wf/g.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/pr
   "redwifi /redes" ":pausa 2" "redwifi /conectar HispaPrueba /abierta" ":pausa 2" "redwifi /estado" > $Wf/g.sal 2>&1
 tr -d '\r' < $Wf/g.sal > $Wf/g.txt
 S=$Wf/g.txt
-mira "una «HispaPrueba» ABIERTA falsa al lado: se conecta a la de WPA2 (02:48:53:aa:00:01), no a la abierta (:04)" \
-  "802.11: conectando con «HispaPrueba» (02:48:53:aa:00:01, canal 6" "^Conectado a «HispaPrueba»\.$"
+mira "una «HispaPrueba» ABIERTA falsa al lado: se conecta a la de WPA2 (...:00:01: el BSSID, recortado), no a la abierta (:04)" \
+  "802.11: conectando con «HispaPrueba» (\.\.\.:00:01, canal 6" "^Conectado a «HispaPrueba»\.$"
 mira "la lista enseña las dos por separado: la WPA2, recordada; la abierta, sin candado ni «recordada»" \
   "^  [1-4]  HispaPrueba  *6  ████ -47 dBm  WPA2  (conectada)$" "^  [1-4]  HispaPrueba  *1  ████ -47 dBm  abierta$"
 mira "pedir la abierta a propósito: no se usa (puede ser falsa) y lo dice; sigue conectada a la WPA2" \
   "^Hay una red ABIERTA que se llama «HispaPrueba», como una que se recordó con contraseña: puede ser falsa y no se usa" \
   "«HispaPrueba» está recordada con contraseña (WPA2) y esta es abierta: no se conecta" "^Conectado a «HispaPrueba»$"
-if grep -q "conectando con «HispaPrueba» (02:48:53:aa:00:04" $S; then ko "se ha conectado a la abierta falsa"; else ok "ni un intento con la abierta falsa"; fi
+if grep -q "conectando con «HispaPrueba» (\.\.\.:00:04" $S; then ko "se ha conectado a la abierta falsa"; else ok "ni un intento con la abierta falsa"; fi
 saca $Wf/g.img WIFI.INI $Wf/g.ini
 if grep -q "^Red=1,4869737061507275656261,2:[0-9A-F]\{112\}.$" $Wf/g.ini; then ok "WIFI.INI sigue con la clave de la WPA2 (no se ha rebajado a abierta)"
 else ko "WIFI.INI ha cambiado la red recordada:"; sed 's/^/        /' $Wf/g.ini; fi
@@ -5831,8 +5831,8 @@ MEMORIA=64 DISCO=$Wf/g.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh ""
 tr -d '\r' < $Wf/g2.sal > $Wf/g2.txt
 S=$Wf/g2.txt
 mira "al arrancar otra vez, con la falsa al lado, se conecta sola a la WPA2" "Se conecta sola a la red recordada «HispaPrueba»" \
-  "802.11: conectando con «HispaPrueba» (02:48:53:aa:00:01" "^Conectado a «HispaPrueba»$"
-if grep -q "conectando con «HispaPrueba» (02:48:53:aa:00:04" $S; then ko "al arrancar, se ha ido a la abierta falsa"; else ok "y ni lo intenta con la falsa"; fi
+  "802.11: conectando con «HispaPrueba» (\.\.\.:00:01" "^Conectado a «HispaPrueba»$"
+if grep -q "conectando con «HispaPrueba» (\.\.\.:00:04" $S; then ko "al arrancar, se ha ido a la abierta falsa"; else ok "y ni lo intenta con la falsa"; fi
 # 5. el escritorio: el icono (con el aspa, sin conectar), la ventana del Wi-Fi, la contraseña con asteriscos, conectar; Configuración
 cp $Wf/d.img $Wf/v.img
 CAPTURAS=$G MEMORIA=64 DISCO=$Wf/v.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 8" ":captura wf1" ":clic 720 583" ":pausa 4" ":captura wf2" \

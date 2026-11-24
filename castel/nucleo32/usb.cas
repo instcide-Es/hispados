@@ -558,23 +558,37 @@ módulo Usb
     ; reinicio del puerto, un rato, y otra vez (como Windows y Linux: hay
     ; aparatos que la primera vez no contestan bien). En el registro queda el
     ; primer fallo, con «luego sí» si a la segunda ha ido.
+    ; (0.8.10, el ASUS GL553VD: «en el puerto 2 (velocidad plena) no se deja
+    ; enumerar (paso 4)», que en el arranque de antes no salía) hasta dos
+    ; reintentos, el segundo tras medio segundo y con el reinicio más largo
+    ; que da tiempo a los aparatos lentos (como los dos esquemas y los
+    ; reintentos de hub_port_init de Linux)
     función enumera_o_reintenta(hc_clase: nat32, hc: nat32, p: nat32, v: nat32): nat32
-        variable r, n0: nat32
+        variable r, n0, vez: nat32
         n0 := n_fallos
         r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v)
         si r <> NINGUNO o n_fallos = n0 entonces devolver r fin
-        espera_ms(100)
-        según hc_clase
-            caso HC_XHCI: v := Xhci.puerto_reinicia(hc, p)
-            caso HC_EHCI: v := Ehci.puerto_reinicia(hc, p)
-            si no: v := Uhci.puerto_reinicia(hc, p)
+        vez := 1
+        mientras vez <= 2 hacer
+            si vez = 1 entonces espera_ms(100) sino espera_ms(500) fin
+            según hc_clase
+                caso HC_XHCI: v := Xhci.puerto_reinicia(hc, p)
+                caso HC_EHCI: v := Ehci.puerto_reinicia(hc, p)
+                si no: v := Uhci.puerto_reinicia(hc, p)
+            fin
+            si v = 0 entonces romper fin
+            si vez = 1 entonces espera_ms(50) sino espera_ms(200) fin
+            r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v)
+            si r <> NINGUNO entonces
+                si n_fallos > n0 entonces fallos[n0].luego_bien := cierto fin
+                romper
+            fin
+            vez := vez + 1
         fin
-        si v = 0 entonces devolver NINGUNO fin
-        espera_ms(50)
-        r := enumera(hc_clase, hc, p, SIN_APARATO, 0, v)
-        si r <> NINGUNO y n_fallos > n0 entonces fallos[n0].luego_bien := cierto fin
-        si r = NINGUNO y n_fallos > n0 + 1 entonces n_fallos := n0 + 1 fin    ; (el mismo, una vez)
-        devolver r
+        ; (el mismo fallo, una vez; si a la segunda o la tercera ha ido, «luego sí»)
+        si n_fallos > n0 + 1 entonces n_fallos := n0 + 1 fin
+        si r <> NINGUNO entonces devolver r fin
+        devolver NINGUNO
     fin
 
     ; busca las controladoras USB, las toma y enumera lo que haya

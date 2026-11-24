@@ -884,11 +884,17 @@ static int escanea(void)
 	memcpy(pr + 26, velocidades, sizeof velocidades);
 	hay_phy = 0;
 	escaneando = 1;
-	if (orden(1, C_SCAN_LMAC, s, sizeof s, 2000) < 0 || estado_resp() != 0) {
+	/* (0.8.10, el ASUS GL553VD: «no acepta el escaneo (FFFFFFFF)» y luego
+	 * escaneaba bien) la respuesta puede no traer el estado (menos de 4
+	 * octetos): FFFFFFFF es «no lo dice», no un fallo; solo vale como
+	 * fallo un estado que diga algo distinto de 0 */
+	if (orden(1, C_SCAN_LMAC, s, sizeof s, 2000) < 0 || (resp_n >= 4 && estado_resp() != 0)) {
 		escaneando = 0;
 		hl_log(0, "iwl: el firmware no acepta el escaneo (%08X)\n", estado_resp());
 		return -1;
 	}
+	if (resp_n < 4)
+		hl_log(2, "iwl: la respuesta al escaneo no trae su estado (%d octetos): se da por buena\n", resp_n);
 	hl_log(2, "iwl: escaneando %d canales de 2,4 GHz\n", n);
 	return 0;
 }
