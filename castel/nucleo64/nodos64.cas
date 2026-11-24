@@ -71,7 +71,9 @@ módulo Nodos64
         n_ent: nat32                ; cuántas entradas ocupa su nombre (FAT: las largas y la 8.3)
         atrib: nat32                ; los atributos de FAT
         sin_cadena: nat32           ; exFAT: los cúmulos van seguidos (NoFatChain)
-        nada: nat32
+        centésimas: nat32           ; exFAT: las centésimas de segundo de mtime (los «10 ms», de 0 a 199 con el segundo impar)
+        padre: nat64                ; exFAT: el nodo de su carpeta (con una referencia: para escribir su grupo de entradas)
+        n_cum: nat64                ; exFAT: cuántos cúmulos tiene (lo que dice DataLength, redondeado)
     fin
 
     público tipo Montaje = estructura
@@ -98,6 +100,17 @@ módulo Nodos64
         etiqueta: arreglo [12] de byte
         ; (para recorrer carpetas sin nodo: el último cúmulo visto)
         pc_primero, pc_idx, pc_cum: nat64
+        ; FAT12 y FAT16: la raíz fija (no es una cadena de cúmulos)
+        bits_fat: nat32             ; 12, 16 o 32
+        sucio: nat32                ; exFAT: ya se ha puesto VolumeDirty (se quita al vaciar)
+        raíz_ini: nat64             ; el octeto de la raíz fija
+        raíz_ents: nat64            ; cuántas entradas caben en ella (no crece)
+        ; exFAT, para escribir
+        mapa_ini: nat64             ; el octeto del mapa de bits de los cúmulos (seguido)
+        mapa_oct: nat64             ; sus octetos
+        mayús: nat64                ; la tabla de mayúsculas del volumen (65536 de 16 bits), o 0
+        vol_flags: nat32            ; VolumeFlags al montar
+        sucio_antes: nat32          ; ya estaba sucio al montar (no se limpia: lo arregla un chkdsk)
     fin
 
     público variable montajes: arreglo [MAX_MONTAJES] de Montaje

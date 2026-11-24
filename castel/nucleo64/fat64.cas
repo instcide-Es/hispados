@@ -1,7 +1,9 @@
 ; =============================================================================
-;  fat64.cas - Hispa-64, etapa 5: FAT32, para leer y escribir (docs/64/HISPA-64.md,
-;  sección 11), según «Microsoft FAT Specification» (la de 2005). Es lo que
-;  traen las memorias USB, las tarjetas y la partición EFI.
+;  fat64.cas - Hispa-64, etapas 5 y 6: FAT32, FAT16 y FAT12, para leer y
+;  escribir (docs/64/HISPA-64.md, secciones 11 y 12), según «Microsoft FAT
+;  Specification» (la de 2005). Es lo que traen las memorias USB, las
+;  tarjetas y la partición EFI (y las memorias viejas y las EFI pequeñas,
+;  FAT16 y FAT12).
 ;
 ;  Todo pasa por la caché de bloques (Discos64.cb_lee y cb_escribe: con
 ;  escritura diferida), así que aquí se lee y se escribe por octetos del
@@ -20,7 +22,11 @@
 ;     cúmulos, cuando nadie lo tenga abierto), renombrar y mover (también una
 ;     carpeta, con su «..»), crear y quitar carpetas («.» y «..»);
 ;   - vaciar: el FSInfo al día y la caché al disco.
-;  FAT12 y FAT16 no (las particiones EFI pequeñas pueden serlo: más adelante).
+;  FAT12 y FAT16 (etapa 6): lo mismo, con sus FAT de 12 bits (cada entrada,
+;  octeto y medio: las hay que cruzan de un sector a otro) y de 16, y la raíz
+;  fija (un número de entradas que no crece: si se llena, ENOSPC). Se sabe
+;  cuál es por el número de cúmulos, como dice la norma (menos de 4085:
+;  FAT12; menos de 65525: FAT16).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Fat64
@@ -65,26 +71,60 @@ módulo Fat64
     fin
 
     ; ---- la FAT ----
+    ; dónde está la entrada del cúmulo c dentro de la FAT (FAT12: octeto y medio)
+    función oct_fat(x: puntero a Montaje, c: nat64): nat64
+        si x.bits_fat = 12 entonces devolver c + c div 2 fin
+        si x.bits_fat = 16 entonces devolver c * 2 fin
+        devolver c * 4
+    fin
+
+    ; la entrada del cúmulo c; las marcas de FAT12 y FAT16 (fin, malo), como
+    ; las de FAT32 (0x0FFFFFF8 y más)
     función lee_fat(x: puntero a Montaje, c: nat64): nat64
         variable v: nat32
         v := 0
         si c >= x.cúmulos + 2 entonces devolver MARCA_FIN fin
-        si no cb_lee(x.disco, x.fat_ini + c * 4, nat64(dirección(v)), 4) entonces
+        si x.bits_fat = 32 entonces
+            si no cb_lee(x.disco, x.fat_ini + c * 4, nat64(dirección(v)), 4) entonces
+                fat_error := EIO
+                devolver MARCA_FIN
+            fin
+            devolver nat64(v yb 0x0FFFFFFF)
+        fin
+        si no cb_lee(x.disco, x.fat_ini + oct_fat(x, c), nat64(dirección(v)), 2) entonces
             fat_error := EIO
             devolver MARCA_FIN
         fin
-        devolver nat64(v yb 0x0FFFFFFF)
+        si x.bits_fat = 16 entonces
+            si v >= 0xFFF7 entonces v := v ob 0x0FFF0000 fin
+        sino
+            si c yb 1 <> 0 entonces v := v >> 4 sino v := v yb 0xFFF fin
+            si v >= 0xFF7 entonces v := v ob 0x0FFFF000 fin
+        fin
+        devolver nat64(v)
     fin
 
     función pon_fat(x: puntero a Montaje, c: nat64, v: nat64): bool
         variable viejo, nuevo: nat32
-        variable k: nat64
+        variable k, dó, largo_: nat64
         viejo := 0
-        si no cb_lee(x.disco, x.fat_ini + c * 4, nat64(dirección(viejo)), 4) entonces devolver falso fin
-        nuevo := (viejo yb 0xF0000000) ob (nat32(v) yb 0x0FFFFFFF)
+        dó := oct_fat(x, c)
+        largo_ := 4
+        si x.bits_fat <> 32 entonces largo_ := 2 fin
+        si no cb_lee(x.disco, x.fat_ini + dó, nat64(dirección(viejo)), largo_) entonces devolver falso fin
+        si x.bits_fat = 32 entonces
+            nuevo := (viejo yb 0xF0000000) ob (nat32(v) yb 0x0FFFFFFF)
+        sino si x.bits_fat = 16 entonces
+            nuevo := nat32(v) yb 0xFFFF
+        sino si c yb 1 <> 0 entonces
+            ; (los 12 de arriba de los dos octetos; los 4 de abajo son del cúmulo de antes)
+            nuevo := (viejo yb 0x000F) ob ((nat32(v) yb 0xFFF) << 4)
+        sino
+            nuevo := (viejo yb 0xF000) ob (nat32(v) yb 0xFFF)
+        fin
         k := 0
         mientras k < x.n_fats hacer
-            si no cb_escribe(x.disco, x.fat_ini + k * x.fat_largo + c * 4, nat64(dirección(nuevo)), 4) entonces devolver falso fin
+            si no cb_escribe(x.disco, x.fat_ini + k * x.fat_largo + dó, nat64(dirección(nuevo)), largo_) entonces devolver falso fin
             k := k + 1
         fin
         devolver cierto
@@ -191,6 +231,11 @@ módulo Fat64
     ; «crear», la carpeta crece un cúmulo a cero)
     función pos_ent(x: puntero a Montaje, d: puntero a Nodo, i: nat64, crear: bool): nat64
         variable c, por: nat64
+        ; (la raíz fija de FAT12 y FAT16: no crece)
+        si x.bits_fat <> 32 y d.clave = 0 entonces
+            si i >= x.raíz_ents entonces devolver 0 fin
+            devolver x.raíz_ini + i * 32
+        fin
         por := x.oct_cúmulo div 32
         c := cúmulo_de(x, d, i div por, crear, cierto)
         si c = 0 entonces devolver 0 fin
@@ -370,6 +415,10 @@ módulo Fat64
         e[k + 3] := byte(v >> 24)
     fin
 
+    función x_bits(m: nat32): nat32
+        devolver mm(m).bits_fat
+    fin
+
     ; el nodo de la entrada h de la carpeta d (el que ya esté en memoria, o uno nuevo)
     función nodo_de(m: nat32, d: puntero a Nodo, ref h: Ent): puntero a Nodo
         variable n: puntero a Nodo
@@ -377,7 +426,8 @@ módulo Fat64
         si n <> nulo entonces devolver n fin
         si h.e[11] yb A_CARPETA <> 0 entonces n := nuevo_nodo(m, h.pos, N_CARPETA) sino n := nuevo_nodo(m, h.pos, N_ARCHIVO) fin
         si n = nulo entonces devolver nulo fin
-        n.primero := nat64(l16(dirección(h.e[0]), 26)) ob (nat64(l16(dirección(h.e[0]), 20)) << 16)
+        n.primero := nat64(l16(dirección(h.e[0]), 26))
+        si x_bits(m) = 32 entonces n.primero := n.primero ob (nat64(l16(dirección(h.e[0]), 20)) << 16) fin
         si n.clase = N_ARCHIVO entonces n.tamaño := nat64(l32(dirección(h.e[0]), 28)) fin
         n.mtime := de_dos(l16(dirección(h.e[0]), 24), l16(dirección(h.e[0]), 22))
         n.dir_primero := d.primero
@@ -412,7 +462,7 @@ módulo Fat64
     público función fat_monta(m: nat32): bool
         variable x: puntero a Montaje
         variable b: arreglo [512] de byte
-        variable bps, spc, res, nf, total, fsz, datos, raíz, fsi: nat64
+        variable bps, spc, res, nf, total, fsz, datos, raíz, fsi, n_raíz, sec_raíz, et: nat64
         variable r: puntero a Nodo
         variable i, k: nat64
         variable buf: nat64
@@ -427,12 +477,16 @@ módulo Fat64
         total := l16(dirección(b[0]), 19)
         si total = 0 entonces total := l32(dirección(b[0]), 32) fin
         fsz := l16(dirección(b[0]), 22)
-        si fsz <> 0 o l16(dirección(b[0]), 17) <> 0 entonces devolver falso fin       ; (FAT12 o FAT16)
-        fsz := l32(dirección(b[0]), 36)
+        n_raíz := l16(dirección(b[0]), 17)
+        ; FAT12 y FAT16: la FAT con su tamaño de 16 bits y la raíz fija; FAT32: ni una ni otra
+        si fsz = 0 y n_raíz <> 0 entonces devolver falso fin
+        si fsz <> 0 y n_raíz = 0 entonces devolver falso fin
+        si fsz = 0 entonces fsz := l32(dirección(b[0]), 36) fin
         si bps <> 512 y bps <> 1024 y bps <> 2048 y bps <> 4096 entonces devolver falso fin
         si spc = 0 o spc yb (spc - 1) <> 0 o nf = 0 o nf > 4 o fsz = 0 o res = 0 entonces devolver falso fin
         si total * bps > octetos_dk(x.disco) entonces total := octetos_dk(x.disco) div bps fin
-        datos := res + nf * fsz
+        sec_raíz := (n_raíz * 32 + bps - 1) div bps
+        datos := res + nf * fsz + sec_raíz
         si datos >= total entonces devolver falso fin
         x.oct_sector := bps
         x.oct_cúmulo := bps * spc
@@ -441,20 +495,33 @@ módulo Fat64
         x.n_fats := nf
         x.datos_ini := datos * bps
         x.cúmulos := (total - datos) div spc
-        si x.cúmulos < 65525 entonces devolver falso fin
-        si x.cúmulos + 2 > fsz * bps div 4 entonces x.cúmulos := fsz * bps div 4 - 2 fin
-        raíz := l32(dirección(b[0]), 44)
-        si raíz < 2 o raíz >= x.cúmulos + 2 entonces devolver falso fin
-        x.raíz_cúmulo := raíz
-        ; (con el «mirroring» quitado, solo cuenta la FAT activa)
-        si b[40] yb 0x80 <> 0 entonces
-            x.fat_ini := x.fat_ini + nat64(b[40] yb 15) * x.fat_largo
-            x.n_fats := 1
+        ; la clase, por el número de cúmulos (como dice la norma, no por el texto «FAT16»)
+        si x.cúmulos < 4085 entonces x.bits_fat := 12
+        sino si x.cúmulos < 65525 entonces x.bits_fat := 16
+        sino x.bits_fat := 32 fin
+        si x.bits_fat = 32 y n_raíz <> 0 entonces devolver falso fin
+        si x.bits_fat <> 32 y n_raíz = 0 entonces devolver falso fin
+        si x.cúmulos + 2 > fsz * bps * 8 div x.bits_fat entonces x.cúmulos := fsz * bps * 8 div x.bits_fat - 2 fin
+        si x.bits_fat = 32 entonces
+            raíz := l32(dirección(b[0]), 44)
+            si raíz < 2 o raíz >= x.cúmulos + 2 entonces devolver falso fin
+            ; (con el «mirroring» quitado, solo cuenta la FAT activa)
+            si b[40] yb 0x80 <> 0 entonces
+                x.fat_ini := x.fat_ini + nat64(b[40] yb 15) * x.fat_largo
+                x.n_fats := 1
+            fin
+            et := 71
+        sino
+            raíz := 0
+            x.raíz_ini := (res + nf * fsz) * bps
+            x.raíz_ents := n_raíz
+            et := 43
         fin
+        x.raíz_cúmulo := raíz
         ; la etiqueta del sector de arranque (la de la raíz, si la hay, manda)
         k := 0
         mientras k < 11 hacer
-            x.etiqueta[nat32(k)] := b[nat32(71 + k)]
+            x.etiqueta[nat32(k)] := b[nat32(et + k)]
             k := k + 1
         fin
         x.etiqueta[11] := 0
@@ -464,13 +531,22 @@ módulo Fat64
         x.próximo := 2
         fsi := l16(dirección(b[0]), 48)
         x.fsinfo := 0
-        si fsi <> 0 y fsi < res entonces
+        si x.bits_fat = 32 y fsi <> 0 y fsi < res entonces
             si cb_lee(x.disco, fsi * bps, nat64(dirección(b[0])), 512) entonces
                 si l32(dirección(b[0]), 0) = 0x41615252 y l32(dirección(b[0]), 484) = 0x61417272 entonces
                     x.fsinfo := fsi * bps
                     si nat64(l32(dirección(b[0]), 488)) <= x.cúmulos entonces x.libres := l32(dirección(b[0]), 488) fin
                     si l32(dirección(b[0]), 492) >= 2 y nat64(l32(dirección(b[0]), 492)) < x.cúmulos + 2 entonces x.próximo := l32(dirección(b[0]), 492) fin
                 fin
+            fin
+        fin
+        si x.libres = 0xFFFFFFFF y x.bits_fat <> 32 entonces
+            ; FAT12 y FAT16 (no tienen FSInfo): contarlos, de uno en uno
+            x.libres := 0
+            i := 2
+            mientras i < x.cúmulos + 2 hacer
+                si lee_fat(x, i) = 0 entonces x.libres := x.libres + 1 fin
+                i := i + 1
             fin
         fin
         si x.libres = 0xFFFFFFFF entonces

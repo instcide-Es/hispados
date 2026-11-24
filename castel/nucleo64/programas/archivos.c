@@ -17,6 +17,10 @@
  *                      errores (ENOENT, EEXIST, EISDIR, ENOTDIR, ENOTEMPTY,
  *                      EXDEV, EROFS, EINVAL, ENAMETOOLONG), fsync; y deja
  *                      ULTIMO.TXT escrito sin fsync (lo vacía el apagado);
+ *                      un nombre de 255 letras (lo más: el de 256, no); y,
+ *                      si el volumen tiene RAIZFIJA.PRB (las FAT12 y FAT16:
+ *                      su raíz no crece), llena la raíz hasta ENOSPC y la
+ *                      vacía otra vez;
  *   ARCHIVOS dir RUTA  lo que hay en RUTA, con sus carpetas (como «dir /s»);
  *   ARCHIVOS rapido RUTA  escribe y lee 8 MB (con fsync) y dice cuánto tarda.
  * Lo comprueba después el anfitrión (pruebas.sh, con mtools y fsck.fat).
@@ -27,7 +31,7 @@ enum { S_STAT = 4, S_FSTAT = 5, S_PREAD = 17, S_PWRITE = 18, S_DUP = 32, S_DUP2 
        S_TRUNCATE = 76, S_FTRUNCATE = 77, S_GETCWD = 79, S_CHDIR = 80, S_RENAME = 82, S_MKDIR = 83,
        S_RMDIR = 84, S_UNLINK = 87, S_SYNC = 162, S_GETDENTS64 = 217, S_MKDIRAT = 258,
        S_NEWFSTATAT = 262, S_UNLINKAT = 263, S_RENAMEAT = 264 };
-enum { EEXIST_ = 17, EXDEV_ = 18, ENOTDIR_ = 20, EISDIR_ = 21, ENOTEMPTY_ = 39, ENAMETOOLONG_ = 36, EBUSY_ = 16 };
+enum { EEXIST_ = 17, EXDEV_ = 18, ENOTDIR_ = 20, EISDIR_ = 21, ENOTEMPTY_ = 39, ENAMETOOLONG_ = 36, EBUSY_ = 16, ENOSPC_ = 28 };
 #define O_RDONLY 0
 #define O_WRONLY 1
 #define O_RDWR 2
@@ -370,6 +374,17 @@ static void prueba(const char *m)
 	largo_[300] = 0;
 	junta(ruta, d, largo_);
 	mira(abre(ruta, O_CREAT | O_WRONLY) == -ENAMETOOLONG_, "un nombre de 300 letras: ENAMETOOLONG");
+	/* lo más largo: 255 letras (las de UTF-16 de FAT y exFAT); 256, no */
+	largo_[255] = 0;
+	largo_[254] = 'Z';
+	junta(ruta, d, largo_);
+	mira(pon_archivo(ruta, "255\n") == 0 && dice(ruta, "255\n"), "un nombre de 255 letras");
+	mira(cuenta(d, largo_, &está) > 0 && está, "y getdents64 lo da entero");
+	mira(sis(S_UNLINK, ruta, 0, 0) == 0, "y se borra");
+	largo_[255] = 'a';
+	largo_[256] = 0;
+	junta(ruta, d, largo_);
+	mira(abre(ruta, O_CREAT | O_WRONLY) == -ENAMETOOLONG_, "uno de 256: ENAMETOOLONG");
 	junta(ruta, d, "adios.txt");
 	mira(sis(S_RENAME, ruta, "/HOLA", 0) == -EXDEV_, "rename a otro montaje: EXDEV");
 	mira(abre("/NUEVO.TXT", O_CREAT | O_WRONLY) == -EROFS, "crear en la unidad en memoria: EROFS");
@@ -388,6 +403,33 @@ static void prueba(const char *m)
 	mira(pon_archivo(ruta, "Escrito sin fsync: lo vac\xc3\xad""a el apagado.\n") == 0, "ULTIMO.TXT, sin fsync");
 	pon("  la prueba en "); pon(d); pon(": crear, escribir, leer, O_APPEND, pwrite, 1,2 MB, huecos, ftruncate, ");
 	pon("nombres largos, 40 archivos, rename, unlink abierto, *at, chdir, los errores\n");
+}
+
+/* la raíz fija de FAT12 y FAT16 (la marca RAIZFIJA.PRB): se llena (ENOSPC) y se vacía */
+static void raíz_fija(const char *m)
+{
+	int k, hechos = 0, bien = 1, antes, está;
+	i64 r = 0;
+	char nom[16] = "RAIZ000.TXT";
+	antes = cuenta(m, 0, 0);
+	for (k = 0; k < 1000; k++) {
+		nom[4] = (char)('0' + k / 100); nom[5] = (char)('0' + k / 10 % 10); nom[6] = (char)('0' + k % 10);
+		junta(ruta, m, nom);
+		r = abre(ruta, O_CREAT | O_WRONLY);
+		if (r < 0) break;
+		sis(S_CLOSE, r, 0, 0);
+		hechos++;
+	}
+	mira(r == -ENOSPC_ && hechos > 0 && hechos < 1000, "la ra\xc3\xadz fija se llena: ENOSPC");
+	mira(sis(S_MKDIR, ruta, 0755, 0) == -ENOSPC_, "mkdir en la ra\xc3\xadz llena: ENOSPC");
+	mira(cuenta(m, "RAIZ000.TXT", &está) == antes + hechos && está, "getdents64 de la ra\xc3\xadz llena");
+	for (k = 0; k < hechos; k++) {
+		nom[4] = (char)('0' + k / 100); nom[5] = (char)('0' + k / 10 % 10); nom[6] = (char)('0' + k % 10);
+		junta(ruta, m, nom);
+		if (sis(S_UNLINK, ruta, 0, 0) != 0) bien = 0;
+	}
+	mira(bien && cuenta(m, 0, 0) == antes, "y se vac\xc3\xad""a otra vez");
+	pon("  la ra\xc3\xadz fija: "); pon_n(hechos); pon(" archivos hasta ENOSPC, y borrados\n");
 }
 
 static void rápido(const char *m)
@@ -464,6 +506,8 @@ int principal(i64 *sp)
 		sis(S_CLOSE, fd, 0, 0);
 		mira(sis(S_UNLINK, ruta, 0, 0) == 0, "y borrarlo");
 		prueba(montajes[i]);
+		junta(ruta, montajes[i], "RAIZFIJA.PRB");
+		if (tamaño_de(ruta) >= 0) raíz_fija(montajes[i]);
 		escritos++;
 	}
 	pon("ARCHIVOS: "); pon_n(de_prueba); pon(de_prueba == 1 ? " disco de prueba (" : " discos de prueba (");

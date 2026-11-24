@@ -106,10 +106,59 @@ módulo Vfs64
         devolver EIO
     fin
 
-    ; suelta una referencia del nodo (si era la última de uno borrado, sus cúmulos)
+    ; suelta una referencia del nodo (si era la última de uno borrado, sus
+    ; cúmulos; en exFAT, también la que tenía de su carpeta)
     función suelta(n: puntero a Nodo)
+        variable p: nat64
+        p := 0
         si n.refs = 1 y n.borrado <> 0 y mm(n.montaje).clase = FS_FAT entonces fat_suelta(n.montaje, n) fin
+        si n.refs = 1 y mm(n.montaje).clase = FS_EXFAT entonces p := ex_suelta(n.montaje, n) fin
         suelta_nodo(n)
+        si p <> 0 entonces suelta(nodo(p)) fin
+    fin
+
+    ; ---- escribir, según la clase (FAT o exFAT) ----
+    función fs_crea(m: nat32, d: puntero a Nodo, nombre: puntero a byte, carpeta: bool): puntero a Nodo
+        variable n: puntero a Nodo
+        si mm(m).clase = FS_EXFAT entonces
+            n := ex_crea(m, d, nombre, carpeta)
+            fs_error := ex_error
+        sino
+            n := fat_crea(m, d, nombre, carpeta)
+            fs_error := fat_error
+        fin
+        si n = nulo y fs_error = 0 entonces fs_error := EIO fin
+        devolver n
+    fin
+
+    función fs_escribe(n: puntero a Nodo, pos: nat64, de: nat64, cuánto_: nat64): ent64
+        si mm(n.montaje).clase = FS_EXFAT entonces devolver ex_escribe(n.montaje, n, pos, de, cuánto_) fin
+        devolver fat_escribe(n.montaje, n, pos, de, cuánto_)
+    fin
+
+    función fs_trunca(n: puntero a Nodo, t: nat64): ent64
+        si mm(n.montaje).clase = FS_EXFAT entonces devolver ex_trunca(n.montaje, n, t) fin
+        devolver fat_trunca(n.montaje, n, t)
+    fin
+
+    función fs_vacía_carpeta(m: nat32, n: puntero a Nodo): bool
+        si mm(m).clase = FS_EXFAT entonces devolver ex_vacía_carpeta(m, n) fin
+        devolver fat_vacía_carpeta(m, n)
+    fin
+
+    función fs_borra(m: nat32, d: puntero a Nodo, n: puntero a Nodo): ent64
+        si mm(m).clase = FS_EXFAT entonces devolver ex_borra(m, d, n) fin
+        devolver fat_borra(m, d, n)
+    fin
+
+    función fs_renombra(m: nat32, d1: puntero a Nodo, n: puntero a Nodo, d2: puntero a Nodo, nombre: puntero a byte): ent64
+        si mm(m).clase = FS_EXFAT entonces devolver ex_renombra(m, d1, n, d2, nombre) fin
+        devolver fat_renombra(m, d1, n, d2, nombre)
+    fin
+
+    función fs_vacía(m: nat32): ent64
+        si mm(m).clase = FS_EXFAT entonces devolver ex_vacía(m) fin
+        devolver fat_vacía(m)
     fin
 
     ; ---- las rutas ----
@@ -315,8 +364,8 @@ módulo Vfs64
                     sino si mm(m).solo_leer <> 0 entonces
                         err := EROFS
                     sino
-                        n := fat_crea(m, d, dirección(último[0]), falso)
-                        si n = nulo entonces err := fat_error fin
+                        n := fs_crea(m, d, dirección(último[0]), falso)
+                        si n = nulo entonces err := fs_error fin
                     fin
                 sino si marcas yb (O_CREAT ob O_EXCL) = O_CREAT ob O_EXCL entonces
                     err := EEXIST
@@ -333,7 +382,7 @@ módulo Vfs64
             sino si (escribe o marcas yb O_TRUNC <> 0) y mm(m).solo_leer <> 0 entonces err := EROFS
             fin
             si err = 0 y marcas yb O_TRUNC <> 0 y escribe y n.clase = N_ARCHIVO y n.tamaño > 0 entonces
-                err := fat_trunca(m, n, 0)
+                err := fs_trunca(n, 0)
             fin
             si err = 0 entonces
                 a := nuevo_abierto(n, marcas, t)
@@ -410,10 +459,10 @@ módulo Vfs64
         si pos < 0 entonces
             p := a.pos
             si a.marcas yb O_APPEND <> 0 entonces p := nd.tamaño fin
-            r := fat_escribe(nd.montaje, nd, p, k, n)
+            r := fs_escribe(nd, p, k, n)
             si r > 0 entonces a.pos := p + nat64(r) fin
         sino
-            r := fat_escribe(nd.montaje, nd, nat64(pos), k, n)
+            r := fs_escribe(nd, nat64(pos), k, n)
         fin
         abre_vfs()
         devolver r
@@ -438,7 +487,7 @@ módulo Vfs64
         si a.marcas yb O_ACCESO = O_RDONLY entonces devolver EINVAL fin
         si mm(nd.montaje).solo_leer <> 0 entonces devolver EROFS fin
         cierra_vfs()
-        r := fat_trunca(nd.montaje, nd, t)
+        r := fs_trunca(nd, t)
         abre_vfs()
         devolver r
     fin
@@ -448,9 +497,9 @@ módulo Vfs64
         variable r: ent64
         variable m: nat32
         m := nodo(a.nodo).montaje
-        si mm(m).clase <> FS_FAT o mm(m).solo_leer <> 0 entonces devolver 0 fin
+        si (mm(m).clase <> FS_FAT y mm(m).clase <> FS_EXFAT) o mm(m).solo_leer <> 0 entonces devolver 0 fin
         cierra_vfs()
-        r := fat_vacía(m)
+        r := fs_vacía(m)
         abre_vfs()
         si r < 0 entonces devolver EIO fin
         devolver 0
@@ -464,8 +513,8 @@ módulo Vfs64
         t := 0
         m := 0
         mientras m < n_montajes hacer
-            si mm(m).en_uso <> 0 y mm(m).clase = FS_FAT y mm(m).solo_leer = 0 entonces
-                r := fat_vacía(m)
+            si mm(m).en_uso <> 0 y (mm(m).clase = FS_FAT o mm(m).clase = FS_EXFAT) y mm(m).solo_leer = 0 entonces
+                r := fs_vacía(m)
                 si r < 0 entonces t := -1 sino si t >= 0 entonces t := t + r fin
             fin
             m := m + 1
@@ -669,8 +718,8 @@ módulo Vfs64
             sino si mm(m).solo_leer <> 0 entonces
                 err := EROFS
             sino
-                n := fat_crea(m, d, dirección(último[0]), cierto)
-                si n = nulo entonces err := fat_error sino suelta(n) fin
+                n := fs_crea(m, d, dirección(último[0]), cierto)
+                si n = nulo entonces err := fs_error sino suelta(n) fin
             fin
             suelta(d)
         sino si err = EBUSY entonces
@@ -705,9 +754,9 @@ módulo Vfs64
                 si mm(m).solo_leer <> 0 entonces err := EROFS
                 sino si carpeta y n.clase <> N_CARPETA entonces err := ENOTDIR
                 sino si no carpeta y n.clase = N_CARPETA entonces err := EISDIR
-                sino si carpeta y no fat_vacía_carpeta(m, n) entonces err := ENOTEMPTY
+                sino si carpeta y no fs_vacía_carpeta(m, n) entonces err := ENOTEMPTY
                 fin
-                si err = 0 entonces err := fat_borra(m, d, n) fin
+                si err = 0 entonces err := fs_borra(m, d, n) fin
                 suelta(n)
             fin
             suelta(d)
@@ -770,17 +819,17 @@ módulo Vfs64
                 ; el mismo: nada, o solo cambian las mayúsculas
                 suelta(otro)
                 otro := nulo
-                si no mismo_texto(dirección(ú1[0]), dirección(ú2[0])) entonces err := fat_renombra(m1, d1, n, d2, dirección(ú2[0])) fin
+                si no mismo_texto(dirección(ú1[0]), dirección(ú2[0])) entonces err := fs_renombra(m1, d1, n, d2, dirección(ú2[0])) fin
                 hecho := cierto
             sino si otro <> nulo entonces
                 si n.clase = N_CARPETA y otro.clase <> N_CARPETA entonces err := ENOTDIR
                 sino si n.clase <> N_CARPETA y otro.clase = N_CARPETA entonces err := EISDIR
-                sino si otro.clase = N_CARPETA y no fat_vacía_carpeta(m2, otro) entonces err := ENOTEMPTY
-                sino err := fat_borra(m2, d2, otro)
+                sino si otro.clase = N_CARPETA y no fs_vacía_carpeta(m2, otro) entonces err := ENOTEMPTY
+                sino err := fs_borra(m2, d2, otro)
                 fin
                 suelta(otro)
             fin
-            si err = 0 y no hecho entonces err := fat_renombra(m1, d1, n, d2, dirección(ú2[0])) fin
+            si err = 0 y no hecho entonces err := fs_renombra(m1, d1, n, d2, dirección(ú2[0])) fin
         fin
         si n <> nulo entonces suelta(n) fin
         si d1 <> nulo entonces suelta(d1) fin
@@ -903,7 +952,7 @@ módulo Vfs64
             según nat16(x.clase)
                 caso FS_UNIDAD: escribir("la unidad en memoria (", n_archivos, " archivos), de solo leer\n")
                 caso FS_FAT, FS_EXFAT:
-                    si x.clase = FS_FAT entonces escribir("FAT32") sino escribir("exFAT") fin
+                    si x.clase = FS_FAT entonces escribir("FAT", x.bits_fat) sino escribir("exFAT") fin
                     si x.etiqueta[0] <> 0 entonces escribir(" «", x.etiqueta, "»") fin
                     escribir(", ")
                     tamaño_legible(x.cúmulos * x.oct_cúmulo)

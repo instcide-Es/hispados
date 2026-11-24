@@ -8,8 +8,11 @@
 # mayúsculas, la raíz (con la etiqueta, el mapa y la tabla) y los archivos,
 # cada uno con sus entradas 0x85, 0xC0 y 0xC1 (con la suma del grupo y el
 # «hash» del nombre).
-#   hazexfat.py SALIDA OCTETOS DESPLAZAMIENTO ETIQUETA RUTA_EN_EL_VOLUMEN=ARCHIVO_DEL_ANFITRIÓN ...
-# (DESPLAZAMIENTO: el sector de la partición en el disco, para PartitionOffset)
+#   hazexfat.py [-c CÚMULO] [-z] SALIDA OCTETOS DESPLAZAMIENTO ETIQUETA RUTA_EN_EL_VOLUMEN=ARCHIVO_DEL_ANFITRIÓN ...
+# (DESPLAZAMIENTO: el sector de la partición en el disco, para PartitionOffset;
+# -c: los octetos de cada cúmulo, de 512 a 32 MB, 4096 si no se dice; -z: la
+# tabla de mayúsculas comprimida, como la de Windows: 0xFFFF y N para cada
+# tramo de N letras que son su propia mayúscula)
 # Los archivos van seguidos (NoFatChain) salvo los que acaban en «.frag», que
 # van a trozos, enlazados en la FAT (y se guardan sin «.frag»).
 import struct, sys, time
@@ -17,6 +20,7 @@ import struct, sys, time
 SECTOR = 512
 CÚMULO = 4096
 SPC_SHIFT = 3
+COMPRIMIDA = False
 
 
 def mayúscula(u):
@@ -140,8 +144,23 @@ class Volumen:
         mapa_oct = (self.cúmulos + 7) // 8
         c_mapa = self.pide((mapa_oct + CÚMULO - 1) // CÚMULO)
         self.enlaza(c_mapa)
-        tabla = b''.join(struct.pack('<H', mayúscula(u)) for u in range(0x10000))
-        c_tabla = self.pide(len(tabla) // CÚMULO)
+        if COMPRIMIDA:
+            t = []
+            u = 0
+            while u < 0x10000:
+                n = 0
+                while u + n < 0x10000 and mayúscula(u + n) == u + n:
+                    n += 1
+                if n >= 3:
+                    t += [0xFFFF, n]
+                    u += n
+                else:
+                    t.append(mayúscula(u))
+                    u += 1
+            tabla = struct.pack('<%dH' % len(t), *t)
+        else:
+            tabla = b''.join(struct.pack('<H', mayúscula(u)) for u in range(0x10000))
+        c_tabla = self.pide((len(tabla) + CÚMULO - 1) // CÚMULO)
         self.enlaza(c_tabla)
         self.escribe(c_tabla, tabla)
         suma_tabla = suma32(tabla, ())
@@ -222,6 +241,18 @@ class Volumen:
 
 
 def main():
+    global CÚMULO, SPC_SHIFT, COMPRIMIDA
+    while len(sys.argv) > 1 and sys.argv[1] in ('-c', '-z'):
+        if sys.argv[1] == '-z':
+            COMPRIMIDA = True
+            del sys.argv[1]
+        else:
+            CÚMULO = int(sys.argv[2])
+            SPC_SHIFT = CÚMULO.bit_length() - 1 - 9
+            if CÚMULO < SECTOR or CÚMULO & (CÚMULO - 1) or SPC_SHIFT > 16:
+                print('hazexfat: el cúmulo, una potencia de 2 de 512 a 32 MB', file=sys.stderr)
+                sys.exit(2)
+            del sys.argv[1:3]
     if len(sys.argv) < 5:
         print(__doc__ or 'uso: hazexfat.py SALIDA OCTETOS DESPLAZAMIENTO ETIQUETA RUTA=ARCHIVO...', file=sys.stderr)
         sys.exit(2)
