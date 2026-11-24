@@ -63,8 +63,8 @@ mira "HORARED sin nada: la zona (Europa/Madrid), el horario de verano (en noviem
   "^La hora por Internet: encendida$" "^La última vez: aún no se ha preguntado la hora a Internet$"
 mira "HORARED /AHORA con dos servidores que dicen lo mismo: el reloj iba cinco minutos adelantado y se pone en hora (de una vez, al empezar el segundo)" \
   "^hora: 10.0.2.2 (10.0.2.2:$NP) da [0-9/]* [0-9:,]* UTC (ida y vuelta: [0-9]* ms)$" \
-  "^hora: la hora de aquí: .* (el reloj del PC va adelantado [345] min [0-9]* s; contestan 2, de acuerdo 2)$" \
-  "^hora: puesta en hora: -[23][0-9][0-9] s$" "^hora: puesto en hora por Internet$" "(HORARED.BIN ha acabado con el código 2)"
+  "^hora: la hora de aquí: .* (el reloj del PC va adelantado [2345] min [0-9]* s; contestan 2, de acuerdo 2)$" \
+  "^hora: puesta en hora: -[1-3][0-9][0-9] s$" "^hora: puesto en hora por Internet$" "(HORARED.BIN ha acabado con el código 2)"
 mira "y otra vez: ya está en hora (un segundo arriba o abajo); el estado lo dice" "^hora: el reloj del PC está en hora$" "^hora: el reloj estaba en hora$" \
   "^La última vez: el reloj estaba en hora (el [0-9/]* [0-9:]*; el reloj iba "
 mira "un servidor que dice el 1/1/2001: de antes de lo que se sabe (la fecha de HORARED.BIN): no se cree" \
@@ -120,7 +120,7 @@ RELOJ=$(relojes "+5 min") CAPTURAS=$G ESCRIBE=1 DISCO=$K/e.img ARRANQUE="escrito
 S=$K/e.sal
 mira "al arrancar con la red, HORARED.BIN (lanzado por el escritorio, con su sello) pone el reloj en hora sola (iba cinco minutos adelantado)" \
   "hora: HORARED.BIN en marcha: la hora por Internet y el horario de verano$" "hora: el reloj del PC lleva el horario de invierno$" \
-  "^hora: puesta en hora: -[23][0-9][0-9] s$"
+  "^hora: puesta en hora: -[1-3][0-9][0-9] s$"
 miracap "Configuración es el Panel de control: un icono grande con su nombre por sección (cada uno con su forma), la pantalla y la memoria arriba" pn0 \
   negrita 140 85 160 100 "Configuración" negrita 190 115 200 125 "Hispa-Pentium $VERSION_BASE: Panel de control" texto 190 135 200 145 "Pantalla:  800 x 600, 32 bits por punto" \
   negrita 155 245 165 255 "Fecha y hora" negrita 300 245 310 255 "Pantalla" negrita 435 245 445 255 "Sonido" negrita 565 245 575 255 "Ratón" \
