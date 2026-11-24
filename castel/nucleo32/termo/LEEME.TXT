@@ -221,6 +221,16 @@ con él encendido simplemente no arranca esta memoria.
   la alarma del regulador de tensión) y, si el portátil se apagó solo con el
   procesador lejos de su límite, lo dice: entonces el apagado no parece por
   temperatura y conviene revisar la alimentación (cargador, batería, placa).
+  POTENCIA (Intel de Sandy Bridge en adelante y AMD Ryzen): en INFORME.TXT,
+  los vatios que gasta el procesador (el paquete, los núcleos, la gráfica
+  integrada y, si lo dice, la memoria) en reposo, en la carga y enfriando;
+  los límites que le pone la BIOS (PL1, PL2, el TDP) y, en «POR QUÉ SE
+  FRENA», en qué parte de la prueba se ha frenado por cada motivo: límite de
+  potencia, PROCHOT (la placa le pide frenar), corriente o temperatura del
+  regulador de tensión, o temperatura. El RESULTADO lo resume, p. ej. «el
+  procesador se frena por potencia a 30 W con el cargador puesto, bastante
+  por debajo de su PL1 (47 W): la fuente o el ajuste del fabricante».
+  Haga la prueba con el cargador puesto para ver si el cargador da bastante.
   Si una cifra no es de fiar, lo dice en vez de inventar: «sin lectura fiable»
   (un sensor que no se mueve ni con la carga), una lectura imposible (no
   cuenta para la parada ni para el veredicto: «no se puede juzgar»), o, en

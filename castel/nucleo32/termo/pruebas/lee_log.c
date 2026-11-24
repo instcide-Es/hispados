@@ -50,7 +50,8 @@ static void datos(char *l, int *t)
 			break;
 		*ig = 0;
 		if (strcmp(n, "MHz") && strcmp(n, "bateria") && strcmp(n, "ocupado") && strncmp(n, "C0", 2) && strncmp(n, "C6", 2) && strcmp(n, "seg") && strcmp(n, "smi") &&
-		    strcmp(n, "parado") && strcmp(n, "V") && strcmp(n, "vent_cpu") && strcmp(n, "gasta") && strcmp(n, "carga")) {
+		    strcmp(n, "parado") && strcmp(n, "V") && strcmp(n, "vent_cpu") && strcmp(n, "gasta") && strcmp(n, "carga") &&
+		    strcmp(n, "potencia")) {	/* (potencia.c: los vatios, los frenos y los C-states) */
 			for (k = 0; k < ns; k++)
 				if (!strcmp(csv[k], n))
 					break;
