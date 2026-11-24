@@ -2195,6 +2195,12 @@ octetos por hilo), PCID con varios hilos, y los procesadores híbridos.
   podían soltarla dos veces (el núcleo se paraba en `Monton64.libera`). Ahora
   se decide con el cerrojo tomado, y mientras se despierta cuenta como «en
   uso».
+- Y otro de la etapa 1: **las zonas apartadas de la memoria física** (el
+  núcleo, la información del cargador, sus módulos, la pantalla) eran 32
+  como mucho y las de más se perdían sin decir nada; con los 30 módulos de
+  ahora, los últimos (`libsaludo.so`) se daban como memoria libre y se
+  pisaban. Ahora son 96, las seguidas se juntan en una, y si no caben se
+  para diciéndolo.
 
 ### Qué hace
 
