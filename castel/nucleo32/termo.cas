@@ -4,7 +4,9 @@
 ;  que el servicio de ACPI ha leído de las zonas térmicas. SOLO LEE: ni un
 ;  registro del procesador, ni del controlador embebido, se escribe desde
 ;  aquí (lo único que se escribe es el registro índice del SMN de AMD, que
-;  no cambia nada: dice qué se va a leer). Las llamadas (usuario.cas):
+;  no cambia nada: dice qué se va a leer; y, con la 220 y EDX = 1, un 0 en
+;  los MSR de los motivos de freno, para borrar sus marcas de registro, que
+;  son volátiles: ni límites ni frecuencias). Las llamadas (usuario.cas):
 ;
 ;   220  un registro del procesador (MSR) de la lista de abajo: EBX el
 ;        registro, ECX dónde dejarlo (8 octetos: lo bajo y lo alto)
@@ -50,6 +52,18 @@
 ;        17Ah y de 400h a 47Fh (Machine Check: los errores de hardware);
 ;        y 690h, 6B0h, 6B1h: por qué se frena (PROCHOT, térmico, la alarma
 ;        del regulador de tensión, los límites de potencia y de corriente)
+;        (TERMO, potencia.c) Y la potencia, solo leer: RAPL (606h unidades,
+;        611h paquete, 613h tiempo frenado, 619h memoria, 639h núcleos, 641h
+;        gráfica, 64Dh el equipo entero), los límites (610h PL1/PL2, 614h
+;        TDP, 65Ch el del equipo, 1ADh las relaciones de turbo, 648h a 64Ch
+;        el TDP configurable), 64Fh (por qué se frena, de Skylake en
+;        adelante), 60Dh y 630h a 632h (el paquete en PC2, PC8, PC9, PC10);
+;        en AMD (familia 17h en adelante) C0010299h, C001029Ah y C001029Bh
+;        (las unidades y la energía del núcleo y del paquete).
+;        Con EDX = 1 (solo Intel, solo 19Ch, 1B1h, 690h, 6B0h, 6B1h y 64Fh):
+;        escribe 0 en él (wrmsr «seguro»), lo que borra sus marcas de
+;        registro (R/WC0) sin tocar nada más (lo demás es de solo lectura)
+;        -> 1 bien, 0 si no se deja
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Termo
@@ -163,12 +177,21 @@ módulo Termo
             ; (TERMO) por qué se frena (Intel de Haswell en adelante): el
             ; núcleo, la gráfica integrada y el anillo (MSR_*_PERF_LIMIT_REASONS)
             caso 0x690, 0x6B0, 0x6B1: devolver cierto
+            ; (TERMO) la potencia (potencia.c): RAPL, los límites, el turbo,
+            ; el TDP configurable, los motivos de Skylake y los C-states que
+            ; faltaban (PC2, PC8 a PC10); solo leer
+            caso 0x606, 0x610, 0x611, 0x613, 0x614, 0x619, 0x639, 0x641, 0x64D, 0x65C: devolver cierto
+            caso 0x1AD, 0x648, 0x649, 0x64A, 0x64B, 0x64C, 0x64F: devolver cierto
+            caso 0x60D, 0x630, 0x631, 0x632: devolver cierto
             ; (TERMO) Machine Check: MCG_CAP, MCG_STATUS y los bancos (CTL,
             ; STATUS, ADDR, MISC de hasta 32): los errores de hardware que ha
             ; anotado el procesador (caché, memoria, bus, PCIe), solo leer
             caso 0x179, 0x17A: devolver cierto
         fin
         si m >= 0x400 y m < 0x480 entonces devolver cierto fin
+        ; (TERMO) AMD de la familia 17h en adelante: las unidades de RAPL y la
+        ; energía del núcleo y del paquete (aparte del «según»: lejos de los demás)
+        si m >= 0xC0010299 y m <= 0xC001029B entonces devolver cierto fin
         devolver falso
     fin
 
@@ -767,6 +790,18 @@ módulo Termo
                 si fabricante() = 0 entonces devolver 0 fin
                 cpuid(1)
                 si r_cpu[3] yb 0x20 = 0 entonces devolver 0 fin    ; sin MSR
+                ; (TERMO) EDX = 1: borrar las marcas de registro de un MSR de
+                ; motivos de freno (escribir 0: sus marcas son R/WC0 y lo demás,
+                ; de solo lectura); nada más se escribe
+                si c = 1 entonces
+                    si fabricante() <> 1 entonces devolver NO_VALE fin
+                    según a
+                        caso 0x19C, 0x1B1, 0x690, 0x6B0, 0x6B1, 0x64F:
+                            si wrmsr_seguro(a, 0, 0) entonces devolver 1 fin
+                            devolver 0
+                    fin
+                    devolver NO_VALE
+                fin
                 si no rdmsr_seguro(a) entonces devolver 0 fin
                 p := puntero(b)
                 p[0] := msr_lo

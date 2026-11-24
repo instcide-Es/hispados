@@ -197,6 +197,12 @@ termo_anfitrion() {
   else ko "la carga rota: $(head -c 400 $B/rota.txt)"; fi
   if $B/tjmax > $B/tjmax.txt; then ok "la TjMax de los Intel que no la dicen: $(grep -c '^bien' $B/tjmax.txt) procesadores bien (el Atom N455 del HP Mini y del Toshiba, 100 °C; los N270, 90)"
   else ko "la TjMax: $(grep '^mal' $B/tjmax.txt | head -n 2)"; fi
+  # (TERMO) la potencia y los frenos (potencia.c) con MSR de mentira: QEMU no tiene RAPL
+  if ! gcc -O1 -Wall -Wextra -I$T $T/pruebas/potencia_prueba.c $T/potencia.c -o $B/potencia 2> $B/gccpo.txt; then
+    ko "potencia.c no compila en el anfitrión: $(head -n 2 $B/gccpo.txt)"
+  elif $B/potencia > $B/potencia.txt; then
+    ok "potencia.c con MSR de mentira ($(grep -c '^bien' $B/potencia.txt) cosas): el MSI GT80 frenado por PL1 a 30 W con el cargador («la fuente o el ajuste del fabricante»), PROCHOT de la placa con el procesador fresco («apunta a la alimentación»), pegado al PL1 (normal), el PL1 bajo el TDP; la vuelta de 32 bits de RAPL, las marcas de registro puestas a 0, los C-states; el Atom (µJ), el AMD Zen y las máquinas virtuales («no lo tiene»)"
+  else ko "potencia.c: $(grep '^mal' $B/potencia.txt | head -n 3 | tr '\n' ' ')"; fi
   # el terminal de SSH.BIN
   python3 -I $AQUI/nucleo32/juegos/datos386.py $B/datos386.h $B/letra.h
   if gcc -O1 -Wall -Wextra -Wno-unused-parameter -I$B -I$AQUI/nucleo32/ssh $AQUI/nucleo32/ssh/vt.c $AQUI/nucleo32/ssh/pruebas/vt_prueba.c -o $B/vt_prueba 2> $B/gccvt.txt; then
@@ -338,6 +344,14 @@ if mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q 'en 4 pr
    && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^RESULTADO'; then
   ok "INFORME.TXT para el técnico: el equipo, la carga en 4 procesadores, cada sensor, los frenados y el resultado"
 else ko "INFORME.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | head -n 12 | tr '\n' ' ')"; fi
+# (TERMO) la potencia (potencia.c): QEMU no tiene RAPL ni los motivos del freno: lo dice y sigue
+if grep -q 'termo: potencia: RAPL (606h): no lo tiene' $Y/t4.txt && grep -q 'termo: suceso: potencia: este procesador no dice sus vatios' $Y/t4.txt \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q '^POTENCIA (lo que gasta el procesador, RAPL)' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q 'no dice sus vatios (RAPL, MSR 606h: no lo tiene)' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^POR QUÉ SE FRENA' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -qE 'dan siempre 0|no lo tiene: ni 19Ch'; then
+  ok "(potencia) en QEMU, sin RAPL ni motivos del freno: «no lo tiene» en el puerto serie, en el .LOG y en INFORME.TXT (POTENCIA y POR QUÉ SE FRENA), y la prueba sigue"
+else ko "(potencia) en QEMU: $(grep 'termo: potencia' $Y/t4.txt | head -n 3 | tr '\n' ' ') / $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -A3 '^POTENCIA' | tr '\n' ' ')"; fi
 # 6b. (TERMO) 2 núcleos con 2 hilos cada uno (CPUID 0Bh), y la batería sin
 # enchufar (tests/acpi/bateria-qemu.aml: 1000 mA a 11 V, 11 W): del 42 % al 36 %
 # en unos 4 minutos, con la carga; en el informe, el consumo y la autonomía

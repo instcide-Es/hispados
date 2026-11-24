@@ -35,6 +35,7 @@
 #include "veredicto.h"
 #include "envio.h"
 #include "rendimiento.h"
+#include "potencia.h"
 
 static int mas_caliente(void);
 static void mira_envio(void);
@@ -979,6 +980,8 @@ static void log_datos(void)
 	m += snprintf(b + m, sizeof b - (size_t)m, " | seg=%u", (jg_tics() - t_inicio) / jg_hz);
 	if (smi_hay == 1)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | smi=%u", smi_dos);
+	if (m < (int)sizeof b - 1)
+		m += po_datos(b + m, (int)sizeof b - m);	/* (TERMO) los vatios, los frenos y los C-states (potencia.c) */
 	if (parado_dos)
 		m += snprintf(b + m, sizeof b - (size_t)m, " | parado=%d ms", parado_dos);
 	if (hay_zonas && za.t.bat_mv > 0 && za.t.bat_mv < 100000)
@@ -2287,7 +2290,7 @@ static void informe_autonomia(char *b, size_t cabe)
 
 static void escribe_informe(void)
 {
-	static char t[6000];
+	static char t[10000];	/* (TERMO) con lo de potencia.c */
 	char r[120], g1[24], g2[24], g3[24];
 	u32 a, me, d, h, mi, se;
 	int n = 0, k;
@@ -2332,6 +2335,12 @@ static void escribe_informe(void)
 			IN("%s", fr);
 		else
 			IN("  Ninguno visto.\r\n");
+	}
+	{
+		static char po[3500];	/* (TERMO) POTENCIA, POR QUÉ SE FRENA y ESTADOS DE REPOSO (potencia.c) */
+
+		if (po_informe(po, (int)sizeof po))
+			IN("%s", po);
 	}
 	/* (TERMO) los errores de hardware (Machine Check) */
 	if (mca_bancos > 0) {
@@ -2476,9 +2485,17 @@ static void escribe_resumen(void)
 {
 	int k;
 
-	VP.frenado = frenado_en_carga();
+	VP.frenado = frenado_en_carga() || po_frenado_carga();
 	mira_mca(1);
 	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
+	{
+		char pv[600];	/* (TERMO) la potencia (potencia.c), si cabe */
+		size_t lr = strlen(resumen);
+		int npv = po_veredicto(pv, (int)sizeof pv);
+
+		if (npv && lr + (size_t)npv + 2 < sizeof resumen)
+			snprintf(resumen + lr, sizeof resumen - lr, "%s%s", lr ? " " : "", pv);
+	}
 	for (k = 0; k < ns && k < VE_MAXS; k++)
 		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
 	escribe_informe();
@@ -2844,6 +2861,48 @@ static int informe_frenos(char *d, int cabe)
 	return n;
 }
 
+/* ---------------------------------------------------------------- la potencia
+ * (TERMO) potencia.c: los vatios (RAPL), los límites de la BIOS (PL1, PL2,
+ * TDP), por qué se frena (19Ch, 1B1h, 690h, 6B0h, 6B1h, 64Fh, cada 2 s y
+ * con sus marcas de registro puestas a 0) y los estados de reposo. Cada 2 s,
+ * después de mira_frenos (que ve antes las marcas «de antes»). Lo único que
+ * se escribe: 0 en esos MSR de motivos (la 220 con EDX = 1, termo.cas) */
+static int po_limpia(u32 m)
+{
+	u32 b[2] = { 0, 0 };
+
+	return sc(SC_MSR, m, (u32)b, 1) == 1;
+}
+
+static void po_suceso(const char *t)
+{
+	suceso_log("%s", t);
+}
+
+static void po_serie(const char *t)
+{
+	serie("%s", t);
+}
+
+static void mira_potencia(void)
+{
+	static int empezada;
+	int k, cpu_max = NO;
+
+	if (!empezada) {
+		struct po_lector l = { lee_msr, po_limpia, po_suceso, po_serie };
+
+		empezada = 1;
+		po_empieza(&l, cpu.intel && cpu.msr_ok, cpu.amd && cpu.msr_ok, cpu.fam, cpu.modelo);
+	}
+	for (k = 0; k < ns; k++)
+		if (S[k].clase == CL_CPU && !S[k].no_fiable && S[k].t != NO && (cpu_max == NO || S[k].t > cpu_max))
+			cpu_max = S[k].t;
+	po_mide(fase == F_CARGA ? PO_CARGA : fase == F_ENFRIA ? PO_ENFRIA : PO_REPOSO, rdtsc(), tsc_hz,
+		hay_bateria && en.pct <= 100 ? (en.ca == 1 ? 1 : en.ca == 0 ? 0 : -1) : -1, cpu_max == NO ? -100000 : cpu_max,
+		cpu.tjmax ? cpu.tjmax * 10 : -100000);
+}
+
 /* ---------------------------------------------------------------- leer todo */
 
 static void lee_todo(void)
@@ -2930,6 +2989,7 @@ static void pulso(void)
 		mira_parones();
 		mira_alimentacion();
 		mira_frenos();
+		mira_potencia();
 		mira_envio();
 		mira_mide();
 		if (!csv_listo && !csv_malo && cuenta_s >= 6)

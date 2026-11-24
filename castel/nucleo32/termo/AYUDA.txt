@@ -22,6 +22,10 @@ un sensor que no se mueve («sin lectura fiable») o uno que da algo imposible
 (no cuenta para la parada ni para el veredicto). En los Atom N2xx/N4xx el
 sensor es aproximado. Hispa-Pentium usa un solo núcleo del procesador.
 
+En INFORME.TXT, también la potencia (los vatios del procesador, sus límites
+PL1 y PL2 y el TDP) y por qué se frena (potencia, PROCHOT de la placa,
+corriente, temperatura), con el tanto por ciento de la prueba en cada uno.
+
 Necesita Hispa-Pentium 0.8.9 o posterior (las lecturas de temperatura del
 núcleo, llamadas 220 a 224); con uno de antes, lo dice y no hace nada más.
 
