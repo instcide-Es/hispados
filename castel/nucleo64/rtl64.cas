@@ -1,0 +1,575 @@
+; =============================================================================
+;  rtl64.cas - Hispa-64, etapa 9: la Realtek RTL8111/8168 y su familia
+;  (8101/8102/8105/8106, 8169, 8411, 8117: el «r8169» de Linux; docs/64/
+;  HISPA-64.md, sección 15). Es la de Hispa-Pentium (castel/nucleo32/
+;  rrtl.cas) pasada a 64 bits, con lo aprendido en el ASUS GL553VD (la
+;  RTL8111H): en las 8168G en adelante, antes del reinicio, la puerta de
+;  recepción cerrada, los FIFO vacíos, sin NOW_IS_OOB y el FIFO compartido
+;  rehecho, mirando que esté listo en LINK_LIST_RDY (el bit 1 de MCU, como
+;  r8169); sin EEE ni ALDPS (el enlace se caía y bajaba a 100 y a 10
+;  Mbit/s) ni el paso a L2/L3, y a negociar otra vez; sin ASPM ni CLKREQ.
+;  Los registros, por su BAR de memoria (donde esté, también por encima de
+;  4 GB) o por los puertos. Dos anillos de descriptores de 16 octetos (OWN,
+;  EOR, FS, LS y el largo; la dirección del búfer de 64 bits): 64 para
+;  recibir y 16 para enviar, de 2 KB. La interrupción, por MSI (las 8168 lo
+;  tienen) o la patilla, y el hilo «red» mira cada 10 ms igual.
+;  QEMU no tiene la 8168, pero su RTL8139 lleva el «modo C+» (el de la
+;  RTL8139C+), con los mismos descriptores y los mismos registros de los
+;  anillos: con «realtek=ensayo» en la línea del núcleo, la RTL8139 de QEMU
+;  se lleva con este driver (el aviso de envío en D9h, el C+ en E0h, el
+;  enlace en 58h), y así se prueban de verdad los anillos (pruebas.sh).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rtl64
+
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redbase64
+
+    constante G_VIEJA = 0
+    constante G_EVL = 1
+    constante G_G = 2
+    constante R_IDR0 = 0x00
+    constante R_MAR0 = 0x08
+    constante R_TNPDS = 0x20
+    constante R_CR = 0x37
+    constante R_TPPOLL = 0x38
+    constante R_IMR = 0x3C
+    constante R_ISR = 0x3E
+    constante R_TCR = 0x40
+    constante R_RCR = 0x44
+    constante R_9346 = 0x50
+    constante R_CFG2 = 0x53
+    constante R_CFG3 = 0x54
+    constante R_CFG5 = 0x56
+    constante R_MSR8139 = 0x58
+    constante R_PHYAR = 0x60
+    constante R_PHYST = 0x6C
+    constante R_PMCH = 0x6F
+    constante R_MACOCP = 0xB0
+    constante R_GPHYOCP = 0xB8
+    constante R_MCU = 0xD3
+    constante R_TPPOLL8139 = 0xD9
+    constante R_RMS = 0xDA
+    constante R_CPCR = 0xE0
+    constante R_IMIT = 0xE2
+    constante R_RDSAR = 0xE4
+    constante R_MTPS = 0xEC
+    constante R_MISC = 0xF0
+    constante NRX = 64
+    constante NTX = 16
+    constante RXTAM = 1536
+    constante OWN = 0x80000000
+    constante EOR = 0x40000000
+    constante FS = 0x20000000
+    constante LS = 0x10000000
+
+    público variable rt_n: nat32                ; 0 o 1: se lleva una
+    público variable rt_interrupciones, rt_malas, rt_sin_envío: nat64
+    público variable rt_familia: arreglo [48] de byte
+    variable rt_motivo: puntero a byte
+    variable io: nat32
+    variable base: nat64
+    variable ensayo: bool
+    variable grupo, xid, aparato, modo, gsi, ifz_n: nat32
+    variable desc: nat64                        ; (física) recepción en 0, envío en 2 KB
+    variable rx_buf: arreglo [NRX] de nat64
+    variable tx_buf: arreglo [NTX] de nat64
+    variable rx_i, tx_i: nat32
+    variable mac: arreglo [8] de byte
+    variable vector: nat32
+    público variable rt_avisos: arreglo [200] de byte      ; lo que ha visto al ponerla en marcha (lo dice prepara_rtl)
+
+    ; ---- los registros, por donde vayan ----
+    función r8(d: nat32): nat32
+        si base = 0 entonces devolver entra8(io + d) fin
+        devolver m8(base + d)
+    fin
+
+    función r16(d: nat32): nat32
+        si base = 0 entonces devolver entra16(io + d) fin
+        devolver m16(base + d)
+    fin
+
+    función r32(d: nat32): nat32
+        si base = 0 entonces devolver entra32(io + d) fin
+        devolver m32(base + d)
+    fin
+
+    función w8(d: nat32, v: nat32)
+        si base = 0 entonces sale8(io + d, v) sino pon_m8(base + d, v yb 0xFF) fin
+    fin
+
+    función w16(d: nat32, v: nat32)
+        si base = 0 entonces sale16(io + d, v) sino pon_m16(base + d, v yb 0xFFFF) fin
+    fin
+
+    función w32(d: nat32, v: nat32)
+        si base = 0 entonces sale32(io + d, v) sino pon_m32(base + d, v) fin
+    fin
+
+    ; ---- la interrupción ----
+    interrupción función int_rtl()
+        variable v: nat32
+        rt_interrupciones := rt_interrupciones + 1
+        si rt_n > 0 entonces
+            v := r16(R_ISR)
+            si v <> 0 y v <> 0xFFFF entonces
+                w16(R_ISR, v)
+                ; (sin descriptores libres, RDU: que vuelva a mirar el anillo)
+                si v yb 0x10 <> 0 y no ensayo entonces w8(R_CR, 0x0C) fin
+                ifz(ifz_n).interrupciones := ifz(ifz_n).interrupciones + 1
+            fin
+        fin
+        avisa_red()
+        eoi()
+    fin
+
+    ; ---- la familia, por el XID (TxConfig, bits 20 a 31 sin el 4 y el 5) ----
+    función es(x: nat32, máscara: nat32, v: nat32): bool
+        devolver x yb máscara = v
+    fin
+
+    función familia_de(x: nat32, ref g: nat32): puntero a byte
+        g := G_G
+        si es(x, 0x7CF, 0x6C0) entonces devolver "RTL8168M/8111M" fin
+        si es(x, 0x7CF, 0x541) entonces devolver "RTL8168H/8111H" fin
+        si es(x, 0x7C8, 0x548) entonces devolver "RTL8117" fin
+        si es(x, 0x7CF, 0x502) o es(x, 0x7CF, 0x501) o es(x, 0x7CF, 0x500) entonces devolver "RTL8168EP/8111EP" fin
+        si es(x, 0x7CF, 0x5C8) entonces devolver "RTL8411B" fin
+        si es(x, 0x7CF, 0x509) entonces devolver "RTL8168GU/8111GU" fin
+        si es(x, 0x7CF, 0x4C0) entonces devolver "RTL8168G/8111G" fin
+        g := G_EVL
+        si es(x, 0x7C8, 0x488) entonces devolver "RTL8411" fin
+        si es(x, 0x7C8, 0x480) entonces devolver "RTL8168F/8111F" fin
+        si es(x, 0x7C8, 0x2C8) entonces devolver "RTL8168E-VL/8111E-VL" fin
+        g := G_VIEJA
+        si es(x, 0x7C8, 0x2C0) entonces devolver "RTL8168E/8111E" fin
+        si es(x, 0x7C8, 0x288) entonces devolver "RTL8168DP/8111DP" fin
+        si es(x, 0x7C8, 0x280) entonces devolver "RTL8168D/8111D" fin
+        si es(x, 0x7C0, 0x3C0) entonces devolver "RTL8168C/8111C" fin
+        si es(x, 0x7C8, 0x380) o es(x, 0x7C8, 0x300) entonces devolver "RTL8168B/8111B" fin
+        si es(x, 0x7C8, 0x448) entonces devolver "RTL8106E" fin
+        si es(x, 0x7C8, 0x440) entonces devolver "RTL8402" fin
+        si es(x, 0x7C8, 0x408) entonces devolver "RTL8105E" fin
+        si es(x, 0x7C8, 0x348) o es(x, 0x7C8, 0x248) entonces devolver "RTL8102E/8103E" fin
+        si es(x, 0x7CF, 0x240) entonces devolver "RTL8401" fin
+        si es(x, 0x7C8, 0x340) entonces devolver "RTL8101E" fin
+        si es(x, 0xFC8, 0x980) o es(x, 0xFC8, 0x180) o es(x, 0xFC8, 0x100) o es(x, 0xFC8, 0x040) o es(x, 0xFC8, 0x008) entonces devolver "RTL8169/8110" fin
+        si x >= 0x4C0 y x yb 0x00F <> 0x00F entonces
+            g := G_G
+            devolver "RTL8168 sin identificar (de las nuevas)"
+        fin
+        devolver "RTL8168 sin identificar"
+    fin
+
+    ; ---- los OCP (las G en adelante) ----
+    función ocp_lee(r: nat32): nat32
+        w32(R_MACOCP, r << 15)
+        devolver r32(R_MACOCP) yb 0xFFFF
+    fin
+
+    función ocp_pon(r: nat32, v: nat32)
+        w32(R_MACOCP, 0x80000000 ob (r << 15) ob (v yb 0xFFFF))
+    fin
+
+    ; el FIFO compartido, listo (LINK_LIST_RDY, el bit 1 de MCU)
+    función espera_fifo(): bool
+        variable i: nat32
+        i := 0
+        mientras i < 420 hacer
+            si r8(R_MCU) yb 0x02 <> 0 entonces devolver cierto fin
+            espera_us(100)
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; el PHY por OCP (página*16 + (registro - 16) * 2)
+    función phy_ocp_lee(r: nat32): nat32
+        variable i, v: nat32
+        w32(R_GPHYOCP, r << 15)
+        i := 0
+        mientras i < 100 hacer
+            espera_us(25)
+            v := r32(R_GPHYOCP)
+            si v yb 0x80000000 <> 0 entonces devolver v yb 0xFFFF fin
+            i := i + 1
+        fin
+        devolver 0xFFFF
+    fin
+
+    función phy_ocp_pon(r: nat32, v: nat32)
+        variable i: nat32
+        w32(R_GPHYOCP, 0x80000000 ob (r << 15) ob (v yb 0xFFFF))
+        i := 0
+        mientras i < 100 hacer
+            espera_us(25)
+            si r32(R_GPHYOCP) yb 0x80000000 = 0 entonces devolver fin
+            i := i + 1
+        fin
+    fin
+
+    ; el PHY: los registros MII (0 BMCR, 1 BMSR)
+    función phy_lee(r: nat32): nat32
+        variable i, v: nat32
+        si grupo = G_G entonces devolver phy_ocp_lee(0xA400 + r * 2) fin
+        w32(R_PHYAR, (r yb 0x1F) << 16)
+        i := 0
+        mientras i < 100 hacer
+            espera_us(25)
+            v := r32(R_PHYAR)
+            si v yb 0x80000000 <> 0 entonces devolver v yb 0xFFFF fin
+            i := i + 1
+        fin
+        devolver 0xFFFF
+    fin
+
+    función phy_pon(r: nat32, v: nat32)
+        variable i: nat32
+        si grupo = G_G entonces
+            phy_ocp_pon(0xA400 + r * 2, v)
+            devolver
+        fin
+        w32(R_PHYAR, 0x80000000 ob ((r yb 0x1F) << 16) ob (v yb 0xFFFF))
+        i := 0
+        mientras i < 100 hacer
+            espera_us(25)
+            si r32(R_PHYAR) yb 0x80000000 = 0 entonces devolver fin
+            i := i + 1
+        fin
+    fin
+
+    ; sin EEE ni ALDPS (las G en adelante: el ASUS GL553VD con la 8111H)
+    función sin_ahorro_g()
+        ocp_pon(0xE040, ocp_lee(0xE040) yb 0xFFFC)
+        phy_ocp_pon(0xA5D0, 0)
+        phy_ocp_pon(0xA430, phy_ocp_lee(0xA430) yb 0xFFFB)
+    fin
+
+    ; ---- dónde están los registros: la BAR de memoria, o los puertos ----
+    función elige_bar(i: nat32): bool
+        variable k, b: nat32
+        variable m, l: nat64
+        io := 0
+        base := 0
+        k := 0
+        mientras k < 6 hacer
+            b := conf(i, 0x10 + k * 4)
+            si b yb 1 <> 0 y io = 0 y b yb 0xFFFC <> 0 entonces io := b yb 0xFFFC fin
+            k := k + 1
+        fin
+        k := 0
+        mientras k < 6 y base = 0 hacer
+            m := bar_mem(i, k)
+            l := bar_largo(i, k)
+            si m <> 0 y l >= 256 entonces
+                si l < 4096 entonces l := 4096 fin
+                base := mapea_disp(m, l, sin_caché())
+            fin
+            k := k + 1
+        fin
+        devolver base <> 0 o io <> 0
+    fin
+
+    función página(): nat64
+        variable f: nat64
+        f := pide()
+        si f <> 0 entonces ceros_k(virt(f), 4096) fin
+        devolver f
+    fin
+
+    función rx_desc(k: nat32): nat64
+        devolver virt(desc) + nat64(k) * 16
+    fin
+
+    función tx_desc(k: nat32): nat64
+        devolver virt(desc) + 2048 + nat64(k) * 16
+    fin
+
+    ; la pone en marcha
+    función pon_tarjeta(i: nat32): bool
+        variable k, v: nat32
+        variable f: nat64
+        variable n: puntero a byte
+        aparato := i
+        pon_d0(i)
+        habilita(i, falso)
+        si no elige_bar(i) entonces
+            rt_motivo := "no tiene ni registros en la memoria ni puertos"
+            devolver falso
+        fin
+        si r32(R_TCR) = 0xFFFFFFFF entonces
+            rt_motivo := "no contesta (sus registros dan FF)"
+            devolver falso
+        fin
+        xid := (r32(R_TCR) >> 20) yb 0xFCF
+        si ensayo entonces
+            grupo := G_VIEJA
+            n := "RTL8139C+ en modo C+ (ensayo)"
+        sino
+            n := familia_de(xid, grupo)
+        fin
+        k := 0
+        mientras n[k] <> 0 y k < 47 hacer
+            rt_familia[k] := n[k]
+            k := k + 1
+        fin
+        rt_familia[k] := 0
+        ; (las G en adelante, antes del reinicio, como rtl_hw_init_8168g)
+        si grupo = G_G entonces
+            w32(R_MISC, r32(R_MISC) ob 0x00080000)
+            k := 0
+            mientras k < 420 y r32(R_TCR) yb 0x800 = 0 hacer
+                espera_us(100)
+                k := k + 1
+            fin
+            k := 0
+            mientras k < 420 y r8(R_MCU) yb 0x30 <> 0x30 hacer
+                espera_us(100)
+                k := k + 1
+            fin
+            w8(R_CR, r8(R_CR) yb 0xF3)
+            w8(R_MCU, r8(R_MCU) yb 0x7F)
+            ocp_pon(0xE8DE, ocp_lee(0xE8DE) yb 0xBFFF)
+            espera_fifo()
+            ocp_pon(0xE8DE, ocp_lee(0xE8DE) ob 0x8000)
+            espera_fifo()
+        fin
+        w8(R_CR, 0x10)
+        k := 0
+        mientras k < 1000 y r8(R_CR) yb 0x10 <> 0 hacer
+            espera_us(1000)
+            k := k + 1
+        fin
+        si r8(R_CR) yb 0x10 <> 0 entonces
+            rt_motivo := "no acaba de reiniciarse"
+            devolver falso
+        fin
+        k := 0
+        mientras k < 6 hacer
+            mac[k] := byte(r8(R_IDR0 + k))
+            k := k + 1
+        fin
+        ; los anillos y los búferes
+        desc := página()
+        si desc = 0 entonces
+            rt_motivo := "no queda memoria"
+            devolver falso
+        fin
+        k := 0
+        mientras k < NRX hacer
+            si k yb 1 = 0 entonces
+                f := página()
+                si f = 0 entonces
+                    rt_motivo := "no queda memoria"
+                    devolver falso
+                fin
+            fin
+            rx_buf[k] := f + nat64(k yb 1) * 2048
+            pon_m32(rx_desc(k) + 4, 0)
+            pon_m64(rx_desc(k) + 8, rx_buf[k])
+            v := OWN ob RXTAM
+            si k = NRX - 1 entonces v := v ob EOR fin
+            pon_m32(rx_desc(k), v)
+            k := k + 1
+        fin
+        k := 0
+        mientras k < NTX hacer
+            si k yb 1 = 0 entonces
+                f := página()
+                si f = 0 entonces
+                    rt_motivo := "no queda memoria"
+                    devolver falso
+                fin
+            fin
+            tx_buf[k] := f + nat64(k yb 1) * 2048
+            v := 0
+            si k = NTX - 1 entonces v := EOR fin
+            pon_m32(tx_desc(k), v)
+            pon_m32(tx_desc(k) + 4, 0)
+            pon_m64(tx_desc(k) + 8, tx_buf[k])
+            k := k + 1
+        fin
+        rx_i := 0
+        tx_i := 0
+        ; en marcha
+        w8(R_9346, 0xC0)
+        si grupo <> G_VIEJA entonces
+            w8(R_CFG2, r8(R_CFG2) yb 0x7F)                     ; sin CLKREQ
+            w8(R_CFG5, r8(R_CFG5) yb 0xFE)                     ; sin ASPM
+            si grupo = G_G entonces w8(R_CFG3, r8(R_CFG3) yb 0xFD) fin   ; sin el paso a L2/L3
+            w16(R_IMIT, 0)
+            w16(R_CPCR, r16(R_CPCR) yb 0xFFBF)
+            v := r8(R_PMCH)
+            si v yb 0x80 = 0 entonces
+                si grupo = G_G entonces w8(R_PMCH, v ob 0xC0) sino w8(R_PMCH, v ob 0x80) fin
+            fin
+        fin
+        w16(R_RMS, RXTAM)
+        si grupo = G_VIEJA entonces w8(R_MTPS, 0x3F) sino w8(R_MTPS, 0x27) fin
+        w32(R_TNPDS, nat32((desc + 2048) yb 0xFFFFFFFF))
+        w32(R_TNPDS + 4, nat32((desc + 2048) >> 32))
+        w32(R_RDSAR, nat32(desc yb 0xFFFFFFFF))
+        w32(R_RDSAR + 4, nat32(desc >> 32))
+        si ensayo entonces w16(R_CPCR, r16(R_CPCR) ob 0x03) fin
+        si grupo = G_G entonces w32(R_MISC, r32(R_MISC) yb 0xFFF7FFFF) fin
+        w8(R_CR, 0x0C)
+        v := 0x03000700
+        si grupo <> G_VIEJA entonces v := v ob 0x80 fin
+        w32(R_TCR, v)
+        según nat16(grupo)
+            caso G_VIEJA: v := 0x0000E70E
+            caso G_EVL: v := 0x0000C70E
+            caso G_G: v := 0x0000CF0E
+        fin
+        w32(R_RCR, v)
+        w32(R_MAR0, 0xFFFFFFFF)
+        w32(R_MAR0 + 4, 0xFFFFFFFF)
+        w8(R_9346, 0)
+        ; la interrupción: MSI, o la patilla
+        modo := 0
+        si vector <> 0 y no ensayo y pon_msi(i, vector) entonces
+            modo := 1
+        sino
+            habilita(i, falso)
+            v := conf(i, 0x3C)
+            si vector <> 0 y (v >> 8) yb 0xFF <> 0 y v yb 0xFF > 0 y v yb 0xFF < 24 entonces
+                si dirige(v yb 0xFF, vector, 1 ob (3 << 2), falso) entonces
+                    modo := 3
+                    gsi := v yb 0xFF
+                fin
+            fin
+        fin
+        w16(R_ISR, 0xFFFF)
+        w16(R_IMR, 0x0073)                         ; ROK, RER, RDU, LinkChg, FOVW
+        ; el PHY: encenderlo y negociar (y en las G, sin EEE ni ALDPS)
+        si no ensayo entonces
+            v := phy_lee(0)
+            si grupo = G_G entonces
+                sin_ahorro_g()
+                phy_pon(0, 0x1200)
+            sino si v <> 0xFFFF y (v yb 0x0800 <> 0 o v yb 0x1000 = 0) entonces
+                phy_pon(0, 0x1200)
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; ---- lo que piden la pila y el hilo «red» ----
+    público función rt_envía(n: nat32, d: nat64, l: nat32): bool
+        variable x: nat64
+        variable v: nat32
+        x := tx_desc(tx_i)
+        si m32(x) yb OWN <> 0 entonces
+            rt_sin_envío := rt_sin_envío + 1
+            devolver falso
+        fin
+        si l > 1518 entonces devolver falso fin
+        copia_k(virt(tx_buf[tx_i]), d, nat64(l))
+        pon_m32(x + 4, 0)
+        pon_m64(x + 8, tx_buf[tx_i])
+        v := OWN ob FS ob LS ob l
+        si tx_i = NTX - 1 entonces v := v ob EOR fin
+        pon_m32(x, v)
+        tx_i := (tx_i + 1) mod NTX
+        si ensayo entonces w8(R_TPPOLL8139, 0x40) sino w8(R_TPPOLL, 0x40) fin
+        devolver cierto
+    fin
+
+    público función rt_recoge(n: nat32, d: nat64): nat32
+        variable x: nat64
+        variable s, l, v: nat32
+        mientras cierto hacer
+            x := rx_desc(rx_i)
+            s := m32(x)
+            si s yb OWN <> 0 entonces devolver 0 fin
+            l := 0
+            si s yb (FS ob LS ob 0x00200000) = (FS ob LS) entonces
+                v := s yb 0x3FFF
+                si v >= 18 y v <= 1522 entonces
+                    l := v - 4                             ; sin el CRC
+                    copia_k(d, virt(rx_buf[rx_i]), nat64(l))
+                fin
+            fin
+            si l = 0 entonces
+                rt_malas := rt_malas + 1
+                ifz(ifz_n).rx_err := ifz(ifz_n).rx_err + 1
+            fin
+            pon_m32(x + 4, 0)
+            pon_m64(x + 8, rx_buf[rx_i])
+            v := OWN ob RXTAM
+            si rx_i = NRX - 1 entonces v := v ob EOR fin
+            pon_m32(x, v)
+            rx_i := (rx_i + 1) mod NRX
+            si l > 0 entonces devolver l fin
+        fin
+        devolver 0
+    fin
+
+    público función rt_enlace(n: nat32, ref vel: nat32): bool
+        variable v: nat32
+        si ensayo entonces
+            vel := 100
+            devolver r8(R_MSR8139) yb 4 = 0
+        fin
+        v := r8(R_PHYST)
+        vel := 10
+        si v yb 0x08 <> 0 entonces vel := 100 fin
+        si v yb 0x10 <> 0 entonces vel := 1000 fin
+        devolver v yb 2 <> 0
+    fin
+
+    ; la tarjeta de Realtek que haya (la primera)
+    público función prepara_rtl(con_ensayo: bool)
+        variable i, a: nat32
+        variable sí: bool
+        vector := pide_vector()
+        si vector <> 0 entonces pon_vector(vector, nat64(dirección(int_rtl))) fin
+        i := 0
+        mientras i < pci_n y rt_n = 0 hacer
+            a := apa_de(i)
+            sí := falso
+            si fab_de(i) = 0x10EC y (a = 0x8168 o a = 0x8161 o a = 0x8136 o a = 0x8169 o a = 0x8167) entonces sí := cierto fin
+            si fab_de(i) = 0x1186 y a = 0x4300 entonces sí := cierto fin                  ; (D-Link DGE-528T: una 8169)
+            ensayo := falso
+            si con_ensayo y fab_de(i) = 0x10EC y a = 0x8139 entonces
+                sí := cierto
+                ensayo := cierto
+            fin
+            si sí entonces
+                escribir("Red: ")
+                escribe_bdf(i)
+                escribir(" 10EC:")
+                hex4(a)
+                si pon_tarjeta(i) entonces
+                    rt_n := 1
+                    ifz_n := alta_ifz(T_RTL, 0, nat64(dirección(mac[0])), dirección(rt_familia[0]))
+                    si ifz_n = 0xFFFFFFFF entonces
+                        rt_n := 0
+                        escribir(": no caben más interfaces\n")
+                        devolver
+                    fin
+                    ifz(ifz_n).modo_int := modo
+                    ifz(ifz_n).pci := i
+                    escribir(" Realtek ", dirección(rt_familia[0]), " (XID ")
+                    hex4(xid)
+                    escribir("), MAC ")
+                    escribe_mac(nat64(dirección(mac[0])))
+                    si base <> 0 entonces escribir(", registros en la memoria") sino escribir(", registros por los puertos") fin
+                    si modo = 1 entonces
+                        escribir(", MSI")
+                    sino si modo = 3 entonces
+                        escribir(", INTx por la GSI ", gsi, " (y mirando cada 10 ms)")
+                    sino
+                        escribir(", sin interrupciones (mirando cada 10 ms)")
+                    fin
+                    si grupo = G_G entonces escribir("; de las 8168G en adelante: sin EEE, ALDPS ni L2/L3; el FIFO compartido por LINK_LIST_RDY") fin
+                    escribir("\n")
+                sino
+                    escribir(": no se pone en marcha: ", rt_motivo, "\n")
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+fin Rtl64.

@@ -1,0 +1,294 @@
+; =============================================================================
+;  virtio64.cas - Hispa-64, etapa 9: virtio-net (docs/64/HISPA-64.md,
+;  sección 15), la tarjeta «paravirtualizada» de QEMU y de VirtualBox, por
+;  la forma de siempre («legacy», la de la versión 0.9.5 de la norma de
+;  virtio, que tienen las de transición: 1AF4:1000): los registros por los
+;  puertos de la BAR 0; dos colas (0 recibir, 1 enviar) de las que dice la
+;  tarjeta (256 en QEMU), cada una en memoria seguida (los descriptores, lo
+;  disponible y, en la página siguiente, lo usado); delante de cada trama,
+;  la cabecera de virtio-net (10 octetos, sin sumas ni trozos). Solo se
+;  piden VIRTIO_NET_F_MAC y STATUS. La interrupción, por la patilla (se
+;  borra leyendo el ISR), y el hilo «red» mira cada 10 ms igual.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Virtio64
+
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redbase64
+
+    constante V_FEAT = 0x00
+    constante V_GFEAT = 0x04
+    constante V_QADDR = 0x08
+    constante V_QSIZE = 0x0C
+    constante V_QSEL = 0x0E
+    constante V_QNOTIFY = 0x10
+    constante V_STATUS = 0x12
+    constante V_ISR = 0x13
+    constante V_MAC = 0x14
+    constante V_NETST = 0x1A
+    constante HDR = 10
+    constante MÁX_Q = 1024
+    constante USADOS_RX = 64                    ; los búferes de recibir que se dan
+    constante BUFS_TX = 32
+
+    público variable vi_n: nat32
+    público variable vi_interrupciones: nat64
+    variable io: nat32
+    variable ifz_n, gsi, vector, modo: nat32
+    variable mac: arreglo [8] de byte
+    variable con_estado: bool
+    ; cada cola: su tamaño, su memoria (física), lo último usado visto y lo siguiente disponible
+    variable q_n: arreglo [2] de nat32
+    variable q_mem: arreglo [2] de nat64
+    variable q_usado: arreglo [2] de nat32
+    variable q_disp: arreglo [2] de nat32
+    variable q_libres: nat32                    ; (envío) descriptores libres
+    variable q_sig_tx: nat32
+    variable rx_buf: arreglo [USADOS_RX] de nat64
+    variable tx_buf: arreglo [BUFS_TX] de nat64
+    variable vi_motivo: puntero a byte
+
+    interrupción función int_virtio()
+        variable v: nat32
+        vi_interrupciones := vi_interrupciones + 1
+        si vi_n > 0 entonces
+            v := entra8(io + V_ISR)                 ; (leerlo lo borra)
+            si v <> 0 entonces ifz(ifz_n).interrupciones := ifz(ifz_n).interrupciones + 1 fin
+        fin
+        avisa_red()
+        eoi()
+    fin
+
+    ; dónde está cada parte de la cola q (virtual)
+    función desc(q: nat32, i: nat32): nat64
+        devolver virt(q_mem[q]) + nat64(i) * 16
+    fin
+
+    función disp_(q: nat32): nat64
+        devolver virt(q_mem[q]) + nat64(q_n[q]) * 16
+    fin
+
+    función usado(q: nat32): nat64
+        variable t: nat64
+        t := nat64(q_n[q]) * 16 + 6 + nat64(q_n[q]) * 2
+        t := (t + 4095) yb (nob nat64(4095))
+        devolver virt(q_mem[q]) + t
+    fin
+
+    función barrera()
+        ensamblador
+            mfence
+        fin
+    fin
+
+    ; prepara la cola q (0 o 1)
+    función pon_cola(q: nat32): bool
+        variable n, págs: nat32
+        variable t, f: nat64
+        sale16(io + V_QSEL, q)
+        n := entra16(io + V_QSIZE)
+        si n = 0 o n > MÁX_Q entonces
+            vi_motivo := "una cola de tamaño raro"
+            devolver falso
+        fin
+        q_n[q] := n
+        t := nat64(n) * 16 + 6 + nat64(n) * 2
+        t := (t + 4095) yb (nob nat64(4095))
+        t := t + ((6 + nat64(n) * 8 + 4095) yb (nob nat64(4095)))
+        págs := nat32(t div 4096)
+        f := pide_seguidos(nat64(págs), 1)
+        si f = 0 entonces
+            vi_motivo := "no queda memoria seguida para las colas"
+            devolver falso
+        fin
+        ceros_k(virt(f), t)
+        q_mem[q] := f
+        q_usado[q] := 0
+        q_disp[q] := 0
+        sale32(io + V_QADDR, nat32(f >> 12))
+        devolver cierto
+    fin
+
+    ; da al dispositivo el búfer k de recibir
+    función da_rx(k: nat32)
+        variable i: nat32
+        variable d: nat64
+        d := desc(0, k)
+        pon_m64(d, rx_buf[k])
+        pon_m32(d + 8, 2048)
+        pon_m16(d + 12, 2)                          ; VIRTQ_DESC_F_WRITE
+        pon_m16(d + 14, 0)
+        i := q_disp[0]
+        pon_m16(disp_(0) + 4 + nat64(i mod q_n[0]) * 2, k)
+        barrera()
+        q_disp[0] := (i + 1) yb 0xFFFF
+        pon_m16(disp_(0) + 2, q_disp[0])
+    fin
+
+    función pon_tarjeta(i: nat32): bool
+        variable k, f, ok_: nat32
+        variable fr: nat64
+        variable v: nat32
+        k := 0
+        io := 0
+        mientras k < 6 y io = 0 hacer
+            v := conf(i, 0x10 + k * 4)
+            si v yb 1 <> 0 y v yb 0xFFFC <> 0 entonces io := v yb 0xFFFC fin
+            k := k + 1
+        fin
+        si io = 0 entonces
+            vi_motivo := "sin la forma de siempre (legacy: sin puertos en una BAR)"
+            devolver falso
+        fin
+        habilita(i, falso)
+        pon_conf(i, 4, conf(i, 4) ob 1)             ; (los puertos)
+        sale8(io + V_STATUS, 0)
+        sale8(io + V_STATUS, 1)                     ; ACKNOWLEDGE
+        sale8(io + V_STATUS, 3)                     ; DRIVER
+        f := entra32(io + V_FEAT)
+        ok_ := f yb ((1 << 5) ob (1 << 16))         ; MAC y STATUS
+        con_estado := ok_ yb (1 << 16) <> 0
+        sale32(io + V_GFEAT, ok_)
+        si no pon_cola(0) o no pon_cola(1) entonces
+            sale8(io + V_STATUS, 0x80)
+            devolver falso
+        fin
+        k := 0
+        mientras k < 6 hacer
+            si ok_ yb (1 << 5) <> 0 entonces mac[k] := byte(entra8(io + V_MAC + k)) sino mac[k] := byte(0x52 + k) fin
+            k := k + 1
+        fin
+        ; los búferes de recibir (dos por página) y de enviar
+        k := 0
+        mientras k < USADOS_RX y k < q_n[0] hacer
+            si k yb 1 = 0 entonces
+                fr := pide()
+                si fr = 0 entonces
+                    vi_motivo := "no queda memoria"
+                    devolver falso
+                fin
+            fin
+            rx_buf[k] := fr + nat64(k yb 1) * 2048
+            da_rx(k)
+            k := k + 1
+        fin
+        k := 0
+        mientras k < BUFS_TX hacer
+            si k yb 1 = 0 entonces
+                fr := pide()
+                si fr = 0 entonces
+                    vi_motivo := "no queda memoria"
+                    devolver falso
+                fin
+            fin
+            tx_buf[k] := fr + nat64(k yb 1) * 2048
+            k := k + 1
+        fin
+        q_sig_tx := 0
+        ; la interrupción: la patilla
+        modo := 0
+        v := conf(i, 0x3C)
+        si vector <> 0 y (v >> 8) yb 0xFF <> 0 y v yb 0xFF > 0 y v yb 0xFF < 24 entonces
+            si dirige(v yb 0xFF, vector, 1 ob (3 << 2), falso) entonces
+                modo := 3
+                gsi := v yb 0xFF
+            fin
+        fin
+        sale8(io + V_STATUS, 7)                     ; DRIVER_OK
+        sale16(io + V_QNOTIFY, 0)
+        devolver cierto
+    fin
+
+    ; ---- lo que piden la pila y el hilo «red» ----
+    público función vi_envía(n: nat32, d: nat64, l: nat32): bool
+        variable k, i, u: nat32
+        variable x: nat64
+        si l > 1518 entonces devolver falso fin
+        ; (lo ya enviado: se sabe por lo usado de la cola 1)
+        u := m16(usado(1) + 2)
+        q_usado[1] := u
+        ; (como mucho BUFS_TX en vuelo)
+        si ((q_disp[1] - q_usado[1]) yb 0xFFFF) >= BUFS_TX entonces devolver falso fin
+        k := q_sig_tx
+        x := virt(tx_buf[k])
+        ceros_k(x, HDR)
+        copia_k(x + HDR, d, nat64(l))
+        x := desc(1, k)
+        pon_m64(x, tx_buf[k])
+        pon_m32(x + 8, l + HDR)
+        pon_m16(x + 12, 0)
+        pon_m16(x + 14, 0)
+        i := q_disp[1]
+        pon_m16(disp_(1) + 4 + nat64(i mod q_n[1]) * 2, k)
+        barrera()
+        q_disp[1] := (i + 1) yb 0xFFFF
+        pon_m16(disp_(1) + 2, q_disp[1])
+        barrera()
+        q_sig_tx := (k + 1) mod BUFS_TX
+        sale16(io + V_QNOTIFY, 1)
+        devolver cierto
+    fin
+
+    público función vi_recoge(n: nat32, d: nat64): nat32
+        variable u, k, l: nat32
+        variable e: nat64
+        u := m16(usado(0) + 2)
+        si u = q_usado[0] entonces devolver 0 fin
+        e := usado(0) + 4 + nat64(q_usado[0] mod q_n[0]) * 8
+        k := m32(e)
+        l := m32(e + 4)
+        q_usado[0] := (q_usado[0] + 1) yb 0xFFFF
+        si k >= USADOS_RX entonces devolver 0 fin
+        si l > HDR y l - HDR <= TRAMA entonces
+            l := l - HDR
+            copia_k(d, virt(rx_buf[k]) + HDR, nat64(l))
+        sino
+            l := 0
+        fin
+        da_rx(k)
+        sale16(io + V_QNOTIFY, 0)
+        si l = 0 entonces devolver vi_recoge(n, d) fin
+        devolver l
+    fin
+
+    público función vi_enlace(n: nat32, ref vel: nat32): bool
+        vel := 1000
+        si no con_estado entonces devolver cierto fin
+        devolver entra16(io + V_NETST) yb 1 <> 0
+    fin
+
+    público función prepara_virtio()
+        variable i: nat32
+        vector := pide_vector()
+        si vector <> 0 entonces pon_vector(vector, nat64(dirección(int_virtio))) fin
+        i := 0
+        mientras i < pci_n y vi_n = 0 hacer
+            si fab_de(i) = 0x1AF4 y (apa_de(i) = 0x1000 o apa_de(i) = 0x1041) y clase_de(i) >> 8 = 0x0200 entonces
+                escribir("Red: ")
+                escribe_bdf(i)
+                escribir(" 1AF4:")
+                hex4(apa_de(i))
+                escribir(" virtio-net")
+                si pon_tarjeta(i) entonces
+                    vi_n := 1
+                    ifz_n := alta_ifz(T_VIRTIO, 0, nat64(dirección(mac[0])), "virtio-net (paravirtualizada)")
+                    si ifz_n = 0xFFFFFFFF entonces
+                        vi_n := 0
+                        escribir(": no caben más interfaces\n")
+                        devolver
+                    fin
+                    ifz(ifz_n).modo_int := modo
+                    ifz(ifz_n).pci := i
+                    escribir(", MAC ")
+                    escribe_mac(nat64(dirección(mac[0])))
+                    escribir(", colas de ", q_n[0], " y ", q_n[1])
+                    si modo = 3 entonces escribir(", INTx por la GSI ", gsi, " (y mirando cada 10 ms)") sino escribir(", sin interrupciones (mirando cada 10 ms)") fin
+                    escribir("\n")
+                sino
+                    escribir(": no se pone en marcha: ", vi_motivo, "\n")
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+fin Virtio64.

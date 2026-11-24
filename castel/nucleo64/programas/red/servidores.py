@@ -14,6 +14,11 @@
 #       segundos (con decimales; negativo, atrasada)
 #   servidores.py eco PUERTO
 #       eco por TCP (cada conexión, en un hilo)
+#   servidores.py dns PUERTO IP [DIRECCIÓN]
+#       DNS por UDP (solo para las pruebas): los nombres que acaban en
+#       «.prueba» son IP (A); los demás, NXDOMAIN; AAAA, sin respuestas.
+#       Escucha en DIRECCIÓN (127.0.0.1 por omisión: QEMU lleva ahí lo que
+#       el invitado manda a 10.0.2.2)
 #   servidores.py certs CARPETA NOMBRE [ec|rsa]
 #       con openssl: una autoridad de prueba (ca.pem, ca.der, ca.key) y un
 #       certificado de servidor para NOMBRE (DNS en el SAN; servidor.pem,
@@ -151,6 +156,33 @@ def eco(puerto):
     s.serve_forever()
 
 
+def dns(puerto, ip, dirección="127.0.0.1"):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind((dirección, puerto))
+    listo(s.getsockname()[1])
+    para_solo()
+    a = socket.inet_aton(ip)
+    while True:
+        q, de = s.recvfrom(2048)
+        if len(q) < 12:
+            continue
+        i, partes = 12, []
+        while i < len(q) and q[i] != 0:
+            partes.append(q[i + 1:i + 1 + q[i]].decode(errors="replace"))
+            i += 1 + q[i]
+        i += 1
+        if i + 4 > len(q):
+            continue
+        tipo = struct.unpack(">H", q[i:i + 2])[0]
+        pregunta = q[12:i + 4]
+        nombre = ".".join(partes).lower()
+        bien = nombre.endswith(".prueba")
+        resp = q[:2] + struct.pack(">HHHHH", 0x8180 if bien else 0x8183, 1, 1 if bien and tipo == 1 else 0, 0, 0) + pregunta
+        if bien and tipo == 1:
+            resp += struct.pack(">HHHIH", 0xC00C, 1, 1, 60, 4) + a
+        s.sendto(resp, de)
+
+
 def openssl(*a):
     subprocess.run(["/usr/bin/openssl"] + list(a), check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -218,12 +250,14 @@ def main(a):
             return ntp(int(a[1]), float(a[2]))
         if len(a) >= 2 and a[0] == "eco":
             return eco(int(a[1]))
+        if len(a) >= 3 and a[0] == "dns":
+            return dns(int(a[1]), a[2], a[3] if len(a) >= 4 else "127.0.0.1")
         if len(a) >= 3 and a[0] == "certs":
             return certs(a[1], a[2], a[3] if len(a) >= 4 else "ec")
     except subprocess.CalledProcessError as e:
         sys.exit("servidores.py: openssl falla: %s" % e.stderr.decode(errors="replace").strip())
     sys.exit("uso: servidores.py http PUERTO ARCHIVO | https PUERTO ARCHIVO CERT.pem CLAVE.pem |\n"
-             "     ntp PUERTO DESFASE_S | eco PUERTO | certs CARPETA NOMBRE [ec|rsa]")
+             "     ntp PUERTO DESFASE_S | eco PUERTO | dns PUERTO IP [DIRECCIÓN] | certs CARPETA NOMBRE [ec|rsa]")
 
 
 if __name__ == "__main__":

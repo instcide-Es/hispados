@@ -16,7 +16,7 @@
 ; =============================================================================
 módulo Ip64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Sondeo64, Azar64, Redbase64, Intel64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Sondeo64, Azar64, Redbase64, Intel64, Rtl64, Virtio64
 
     constante MAX_ARP = 32
     constante LO_N = 256
@@ -76,6 +76,8 @@ módulo Ip64
         bien := falso
         según nat16(x.clase)
             caso T_E1000: bien := in_envía(x.índice, d, n)
+            caso T_RTL: bien := rt_envía(x.índice, d, n)
+            caso T_VIRTIO: bien := vi_envía(x.índice, d, n)
         fin
         si bien entonces
             x.tx_paq := x.tx_paq + 1
@@ -91,6 +93,8 @@ módulo Ip64
         x := ifz(i)
         según nat16(x.clase)
             caso T_E1000: devolver in_recoge(x.índice, d)
+            caso T_RTL: devolver rt_recoge(x.índice, d)
+            caso T_VIRTIO: devolver vi_recoge(x.índice, d)
         fin
         devolver 0
     fin
@@ -104,6 +108,8 @@ módulo Ip64
         e := falso
         según nat16(x.clase)
             caso T_E1000: e := in_enlace(x.índice, v)
+            caso T_RTL: e := rt_enlace(x.índice, v)
+            caso T_VIRTIO: e := vi_enlace(x.índice, v)
         fin
         si e y x.enlace = 0 entonces
             x.enlace := 1
@@ -1075,7 +1081,7 @@ módulo Ip64
     fin
 
     ; las tarjetas, «lo» y el hilo (con «ip=...» de la línea, o vacío)
-    público función prepara_red(fija: puntero a byte, sin_dhcp_: bool)
+    público función prepara_red(fija: puntero a byte, sin_dhcp_: bool, realtek_ensayo: bool)
         variable x: puntero a Ifz
         sin_dhcp := sin_dhcp_
         dice_dhcp := cierto
@@ -1092,6 +1098,8 @@ módulo Ip64
         x.nombre[2] := 0
         copia_k(nat64(dirección(x.tarjeta[0])), nat64("la interfaz de este equipo (127.0.0.1)"), 39)
         prepara_intel()
+        prepara_rtl(realtek_ensayo)
+        prepara_virtio()
         si fija[0] <> 0 entonces ip_fija(fija) fin
         ip_id := azar32()
         lo_cola := nat64(reserva(nat64(LO_N) * TRAMA))
