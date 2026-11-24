@@ -66,7 +66,7 @@ módulo Hispa64
     importar Es64, Acpi64, Reloj64, Apic64, Pci64, PorCpu64, Cerrojo, Hilos64, Smp64, PrSmp64
     importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
     importar Msi64, Nvme64, Ahci64, Discos64, Nodos64, Fat64, Exfat64, Vfs64, PrDisc64
-    importar Raton64
+    importar Raton64, Usbvigia
 
     constante VERSIÓN = "0.6.0"
     constante MB1 = 0x2BADB002
@@ -511,6 +511,7 @@ módulo Hispa64
         escribir("Discos:\n")
         prepara_nvme(tiene("sinmsix"))
         prepara_ahci(tiene("sinmsi"))
+        si no tiene("sinusb") entonces prepara_usb(tiene("sinmsix"), tiene("sinmsi")) fin
         si no prepara_bloques(tiene("escribir")) entonces escribir("  sin memoria para la caché de bloques\n") fin
         escribir("  la caché de bloques: ", cb_n, " bloques de 4 KB (")
         tamaño_legible(nat64(cb_n) * 4096)

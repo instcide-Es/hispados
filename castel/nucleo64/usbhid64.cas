@@ -1,0 +1,247 @@
+; =============================================================================
+;  usbhid64.cas - Hispa-64, etapa 6: los teclados, ratones y tabletas USB (la
+;  clase HID, 03; docs/64/HISPA-64.md, sección 12).
+;
+;  Cada interfaz HID con un extremo de interrupción de entrada: se lee su
+;  descriptor de informe y lo analiza Hidesc64 (dónde van los botones, los
+;  ejes, la rueda, las teclas); con eso, en el protocolo de informes (el de
+;  verdad: con la rueda, y las tabletas con su posición absoluta). Si el
+;  descriptor no se entiende y es un teclado o un ratón de arranque
+;  (subclase 1), el protocolo de arranque (8 octetos el teclado, 3 el ratón).
+;  El vigía (usbvigia.cas) mira los informes que llegan: las teclas, como
+;  pulsadas y soltadas, a Teclas64 (con el mapa español); los movimientos, a
+;  Raton64. Los LED del teclado (Bloq Mayús, Bloq Num), con SET_REPORT
+;  cuando cambian.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbhid64
+
+    importar Cifras64, Es64, Fisica64, Monton64, Hilos64, Xhci64, Usb64, Raton64
+
+    público constante MAX_HID = 8
+    público constante H_TECLADO = 1
+    público constante H_RATÓN = 2
+    público constante H_TABLETA = 3
+
+    tipo Hid = estructura
+        hay: bool
+        aparato, interfaz, número, ext: nat32
+        clase: nat32                ; H_TECLADO, H_RATÓN, H_TABLETA
+        arranque: bool              ; con el protocolo de arranque
+        largo: nat32                ; del informe que se pide
+        pedido: bool
+        página: nat64               ; (física) el informe en 0; lo de antes (teclas) en 0x100
+        antes: arreglo [8] de byte  ; (teclado) los modificadores y las teclas del informe anterior
+    fin
+
+    variable hids: arreglo [MAX_HID] de Hid
+    público variable uh_teclados, uh_ratones, uh_tabletas, uh_informes, uh_teclas, uh_fallos: nat64
+    público variable uh_última: nat32           ; el último uso de tecla pulsado (para las pruebas)
+
+    función h8(h: nat32, k: nat32): nat32
+        devolver m8(virt(hids[h].página) + nat64(k))
+    fin
+
+    ; una tecla HID (página 7) pulsada o soltada
+    función tecla_usb(uso: nat32, pulsada: bool)
+        si pulsada entonces
+            uh_teclas := uh_teclas + 1
+            uh_última := uso
+        fin
+    fin
+
+    ; el informe de arranque del teclado: los modificadores (bits de 0xE0 a
+    ; 0xE7) y hasta 6 teclas; lo que cambia respecto del anterior
+    función teclado_arranque(h: nat32, n: nat32)
+        variable k, j, u: nat32
+        variable está: bool
+        si n < 3 entonces devolver fin
+        ; (un informe de «demasiadas teclas»: 0x01 en todas; se tira)
+        si h8(h, 2) = 1 entonces devolver fin
+        ; los modificadores
+        k := 0
+        mientras k < 8 hacer
+            si ((h8(h, 0) xob hids[h].antes[0]) >> k) yb 1 <> 0 entonces tecla_usb(0xE0 + k, (h8(h, 0) >> k) yb 1 <> 0) fin
+            k := k + 1
+        fin
+        ; las soltadas: las de antes que no están
+        k := 2
+        mientras k < 8 hacer
+            u := hids[h].antes[k]
+            si u > 3 entonces
+                está := falso
+                j := 2
+                mientras j < n y j < 8 hacer
+                    si h8(h, j) = u entonces está := cierto fin
+                    j := j + 1
+                fin
+                si no está entonces tecla_usb(u, falso) fin
+            fin
+            k := k + 1
+        fin
+        ; las pulsadas: las de ahora que no estaban
+        k := 2
+        mientras k < n y k < 8 hacer
+            u := h8(h, k)
+            si u > 3 entonces
+                está := falso
+                j := 2
+                mientras j < 8 hacer
+                    si hids[h].antes[j] = u entonces está := cierto fin
+                    j := j + 1
+                fin
+                si no está entonces tecla_usb(u, cierto) fin
+            fin
+            k := k + 1
+        fin
+        k := 0
+        mientras k < 8 hacer
+            si k < n entonces hids[h].antes[k] := byte(h8(h, k)) sino hids[h].antes[k] := 0 fin
+            k := k + 1
+        fin
+    fin
+
+    función con_signo8(v: nat32): ent32
+        si v >= 128 entonces devolver ent32(v) - 256 fin
+        devolver ent32(v)
+    fin
+
+    función ratón_arranque(h: nat32, n: nat32)
+        variable rueda: ent32
+        si n < 3 entonces devolver fin
+        rueda := 0
+        si n >= 4 entonces rueda := con_signo8(h8(h, 3)) fin
+        ratón_mueve(con_signo8(h8(h, 1)), con_signo8(h8(h, 2)), rueda, h8(h, 0) yb 7, 1)
+    fin
+
+    ; un informe que ha llegado
+    función procesa(h: nat32, n: nat32)
+        uh_informes := uh_informes + 1
+        si hids[h].clase = H_TECLADO entonces
+            teclado_arranque(h, n)
+        sino si hids[h].clase = H_RATÓN entonces
+            ratón_arranque(h, n)
+        fin
+    fin
+
+    ; la interfaz i del aparato ai, si es HID con un extremo de interrupción de entrada
+    función toma(ai: nat32, i: nat32): bool
+        variable a: puntero a Aparato
+        variable k, e: nat32
+        a := aparato(ai)
+        si a.interfaces[i].clase <> 3 entonces devolver falso fin
+        e := busca_ext(a, i, 3, cierto)
+        si e = U_NINGUNO entonces devolver falso fin
+        k := 0
+        mientras k < MAX_HID y hids[k].hay hacer k := k + 1 fin
+        si k >= MAX_HID entonces devolver falso fin
+        hids[k].aparato := ai
+        hids[k].interfaz := i
+        hids[k].número := a.interfaces[i].número
+        hids[k].ext := e
+        hids[k].pedido := falso
+        hids[k].página := página_de(a.ctl)
+        si hids[k].página = 0 entonces devolver falso fin
+        k := k
+        ; (por ahora, el protocolo de arranque)
+        si a.interfaces[i].subclase = 1 y a.interfaces[i].protocolo = 1 entonces
+            hids[k].clase := H_TECLADO
+            hids[k].largo := 8
+            uh_teclados := uh_teclados + 1
+        sino si a.interfaces[i].subclase = 1 y a.interfaces[i].protocolo = 2 entonces
+            hids[k].clase := H_RATÓN
+            hids[k].largo := 4
+            uh_ratones := uh_ratones + 1
+        sino
+            suelta_página(hids[k].página)
+            devolver falso
+        fin
+        hids[k].arranque := cierto
+        u_control(a, 0x21, 0x0B, 0, hids[k].número, 0)                ; SET_PROTOCOL (arranque)
+        u_control(a, 0x21, 0x0A, 0, hids[k].número, 0)                ; SET_IDLE (solo al cambiar)
+        hids[k].hay := cierto
+        a.dueño := DE_HID
+        devolver cierto
+    fin
+
+    público función hid_nuevo(ai: nat32)
+        variable a: puntero a Aparato
+        variable i: nat32
+        a := aparato(ai)
+        si a = nulo o a.dueño <> DE_NADIE entonces devolver fin
+        i := 0
+        mientras i < a.n_interfaces hacer
+            toma(ai, i)
+            i := i + 1
+        fin
+    fin
+
+    público función prepara_hid()
+        variable i: nat32
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            si aparato(i) <> nulo y aparato(i).usado entonces hid_nuevo(i) fin
+            i := i + 1
+        fin
+    fin
+
+    público función hid_se_va(ai: nat32)
+        variable k: nat32
+        k := 0
+        mientras k < MAX_HID hacer
+            si hids[k].hay y hids[k].aparato = ai entonces
+                hids[k].hay := falso
+                suelta_página(hids[k].página)
+                aparato(ai).dueño := DE_NADIE
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; (el vigía) los informes que han llegado, y otro pedido
+    público función hid_mira()
+        variable k: nat32
+        variable a: puntero a Aparato
+        variable r: ent32
+        k := 0
+        mientras k < MAX_HID hacer
+            si hids[k].hay entonces
+                a := aparato(hids[k].aparato)
+                si no hids[k].pedido entonces
+                    u_pide_informe(a, hids[k].ext, hids[k].página, hids[k].largo)
+                    hids[k].pedido := cierto
+                sino
+                    r := u_informe(a, hids[k].ext, hids[k].largo)
+                    si r <> -3 entonces
+                        hids[k].pedido := falso
+                        si r > 0 entonces procesa(k, nat32(r)) sino uh_fallos := uh_fallos + 1 fin
+                        u_pide_informe(a, hids[k].ext, hids[k].página, hids[k].largo)
+                        hids[k].pedido := cierto
+                    fin
+                fin
+            fin
+            k := k + 1
+        fin
+    fin
+
+    público función escribe_clase(ai: nat32)
+        variable k: nat32
+        variable a: puntero a Aparato
+        a := aparato(ai)
+        si a.dueño = DE_ALM entonces escribir("; almacenamiento (SCSI, Bulk-Only)") fin
+        k := 0
+        mientras k < MAX_HID hacer
+            si hids[k].hay y hids[k].aparato = ai entonces
+                escribir("; HID: ")
+                según nat16(hids[k].clase)
+                    caso H_TECLADO: escribir("teclado")
+                    caso H_RATÓN: escribir("ratón")
+                    caso H_TABLETA: escribir("tableta")
+                fin
+                si hids[k].arranque entonces escribir(" (protocolo de arranque)") fin
+            fin
+            k := k + 1
+        fin
+    fin
+
+fin Usbhid64.

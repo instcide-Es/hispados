@@ -30,12 +30,13 @@
 ; =============================================================================
 módulo Discos64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64, Usbalm64
 
     público constante MAX_DISCOS = 48
     público constante D_NVME = 1
     público constante D_SATA = 2
     público constante D_PARTE = 3
+    público constante D_USB = 4                ; [etapa 6] las memorias USB (Usbalm64)
     público constante BLOQUE = 4096
     constante NADA = 0xFFFFFFFF
     constante CUBOS = 4096
@@ -186,6 +187,7 @@ módulo Discos64
         d := dk_padre[d]
         si dk_clase[d] = D_NVME entonces devolver nvme_modelo(dk_índice[d]) fin
         si dk_clase[d] = D_SATA entonces devolver sata_modelo(dk_índice[d]) fin
+        si dk_clase[d] = D_USB entonces devolver usb_modelo(dk_índice[d]) fin
         devolver ""
     fin
 
@@ -207,7 +209,8 @@ módulo Discos64
         variable bien: bool
         bien := falso
         si dk_clase[d] = D_NVME entonces bien := nvme_es(dk_índice[d], lba, n, fís, escribe)
-        sino si dk_clase[d] = D_SATA entonces bien := sata_es(dk_índice[d], lba, n, fís, escribe) fin
+        sino si dk_clase[d] = D_SATA entonces bien := sata_es(dk_índice[d], lba, n, fís, escribe)
+        sino si dk_clase[d] = D_USB entonces bien := usb_es(dk_índice[d], lba, n, fís, escribe) fin
         si no bien entonces dk_errores := dk_errores + 1 fin
         devolver bien
     fin
@@ -223,6 +226,7 @@ módulo Discos64
     función vacía_abajo(d: nat32): bool
         si dk_clase[d] = D_NVME entonces devolver nvme_vacía(dk_índice[d]) fin
         si dk_clase[d] = D_SATA entonces devolver sata_vacía(dk_índice[d]) fin
+        si dk_clase[d] = D_USB entonces devolver usb_vacía(dk_índice[d]) fin
         devolver cierto
     fin
 
@@ -707,6 +711,16 @@ módulo Discos64
             d := nuevo_disco(D_SATA, i, sata_sector(i), sata_sectores(i))
             si d <> NADA entonces
                 pon_nombre(d, "sata", 0, 0)
+                añade_número(d, i)
+            fin
+            i := i + 1
+        fin
+        ; [etapa 6] las memorias USB
+        i := 0
+        mientras i < ua_n_discos hacer
+            d := nuevo_disco(D_USB, i, usb_sector(i), usb_sectores(i))
+            si d <> NADA entonces
+                pon_nombre(d, "usb", 0, 0)
                 añade_número(d, i)
             fin
             i := i + 1

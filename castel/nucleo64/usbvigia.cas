@@ -1,0 +1,215 @@
+; =============================================================================
+;  usbvigia.cas - Hispa-64, etapa 6: el USB entero (docs/64/HISPA-64.md,
+;  sección 12): preparar las controladoras (xhci64.cas), enumerar lo que hay
+;  (usb64.cas), dárselo a las clases (usbhid64.cas: teclados, ratones y
+;  tabletas; usbalm64.cas: memorias) y el hilo «vigía», que atiende lo que
+;  llega: los informes de los teclados y ratones, los cambios de los puertos
+;  de las controladoras y de los concentradores (lo que se enchufa y se
+;  desenchufa en marcha), los LED del teclado. Con interrupciones, duerme
+;  hasta que la controladora avisa (o 100 ms); sin ellas, mira cada 10 ms.
+;  «sinusb» en la línea de órdenes: no se toca nada.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbvigia
+
+    importar Cifras64, Es64, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Xhci64, Usb64, Usbalm64, Usbhid64
+
+    variable vigía: puntero a Hilo
+    variable parar: bool
+    público variable uv_vueltas, uv_enchufados, uv_quitados: nat64
+
+    ; lo que hay en los puertos de las controladoras (al arrancar)
+    función mira_raíces()
+        variable c, p: nat32
+        c := 0
+        mientras c < xh_n hacer
+            p := 1
+            mientras p <= puertos_de(c) hacer
+                puerto_cambio(c, p)
+                si puerto_estado(c, p) yb 1 <> 0 entonces
+                    si enumera_raíz(c, p) = U_NINGUNO entonces
+                        escribir("  ", c + 1, "-", p, ": no se deja (", us_motivo, ")\n")
+                    fin
+                fin
+                p := p + 1
+            fin
+            c := c + 1
+        fin
+    fin
+
+    público función escribe_usb()
+        variable i: nat32
+        variable a: puntero a Aparato
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            a := aparato(i)
+            si a <> nulo entonces
+                escribe_aparato(i)
+                escribe_clase(i)
+                escribir("\n")
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; [etapa 6] el USB: las controladoras, lo enchufado, las clases y el vigía
+    público función prepara_usb(sin_msix: bool, sin_msi: bool)
+        variable t0: nat64
+        prepara_xhci(sin_msix, sin_msi)
+        si xh_n = 0 entonces devolver fin
+        ; (un rato para que se entrenen los enlaces de USB 3)
+        espera_ms(50)
+        t0 := ahora_ns()
+        mira_raíces()
+        prepara_hid()
+        prepara_alm()
+        escribir("USB: ", us_n, " aparatos (", us_hubs, " concentradores) en ", (ahora_ns() - t0) div 1000000, " ms\n")
+        escribe_usb()
+        escribe_alm()
+        parar := falso
+        vigía := crea(nat64(dirección(vigía_)), 0, "vigía USB", NORMAL, CUALQUIERA)
+    fin
+
+    ; ---- el vigía ----
+    ; lo enchufado y desenchufado en un puerto de una controladora
+    función raíz_cambia(c: nat32, p: nat32)
+        variable i: nat32
+        i := en_raíz(c, p)
+        si i <> U_NINGUNO entonces quita(i) fin
+        si puerto_estado(c, p) yb 1 <> 0 entonces
+            espera_ms(100)
+            i := enumera_raíz(c, p)
+            si i <> U_NINGUNO entonces enchufado(i) fin
+        fin
+    fin
+
+    ; el aparato i (y lo que cuelga de él) se va
+    función quita(i: nat32)
+        variable j: nat32
+        marca_ido(i)
+        j := 0
+        mientras j < MAX_APARATOS hacer
+            si aparato(j) <> nulo y aparato(j).ido entonces
+                hid_se_va(j)
+                se_va(j)
+                escribir("USB: se ha desenchufado ")
+                escribe_sitio(j)
+                escribir("\n")
+            fin
+            j := j + 1
+        fin
+        ; (de abajo arriba: los que cuelgan, antes)
+        j := MAX_APARATOS
+        mientras j > 0 hacer
+            j := j - 1
+            si aparato(j) <> nulo y aparato(j).ido y aparato(j).dueño <> DE_ALM entonces
+                suelta(j)
+                uv_quitados := uv_quitados + 1
+            fin
+        fin
+    fin
+
+    función enchufado(i: nat32)
+        uv_enchufados := uv_enchufados + 1
+        escribir("USB: enchufado")
+        escribe_aparato(i)
+        hid_nuevo(i)
+        escribe_clase(i)
+        escribir("\n")
+        ; (y si es un concentrador, lo que tenga ya se ha enumerado)
+        mira_nuevos()
+    fin
+
+    ; los que cuelgan de un concentrador recién enchufado: a sus clases
+    función mira_nuevos()
+        variable j: nat32
+        j := 0
+        mientras j < MAX_APARATOS hacer
+            si aparato(j) <> nulo y aparato(j).usado y aparato(j).dueño = DE_NADIE entonces hid_nuevo(j) fin
+            j := j + 1
+        fin
+    fin
+
+    ; un concentrador dice que han cambiado sus puertos (el mapa de bits)
+    función hub_cambia(h: nat32, mapa: nat32)
+        variable a: puntero a Aparato
+        variable p, estado, i: nat32
+        a := aparato(h)
+        p := 1
+        mientras p <= a.puertos_hub hacer
+            si mapa yb (nat32(1) << p) <> 0 entonces
+                estado := estado_hub(a, p)
+                borra_cambios(a, p, estado >> 16)
+                si (estado >> 16) yb 1 <> 0 entonces
+                    i := en_hub(h, p)
+                    si i <> U_NINGUNO entonces quita(i) fin
+                    si estado yb 1 <> 0 entonces
+                        espera_ms(100)
+                        i := puerto_de_hub(h, p)
+                        si i <> U_NINGUNO entonces enchufado(i) fin
+                    fin
+                fin
+            fin
+            p := p + 1
+        fin
+    fin
+
+    variable hub_pedido: arreglo [MAX_APARATOS] de bool
+    variable hub_página: nat64
+
+    función mira_hubs()
+        variable i: nat32
+        variable a: puntero a Aparato
+        variable r: ent32
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            a := aparato(i)
+            si a <> nulo y a.usado y no a.ido y a.r.es_hub y a.hub_ext <> U_NINGUNO entonces
+                si hub_página = 0 entonces hub_página := página_de(a.ctl) fin
+                si no hub_pedido[i] entonces
+                    u_pide_informe(a, a.hub_ext, hub_página + nat64(i) * 8, 4)
+                    hub_pedido[i] := cierto
+                sino
+                    r := u_informe(a, a.hub_ext, 4)
+                    si r <> -3 entonces
+                        hub_pedido[i] := falso
+                        si r > 0 entonces hub_cambia(i, m32(virt(hub_página) + nat64(i) * 8)) fin
+                    fin
+                fin
+            sino
+                hub_pedido[i] := falso
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función vigía_(arg: nat64)
+        variable c, p, cambios: nat32
+        variable con: bool
+        mientras no parar hacer
+            uv_vueltas := uv_vueltas + 1
+            con := falso
+            c := 0
+            mientras c < xh_n hacer
+                mira(c)
+                si con_mensajes(c) entonces con := cierto fin
+                cambios := cambios_de(c)
+                p := 1
+                mientras p <= puertos_de(c) hacer
+                    si puerto_cambio(c, p) entonces raíz_cambia(c, p) fin
+                    p := p + 1
+                fin
+                c := c + 1
+            fin
+            mira_hubs()
+            hid_mira()
+            si con entonces
+                espera_plazo(dirección(xh_vigía), 100000000)
+                rearma(dirección(xh_vigía))
+            sino
+                duerme_ms(10)
+            fin
+        fin
+    fin
+
+fin Usbvigia.

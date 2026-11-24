@@ -1,0 +1,573 @@
+; =============================================================================
+;  usb64.cas - Hispa-64, etapa 6: los aparatos USB (docs/64/HISPA-64.md,
+;  sección 12). Lo que hay enchufado en los puertos de las controladoras
+;  (xhci64.cas) y detrás de los concentradores: a cada aparato, su ranura y su
+;  dirección (las da el xHCI), sus descriptores (quién es, su nombre, sus
+;  interfaces y sus extremos, con el compañero de USB 3), su configuración y
+;  sus extremos en la controladora. De aquí los toman las clases:
+;  usbhid64.cas (teclados, ratones, tabletas) y usbalm64.cas (memorias); y el
+;  vigía (usbvigia.cas) atiende lo que se enchufa y se desenchufa.
+;
+;  Los concentradores (los de USB 2 y 1.1, y los de USB 3: su descriptor
+;  0x2A y su profundidad, SET_HUB_DEPTH): cada aparato lleva su cadena de
+;  ruta (el puerto de cada concentrador por el que se llega a él) y, si es de
+;  USB 1.x detrás de uno de alta velocidad, la ranura y el puerto de su
+;  traductor. Su tubería de interrupción dice qué puertos han cambiado.
+;
+;  Con lo aprendido en el taller (usb.cas de Hispa-Pentium): los de
+;  velocidad plena empiezan con un extremo 0 de 64 octetos y luego se les
+;  pone el que digan (Evaluate Context); 10 ms después de la dirección; y si
+;  un aparato no se deja a la primera, otro reinicio del puerto y otra vez.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usb64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Xhci64
+
+    público constante MAX_APARATOS = 32
+    público constante MAX_EXT = 8
+    público constante MAX_INTERFACES = 4
+    público constante U_NINGUNO = 0xFFFFFFFF
+    constante MAX_NIVEL = 5
+
+    público constante PIDE_ESTADO = 0
+    público constante QUITA_CARACTERÍSTICA = 1
+    público constante PON_CARACTERÍSTICA = 3
+    público constante PIDE_DESCRIPTOR = 6
+    público constante PON_CONFIGURACIÓN = 9
+
+    ; quién se ha quedado con un aparato
+    público constante DE_NADIE = 0
+    público constante DE_HID = 1
+    público constante DE_ALM = 2
+    público constante DE_HUB = 3
+
+    público tipo Interfaz = estructura
+        número, clase, subclase, protocolo: nat32
+        largo_informe: nat32                    ; (HID) lo que mide su descriptor de informe
+    fin
+
+    público tipo Aparato = estructura
+        usado: bool
+        ido: bool                               ; se ha desenchufado: lo que se le pida falla
+        ctl: nat32
+        r: Ranura                               ; lo de su ranura (xhci64)
+        velocidad: nat32
+        padre, puerto, nivel: nat32             ; el concentrador del que cuelga (U_NINGUNO: de un puerto raíz) y su puerto
+        fabricante, producto, versión, clase, subclase, protocolo: nat32
+        configuración: nat32
+        n_interfaces: nat32
+        interfaces: arreglo [MAX_INTERFACES] de Interfaz
+        n_ext: nat32
+        ext: arreglo [MAX_EXT] de Ext
+        e0: Ext                                 ; el de control
+        búfer: nat64                            ; una página para lo de control (física)
+        m: Mutex                                ; de uno en uno
+        dueño: nat32                            ; DE_HID, DE_ALM, DE_HUB...
+        clase_suya: nat32                       ; (lo que diga la clase: teclado, ratón...)
+        ; (concentrador)
+        puertos_hub: nat32
+        hub_ext: nat32                          ; su extremo de interrupción (o U_NINGUNO)
+        nombre: arreglo [40] de byte            ; iProduct
+        hecho: arreglo [24] de byte             ; iManufacturer
+    fin
+
+    público variable aparatos: arreglo [MAX_APARATOS] de puntero a Aparato
+    público variable us_n, us_hubs, us_fallos, us_quitados: nat32
+    público variable us_motivo: puntero a byte
+    variable paso_fallo: nat32
+
+    público función aparato(i: nat32): puntero a Aparato
+        devolver aparatos[i]
+    fin
+
+    función ceros(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    público función copia(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    público función datos_de(a: puntero a Aparato): nat64
+        devolver virt(a.búfer)
+    fin
+
+    función b8(a: puntero a Aparato, k: nat32): nat32
+        devolver nat32(m8(virt(a.búfer) + nat64(k)))
+    fin
+
+    función b16(a: puntero a Aparato, k: nat32): nat32
+        devolver b8(a, k) ob (b8(a, k + 1) << 8)
+    fin
+
+    ; ---- las transferencias, para las clases ----
+    ; una de control: los datos (n octetos, como mucho 2048) van y vienen por
+    ; la página del aparato (datos_de); da lo que ha llegado, o < 0
+    público función u_control(a: puntero a Aparato, tipo_: nat32, petición: nat32, valor_: nat32, índice: nat32, n: nat32): ent32
+        variable p: nat64
+        variable r: ent32
+        si a.ido entonces devolver T_FALLO fin
+        si n > 2048 entonces n := 2048 fin
+        p := nat64(tipo_ yb 0xFF) ob (nat64(petición yb 0xFF) << 8) ob (nat64(valor_ yb 0xFFFF) << 16) ob (nat64(índice yb 0xFFFF) << 32) ob (nat64(n) << 48)
+        cierra_mutex(dirección(a.m))
+        r := Xhci64.control(a.ctl, a.r.ranura, dirección(a.e0), p, a.búfer + 2048, n, tipo_ yb 0x80 <> 0)
+        abre_mutex(dirección(a.m))
+        devolver r
+    fin
+
+    ; lo que ha llegado (o lo que se manda): en la segunda mitad de la página
+    público función de_control(a: puntero a Aparato): nat64
+        devolver virt(a.búfer) + 2048
+    fin
+
+    público función u_granel(a: puntero a Aparato, e: nat32, datos: nat64, n: nat32, ms: nat64): ent32
+        variable r: ent32
+        si a.ido entonces devolver T_FALLO fin
+        cierra_mutex(dirección(a.m))
+        r := Xhci64.granel(a.ctl, a.r.ranura, dirección(a.ext[e]), datos, n, ms)
+        abre_mutex(dirección(a.m))
+        devolver r
+    fin
+
+    ; el extremo e del aparato ha dicho STALL: CLEAR_FEATURE(ENDPOINT_HALT)
+    ; (el xHCI ya lo ha repuesto)
+    público función quita_parada(a: puntero a Aparato, e: nat32): ent32
+        devolver u_control(a, 0x02, QUITA_CARACTERÍSTICA, 0, a.ext[e].número, 0)
+    fin
+
+    público función u_pide_informe(a: puntero a Aparato, e: nat32, datos: nat64, n: nat32)
+        si a.ido entonces devolver fin
+        Xhci64.pide_informe(a.ctl, a.r.ranura, dirección(a.ext[e]), datos, n)
+    fin
+
+    público función u_informe(a: puntero a Aparato, e: nat32, n: nat32): ent32
+        si a.ido entonces devolver T_FALLO fin
+        devolver Xhci64.informe(a.ctl, a.r.ranura, dirección(a.ext[e]), n)
+    fin
+
+    ; el primer extremo de esa clase y dirección (0x80: de entrada) de la interfaz, o U_NINGUNO
+    público función busca_ext(a: puntero a Aparato, interfaz: nat32, clase: nat32, entra: bool): nat32
+        variable i: nat32
+        i := 0
+        mientras i < a.n_ext hacer
+            si a.ext[i].interfaz = interfaz y a.ext[i].clase = clase y ((a.ext[i].número yb 0x80 <> 0) = entra) entonces devolver i fin
+            i := i + 1
+        fin
+        devolver U_NINGUNO
+    fin
+
+    ; ---- los descriptores ----
+    función lee_configuración(a: puntero a Aparato, largo: nat32)
+        variable d, n, k, clase, interfaz: nat32
+        variable vale: bool
+        variable p: nat64
+        p := de_control(a)
+        a.configuración := nat32(m8(p + 5))
+        a.n_interfaces := 0
+        a.n_ext := 0
+        d := 0
+        interfaz := 0
+        vale := falso
+        mientras d + 2 <= largo y m8(p + d) >= 2 y d + m8(p + d) <= largo hacer
+            k := m8(p + d + 1)
+            si k = 4 y m8(p + d) >= 9 entonces
+                ; una interfaz (solo su primera variante)
+                vale := m8(p + d + 3) = 0 y a.n_interfaces < MAX_INTERFACES
+                si vale entonces
+                    n := a.n_interfaces
+                    a.interfaces[n].número := m8(p + d + 2)
+                    a.interfaces[n].clase := m8(p + d + 5)
+                    a.interfaces[n].subclase := m8(p + d + 6)
+                    a.interfaces[n].protocolo := m8(p + d + 7)
+                    a.interfaces[n].largo_informe := 0
+                    interfaz := n
+                    a.n_interfaces := n + 1
+                fin
+            sino si k = 0x21 y vale y m8(p + d) >= 9 entonces
+                ; el descriptor HID: lo que mide el de informe
+                a.interfaces[interfaz].largo_informe := m16(p + d + 7)
+            sino si k = 5 y m8(p + d) >= 7 y vale y a.n_ext < MAX_EXT entonces
+                clase := m8(p + d + 3) yb 3
+                si clase = 2 o clase = 3 entonces
+                    n := a.n_ext
+                    a.ext[n].número := m8(p + d + 2)
+                    a.ext[n].clase := clase
+                    a.ext[n].paquete := m16(p + d + 4) yb 0x7FF
+                    a.ext[n].intervalo := m8(p + d + 6)
+                    a.ext[n].interfaz := interfaz
+                    a.ext[n].ráfaga := 0
+                    a.ext[n].anillo.fís := 0
+                    a.n_ext := n + 1
+                fin
+            sino si k = 0x30 y m8(p + d) >= 6 y a.n_ext > 0 entonces
+                ; el compañero de USB 3 del extremo de antes: su ráfaga
+                a.ext[a.n_ext - 1].ráfaga := m8(p + d + 2) yb 15
+            fin
+            d := d + m8(p + d)
+        fin
+    fin
+
+    ; un texto del aparato (índice k) a t (en ASCII; lo demás, «?»)
+    función lee_texto(a: puntero a Aparato, k: nat32, t: puntero a byte, máx: nat32)
+        variable r: ent32
+        variable lengua, i, j, u: nat32
+        variable p: nat64
+        t[0] := 0
+        si k = 0 entonces devolver fin
+        p := de_control(a)
+        r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0300, 0, 255)
+        si r < 4 entonces devolver fin
+        lengua := m16(p + 2)
+        r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0300 ob k, lengua, 255)
+        si r < 4 entonces devolver fin
+        i := 2
+        j := 0
+        mientras i + 1 < nat32(r) y i + 1 < m8(p) y j + 1 < máx hacer
+            u := m16(p + i)
+            si u >= 32 y u < 127 entonces t[j] := byte(u) sino t[j] := '?' fin
+            i := i + 2
+            j := j + 1
+        fin
+        mientras j > 0 y t[j - 1] = ' ' hacer j := j - 1 fin
+        t[j] := 0
+    fin
+
+    función ficha_libre(): nat32
+        variable i: nat32
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            si aparatos[i] = nulo entonces devolver i fin
+            i := i + 1
+        fin
+        devolver U_NINGUNO
+    fin
+
+    ; no se deja: se suelta lo que tenga y se dice en qué paso (us_motivo)
+    función no_se_deja(i: nat32, etapa: nat32, qué: puntero a byte): nat32
+        variable a: puntero a Aparato
+        a := aparatos[i]
+        Xhci64.quita_aparato(a.ctl, a.r, a.e0, dirección(a.ext[0]), a.n_ext)
+        suelta_página(a.búfer)
+        libera(puntero(nat64(a)))
+        aparatos[i] := nulo
+        us_fallos := us_fallos + 1
+        paso_fallo := etapa
+        us_motivo := qué
+        devolver U_NINGUNO
+    fin
+
+    ; hay un aparato recién reiniciado en el puerto p (de la controladora c,
+    ; o del concentrador «padre»): su dirección, quién es y su configuración.
+    ; Da su número, o U_NINGUNO.
+    público función enumera(c: nat32, raíz: nat32, padre: nat32, p: nat32, velocidad: nat32): nat32
+        variable i, largo, m0: nat32
+        variable a, h: puntero a Aparato
+        variable r: ent32
+        variable d: nat64
+        i := ficha_libre()
+        si i = U_NINGUNO entonces
+            us_motivo := "no caben más aparatos"
+            devolver U_NINGUNO
+        fin
+        a := puntero(nat64(reserva(tamaño(Aparato))))
+        si a = nulo entonces devolver U_NINGUNO fin
+        ceros(nat64(a), tamaño(Aparato))
+        aparatos[i] := a
+        a.ctl := c
+        a.velocidad := velocidad
+        a.padre := padre
+        a.puerto := p
+        a.hub_ext := U_NINGUNO
+        a.búfer := página_de(c)
+        si a.búfer = 0 entonces devolver no_se_deja(i, 0, "no queda memoria") fin
+        a.r.velocidad := velocidad
+        a.r.puerto_raíz := raíz
+        según nat16(velocidad)
+            caso V_BAJA: a.e0.paquete := 8
+            caso V_SÚPER: a.e0.paquete := 512
+            si no: a.e0.paquete := 64
+        fin
+        si padre <> U_NINGUNO entonces
+            h := aparatos[padre]
+            a.nivel := h.nivel + 1
+            largo := p
+            si largo > 15 entonces largo := 15 fin
+            a.r.ruta := h.r.ruta ob (largo << (4 * h.nivel))
+            ; el traductor de uno de USB 1.x: el concentrador de alta velocidad más cercano
+            si velocidad = V_BAJA o velocidad = V_PLENA entonces
+                si h.velocidad = V_ALTA entonces
+                    a.r.tt_ranura := h.r.ranura
+                    a.r.tt_puerto := p
+                sino
+                    a.r.tt_ranura := h.r.tt_ranura
+                    a.r.tt_puerto := h.r.tt_puerto
+                fin
+            fin
+        fin
+        si no nuevo_aparato(c, a.r, a.e0) entonces devolver no_se_deja(i, 1, xh_motivo) fin
+        espera_ms(10)
+        d := de_control(a)
+        ; lo primero del descriptor: el paquete del extremo 0
+        r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0100, 0, 8)
+        si r < 8 entonces devolver no_se_deja(i, 2, "no da su descriptor") fin
+        m0 := m8(d + 7)
+        si velocidad <> V_SÚPER y m0 <> a.e0.paquete y (m0 = 8 o m0 = 16 o m0 = 32 o m0 = 64) entonces
+            a.e0.paquete := m0
+            si no pon_paquete0(c, a.r, a.e0) entonces devolver no_se_deja(i, 2, "no acepta su paquete (Evaluate Context)") fin
+        fin
+        r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0100, 0, 18)
+        si r < 18 entonces devolver no_se_deja(i, 3, "no da su descriptor entero") fin
+        a.versión := m16(d + 2)
+        a.clase := m8(d + 4)
+        a.subclase := m8(d + 5)
+        a.protocolo := m8(d + 6)
+        a.fabricante := m16(d + 8)
+        a.producto := m16(d + 10)
+        largo := m8(d + 14) ob (m8(d + 15) << 8)
+        ; su configuración (la primera): cuánto mide, y entera
+        r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200, 0, 9)
+        si r < 9 entonces devolver no_se_deja(i, 4, "no da su configuración") fin
+        r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200, 0, m16(d + 2))
+        si r < 9 entonces devolver no_se_deja(i, 5, "no da su configuración entera") fin
+        lee_configuración(a, nat32(r))
+        lee_texto(a, largo >> 8, dirección(a.nombre[0]), 40)
+        lee_texto(a, largo yb 0xFF, dirección(a.hecho[0]), 24)
+        si no configura(c, a.r, dirección(a.ext[0]), a.n_ext) entonces devolver no_se_deja(i, 6, xh_motivo) fin
+        r := u_control(a, 0x00, PON_CONFIGURACIÓN, a.configuración, 0, 0)
+        si r < 0 entonces devolver no_se_deja(i, 7, "no acepta su configuración") fin
+        a.usado := cierto
+        us_n := us_n + 1
+        si a.clase = 9 o (a.n_interfaces > 0 y a.interfaces[0].clase = 9) entonces concentrador(i) fin
+        devolver i
+    fin
+
+    ; lo del puerto p de la controladora: reiniciar y enumerar; si no se deja,
+    ; otro reinicio, un rato, y otra vez (como Windows y Linux)
+    público función enumera_raíz(c: nat32, p: nat32): nat32
+        variable v, r: nat32
+        v := puerto_reinicia(c, p)
+        si v = 0 entonces devolver U_NINGUNO fin
+        r := enumera(c, p, U_NINGUNO, 0, v)
+        si r <> U_NINGUNO entonces devolver r fin
+        espera_ms(100)
+        v := puerto_reinicia(c, p)
+        si v = 0 entonces devolver U_NINGUNO fin
+        espera_ms(50)
+        devolver enumera(c, p, U_NINGUNO, 0, v)
+    fin
+
+    ; ---- los concentradores ----
+    función concentrador(i: nat32)
+        variable a: puntero a Aparato
+        variable r: ent32
+        variable p, tipo_, espera: nat32
+        variable d: nat64
+        a := aparatos[i]
+        d := de_control(a)
+        tipo_ := 0x2900
+        si a.velocidad = V_SÚPER entonces tipo_ := 0x2A00 fin
+        r := u_control(a, 0xA0, PIDE_DESCRIPTOR, tipo_, 0, 12)
+        si r < 7 entonces devolver fin
+        a.dueño := DE_HUB
+        us_hubs := us_hubs + 1
+        a.puertos_hub := m8(d + 2)
+        si a.puertos_hub > 15 entonces a.puertos_hub := 15 fin
+        espera := m8(d + 5) * 2
+        a.r.es_hub := cierto
+        a.r.puertos_hub := a.puertos_hub
+        si a.velocidad = V_ALTA entonces
+            a.r.tiempo_tt := (m16(d + 3) >> 5) yb 3
+            a.r.mtt := a.protocolo = 2
+        fin
+        si a.nivel >= MAX_NIVEL entonces devolver fin
+        si no configura(a.ctl, a.r, dirección(a.ext[0]), a.n_ext) entonces devolver fin
+        si a.velocidad = V_SÚPER entonces u_control(a, 0x20, 12, a.nivel, 0, 0) fin   ; SET_HUB_DEPTH
+        a.hub_ext := busca_ext(a, 0, 3, cierto)
+        ; corriente a sus puertos, y un rato
+        p := 1
+        mientras p <= a.puertos_hub hacer
+            u_control(a, 0x23, PON_CARACTERÍSTICA, 8, p, 0)
+            p := p + 1
+        fin
+        si espera < 100 entonces espera := 100 fin
+        espera_ms(nat64(espera) + 50)
+        p := 1
+        mientras p <= a.puertos_hub hacer
+            si estado_hub(a, p) yb 1 <> 0 entonces puerto_de_hub(i, p) fin
+            p := p + 1
+        fin
+    fin
+
+    ; el estado del puerto p del concentrador (wPortStatus; y en los 16 de arriba, wPortChange)
+    público función estado_hub(a: puntero a Aparato, p: nat32): nat32
+        variable r: ent32
+        r := u_control(a, 0xA3, PIDE_ESTADO, 0, p, 4)
+        si r < 4 entonces devolver 0 fin
+        devolver m32(de_control(a))
+    fin
+
+    ; los avisos de cambio del puerto p, borrados (C_PORT_CONNECTION, C_PORT_ENABLE, C_PORT_RESET...)
+    público función borra_cambios(a: puntero a Aparato, p: nat32, cambios: nat32)
+        variable k: nat32
+        k := 0
+        mientras k < 12 hacer
+            si cambios yb (nat32(1) << k) <> 0 entonces u_control(a, 0x23, QUITA_CARACTERÍSTICA, 16 + k, p, 0) fin
+            k := k + 1
+        fin
+    fin
+
+    ; hay algo en el puerto p del concentrador i: reiniciarlo y enumerarlo (dos veces si hace falta)
+    público función puerto_de_hub(i: nat32, p: nat32): nat32
+        variable r: nat32
+        r := puerto_de_hub_una(i, p)
+        si r <> U_NINGUNO entonces devolver r fin
+        espera_ms(100)
+        devolver puerto_de_hub_una(i, p)
+    fin
+
+    función puerto_de_hub_una(i: nat32, p: nat32): nat32
+        variable a: puntero a Aparato
+        variable estado, v, vueltas: nat32
+        a := aparatos[i]
+        borra_cambios(a, p, 1)
+        u_control(a, 0x23, PON_CARACTERÍSTICA, 4, p, 0)          ; PORT_RESET
+        estado := 0
+        vueltas := 0
+        mientras vueltas < 25 hacer
+            espera_ms(20)
+            estado := estado_hub(a, p)
+            si estado yb 0x100000 <> 0 entonces romper fin      ; C_PORT_RESET
+            vueltas := vueltas + 1
+        fin
+        borra_cambios(a, p, estado >> 16)
+        espera_ms(20)
+        si vueltas >= 25 o estado yb 2 = 0 entonces devolver U_NINGUNO fin
+        si a.velocidad = V_SÚPER entonces
+            v := V_SÚPER
+        sino si estado yb 0x200 <> 0 entonces
+            v := V_BAJA
+        sino si estado yb 0x400 <> 0 entonces
+            v := V_ALTA
+        sino
+            v := V_PLENA
+        fin
+        devolver enumera(a.ctl, a.r.puerto_raíz, i, p, v)
+    fin
+
+    ; ---- quitar ----
+    ; ¿cuelga j del aparato i (también más abajo)?
+    público función cuelga_de(j: nat32, i: nat32): bool
+        variable k, n: nat32
+        k := j
+        n := 0
+        mientras k <> U_NINGUNO y aparatos[k] <> nulo y n < 8 hacer
+            si aparatos[k].padre = i entonces devolver cierto fin
+            k := aparatos[k].padre
+            n := n + 1
+        fin
+        devolver falso
+    fin
+
+    ; marca el aparato i (y lo que cuelga de él) como ido
+    público función marca_ido(i: nat32)
+        variable j: nat32
+        aparatos[i].ido := cierto
+        j := 0
+        mientras j < MAX_APARATOS hacer
+            si aparatos[j] <> nulo y cuelga_de(j, i) entonces aparatos[j].ido := cierto fin
+            j := j + 1
+        fin
+    fin
+
+    ; suelta un aparato ya marcado y sin dueño (la clase lo ha dejado)
+    público función suelta(i: nat32)
+        variable a: puntero a Aparato
+        a := aparatos[i]
+        si a = nulo entonces devolver fin
+        Xhci64.quita_aparato(a.ctl, a.r, a.e0, dirección(a.ext[0]), a.n_ext)
+        suelta_página(a.búfer)
+        si a.r.es_hub entonces us_hubs := us_hubs - 1 fin
+        libera(puntero(nat64(a)))
+        aparatos[i] := nulo
+        us_n := us_n - 1
+        us_quitados := us_quitados + 1
+    fin
+
+    ; el aparato del puerto raíz p de la controladora c (de un puerto raíz), o U_NINGUNO
+    público función en_raíz(c: nat32, p: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            si aparatos[i] <> nulo y aparatos[i].ctl = c y aparatos[i].padre = U_NINGUNO y aparatos[i].r.puerto_raíz = p entonces devolver i fin
+            i := i + 1
+        fin
+        devolver U_NINGUNO
+    fin
+
+    público función en_hub(h: nat32, p: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            si aparatos[i] <> nulo y aparatos[i].padre = h y aparatos[i].puerto = p entonces devolver i fin
+            i := i + 1
+        fin
+        devolver U_NINGUNO
+    fin
+
+    ; el sitio de un aparato: «c-p» o «c-p.p.p» (como Linux: la controladora, el puerto raíz y los de los concentradores)
+    público función escribe_sitio(i: nat32)
+        variable a: puntero a Aparato
+        a := aparatos[i]
+        si a.padre = U_NINGUNO entonces
+            escribir(a.ctl + 1, "-", a.r.puerto_raíz)
+        sino
+            escribe_sitio(a.padre)
+            escribir(".", a.puerto)
+        fin
+    fin
+
+    público función hex4u(v: nat32)
+        variable k: nat32
+        variable c: nat32
+        k := 4
+        mientras k > 0 hacer
+            k := k - 1
+            c := (v >> (k * 4)) yb 15
+            si c < 10 entonces letra_hex(c + '0') sino letra_hex(c - 10 + 'A') fin
+        fin
+    fin
+
+    función letra_hex(c: nat32)
+        variable t: arreglo [2] de byte
+        t[0] := byte(c)
+        t[1] := 0
+        escribir(dirección(t[0]))
+    fin
+
+    público función escribe_aparato(i: nat32)
+        variable a: puntero a Aparato
+        a := aparatos[i]
+        escribir("  ")
+        escribe_sitio(i)
+        escribir(": ")
+        hex4u(a.fabricante)
+        escribir(":")
+        hex4u(a.producto)
+        si a.nombre[0] <> 0 entonces escribir(" «", a.nombre, "»") fin
+        escribir(", USB ", a.versión >> 8, ".", (a.versión >> 4) yb 15, ", velocidad ", nombre_velocidad(a.velocidad))
+        escribir(", ranura ", a.r.ranura, ", paquete del extremo 0: ", a.e0.paquete)
+        si a.r.es_hub entonces escribir("; concentrador de ", a.puertos_hub, " puertos") fin
+    fin
+
+fin Usb64.

@@ -1,0 +1,1074 @@
+; =============================================================================
+;  xhci64.cas - Hispa-64, etapa 6: las controladoras USB 3 (xHCI; docs/64/
+;  HISPA-64.md, sección 12). Según «eXtensible Host Controller Interface for
+;  USB» 1.2, con lo aprendido en Hispa-Pentium (xhci.cas, probado en el
+;  taller) y pasado a 64 bits:
+;   - la BAR 0 de 64 bits, donde esté (también por encima de 4 GB): en 64
+;     bits no hay que moverla; con HCCPARAMS1.AC64 = 0 (direcciones de 32
+;     bits), sus páginas, por debajo de 4 GB;
+;   - el traspaso de la BIOS (la capacidad extendida 1, USBLEGSUP: el
+;     semáforo del sistema, esperar a que la BIOS suelte, y sus SMI fuera) y,
+;     en los PCH de Intel de las series 7 y 8, los puertos pasados del EHCI al
+;     xHCI (XUSB2PR y USB3_PSSEN: aquí no hay EHCI);
+;   - varias controladoras (hasta 4), cada una con su DCBAA, su anillo de
+;     órdenes y su anillo de sucesos; los protocolos de cada puerto (la
+;     capacidad extendida 2: cuáles son de USB 2 y cuáles de USB 3);
+;   - las interrupciones por mensaje (MSI-X, o MSI): el interruptor 0; la
+;     interrupción recoge el anillo de sucesos y despierta a quien espera; sin
+;     ellas («sinmsix sinmsi» o si no las tiene) quien espera mira el anillo;
+;   - los aparatos: Enable Slot, Address Device, Evaluate Context (el paquete
+;     del extremo 0 de los de velocidad plena: se empieza con 64, como Linux,
+;     y se pone el que diga el descriptor), Configure Endpoint (los extremos y,
+;     de un concentrador, sus puertos y su traductor), Reset Endpoint y Set TR
+;     Dequeue Pointer después de un fallo, Stop Endpoint si se pasa el tiempo,
+;     Disable Slot al quitarlo;
+;   - las transferencias: de control (petición, datos, estado), a granel
+;     (partidas en TRB que no cruzan 64 KB, encadenadas, con el «TD Size») y
+;     de interrupción (un informe pedido; al llegar, quien lo vigila lo lee).
+;  Esto sabe de la controladora; lo de los aparatos (sus descriptores, los
+;  concentradores, las clases) está en usb64.cas.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Xhci64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64
+
+    público constante MAX_XHCI = 4
+    público constante MAX_PUERTOS = 32
+    constante MAX_RANURAS = 64
+    constante TRBS = 256                        ; los de un anillo (el último, el enlace)
+
+    ; ---- las velocidades (las de PORTSC) ----
+    público constante V_PLENA = 1               ; 12 Mbit/s
+    público constante V_BAJA = 2                ; 1,5 Mbit/s
+    público constante V_ALTA = 3                ; 480 Mbit/s
+    público constante V_SÚPER = 4               ; 5 Gbit/s (y más: SuperSpeedPlus)
+
+    ; ---- los registros de trabajo ----
+    constante USBCMD = 0x00
+    constante USBSTS = 0x04
+    constante CRCR = 0x18
+    constante DCBAAP = 0x30
+    constante CONFIG = 0x38
+    constante PORTSC = 0x400
+    constante P_GUARDA = 0x0E00C3E0             ; lo que se escribe tal cual (PP, PIC, LWS, WCE/WDE/WOE...)
+    constante P_CAMBIOS = 0x00FE0000            ; los avisos de cambio (se borran escribiendo 1)
+
+    ; ---- las clases de TRB ----
+    constante TRB_NORMAL = 1
+    constante TRB_PETICIÓN = 2
+    constante TRB_DATOS = 3
+    constante TRB_ESTADO = 4
+    constante TRB_ENLACE = 6
+    constante TRB_HABILITAR = 9
+    constante TRB_DESHABILITAR = 10
+    constante TRB_DIRECCIÓN = 11
+    constante TRB_CONFIGURAR = 12
+    constante TRB_EVALUAR = 13
+    constante TRB_REPONER = 14
+    constante TRB_PARAR = 15
+    constante TRB_DESENCOLAR = 16
+    constante SUC_TRANSFERENCIA = 32
+    constante SUC_ORDEN = 33
+    constante SUC_PUERTO = 34
+
+    ; ---- cómo acaba algo (el código de la norma) ----
+    público constante C_BIEN = 1
+    público constante C_BABBLE = 3
+    público constante C_TRANSACCIÓN = 4
+    público constante C_PARADA = 6              ; STALL
+    público constante C_CORTO = 13
+    público constante C_TIEMPO = 0x100          ; (nuestro) no ha acabado a tiempo
+    público constante C_IDO = 0x101             ; (nuestro) el aparato se ha ido
+
+    ; lo que dan las transferencias, si no es lo que ha llegado
+    público constante T_FALLO = -1
+    público constante T_PARADA = -2
+
+    público tipo Anillo = estructura
+        fís: nat64
+        pos, ciclo: nat32
+    fin
+
+    ; un extremo de un aparato (el 0, el de control, también), con lo que
+    ; hace falta para esperar lo que se le pide
+    público tipo Ext = estructura
+        anillo: Anillo
+        número: nat32               ; el del USB (bit 7: de entrada); 0 el de control
+        clase: nat32                ; 0 control, 1 isócrono, 2 a granel, 3 interrupción
+        paquete: nat32
+        intervalo: nat32            ; (bInterval)
+        ráfaga: nat32               ; (USB 3: bMaxBurst)
+        dci: nat32                  ; su número para el xHCI (1 el de control)
+        interfaz: nat32
+        esperado: nat64             ; el TRB del final de lo pedido (físico)
+        hecho: bool
+        en_marcha: bool             ; hay algo pedido
+        código: nat32
+        pedido, llegado: nat32      ; los octetos pedidos y los que han llegado
+        n_trb: nat32                ; los TRB de datos de lo pedido: dónde están y desde qué octeto
+        trb_fís: arreglo [8] de nat64
+        trb_ini, trb_largo: arreglo [8] de nat32
+        hechos: nat64
+        aviso: Suceso
+    fin
+
+    tipo Ctl = estructura
+        aparato: nat32              ; su número en Pci64
+        modo: nat32                 ; NINGUNA, CON_MSI, CON_MSIX
+        ac64: bool
+        hay: bool
+        cap, reg, rt, timbres: nat64
+        puertos, ranuras, contexto, versión: nat32
+        dcbaa: nat64                ; (física) y la tabla del anillo de sucesos en +0x800
+        órdenes: Anillo
+        sucesos: nat64
+        suc_pos, suc_ciclo: nat32
+        entrada: nat64              ; el contexto de entrada (uno: las órdenes van de una en una)
+        cerrojo: nat64              ; el del anillo de sucesos
+        m_orden: Mutex
+        aviso: Suceso               ; la orden ha acabado
+        orden_hecha: bool
+        orden_código, orden_ranura: nat32
+        cambios: nat32              ; sucesos de los puertos sin atender
+        proto: arreglo [MAX_PUERTOS] de byte    ; 2 o 3 (0: no se sabe: 2)
+        ext: arreglo [MAX_RANURAS * 32] de nat64        ; (ranura, dci) -> su Ext
+        pci_nombre: arreglo [8] de byte
+    fin
+
+    variable ctls: arreglo [MAX_XHCI] de nat64
+    público variable xh_n: nat32
+    variable vector: nat32
+    público variable xh_interrupciones, xh_sucesos, xh_órdenes, xh_fallos, xh_tiempos: nat64
+    público variable xh_motivo: puntero a byte
+    ; lo que despierta al vigía del USB (usbvigia.cas): un puerto que cambia,
+    ; un informe de una tubería de interrupción
+    público variable xh_vigía: Suceso
+
+    función ctl(c: nat32): puntero a Ctl
+        devolver puntero(ctls[c])
+    fin
+
+    función lee(x: puntero a Ctl, r: nat32): nat32
+        devolver m32(x.reg + r)
+    fin
+
+    función pon(x: puntero a Ctl, r: nat32, v: nat32)
+        pon_m32(x.reg + r, v)
+    fin
+
+    función pon64(d: nat64, v: nat64)
+        pon_m32(d, nat32(v))
+        pon_m32(d + 4, nat32(v >> 32))
+    fin
+
+    función ceros(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    ; una página para la controladora (física, a cero); por debajo de 4 GB si no sabe de 64 bits
+    función página(x: puntero a Ctl): nat64
+        variable f: nat64
+        si x.ac64 entonces f := pide() sino f := pide_seguidos(1, 1) fin
+        si f = 0 entonces devolver 0 fin
+        si no x.ac64 y f >= nat64(1) << 32 entonces
+            suelta_seguidos(f, 1)
+            devolver 0
+        fin
+        ceros(virt(f), 4096)
+        devolver f
+    fin
+
+    público función página_de(c: nat32): nat64
+        devolver página(ctl(c))
+    fin
+
+    público función suelta_página(f: nat64)
+        si f <> 0 entonces devuelve(f) fin
+    fin
+
+    ; ¿se le puede dar a esta controladora una dirección física cualquiera?
+    público función de_64(c: nat32): bool
+        devolver ctl(c).ac64
+    fin
+
+    ; espera a que (registro yb máscara) = igual, como mucho ms milisegundos
+    función espera_reg(x: puntero a Ctl, r: nat32, máscara: nat32, igual: nat32, ms: nat64): bool
+        variable t0: nat64
+        t0 := ahora_ns()
+        mientras (lee(x, r) yb máscara) <> igual hacer
+            si ahora_ns() - t0 > ms * 1000000 entonces devolver falso fin
+            si va entonces duerme_ms(1) sino espera_us(100) fin
+        fin
+        devolver cierto
+    fin
+
+    público función espera_ms(ms: nat64)
+        si va entonces duerme_ms(ms) sino espera_us(ms * 1000) fin
+    fin
+
+    ; ---- los anillos ----
+    función nuevo_anillo(x: puntero a Ctl, ref a: Anillo): bool
+        variable t: nat64
+        si a.fís = 0 entonces a.fís := página(x) sino ceros(virt(a.fís), 4096) fin
+        si a.fís = 0 entonces devolver falso fin
+        a.pos := 0
+        a.ciclo := 1
+        t := virt(a.fís) + (TRBS - 1) * 16
+        pon64(t, a.fís)
+        pon_m32(t + 8, 0)
+        pon_m32(t + 12, (TRB_ENLACE << 10) ob 2)        ; (2: aquí cambia el ciclo)
+        devolver cierto
+    fin
+
+    ; mete un TRB en el anillo; da su dirección física. El ciclo se escribe el
+    ; último (la controladora puede estar leyendo el anillo)
+    función al_anillo(ref a: Anillo, p: nat64, p2: nat32, p3: nat32): nat64
+        variable d, t: nat64
+        d := a.fís + nat64(a.pos) * 16
+        t := virt(d)
+        pon64(t, p)
+        pon_m32(t + 8, p2)
+        ensamblador
+            db 0x0F, 0xAE, 0xF8             ; sfence
+        fin
+        pon_m32(t + 12, (p3 yb 0xFFFFFFFE) ob a.ciclo)
+        a.pos := a.pos + 1
+        si a.pos = TRBS - 1 entonces
+            t := virt(a.fís) + (TRBS - 1) * 16
+            pon_m32(t + 12, (TRB_ENLACE << 10) ob 2 ob a.ciclo)
+            a.pos := 0
+            a.ciclo := a.ciclo xob 1
+        fin
+        devolver d
+    fin
+
+    función timbre(x: puntero a Ctl, ranura: nat32, cuál: nat32)
+        ensamblador
+            db 0x0F, 0xAE, 0xF0             ; mfence
+        fin
+        pon_m32(x.timbres + nat64(ranura) * 4, cuál)
+    fin
+
+    ; ---- el anillo de sucesos ----
+    ; recoge lo que haya y lo apunta: la orden que ha acabado, lo que ha
+    ; acabado de cada extremo; los cambios de los puertos, para el vigía.
+    ; (Lo llaman la interrupción y quien espera: con el cerrojo.)
+    función recoge(x: puntero a Ctl)
+        variable t, trb: nat64
+        variable w2, w3, clase, ranura, dci, código: nat32
+        variable e: puntero a Ext
+        variable visto, al_vigía: bool
+        variable rf: nat64
+        rf := toma(dirección(x.cerrojo))
+        visto := falso
+        al_vigía := falso
+        mientras cierto hacer
+            t := virt(x.sucesos) + nat64(x.suc_pos) * 16
+            w3 := m32(t + 12)
+            si (w3 yb 1) <> x.suc_ciclo entonces romper fin
+            visto := cierto
+            xh_sucesos := xh_sucesos + 1
+            trb := nat64(m32(t)) ob (nat64(m32(t + 4)) << 32)
+            w2 := m32(t + 8)
+            código := w2 >> 24
+            clase := (w3 >> 10) yb 0x3F
+            si clase = SUC_ORDEN entonces
+                x.orden_código := código
+                x.orden_ranura := w3 >> 24
+                x.orden_hecha := cierto
+                señala(dirección(x.aviso))
+            sino si clase = SUC_TRANSFERENCIA entonces
+                ranura := w3 >> 24
+                dci := (w3 >> 16) yb 0x1F
+                e := nulo
+                si ranura > 0 y ranura < MAX_RANURAS entonces e := puntero(x.ext[ranura * 32 + dci]) fin
+                si e <> nulo y e.en_marcha entonces
+                    si código = C_CORTO entonces corto(e, trb, w2 yb 0xFFFFFF) fin
+                    si trb = e.esperado o (código <> C_BIEN y código <> C_CORTO) o (código = C_CORTO y e.clase <> 0) entonces
+                        ; acabado (lo último, un fallo, o un corto fuera de las de control: el resto del TD no se hace)
+                        e.código := código
+                        e.en_marcha := falso
+                        e.hecho := cierto
+                        e.hechos := e.hechos + 1
+                        señala(dirección(e.aviso))
+                        si e.clase = 3 entonces al_vigía := cierto fin
+                    fin
+                fin
+            sino si clase = SUC_PUERTO entonces
+                x.cambios := x.cambios + 1
+                al_vigía := cierto
+            fin
+            x.suc_pos := x.suc_pos + 1
+            si x.suc_pos = TRBS entonces
+                x.suc_pos := 0
+                x.suc_ciclo := x.suc_ciclo xob 1
+            fin
+        fin
+        si visto entonces
+            ; hasta dónde se ha leído, y el aviso de «ocupado» (EHB), borrado
+            pon64(x.rt + 0x20 + 0x18, (x.sucesos + nat64(x.suc_pos) * 16) ob 8)
+        fin
+        suelta(dirección(x.cerrojo), rf)
+        si al_vigía entonces señala(dirección(xh_vigía)) fin
+    fin
+
+    ; un paquete corto en el TRB trb (le han faltado «falta» octetos): lo que ha llegado
+    función corto(e: puntero a Ext, trb: nat64, falta: nat32)
+        variable j: nat32
+        j := 0
+        mientras j < e.n_trb hacer
+            si e.trb_fís[j] = trb entonces
+                si falta > e.trb_largo[j] entonces falta := e.trb_largo[j] fin
+                e.llegado := e.trb_ini[j] + e.trb_largo[j] - falta
+                devolver
+            fin
+            j := j + 1
+        fin
+    fin
+
+    ; apunta un TRB de datos de lo pedido
+    función apunta(e: puntero a Ext, trb: nat64, ini: nat32, largo: nat32)
+        si e.n_trb < 8 entonces
+            e.trb_fís[e.n_trb] := trb
+            e.trb_ini[e.n_trb] := ini
+            e.trb_largo[e.n_trb] := largo
+            e.n_trb := e.n_trb + 1
+        fin
+    fin
+
+    público función mira(c: nat32)
+        recoge(ctl(c))
+    fin
+
+    público función cambios_de(c: nat32): nat32
+        variable n: nat32
+        n := ctl(c).cambios
+        ctl(c).cambios := 0
+        devolver n
+    fin
+
+    público función con_mensajes(c: nat32): bool
+        devolver ctl(c).modo <> NINGUNA
+    fin
+
+    interrupción función int_xhci()
+        variable c: nat32
+        variable x: puntero a Ctl
+        xh_interrupciones := xh_interrupciones + 1
+        c := 0
+        mientras c < xh_n hacer
+            x := ctl(c)
+            si x.hay y x.modo <> NINGUNA entonces
+                ; IMAN.IP (se borra con 1; IE sigue), USBSTS.EINT
+                si m32(x.rt + 0x20) yb 1 <> 0 entonces pon_m32(x.rt + 0x20, 3) fin
+                pon(x, USBSTS, 8)
+                recoge(x)
+            fin
+            c := c + 1
+        fin
+        eoi()
+    fin
+
+    ; espera a que el suceso s se cumpla: mirando primero (lo rápido no
+    ; duerme), luego durmiendo con plazo (20 ms) y mirando otra vez; sin
+    ; mensajes, mirando el anillo cediendo el procesador
+    función espera_hecho(x: puntero a Ctl, hecho: puntero a bool, s: puntero a Suceso, ms: nat64): bool
+        variable t0: nat64
+        variable vueltas: nat32
+        t0 := ahora_ns()
+        vueltas := 0
+        mientras cierto hacer
+            recoge(x)
+            si valor(hecho) entonces devolver cierto fin
+            si ahora_ns() - t0 > ms * 1000000 entonces devolver falso fin
+            vueltas := vueltas + 1
+            si vueltas < 200 o no va entonces
+                pausa()
+            sino si x.modo <> NINGUNA y tic_va entonces
+                espera_plazo(s, 20000000)
+                rearma(s)
+            sino
+                si vueltas > 2000 entonces duerme_ms(1) sino cede() fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; ---- las órdenes ----
+    ; manda una orden y espera; da su código (C_BIEN = 1) o C_TIEMPO. Con el
+    ; mutex de las órdenes cerrado (quien la pide).
+    función orden(x: puntero a Ctl, p: nat64, p2: nat32, p3: nat32): nat32
+        x.orden_hecha := falso
+        rearma(dirección(x.aviso))
+        al_anillo(x.órdenes, p, p2, p3)
+        xh_órdenes := xh_órdenes + 1
+        timbre(x, 0, 0)
+        si no espera_hecho(x, dirección(x.orden_hecha), dirección(x.aviso), 3000) entonces
+            xh_tiempos := xh_tiempos + 1
+            xh_motivo := "una orden no ha acabado en 3 s"
+            devolver C_TIEMPO
+        fin
+        si x.orden_código <> C_BIEN entonces xh_fallos := xh_fallos + 1 fin
+        devolver x.orden_código
+    fin
+
+    función de_entrada(x: puntero a Ctl, n: nat32): nat64
+        devolver virt(x.entrada) + nat64(n) * x.contexto
+    fin
+
+    ; ---- tomar la controladora ----
+    función traspaso(x: puntero a Ctl, hcc: nat32)
+        variable d, n, w: nat32
+        variable p, t0: nat64
+        d := (hcc >> 16) << 2
+        n := 0
+        mientras d <> 0 y n < 64 hacer
+            p := x.cap + nat64(d)
+            w := m32(p)
+            si (w yb 0xFF) = 1 entonces
+                ; USBLEGSUP: el semáforo del sistema, y esperar a que la BIOS suelte (1 s)
+                si w yb 0x00010000 <> 0 entonces
+                    pon_m32(p, w ob 0x01000000)
+                    t0 := ahora_ns()
+                    mientras m32(p) yb 0x00010000 <> 0 y ahora_ns() - t0 < 1000000000 hacer espera_ms(10) fin
+                    si m32(p) yb 0x00010000 <> 0 entonces
+                        escribir(" (la BIOS no la suelta: se toma igual)")
+                        pon_m32(p, (m32(p) yb nob nat32(0x00010000)))
+                    sino
+                        escribir(" (traspaso de la BIOS)")
+                    fin
+                sino
+                    pon_m32(p, w ob 0x01000000)
+                fin
+                ; sus SMI, fuera (y los avisos, borrados)
+                pon_m32(p + 4, (m32(p + 4) yb nob nat32(0x0000E011)) ob 0xE0000000)
+            sino si (w yb 0xFF) = 2 entonces
+                ; un protocolo: qué puertos son de USB 2 y cuáles de USB 3
+                protocolo(x, w >> 24, m32(p + 8))
+            fin
+            si ((w >> 8) yb 0xFF) = 0 entonces d := 0 sino d := d + (((w >> 8) yb 0xFF) << 2) fin
+            n := n + 1
+        fin
+    fin
+
+    función protocolo(x: puntero a Ctl, mayor: nat32, w: nat32)
+        variable p, k: nat32
+        p := w yb 0xFF
+        k := (w >> 8) yb 0xFF
+        mientras k > 0 y p >= 1 y p <= MAX_PUERTOS hacer
+            x.proto[p - 1] := byte(mayor)
+            p := p + 1
+            k := k - 1
+        fin
+    fin
+
+    ; los PCH de Intel de las series 7 y 8 (Panther Point, Lynx Point...):
+    ; los puertos van al EHCI hasta que se pasan al xHCI (como hace Linux)
+    función puertos_intel(i: nat32)
+        variable a: nat32
+        si fab_de(i) <> 0x8086 entonces devolver fin
+        a := apa_de(i)
+        si a = 0x1E31 o a = 0x8C31 o a = 0x9C31 o a = 0x9CB1 o a = 0x8CB1 o a = 0x8D31 o a = 0xA12F o a = 0xA2AF entonces
+            pon_conf(i, 0xD8, conf(i, 0xDC))        ; USB3_PSSEN <- USB3PRM
+            pon_conf(i, 0xD0, conf(i, 0xD4))        ; XUSB2PR <- XUSB2PRM
+            escribir(" (puertos pasados del EHCI al xHCI)")
+        fin
+    fin
+
+    función pon_ctl(i: nat32, sin_msix: bool, sin_msi: bool): bool
+        variable x: puntero a Ctl
+        variable base, tam, t, f: nat64
+        variable hcs1, hcs2, hcc, n, k: nat32
+        x := puntero(nat64(reserva(tamaño(Ctl))))
+        si x = nulo entonces
+            xh_motivo := "no queda memoria"
+            devolver falso
+        fin
+        ceros(nat64(x), tamaño(Ctl))
+        x.aparato := i
+        base := bar_mem(i, 0)
+        tam := bar_largo(i, 0)
+        si base = 0 o tam < 0x1000 entonces
+            xh_motivo := "su BAR 0 no es de memoria"
+            libera(puntero(nat64(x)))
+            devolver falso
+        fin
+        si tam > 0x100000 entonces tam := 0x100000 fin
+        habilita(i, falso)
+        x.cap := mapea_disp(base, tam, sin_caché())
+        x.versión := m32(x.cap) >> 16
+        hcs1 := m32(x.cap + 4)
+        hcs2 := m32(x.cap + 8)
+        hcc := m32(x.cap + 0x10)
+        x.reg := x.cap + nat64(m32(x.cap) yb 0xFF)
+        x.timbres := x.cap + nat64(m32(x.cap + 0x14) yb 0xFFFFFFFC)
+        x.rt := x.cap + nat64(m32(x.cap + 0x18) yb 0xFFFFFFE0)
+        x.puertos := hcs1 >> 24
+        si x.puertos > MAX_PUERTOS entonces x.puertos := MAX_PUERTOS fin
+        x.ranuras := hcs1 yb 0xFF
+        si x.ranuras > MAX_RANURAS - 1 entonces x.ranuras := MAX_RANURAS - 1 fin
+        x.contexto := 32
+        si hcc yb 4 <> 0 entonces x.contexto := 64 fin
+        x.ac64 := hcc yb 1 <> 0
+        escribir(" en ")
+        hex(base)
+        si base >= nat64(1) << 32 entonces escribir(" (por encima de 4 GB)") fin
+        puertos_intel(i)
+        traspaso(x, hcc)
+        ; parar y reiniciar
+        pon(x, USBCMD, lee(x, USBCMD) yb nob nat32(1))
+        espera_reg(x, USBSTS, 1, 1, 20)
+        pon(x, USBCMD, 2)
+        espera_ms(1)
+        si no espera_reg(x, USBCMD, 2, 0, 1000) o no espera_reg(x, USBSTS, 0x800, 0, 1000) entonces
+            xh_motivo := "no acaba de reiniciarse"
+            devolver falso
+        fin
+        si lee(x, 0x08) yb 1 = 0 entonces
+            xh_motivo := "no sabe de páginas de 4 KB"
+            devolver falso
+        fin
+        x.dcbaa := página(x)
+        x.sucesos := página(x)
+        x.entrada := página(x)
+        si x.dcbaa = 0 o x.sucesos = 0 o x.entrada = 0 o no nuevo_anillo(x, x.órdenes) entonces
+            xh_motivo := "no queda memoria"
+            devolver falso
+        fin
+        ; las páginas «de borrador» que pida: su lista, en la entrada 0 de la DCBAA
+        n := (((hcs2 >> 21) yb 0x1F) << 5) ob (hcs2 >> 27)
+        si n > 0 entonces
+            si n > 512 entonces
+                xh_motivo := "pide más de 512 páginas de borrador"
+                devolver falso
+            fin
+            t := página(x)
+            si t = 0 entonces devolver falso fin
+            k := 0
+            mientras k < n hacer
+                f := página(x)
+                si f = 0 entonces devolver falso fin
+                pon64(virt(t) + nat64(k) * 8, f)
+                k := k + 1
+            fin
+            pon64(virt(x.dcbaa), t)
+        fin
+        pon(x, CONFIG, (lee(x, CONFIG) yb nob nat32(0xFF)) ob x.ranuras)
+        pon64(x.reg + DCBAAP, x.dcbaa)
+        pon64(x.reg + CRCR, x.órdenes.fís ob 1)
+        ; el anillo de sucesos: un trozo, de una página (la tabla, en DCBAA + 0x800)
+        x.suc_pos := 0
+        x.suc_ciclo := 1
+        t := virt(x.dcbaa) + 0x800
+        pon64(t, x.sucesos)
+        pon_m32(t + 8, TRBS)
+        pon_m32(t + 12, 0)
+        pon_m32(x.rt + 0x20 + 8, 1)                     ; ERSTSZ
+        pon64(x.rt + 0x20 + 0x18, x.sucesos)            ; ERDP
+        pon64(x.rt + 0x20 + 0x10, x.dcbaa + 0x800)      ; ERSTBA (lo último)
+        ; las interrupciones por mensaje
+        x.modo := NINGUNA
+        si vector <> 0 y no (sin_msix y sin_msi) entonces
+            si no sin_msix y pon_msix(i, vector) entonces x.modo := CON_MSIX
+            sino si no sin_msi y pon_msi(i, vector) entonces x.modo := CON_MSI fin
+        fin
+        habilita(i, x.modo <> NINGUNA)
+        pon_m32(x.rt + 0x20 + 4, 160)                   ; IMOD: 40 µs entre interrupciones
+        si x.modo <> NINGUNA entonces
+            pon_m32(x.rt + 0x20, 3)                     ; IMAN: IE (y IP borrado)
+            pon(x, USBCMD, 1 ob 4)                      ; en marcha, con interrupciones
+        sino
+            pon_m32(x.rt + 0x20, 1)
+            pon(x, USBCMD, 1)
+        fin
+        si no espera_reg(x, USBSTS, 1, 0, 100) entonces
+            xh_motivo := "no se pone en marcha"
+            devolver falso
+        fin
+        ; corriente a los puertos
+        k := 0
+        mientras k < x.puertos hacer
+            t := nat64(m32(x.reg + PORTSC + nat64(k) * 0x10))
+            si t yb 0x200 = 0 entonces pon_m32(x.reg + PORTSC + nat64(k) * 0x10, (nat32(t) yb P_GUARDA) ob 0x200) fin
+            k := k + 1
+        fin
+        x.hay := cierto
+        ctls[xh_n] := nat64(x)
+        xh_n := xh_n + 1
+        devolver cierto
+    fin
+
+    ; todas las controladoras xHCI de PCI (clase 0C, 03, 30)
+    público función prepara_xhci(sin_msix: bool, sin_msi: bool)
+        variable i: nat32
+        variable x: puntero a Ctl
+        si vector = 0 entonces
+            vector := pide_vector()
+            si vector <> 0 entonces pon_vector(vector, nat64(dirección(int_xhci))) fin
+        fin
+        i := 0
+        mientras i < pci_n y xh_n < MAX_XHCI hacer
+            si clase_de(i) = 0x0C0330 entonces
+                escribir("xHCI: ")
+                escribe_bdf(i)
+                escribir(" ")
+                hex4(fab_de(i))
+                escribir(":")
+                hex4(apa_de(i))
+                si pon_ctl(i, sin_msix, sin_msi) entonces
+                    x := ctl(xh_n - 1)
+                    escribir("\n  versión ", x.versión >> 8, ".", (x.versión >> 4) yb 0xF, x.versión yb 0xF, ", ", x.puertos, " puertos (")
+                    escribe_protocolos(x)
+                    escribir("), ", x.ranuras, " ranuras, contextos de ", x.contexto, " octetos")
+                    si x.ac64 entonces escribir(", direcciones de 64 bits") sino escribir(", direcciones de 32 bits") fin
+                    escribir("; ")
+                    escribe_modo(x.modo)
+                    escribir("\n")
+                sino
+                    escribir(": no se puede usar (", xh_motivo, ")\n")
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función escribe_protocolos(x: puntero a Ctl)
+        variable k, n2, n3: nat32
+        n2 := 0
+        n3 := 0
+        k := 0
+        mientras k < x.puertos hacer
+            si x.proto[k] = 3 entonces n3 := n3 + 1 sino n2 := n2 + 1 fin
+            k := k + 1
+        fin
+        escribir(n2, " de USB 2 y ", n3, " de USB 3")
+    fin
+
+    ; ---- los puertos de la controladora ----
+    público función puertos_de(c: nat32): nat32
+        devolver ctl(c).puertos
+    fin
+
+    público función es_usb3(c: nat32, p: nat32): bool
+        devolver ctl(c).proto[p - 1] = 3
+    fin
+
+    función portsc(x: puntero a Ctl, p: nat32): nat64
+        devolver x.reg + PORTSC + nat64(p - 1) * 0x10
+    fin
+
+    ; lo que hay en el puerto p (desde 1): bit 0 algo enchufado, bit 1 habilitado
+    público función puerto_estado(c: nat32, p: nat32): nat32
+        devolver m32(portsc(ctl(c), p)) yb 3
+    fin
+
+    ; ¿ha cambiado lo enchufado en el puerto p? (los avisos, borrados)
+    público función puerto_cambio(c: nat32, p: nat32): bool
+        variable v: nat32
+        variable d: nat64
+        d := portsc(ctl(c), p)
+        v := m32(d)
+        si v yb P_CAMBIOS = 0 entonces devolver falso fin
+        pon_m32(d, (v yb P_GUARDA) ob (v yb P_CAMBIOS))
+        devolver v yb 0x20000 <> 0
+    fin
+
+    función velocidad_de(v: nat32): nat32
+        según nat16((v >> 10) yb 0x0F)
+            caso 1: devolver V_PLENA
+            caso 2: devolver V_BAJA
+            caso 3: devolver V_ALTA
+            caso 4, 5, 6, 7: devolver V_SÚPER
+        fin
+        devolver 0
+    fin
+
+    ; reinicia el puerto p; da la velocidad de lo que hay, o 0 si no queda habilitado
+    público función puerto_reinicia(c: nat32, p: nat32): nat32
+        variable x: puntero a Ctl
+        variable d: nat64
+        variable v, bit: nat32
+        x := ctl(c)
+        d := portsc(x, p)
+        v := m32(d)
+        si v yb 1 = 0 entonces devolver 0 fin
+        ; uno de USB 3 ya habilitado (el enlace se entrena solo): tal cual
+        si v yb 2 <> 0 y velocidad_de(v) = V_SÚPER entonces
+            pon_m32(d, (v yb P_GUARDA) ob (v yb P_CAMBIOS))
+            devolver V_SÚPER
+        fin
+        ; el reinicio (PR); en uno de USB 3 sin habilitar, el «caliente» (WPR)
+        bit := 0x10
+        si x.proto[p - 1] = 3 entonces bit := 0x80000000 fin
+        pon_m32(d, (v yb P_GUARDA) ob bit)
+        si no espera_reg(x, PORTSC + (p - 1) * 0x10, 0x00200000, 0x00200000, 500) entonces
+            si bit = 0x80000000 y m32(d) yb 0x00080000 = 0 entonces devolver 0 fin
+        fin
+        v := m32(d)
+        pon_m32(d, (v yb P_GUARDA) ob (v yb P_CAMBIOS))
+        espera_ms(20)                                   ; (el aparato se repone del reinicio)
+        v := m32(d)
+        si v yb 2 = 0 entonces devolver 0 fin
+        devolver velocidad_de(v)
+    fin
+
+    ; ---- los aparatos ----
+    ; el contexto de la ranura (en el de entrada): la cadena de ruta, la
+    ; velocidad, el último extremo, el puerto raíz, lo del concentrador y del traductor
+    público tipo Ranura = estructura
+        ranura: nat32
+        ruta, velocidad, puerto_raíz: nat32
+        es_hub: bool
+        mtt: bool
+        puertos_hub, tiempo_tt: nat32
+        tt_ranura, tt_puerto: nat32
+        últ_dci: nat32
+        contexto: nat64             ; su contexto de salida (física)
+    fin
+
+    función pon_ranura(x: puntero a Ctl, ref r: Ranura)
+        variable s: nat64
+        variable w0, w1, w2: nat32
+        s := de_entrada(x, 1)
+        w0 := (r.ruta yb 0xFFFFF) ob (r.velocidad << 20) ob (r.últ_dci << 27)
+        w1 := r.puerto_raíz << 16
+        w2 := 0
+        si r.es_hub entonces
+            w0 := w0 ob 0x04000000
+            si r.mtt entonces w0 := w0 ob 0x02000000 fin
+            w1 := w1 ob (r.puertos_hub << 24)
+            w2 := r.tiempo_tt << 16
+        fin
+        si r.tt_ranura <> 0 entonces w2 := w2 ob r.tt_ranura ob (r.tt_puerto << 8) fin
+        pon_m32(s, w0)
+        pon_m32(s + 4, w1)
+        pon_m32(s + 8, w2)
+        pon_m32(s + 12, 0)
+    fin
+
+    función pon_ext0(x: puntero a Ctl, ref e0: Ext)
+        variable e: nat64
+        e := de_entrada(x, 2)
+        pon_m32(e, 0)
+        pon_m32(e + 4, (3 << 1) ob (4 << 3) ob (e0.paquete << 16))     ; de control, tres intentos
+        pon64(e + 8, (e0.anillo.fís + nat64(e0.anillo.pos) * 16) ob nat64(e0.anillo.ciclo))
+        pon_m32(e + 16, 8)
+    fin
+
+    ; un aparato recién reiniciado: una ranura, su contexto, el anillo del
+    ; extremo 0 y su dirección. Falso si no puede ser (y xh_motivo).
+    público función nuevo_aparato(c: nat32, ref r: Ranura, ref e0: Ext): bool
+        variable x: puntero a Ctl
+        variable k: nat32
+        x := ctl(c)
+        cierra_mutex(dirección(x.m_orden))
+        k := orden(x, 0, 0, TRB_HABILITAR << 10)
+        si k <> C_BIEN entonces
+            abre_mutex(dirección(x.m_orden))
+            xh_motivo := "no da ranura (Enable Slot)"
+            devolver falso
+        fin
+        r.ranura := x.orden_ranura
+        si r.ranura = 0 o r.ranura > x.ranuras entonces
+            abre_mutex(dirección(x.m_orden))
+            xh_motivo := "da una ranura que no hay"
+            devolver falso
+        fin
+        r.contexto := página(x)
+        e0.anillo.fís := 0
+        e0.dci := 1
+        e0.clase := 0
+        si r.contexto = 0 o no nuevo_anillo(x, e0.anillo) entonces
+            abre_mutex(dirección(x.m_orden))
+            xh_motivo := "no queda memoria"
+            devolver falso
+        fin
+        x.ext[r.ranura * 32 + 1] := nat64(dirección(e0))
+        pon64(virt(x.dcbaa) + nat64(r.ranura) * 8, r.contexto)
+        ceros(virt(x.entrada), 4096)
+        pon_m32(de_entrada(x, 0) + 4, 3)                ; se dan la ranura y el extremo 0
+        r.últ_dci := 1
+        pon_ranura(x, r)
+        pon_ext0(x, e0)
+        k := orden(x, x.entrada, 0, (TRB_DIRECCIÓN << 10) ob (r.ranura << 24))
+        abre_mutex(dirección(x.m_orden))
+        si k <> C_BIEN entonces
+            xh_motivo := "no le da dirección (Address Device)"
+            devolver falso
+        fin
+        devolver cierto
+    fin
+
+    ; el paquete del extremo 0 era otro: se le dice (Evaluate Context)
+    público función pon_paquete0(c: nat32, ref r: Ranura, ref e0: Ext): bool
+        variable x: puntero a Ctl
+        variable k: nat32
+        x := ctl(c)
+        cierra_mutex(dirección(x.m_orden))
+        ceros(virt(x.entrada), 4096)
+        pon_m32(de_entrada(x, 0) + 4, 2)
+        pon_ext0(x, e0)
+        k := orden(x, x.entrada, 0, (TRB_EVALUAR << 10) ob (r.ranura << 24))
+        abre_mutex(dirección(x.m_orden))
+        devolver k = C_BIEN
+    fin
+
+    función dci_de(número: nat32): nat32
+        si número yb 0x80 <> 0 entonces devolver (número yb 0x0F) * 2 + 1 fin
+        devolver (número yb 0x0F) * 2
+    fin
+
+    ; cada cuánto se pregunta a uno de interrupción, como lo quiere el xHCI:
+    ; el exponente de 2, en microtramas de 125 µs
+    función intervalo_xhci(velocidad: nat32, intervalo: nat32): nat32
+        variable k, ms: nat32
+        si velocidad = V_ALTA o velocidad = V_SÚPER entonces
+            si intervalo = 0 entonces devolver 0 fin
+            si intervalo > 16 entonces devolver 15 fin
+            devolver intervalo - 1
+        fin
+        ms := intervalo
+        si ms = 0 entonces ms := 1 fin
+        k := 3
+        mientras ms > 1 y k < 10 hacer
+            ms := ms >> 1
+            k := k + 1
+        fin
+        devolver k
+    fin
+
+    ; los extremos del aparato (los n de la lista), cada uno con su anillo, y
+    ; lo de la ranura (también lo de un concentrador): Configure Endpoint
+    público función configura(c: nat32, ref r: Ranura, ext: puntero a Ext, n: nat32): bool
+        variable x: puntero a Ctl
+        variable e: puntero a Ext
+        variable d: nat64
+        variable i, dci, añade, clase, k, esit: nat32
+        x := ctl(c)
+        cierra_mutex(dirección(x.m_orden))
+        ceros(virt(x.entrada), 4096)
+        añade := 1
+        i := 0
+        mientras i < n hacer
+            e := ext + nat64(i)
+            dci := dci_de(e.número)
+            e.dci := dci
+            si dci > r.últ_dci entonces r.últ_dci := dci fin
+            si e.anillo.fís = 0 entonces
+                si no nuevo_anillo(x, e.anillo) entonces
+                    abre_mutex(dirección(x.m_orden))
+                    devolver falso
+                fin
+                añade := añade ob (nat32(1) << dci)
+                x.ext[r.ranura * 32 + dci] := nat64(e)
+                d := de_entrada(x, dci + 1)
+                clase := e.clase
+                si e.número yb 0x80 <> 0 entonces clase := clase + 4 fin
+                esit := e.paquete * (e.ráfaga + 1)
+                si e.clase = 3 entonces pon_m32(d, (intervalo_xhci(r.velocidad, e.intervalo) << 16) ob ((esit >> 16) << 24)) fin
+                pon_m32(d + 4, (3 << 1) ob (clase << 3) ob (e.ráfaga << 8) ob (e.paquete << 16))
+                pon64(d + 8, e.anillo.fís ob 1)
+                si e.clase = 2 entonces
+                    pon_m32(d + 16, 3072)
+                sino
+                    pon_m32(d + 16, (esit << 16) ob esit)
+                fin
+            fin
+            i := i + 1
+        fin
+        pon_m32(de_entrada(x, 0) + 4, añade)
+        pon_ranura(x, r)
+        k := orden(x, x.entrada, 0, (TRB_CONFIGURAR << 10) ob (r.ranura << 24))
+        abre_mutex(dirección(x.m_orden))
+        si k <> C_BIEN entonces xh_motivo := "no acepta sus extremos (Configure Endpoint)" fin
+        devolver k = C_BIEN
+    fin
+
+    ; el aparato se ha ido (o no se ha dejado): la ranura, deshabilitada, y
+    ; sus páginas (el contexto y los anillos), sueltas
+    público función quita_aparato(c: nat32, ref r: Ranura, ref e0: Ext, ext: puntero a Ext, n: nat32)
+        variable x: puntero a Ctl
+        variable i: nat32
+        variable e: puntero a Ext
+        x := ctl(c)
+        si r.ranura = 0 o r.ranura > x.ranuras entonces devolver fin
+        cierra_mutex(dirección(x.m_orden))
+        orden(x, 0, 0, (TRB_DESHABILITAR << 10) ob (r.ranura << 24))
+        abre_mutex(dirección(x.m_orden))
+        i := 0
+        mientras i < 32 hacer
+            x.ext[r.ranura * 32 + i] := 0
+            i := i + 1
+        fin
+        pon64(virt(x.dcbaa) + nat64(r.ranura) * 8, 0)
+        suelta_página(r.contexto)
+        suelta_página(e0.anillo.fís)
+        e0.anillo.fís := 0
+        i := 0
+        mientras i < n hacer
+            e := ext + nat64(i)
+            suelta_página(e.anillo.fís)
+            e.anillo.fís := 0
+            i := i + 1
+        fin
+        r.contexto := 0
+        r.ranura := 0
+    fin
+
+    ; ---- las transferencias ----
+    ; después de un fallo: si se ha parado (Halted), Reset Endpoint; si no,
+    ; Stop Endpoint; y su anillo sigue desde donde va a ir lo próximo
+    función repone(x: puntero a Ctl, ranura: nat32, e: puntero a Ext, parado: bool)
+        variable de: nat32
+        de := (e.dci << 16) ob (ranura << 24)
+        cierra_mutex(dirección(x.m_orden))
+        si parado entonces orden(x, 0, 0, (TRB_REPONER << 10) ob de) sino orden(x, 0, 0, (TRB_PARAR << 10) ob de) fin
+        orden(x, (e.anillo.fís + nat64(e.anillo.pos) * 16) ob nat64(e.anillo.ciclo), 0, (TRB_DESENCOLAR << 10) ob de)
+        abre_mutex(dirección(x.m_orden))
+        e.en_marcha := falso
+    fin
+
+    función empieza(e: puntero a Ext, n: nat32)
+        e.hecho := falso
+        e.código := 0
+        e.pedido := n
+        e.llegado := n
+        e.n_trb := 0
+        rearma(dirección(e.aviso))
+    fin
+
+    ; espera lo pedido a e; da lo que ha llegado o T_FALLO, T_PARADA
+    función acaba(x: puntero a Ctl, ranura: nat32, e: puntero a Ext, n: nat32, ms: nat64): ent32
+        si no espera_hecho(x, dirección(e.hecho), dirección(e.aviso), ms) entonces
+            xh_tiempos := xh_tiempos + 1
+            e.código := C_TIEMPO
+            repone(x, ranura, e, falso)
+            devolver T_FALLO
+        fin
+        si e.código <> C_BIEN y e.código <> C_CORTO entonces
+            xh_fallos := xh_fallos + 1
+            repone(x, ranura, e, cierto)
+            si e.código = C_PARADA entonces devolver T_PARADA fin
+            devolver T_FALLO
+        fin
+        devolver ent32(e.llegado)
+    fin
+
+    ; una transferencia de control: la petición (8 octetos) y n octetos de
+    ; datos (física: datos), que entran o salen
+    público función control(c: nat32, ranura: nat32, e: puntero a Ext, petición: nat64, datos: nat64, n: nat32, entra: bool): ent32
+        variable x: puntero a Ctl
+        variable trt, dir: nat32
+        x := ctl(c)
+        empieza(e, n)
+        e.en_marcha := cierto
+        trt := 0
+        si n <> 0 entonces
+            trt := 2
+            si entra entonces trt := 3 fin
+        fin
+        al_anillo(e.anillo, petición, 8, (TRB_PETICIÓN << 10) ob 0x40 ob (trt << 16))
+        si n <> 0 entonces
+            dir := 0
+            si entra entonces dir := 0x10000 fin
+            apunta(e, al_anillo(e.anillo, datos, n, (TRB_DATOS << 10) ob dir ob 0x04), 0, n)
+        fin
+        ; el estado, al revés que los datos (y, sin datos, entra)
+        dir := 0x10000
+        si n <> 0 y entra entonces dir := 0 fin
+        e.esperado := al_anillo(e.anillo, 0, 0, (TRB_ESTADO << 10) ob dir ob 0x20)
+        timbre(x, ranura, 1)
+        devolver acaba(x, ranura, e, n, 2000)
+    fin
+
+    ; una a granel: n octetos (física seguida) en TRB que no cruzan 64 KB,
+    ; encadenados; el último con IOC
+    público función granel(c: nat32, ranura: nat32, e: puntero a Ext, datos: nat64, n: nat32, ms: nat64): ent32
+        variable x: puntero a Ctl
+        variable d, fin_: nat64
+        variable trozo, hecho, paquetes, td, marcas: nat32
+        x := ctl(c)
+        empieza(e, n)
+        e.en_marcha := cierto
+        d := datos
+        fin_ := datos + nat64(n)
+        hecho := 0
+        mientras cierto hacer
+            trozo := nat32(((d + 0x10000) yb nob nat64(0xFFFF)) - d)
+            si d + nat64(trozo) > fin_ entonces trozo := nat32(fin_ - d) fin
+            paquetes := (n - hecho - trozo + e.paquete - 1) div e.paquete
+            td := paquetes
+            si td > 31 entonces td := 31 fin
+            marcas := (TRB_NORMAL << 10) ob 0x04
+            si hecho + trozo < n entonces
+                apunta(e, al_anillo(e.anillo, d, trozo ob (td << 17), marcas ob 0x10), hecho, trozo)
+            sino
+                e.esperado := al_anillo(e.anillo, d, trozo, marcas ob 0x20)
+                apunta(e, e.esperado, hecho, trozo)
+                romper
+            fin
+            hecho := hecho + trozo
+            d := d + nat64(trozo)
+        fin
+        timbre(x, ranura, e.dci)
+        devolver acaba(x, ranura, e, n, ms)
+    fin
+
+    ; ---- las tuberías de interrupción ----
+    ; pide un informe de n octetos a e (a la física datos): al llegar, e.hecho
+    público función pide_informe(c: nat32, ranura: nat32, e: puntero a Ext, datos: nat64, n: nat32)
+        variable x: puntero a Ctl
+        x := ctl(c)
+        empieza(e, n)
+        e.en_marcha := cierto
+        e.esperado := al_anillo(e.anillo, datos, n, (TRB_NORMAL << 10) ob 0x24)
+        apunta(e, e.esperado, 0, n)
+        timbre(x, ranura, e.dci)
+    fin
+
+    ; lo que ha llegado del informe pedido (si ha acabado): los octetos, o
+    ; T_FALLO (y el extremo, repuesto); -3 si aún no
+    público función informe(c: nat32, ranura: nat32, e: puntero a Ext, n: nat32): ent32
+        variable x: puntero a Ctl
+        x := ctl(c)
+        recoge(x)
+        si no e.hecho entonces devolver -3 fin
+        e.hecho := falso
+        si e.código = C_BIEN o e.código = C_CORTO entonces devolver ent32(e.llegado) fin
+        xh_fallos := xh_fallos + 1
+        repone(x, ranura, e, e.código = C_PARADA)
+        devolver T_FALLO
+    fin
+
+    ; deja de pedir (el aparato se va): Stop Endpoint y el anillo, al día
+    público función deja_de_pedir(c: nat32, ranura: nat32, e: puntero a Ext)
+        si e.en_marcha entonces repone(ctl(c), ranura, e, falso) fin
+    fin
+
+    ; antes de apagar: paradas
+    público función para_xhci()
+        variable c: nat32
+        c := 0
+        mientras c < xh_n hacer
+            si ctl(c).hay entonces pon(ctl(c), USBCMD, lee(ctl(c), USBCMD) yb nob nat32(5)) fin
+            c := c + 1
+        fin
+    fin
+
+    público función nombre_velocidad(v: nat32): puntero a byte
+        según nat16(v)
+            caso V_BAJA: devolver "baja (1,5 Mbit/s)"
+            caso V_PLENA: devolver "plena (12 Mbit/s)"
+            caso V_ALTA: devolver "alta (480 Mbit/s)"
+            caso V_SÚPER: devolver "SuperSpeed (5 Gbit/s)"
+        fin
+        devolver "¿?"
+    fin
+
+fin Xhci64.

@@ -1,0 +1,399 @@
+; =============================================================================
+;  usbalm64.cas - Hispa-64, etapa 6: las memorias y los discos USB (docs/64/
+;  HISPA-64.md, sección 12): la clase «almacenamiento» (08), con órdenes SCSI
+;  (06) y el transporte «solo a granel» (50, Bulk-Only Transport).
+;
+;  Cada orden son tres pasos por los dos extremos a granel: un envoltorio de
+;  31 octetos con la orden SCSI (CBW), los datos (si los hay) y un estado de
+;  13 (CSW). Órdenes: INQUIRY, TEST UNIT READY, REQUEST SENSE, READ CAPACITY
+;  (10 y, si no cabe, 16), READ y WRITE (10, o 16 más allá de 2^32
+;  sectores) y SYNCHRONIZE CACHE. Si se atasca: quitar la parada del
+;  extremo, o el reinicio de la clase (Bulk-Only Mass Storage Reset) y otra
+;  vez. Los datos van por DMA a la memoria que da Discos64 (la página de la
+;  caché), hasta 128 KB por orden; con una controladora de 32 bits, lo de
+;  por encima de 4 GB pasa por una página de paso.
+;
+;  Cada memoria es un disco más de Discos64 (la clase D_USB: «usb0»,
+;  «usb1»...), con sus particiones y lo de encima (FAT, exFAT). Como todos
+;  los discos, de solo leer salvo con «escribir».
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbalm64
+
+    importar Cifras64, Es64, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Xhci64, Usb64
+
+    público constante MAX_MEMORIAS = 8
+    constante POR_ORDEN = 128 * 1024
+
+    tipo Memoria = estructura
+        hay: bool
+        ida: bool
+        aparato: nat32
+        interfaz: nat32
+        entra, sale: nat32          ; sus extremos a granel
+        sector: nat32
+        sectores: nat64
+        largo16: bool               ; READ/WRITE(16)
+        etiqueta: nat32
+        sobres: nat64               ; una página: el CBW en 0, el CSW en 0x40, lo de las órdenes en 0x200
+        de_paso: nat64                 ; la página de paso (controladoras de 32 bits), o 0
+        m: Mutex
+        modelo: arreglo [28] de byte
+        quitable: bool
+    fin
+
+    variable mems: arreglo [MAX_MEMORIAS] de Memoria
+    público variable ua_n_discos: nat32
+    público variable ua_órdenes, ua_fallos, ua_reinicios: nat64
+    público variable ua_leídos, ua_escritos: nat64     ; sectores
+
+    función ceros(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    función reinicia(k: nat32)
+        variable a: puntero a Aparato
+        a := aparato(mems[k].aparato)
+        ua_reinicios := ua_reinicios + 1
+        u_control(a, 0x21, 0xFF, 0, mems[k].interfaz, 0)
+        quita_parada(a, mems[k].entra)
+        quita_parada(a, mems[k].sale)
+    fin
+
+    ; la orden SCSI de lo que hay en sobres + 0x200 (largo octetos) con n
+    ; octetos de datos (en la física datos) que entran o salen. Da 0 si
+    ; bien, 1 si la memoria dice que ha fallado (CSW 1) y 2 si no ha salido
+    función orden(k: nat32, largo: nat32, datos: nat64, n: nat32, entra: bool): nat32
+        variable a: puntero a Aparato
+        variable s: nat64
+        variable r: ent32
+        variable i: nat32
+        a := aparato(mems[k].aparato)
+        si a.ido entonces devolver 2 fin
+        ua_órdenes := ua_órdenes + 1
+        s := virt(mems[k].sobres)
+        mems[k].etiqueta := mems[k].etiqueta + 1
+        ceros(s, 0x60)
+        pon_m32(s, 0x43425355)                          ; «USBC»
+        pon_m32(s + 4, mems[k].etiqueta)
+        pon_m32(s + 8, n)
+        si entra entonces pon_m8(s + 12, 0x80) fin
+        pon_m8(s + 14, largo)
+        i := 0
+        mientras i < largo hacer
+            pon_m8(s + 15 + nat64(i), m8(s + 0x200 + nat64(i)))
+            i := i + 1
+        fin
+        r := u_granel(a, mems[k].sale, mems[k].sobres, 31, 2000)
+        si r = T_PARADA entonces
+            quita_parada(a, mems[k].sale)
+            r := u_granel(a, mems[k].sale, mems[k].sobres, 31, 2000)
+        fin
+        si r <> 31 entonces
+            reinicia(k)
+            ua_fallos := ua_fallos + 1
+            devolver 2
+        fin
+        si n <> 0 entonces
+            si entra entonces
+                r := u_granel(a, mems[k].entra, datos, n, 5000)
+                si r = T_PARADA entonces quita_parada(a, mems[k].entra) fin
+            sino
+                r := u_granel(a, mems[k].sale, datos, n, 5000)
+                si r = T_PARADA entonces quita_parada(a, mems[k].sale) fin
+            fin
+            si r = T_FALLO entonces
+                reinicia(k)
+                ua_fallos := ua_fallos + 1
+                devolver 2
+            fin
+        fin
+        ; el estado (si el extremo se ha parado, se le quita y otra vez)
+        r := u_granel(a, mems[k].entra, mems[k].sobres + 0x40, 13, 5000)
+        si r = T_PARADA entonces
+            quita_parada(a, mems[k].entra)
+            r := u_granel(a, mems[k].entra, mems[k].sobres + 0x40, 13, 5000)
+        fin
+        si r <> 13 o m32(s + 0x40) <> 0x53425355 o m32(s + 0x44) <> mems[k].etiqueta o m8(s + 0x4C) > 1 entonces
+            reinicia(k)
+            ua_fallos := ua_fallos + 1
+            devolver 2
+        fin
+        si m8(s + 0x4C) <> 0 entonces ua_fallos := ua_fallos + 1 fin
+        devolver m8(s + 0x4C)
+    fin
+
+    función pon_orden(k: nat32, código: nat32)
+        ceros(virt(mems[k].sobres) + 0x200, 16)
+        pon_m8(virt(mems[k].sobres) + 0x200, código)
+    fin
+
+    función pon_b(k: nat32, i: nat32, v: nat32)
+        pon_m8(virt(mems[k].sobres) + 0x200 + nat64(i), v yb 0xFF)
+    fin
+
+    ; lo que llega de las órdenes pequeñas, en sobres + 0x400
+    función dato(k: nat32, i: nat32): nat32
+        devolver m8(virt(mems[k].sobres) + 0x400 + nat64(i))
+    fin
+
+    función be32(k: nat32, i: nat32): nat32
+        devolver (dato(k, i) << 24) ob (dato(k, i + 1) << 16) ob (dato(k, i + 2) << 8) ob dato(k, i + 3)
+    fin
+
+    ; por qué ha fallado la anterior (y queda lista para otra)
+    función pregunta_fallo(k: nat32)
+        pon_orden(k, 0x03)
+        pon_b(k, 4, 18)
+        orden(k, 6, mems[k].sobres + 0x400, 18, cierto)
+    fin
+
+    ; la interfaz i del aparato a, si es una memoria (08, SCSI 06, BOT 50)
+    función mira(ai: nat32, i: nat32): bool
+        variable a: puntero a Aparato
+        variable k, e, s, vueltas, j: nat32
+        variable bien: bool
+        a := aparato(ai)
+        si a.interfaces[i].clase <> 8 o a.interfaces[i].subclase <> 6 o a.interfaces[i].protocolo <> 0x50 entonces devolver falso fin
+        e := busca_ext(a, i, 2, cierto)
+        s := busca_ext(a, i, 2, falso)
+        si e = U_NINGUNO o s = U_NINGUNO entonces devolver falso fin
+        k := 0
+        mientras k < MAX_MEMORIAS y mems[k].hay hacer k := k + 1 fin
+        si k >= MAX_MEMORIAS entonces devolver falso fin
+        ceros(nat64(dirección(mems[k])), tamaño(Memoria))
+        mems[k].aparato := ai
+        mems[k].interfaz := a.interfaces[i].número
+        mems[k].entra := e
+        mems[k].sale := s
+        mems[k].sobres := página_de(a.ctl)
+        si mems[k].sobres = 0 entonces devolver falso fin
+        si no de_64(a.ctl) entonces mems[k].de_paso := 0 fin
+        ; quién es (INQUIRY): el fabricante y el producto
+        pon_orden(k, 0x12)
+        pon_b(k, 4, 36)
+        si orden(k, 6, mems[k].sobres + 0x400, 36, cierto) <> 0 entonces
+            si orden(k, 6, mems[k].sobres + 0x400, 36, cierto) <> 0 entonces devolver suéltala(k) fin
+        fin
+        si dato(k, 0) yb 0x1F <> 0 entonces devolver suéltala(k) fin       ; (solo discos: no CD)
+        mems[k].quitable := dato(k, 1) yb 0x80 <> 0
+        j := 0
+        mientras j < 24 hacer
+            mems[k].modelo[j] := byte(dato(k, 8 + j))
+            si mems[k].modelo[j] < 32 o mems[k].modelo[j] > 126 entonces mems[k].modelo[j] := ' ' fin
+            j := j + 1
+        fin
+        mientras j > 0 y mems[k].modelo[j - 1] = ' ' hacer j := j - 1 fin
+        mems[k].modelo[j] := 0
+        ; ¿está lista? (una recién enchufada puede tardar)
+        bien := falso
+        vueltas := 0
+        mientras no bien y vueltas < 30 hacer
+            pon_orden(k, 0x00)
+            bien := orden(k, 6, 0, 0, falso) = 0
+            si no bien entonces
+                pregunta_fallo(k)
+                espera_ms(100)
+            fin
+            vueltas := vueltas + 1
+        fin
+        ; cuántos sectores y de cuánto (READ CAPACITY 10, y 16 si no cabe)
+        pon_orden(k, 0x25)
+        si orden(k, 10, mems[k].sobres + 0x400, 8, cierto) <> 0 entonces
+            pregunta_fallo(k)
+            pon_orden(k, 0x25)
+            si orden(k, 10, mems[k].sobres + 0x400, 8, cierto) <> 0 entonces devolver suéltala(k) fin
+        fin
+        mems[k].sectores := nat64(be32(k, 0)) + 1
+        mems[k].sector := be32(k, 4)
+        si be32(k, 0) = 0xFFFFFFFF entonces
+            pon_orden(k, 0x9E)
+            pon_b(k, 1, 0x10)
+            pon_b(k, 13, 32)
+            si orden(k, 16, mems[k].sobres + 0x400, 32, cierto) <> 0 entonces devolver suéltala(k) fin
+            mems[k].sectores := ((nat64(be32(k, 0)) << 32) ob nat64(be32(k, 4))) + 1
+            mems[k].sector := be32(k, 8)
+            mems[k].largo16 := cierto
+        fin
+        si mems[k].sector <> 512 y mems[k].sector <> 4096 y mems[k].sector <> 2048 entonces devolver suéltala(k) fin
+        mems[k].hay := cierto
+        a.dueño := DE_ALM
+        ua_n_discos := ua_n_discos + 1
+        devolver cierto
+    fin
+
+    función suéltala(k: nat32): bool
+        suelta_página(mems[k].sobres)
+        mems[k].sobres := 0
+        devolver falso
+    fin
+
+    ; las memorias entre los aparatos enumerados; da cuántas hay
+    público función prepara_alm(): nat32
+        variable i, j: nat32
+        variable a: puntero a Aparato
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            a := aparato(i)
+            si a <> nulo y a.usado y a.dueño = DE_NADIE entonces
+                j := 0
+                mientras j < a.n_interfaces hacer
+                    si mira(i, j) entonces romper fin
+                    j := j + 1
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver ua_n_discos
+    fin
+
+    público función escribe_alm()
+        variable k: nat32
+        k := 0
+        mientras k < ua_n_discos hacer
+            escribir("  usb", k, ": «", mems[k].modelo, "» en ")
+            escribe_sitio(mems[k].aparato)
+            escribir(", ")
+            tamaño_legible(mems[k].sectores * nat64(mems[k].sector))
+            escribir(" (", mems[k].sectores, " sectores de ", mems[k].sector, " octetos)")
+            si mems[k].largo16 entonces escribir(", READ(16)") fin
+            escribir("\n")
+            k := k + 1
+        fin
+    fin
+
+    ; ---- para Discos64 ----
+    público función usb_sector(k: nat32): nat32
+        devolver mems[k].sector
+    fin
+
+    público función usb_sectores(k: nat32): nat64
+        devolver mems[k].sectores
+    fin
+
+    público función usb_modelo(k: nat32): puntero a byte
+        devolver dirección(mems[k].modelo[0])
+    fin
+
+    ; ¿se ha desenchufado?
+    público función usb_ida(k: nat32): bool
+        si mems[k].ida entonces devolver cierto fin
+        devolver aparato(mems[k].aparato) = nulo o aparato(mems[k].aparato).ido
+    fin
+
+    ; el aparato i se va: su memoria, si la tiene, queda «ida» (lo que se le pida falla)
+    público función se_va(i: nat32)
+        variable k: nat32
+        k := 0
+        mientras k < ua_n_discos hacer
+            si mems[k].hay y mems[k].aparato = i entonces mems[k].ida := cierto fin
+            k := k + 1
+        fin
+    fin
+
+    función rw(k: nat32, lba: nat64, n: nat32, fís: nat64, escribe: bool): bool
+        variable código, r: nat32
+        variable octetos: nat32
+        octetos := n * mems[k].sector
+        si mems[k].largo16 entonces
+            si escribe entonces código := 0x8A sino código := 0x88 fin
+            pon_orden(k, código)
+            pon_b(k, 2, nat32(lba >> 56))
+            pon_b(k, 3, nat32(lba >> 48))
+            pon_b(k, 4, nat32(lba >> 40))
+            pon_b(k, 5, nat32(lba >> 32))
+            pon_b(k, 6, nat32(lba >> 24))
+            pon_b(k, 7, nat32(lba >> 16))
+            pon_b(k, 8, nat32(lba >> 8))
+            pon_b(k, 9, nat32(lba))
+            pon_b(k, 12, n >> 8)
+            pon_b(k, 13, n)
+            r := orden(k, 16, fís, octetos, no escribe)
+        sino
+            si escribe entonces código := 0x2A sino código := 0x28 fin
+            pon_orden(k, código)
+            pon_b(k, 2, nat32(lba >> 24))
+            pon_b(k, 3, nat32(lba >> 16))
+            pon_b(k, 4, nat32(lba >> 8))
+            pon_b(k, 5, nat32(lba))
+            pon_b(k, 7, n >> 8)
+            pon_b(k, 8, n)
+            r := orden(k, 10, fís, octetos, no escribe)
+        fin
+        si r = 1 entonces pregunta_fallo(k) fin
+        devolver r = 0
+    fin
+
+    ; lee o escribe n sectores desde lba, de o a la física fís (seguida)
+    público función usb_es(k: nat32, lba: nat64, n: nat64, fís: nat64, escribe: bool): bool
+        variable trozo, máx: nat64
+        variable bien: bool
+        variable a: puntero a Aparato
+        si k >= ua_n_discos o usb_ida(k) entonces devolver falso fin
+        si lba + n > mems[k].sectores entonces devolver falso fin
+        a := aparato(mems[k].aparato)
+        máx := POR_ORDEN div mems[k].sector
+        bien := cierto
+        cierra_mutex(dirección(mems[k].m))
+        mientras n > 0 y bien hacer
+            trozo := n
+            si trozo > máx entonces trozo := máx fin
+            si no de_64(a.ctl) y fís + trozo * mems[k].sector > nat64(1) << 32 entonces
+                ; (una controladora de 32 bits: por la página de paso, de 4 KB en 4 KB)
+                bien := por_paso(k, lba, n, fís, escribe)
+                romper
+            fin
+            bien := rw(k, lba, nat32(trozo), fís, escribe)
+            si no bien entonces
+                ; otra vez (una memoria que se ha atascado y se ha reiniciado)
+                bien := rw(k, lba, nat32(trozo), fís, escribe)
+            fin
+            si escribe entonces ua_escritos := ua_escritos + trozo sino ua_leídos := ua_leídos + trozo fin
+            lba := lba + trozo
+            fís := fís + trozo * mems[k].sector
+            n := n - trozo
+        fin
+        abre_mutex(dirección(mems[k].m))
+        devolver bien
+    fin
+
+    función por_paso(k: nat32, lba: nat64, n: nat64, fís: nat64, escribe: bool): bool
+        variable por, trozo: nat64
+        variable a: puntero a Aparato
+        a := aparato(mems[k].aparato)
+        si mems[k].de_paso = 0 entonces mems[k].de_paso := página_de(a.ctl) fin
+        si mems[k].de_paso = 0 entonces devolver falso fin
+        por := 4096 div mems[k].sector
+        si por = 0 entonces devolver falso fin
+        mientras n > 0 hacer
+            trozo := n
+            si trozo > por entonces trozo := por fin
+            si escribe entonces copia(virt(mems[k].de_paso), virt(fís), trozo * mems[k].sector) fin
+            si no rw(k, lba, nat32(trozo), mems[k].de_paso, escribe) entonces devolver falso fin
+            si no escribe entonces copia(virt(fís), virt(mems[k].de_paso), trozo * mems[k].sector) fin
+            lba := lba + trozo
+            fís := fís + trozo * mems[k].sector
+            n := n - trozo
+        fin
+        devolver cierto
+    fin
+
+    ; vaciar su caché (SYNCHRONIZE CACHE 10)
+    público función usb_vacía(k: nat32): bool
+        variable r: nat32
+        si k >= ua_n_discos o usb_ida(k) entonces devolver falso fin
+        cierra_mutex(dirección(mems[k].m))
+        pon_orden(k, 0x35)
+        r := orden(k, 10, 0, 0, falso)
+        si r = 1 entonces pregunta_fallo(k) fin
+        abre_mutex(dirección(mems[k].m))
+        ; (las que no la tienen dicen que no: también vale)
+        devolver r <> 2
+    fin
+
+fin Usbalm64.
