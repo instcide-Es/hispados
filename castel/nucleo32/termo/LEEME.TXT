@@ -61,12 +61,15 @@ Con Linux:
   «Secure Boot» en «Disabled», «Boot» > «Fast Boot» en «Disabled» y «Launch
   CSM» en «Enabled»; F10 para guardar. La gráfica NVIDIA (GTX 1050) es
   «Optimus»: si está dormida, el Termómetro lo dice y no la despierta; los
-  ventiladores y la temperatura de ASUS salen por su WMI si la BIOS los da.
+  ventiladores y la temperatura de ASUS salen por su WMI si la BIOS los da
+  («parado» si el ventilador no gira todavía; «no disponible» si la BIOS no
+  lo da, como el de la gráfica en el GL553VD).
   Un portátil de la época de Windows 7 arranca así sin tocar nada más (no hace
   falta quitar el «Secure Boot»: esos equipos no lo tienen o lo traen apagado).
   Si se queda colgado al arrancar, apáguelo (botón 5 s) y elija en el menú
   «Termometro SIN ACPI» (mide el procesador, pero no las zonas ni la batería).
-  Si la pantalla sale rara, elija «Termometro (1024 x 600)» o «(800 x 600)».
+  Si la pantalla sale rara (o muy grande), elija «Termometro (la medida que
+  diga la pantalla...)», «Termometro (1024 x 600)» o «(800 x 600)».
 
 
   La memoria arranca también por UEFI (los equipos de 2012 en adelante): en
@@ -179,6 +182,14 @@ con él encendido simplemente no arranca esta memoria.
                    gráfica. Si hay que llevar el portátil a un técnico,
                    llévele (o mándele) el archivo INFORME.TXT y el INFORME.BMP:
                    no llevan datos personales.
+  Al empezar, el Termómetro escribe un archivo de prueba en la memoria, lo lee
+  de vuelta y lo borra. Si no puede guardar (la memoria no aparece, es de
+  solo lectura, está llena o el USB falla), sale abajo una FRANJA ROJA GRANDE
+  «NO se puede guardar en X: ...» con el motivo (el disco del portátil, C:,
+  no se toca nunca) y, encima, «Qué ha encontrado el sistema al arrancar»
+  (el USB, los discos, las unidades). Al acabar la prueba, la línea
+  de abajo dice dónde ha quedado el informe («guardado y comprobado»). Si
+  sale la franja roja, haga una foto de la pantalla y mándemela.
   Si el portátil se apaga solo: vuelva a arrancar desde la memoria. El
   Termómetro avisa de que «la última vez no se cerró bien» y dice durante qué
   fase se apagó, a qué hora y a qué temperatura estaba.
@@ -195,6 +206,11 @@ con él encendido simplemente no arranca esta memoria.
 
   BATERÍA: si la tapa de abajo o el ratón táctil abomban, puede ser la batería
   hinchada: no lo cargue y llévelo al técnico cuanto antes.
+  AUTONOMÍA: si quiere saber cuánto le dura la batería, quite el cargador
+  antes de empezar y déjelo así al menos 3 minutos (mejor 10). En INFORME.TXT
+  saldrá lo que gasta (en vatios, si la batería lo dice), lo que ha bajado el
+  porcentaje y cuánto duraría a ese ritmo. Con la prueba de esfuerzo gasta
+  mucho más que con un uso normal: lo pone al lado.
   FRENOS Y ALIMENTACIÓN: el Termómetro apunta también si el procesador se
   frena y por qué (temperatura, límite de potencia, una señal de la placa o
   la alarma del regulador de tensión) y, si el portátil se apagó solo con el

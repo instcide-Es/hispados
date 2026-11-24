@@ -1956,7 +1956,7 @@ for hc in xhci ehci; do
     bucle :espera ":tecla ctrl-c" ":tecla up ret" :espera ":tecla ctrl-c" "copy textos\\largo.txt copia.txt" prueba :espera escribe salir disco apagar > $N/usb$hc.sal 2>&1
   S=$N/usb$hc.sal
   mira "$que: la controladora se toma, se enumeran los aparatos (teclado, ratón y memoria) y la memoria es la unidad X:" \
-    "^usb: controladora $que " "($que); teclado$" "($que); ratón$" "($que); almacenamiento$" "^usb: 1 teclados, 1 ratones, 1 memorias\.$" \
+    "^usb: controladora $que " "($que); teclado$" "($que); ratón$" "($que); almacenamiento$" "^usb: 1 teclado, 1 ratón, 1 memoria\.$" \
     "^disco 0: QEMU    QEMU HARDDISK, 16 MB, FAT16 (USB)\.$" "^unidades: X: (disco 0, USB, FAT16); la del sistema, X:"
   mira "$que, sin teclado PS/2: el teclado USB es el español (eñe, acentos y diéresis con tecla muerta, ¿?), con Ctrl+C y las flechas" \
     "^X:.>echo Querida señora: ¿qué tal está? El pingüino > maría.txt$" "^Querida señora: ¿qué tal está? El pingüino$" "^X:.>prueba$" \
@@ -1981,7 +1981,7 @@ ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off QEMU_MAS="-device qemu-xhci,id=u -device
 S=$N/hub.sal
 mira "un concentrador USB: se enciende, se reinician sus puertos y se enumera lo que cuelga de él (teclado, ratón y memoria, a velocidad plena)" \
   ": concentrador de 8 puertos$" "velocidad plena, en el puerto 1 del concentrador 0; teclado$" "en el puerto 2 del concentrador 0; ratón$" \
-  "en el puerto 3 del concentrador 0; almacenamiento$" "^usb: 1 teclados, 1 ratones, 1 memorias\.$"
+  "en el puerto 3 del concentrador 0; almacenamiento$" "^usb: 1 teclado, 1 ratón, 1 memoria\.$"
 mira "y detrás del concentrador van el teclado (se teclea por él) y la memoria (se leen sus archivos y sus programas)" \
   "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" "^hola.bin ha acabado con el código 3" "^\[código 5\]"
 # 7 bis. un EHCI con sus compañeras UHCI (los PC de 2002 a 2010): el teclado y el ratón, de USB 1.1, se ceden a ellas; la memoria va por el EHCI
@@ -1992,7 +1992,7 @@ S=$N/comp.sal
 mira "un EHCI con dos UHCI compañeras: lo que no es de alta velocidad (el teclado y el ratón) se cede a ellas y se enumera allí; la memoria, por el EHCI" \
   "^usb: controladora EHCI 8086:293A, 6 puertos (2 cedidos a las compañeras: aparatos de USB 1.x)$" "^usb: controladora UHCI 8086:2934, 2 puertos$" \
   "velocidad alta, en el puerto 2 (EHCI); almacenamiento$" "velocidad plena, en el puerto 1 (UHCI); teclado$" "velocidad plena, en el puerto 1 (UHCI); ratón$" \
-  "^usb: 1 teclados, 1 ratones, 1 memorias\.$"
+  "^usb: 1 teclado, 1 ratón, 1 memoria\.$"
 mira "UHCI: el teclado USB (se teclea por él, sin teclado PS/2), con sus letras" "^X:.>echo El pingüino de la señora > a.txt$" "^El pingüino de la señora$" \
   "^archivo: TEXTOS.LARGO.TXT mide 17600 octetos; leídos 17600 a trozos de 777, 400 líneas, suma $suma$" "; archivos abiertos: 0$" "^\[código 5\]"
 saca $N/comp.img TEXTOS/LARGO.TXT $N/largo.txt; saca $N/comp.img COPIA.TXT $N/copia.txt
@@ -2038,7 +2038,7 @@ CAPTURAS=$G ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off SOLO_LECTURA=1 SATA=$P/d32.i
   ":clic 578 76" ":pausa 1" ":doble 62 30" ":pausa 2" ":captura m3" ":doble 580 160" ":pausa 1" ":captura m4" > $N/escusb.sal 2>&1
 S=$N/escusb.sal
 mira "el escritorio en un PC sin teclado ni ratón PS/2 (como un Mac): arranca con el ratón y el teclado USB" \
-  "^usb: 1 teclados, 1 ratones, 1 memorias\.$" "^escritorio: en marcha, 800 x 600" "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 35 octetos"
+  "^usb: 1 teclado, 1 ratón, 1 memoria\.$" "^escritorio: en marcha, 800 x 600" "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 35 octetos"
 miracap "el ratón USB mueve la flecha y pulsa: el menú Inicio se abre con un clic" m1 negrita 46 155 54 163 "Bloc de notas" negrita 320 533 328 541 "Apagar equipo"
 miracap "el teclado USB escribe en el Bloc de notas (con eñe y «¡»), y F2 guarda" m2 texto 94 146 102 156 "Guardado en la memoria USB: ¡señor!" \
   texto 94 428 104 448 "Guardado en NOTAS.TXT (35 octetos)."
@@ -2074,12 +2074,12 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
       tr -d '\r' < $N/g$hc.sal | iconv -f CP437 -t UTF-8 > $N/g$hc.txt
       S=$N/g$hc.txt
       mira "la memoria USB con GRUB, arrancada de un $que sin teclado PS/2: el núcleo le quita el USB a la BIOS y lee él la memoria (X:, la del sistema)" \
-        "^usb: controladora $que " "^usb: 1 teclados, 1 ratones, 1 memorias\.$" "^disco 0: QEMU    QEMU HARDDISK, 64 MB, FAT16 (USB)\.$" \
+        "^usb: controladora $que " "^usb: 1 teclado, 1 ratón, 1 memoria\.$" "^disco 0: QEMU    QEMU HARDDISK, 64 MB, FAT16 (USB)\.$" \
         "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)" \
         "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 8 octetos"
       dd if=$N/g$hc.img of=$N/g$hc.vol bs=1M skip=1 status=none
       saca $N/g$hc.vol NOTAS.TXT $N/notas.txt; saca $N/g$hc.vol ARRANQUE.TXT $N/arranque.txt
-      if cap $G/g$hc.ppm texto 94 146 102 156 "hola usb" && [ "$(cat $N/notas.txt 2> /dev/null)" = "hola usb" ] && grep -q "^usb: 1 teclados, 1 ratones, 1 memorias" $N/arranque.txt && grep -q "la del sistema, X:" $N/arranque.txt \
+      if cap $G/g$hc.ppm texto 94 146 102 156 "hola usb" && [ "$(cat $N/notas.txt 2> /dev/null)" = "hola usb" ] && grep -q "^usb: 1 teclado, 1 ratón, 1 memoria" $N/arranque.txt && grep -q "la del sistema, X:" $N/arranque.txt \
         && fsck.fat -n $N/g$hc.vol > $P/fsck.txt 2>&1; then
         ok "$que: lo tecleado con el teclado USB y guardado con el Bloc de notas está en la memoria (sana), con el registro del arranque (ARRANQUE.TXT)"
       else ko "$que: en la memoria USB de arranque no queda lo guardado, o no queda sana:"; sed 's/^/        /' $P/fsck.txt | head -6; fi
@@ -2598,7 +2598,7 @@ for hc in xhci ehci; do
   if [ $hc = xhci ]; then
     mira "$que: un concentrador enchufado en marcha, con un teclado y un ratón detrás: el teclado teclea; y al quitarlo se va todo, y otro teclado vuelve a ir" \
       "usb: se desenchufa el aparato 0$" ": concentrador de 8 puertos$" "en el puerto 1 del concentrador [0-9]*; teclado$" "en el puerto 2 del concentrador [0-9]*; ratón$" \
-      "usb: 1 teclados, 1 ratones\.$" "^dos$" "usb: 1 teclados, 0 ratones\.$" "^tres$"
+      "usb: 1 teclado, 1 ratón\.$" "^dos$" "usb: 1 teclado, 0 ratones\.$" "^tres$"
   else
     mira "$que: el teclado sigue tecleando después de quitar y enchufar memorias" "^tres$"
   fi

@@ -632,17 +632,29 @@ módulo Semilla
 
     ; una tarea que, al medio minuto de arrancar, apunta cómo van los
     ; teclados y los ratones USB (si llegan sus informes) y lo guarda
+    ; (TERMO) y, los dos primeros minutos, cada segundo que haya algo nuevo:
+    ; si el equipo se queda congelado (el Acer One 10), la última línea de
+    ; ARRANQUE.TXT dice hasta dónde llegó
     función registro_luego(nada: nat32)
-        dormir(30 * HZ)
-        enseña_estado()
-        guarda_registro()
+        variable s, visto: nat32
+        visto := registro_largo
+        s := 0
+        mientras s < 120 hacer
+            dormir(HZ)
+            s := s + 1
+            si s = 30 y teclados + ratones <> 0 entonces enseña_estado() fin
+            si registro_largo <> visto entonces
+                visto := registro_largo
+                guarda_registro()
+            fin
+        fin
     fin
 
     ; los discos y las unidades: los de dentro (IDE y SATA), las memorias
     ; USB y lo que haya traído el cargador. Dice lo que encuentra.
     función busca_discos()
         variable d, u, n, pedida: nat32
-        variable dd: arreglo [4] de nat32
+        variable dd: arreglo [6] de nat32
         ; en los discos solo se escribe si el cargador lo dice: «escritura»
         ; (en todos) o «escritura=usb» (solo en las memorias USB). En un PC
         ; de verdad, el disco es el del dueño.
@@ -668,10 +680,14 @@ módulo Semilla
                 Usbhid.prepara()
                 enseña_descriptor()
                 si Usbalm.prepara() <> 0 entonces busca_usb() fin
+                ; («1 ratón», «2 ratones»: en singular o en plural)
                 dd[0] := teclados
-                dd[1] := ratones
-                dd[2] := Usbalm.cuántas
-                apunta("usb: %u teclados, %u ratones, %u memorias.\n", dd)
+                si teclados = 1 entonces dd[1] := nat32("teclado") sino dd[1] := nat32("teclados") fin
+                dd[2] := ratones
+                si ratones = 1 entonces dd[3] := nat32("ratón") sino dd[3] := nat32("ratones") fin
+                dd[4] := Usbalm.cuántas
+                si Usbalm.cuántas = 1 entonces dd[5] := nat32("memoria") sino dd[5] := nat32("memorias") fin
+                apunta("usb: %u %s, %u %s, %u %s.\n", dd)
                 ; y lo que se enchufe y se desenchufe a partir de ahora
                 Usbcal.prepara()
             fin
@@ -731,7 +747,7 @@ módulo Semilla
             si escribible(del_sistema) y tiene_sistema(del_sistema) entonces
                 guarda_registro()
                 ; y, al medio minuto, otra vez, con cómo van el teclado y el ratón
-                si teclados + ratones <> 0 entonces crear_tarea("registro", nat32(dirección(registro_luego)), 0) fin
+                crear_tarea("registro", nat32(dirección(registro_luego)), 0)
             fin
         fin
     fin
@@ -754,6 +770,13 @@ módulo Semilla
             tabla_efi(de64)
             d[0] := 32
             si de64 entonces d[0] := 64 fin
+            ; (la del GOP aunque esté por encima de 4 GB: aquí aún no se ha
+            ; puesto a la vista, y pantalla_del_cargador no la daría)
+            si no hay y medida_del_cargador(an, al, bits) entonces
+                hay := cierto
+                d[1] := an
+                d[2] := al
+            fin
             si hay entonces formatear(modo_arranque, 64, "por UEFI (%u bits, GOP %u x %u)", d) sino formatear(modo_arranque, 64, "por UEFI (%u bits, sin pantalla)", d) fin
         sino si mb2() entonces
             Textos32.copiar(modo_arranque, "por multiboot2 (sin UEFI)")
@@ -767,6 +790,15 @@ módulo Semilla
         d[0] := nat32(dirección(modo_arranque[0]))
         d[1] := nat32(línea_del_cargador())
         apunta("arranque: %s; la línea del cargador: %s\n", d)
+        ; (TERMO) el paso de línea de la pantalla (el Acer One 10: las frases
+        ; salían unas encima de otras): lo que da el cargador
+        si hay entonces
+            d[0] := fila
+            d[1] := an
+            d[2] := al
+            d[3] := bits
+            apunta("arranque: la pantalla del cargador: %u octetos por línea, %u x %u, %u bits\n", d)
+        fin
     fin
 
     ; (MWAIT, 0.8.9) ¿«mwait» en el reposo, con la pista más honda? Solo si
@@ -1062,6 +1094,13 @@ módulo Semilla
                 si v[0] = 0xEB9D2D31 y v[1] = 0x11D32D88 y v[2] = 0x9000169A y v[3] = 0x4DC13F27 entonces d2 := v[4] fin
             fin
         fin
+        ; (TERMO) si la tabla del SMBIOS 3 está por encima de 4 GB (su punto
+        ; de entrada «_SM3_» da 64 bits: +10h la dirección, +14h la parte
+        ; alta), ACPI.BIN no la alcanza: entonces, la del SMBIOS 2 si la hay
+        si d3 <> 0 y d2 <> 0 entonces
+            v := puntero(mapear_aparato(d3, 32))
+            si v <> nulo y v[5] <> 0 entonces devolver d2 fin
+        fin
         si d3 <> 0 entonces devolver d3 fin
         devolver d2
     fin
@@ -1145,7 +1184,10 @@ módulo Semilla
         lee_ajustes()
         arranca_cuentas()                       ; (USUARIOS) los usuarios y la semilla del azar
         si buscar(línea_del_cargador(), "teclado=us") <> nulo entonces pon_teclado(falso) fin
-        si buscar(línea_del_cargador(), "sinacpi") = nulo y buscar(línea_del_cargador(), "instalar") = nulo entonces arranca_acpi() fin
+        si buscar(línea_del_cargador(), "sinacpi") = nulo y buscar(línea_del_cargador(), "instalar") = nulo entonces
+            apunta0("arranque: paso: el servicio de ACPI (ACPI.BIN; su registro, en \\ACPI.TXT y lo que escribe en el equipo, en \\ACPIESC.TXT)\n")     ; (TERMO)
+            arranca_acpi()
+        fin
         ; o el escritorio (el entorno gráfico): esta consola se queda esperando
         ; (las teclas son de las ventanas; lo que diga el núcleo sale por el
         ; puerto serie)
@@ -1166,6 +1208,7 @@ módulo Semilla
             ; pantalla es suya: esta consola espera a que acabe)
             lanza("INSTALAR.BIN", nulo)
         sino si buscar(línea_del_cargador(), "escritorio") <> nulo entonces
+            apunta0("arranque: paso: el escritorio\n")      ; (TERMO)
             arranca()
         sino si buscar(línea_del_cargador(), "ordenes") <> nulo entonces
             ordenes_de_usuario(cierto)          ; (USUARIOS) del que entre

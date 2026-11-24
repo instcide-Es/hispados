@@ -269,6 +269,24 @@ módulo Multiboot
         devolver cierto
     fin
 
+    ; (UEFI) la medida de la pantalla que ha puesto el cargador (el GOP), esté
+    ; donde esté (también por encima de 4 GB, antes de que video.cas la ponga
+    ; a la vista): para la primera línea del registro del arranque
+    público función medida_del_cargador(ref ancho: nat32, ref alto: nat32, ref bits: nat32): bool
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        si no mb2() entonces devolver falso fin
+        p := puntero(etiqueta(E_PANTALLA))
+        si p = nulo entonces devolver falso fin
+        q := puntero(nat32(p) + 28)
+        p := p + 2
+        si q[1] <> 1 entonces devolver falso fin
+        ancho := p[3]
+        alto := p[4]
+        bits := q[0]
+        devolver cierto
+    fin
+
     ; (UEFI) la parte alta de la dirección de la pantalla (0: por debajo de 4 GB)
     público función pantalla_alta(): nat32
         variable p: puntero a nat32

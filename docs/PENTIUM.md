@@ -722,7 +722,7 @@ usb: controladora EHCI 8086:24CD, 6 puertos
 usb: aparato 0, 0627:0001, velocidad alta, en el puerto 1 (EHCI); teclado
 usb: aparato 1, 0627:0001, velocidad alta, en el puerto 2 (EHCI); ratón
 usb: aparato 2, 46F4:0001, velocidad alta, en el puerto 3 (EHCI); almacenamiento
-usb: 1 teclados, 1 ratones, 1 memorias.
+usb: 1 teclado, 1 ratón, 1 memoria.
 disco 0: QEMU HARDDISK, 40 MB, FAT32 (SATA).
 disco 1: QEMU    QEMU HARDDISK, 16 MB, FAT16 (USB).
 los discos de dentro son de solo lectura (para escribir en ellos: «escritura» en la línea del cargador).
@@ -9841,6 +9841,43 @@ columna MHz del Termómetro: de 499 a 1333 en reposo y hasta 1833 con carga).
 | **MSI GT80 Titan 2QD/2QE** (el objetivo, sin probar aún) | i7 Haswell HQ, 4 núcleos / 8 hilos, TjMax del MSR; 2 × GTX 970M/980M (GM204) en SLI | — | la carga en todos los procesadores (los AP, despertados solo para la prueba); un sensor por núcleo; las GPU por el BAR0 (solo leer, receta de nouveau); los frenos (PROCHOT, VR Therm Alert, PL1/PL2, 690h); el informe para el técnico; en el LEEME, Supr/F11 y CSM |
 
 | **ASUS ROG GL553V** (de Carlos, objetivo) | i7-7700HQ Kaby Lake (4/8); GTX 1050/1050 Ti (GP107, Optimus) | — | la GPU Pascal (20460h, solo leer) sin despertarla si duerme (Optimus: el enlace del puerto); ventiladores y temperatura por el WMI de ASUS (DSTS, nunca DEVS); en el LEEME, Esc/F2 y «Launch CSM» |
+| **ASUS ROG GL553VD** (real, 23/11 por UEFI) | i5-7300HQ Kaby Lake (4 núcleos / 4 hilos); GTX 1050 | GOP 1920x1080 | todo leído: núcleos 0-3 y paquete (26→54 °C), GPU 21→41 °C, THRM, ventilador del CPU por WMI (1900→2700 r.p.m.; antes de girar, «parado»), el de la GPU «no disponible»; la topología por CPUID 0Bh (decía «2 núcleos, 2 hilos»: CPUID 1/4 dan lo que cabe, no lo que hay); en el informe, el consumo (_BST) y la autonomía (bajó del 42 al 25 % en 9 min con la carga) |
+| **Monovate 14.1** (real, 23/11 por UEFI) | i3-1115G4 Tiger Lake (2/4); firmware Insoluxia TN29V2.17; el 8254 parado (tic del HPET) | la batería, la misma lectura de principio a fin (enchufado o no); «de bien a templado» cada 2-4 s a 59-63 °C; «sin pantalla» con GOP; la hora del registro, 4 s atrás | el reloj de ACPI.BIN va con los tics del núcleo (antes, las vueltas del procesador medidas al arrancar: si el servicio se quedaba sin procesador mientras medía, su reloj iba lento y no releía); aviso si la batería no se relee en 40 s; 3 °C de margen al bajar de estado; el GOP aunque esté por encima de 4 GB; la hora del registro no va hacia atrás |
+| **ThinkPad E14 Gen 5** (real, 23/11 por UEFI) | i7-1355U Raptor Lake (híbrido: 2 de rendimiento con 2 hilos + 8 eficientes) | «12 procesadores (10 núcleos, 2 hilos por núcleo)»; «equipo  , placa  , BIOS » vacíos | los hilos de cada núcleo (CPUID 07h EDX[15] y 1Ah): «10 núcleos: 2 de rendimiento (2 hilos cada uno) y 8 eficientes», también en el INFORME; el suceso de ACPI espera a su primera lectura (salía con el bloque a cero); SMBIOS 3 por encima de 4 GB: el de SMBIOS 2 |
+| **Medion S2217** (batería muerta) | — | sin nada de la batería | «batería: no la encuentro o no está (va con el cable)» y el porqué, en el .LOG y en el INFORME |
+
+**El MSI GT80 2QD de verdad (23/11, por la BIOS/CSM).** i7-5700HQ (Broadwell,
+4/8), BIOS E1812IMS.117. El contador se quedaba congelado 3-4 s y saltaba; en
+el .LOG, «leer y apuntar ha tardado 8640 ms» a los 18 s de carga y luego
+2020-2030 ms cada pocos segundos; desde ahí, los núcleos 1-3 a «--» para
+siempre, lo ocupado entre el 52 y el 67 % (también en reposo) y las líneas
+DATOS «de dos en dos». Lo que dice el código (seguro): con el Termómetro más
+de 6 s sin preguntar, el núcleo (termo.cas, la 224 con 0 que hace la hija)
+**para la carga y duerme a los demás procesadores**; la hija acaba, y nadie lo
+decía (la carga quedaba rota hasta el final y el veredicto la daba por
+buena). Las líneas dobles no son dos bucles (solo hay uno, `pulso`): con un
+apunte cada ~3 s (cada pulso de 2 s tardaba 2 s) y la hora de la CMOS de 2 en
+2 s (DATO_FECHA), dos líneas seguidas salen con la misma hora; ahora llevan
+`seg=` (por los tics). Lo que se deduce: los 8640 ms los midió el tic del
+sistema, que en un SMI no cuenta (sus interrupciones esperan), y la carga de
+300 s duró 302 s de CMOS: el equipo **no** estuvo parado entero (no fue un SMI
+largo); fue el Termómetro el que se quedó sin poder correr (lo más probable,
+dentro de una llamada: escribir en la memoria USB). Lo arreglado: MSR_SMI_COUNT
+(34h) en la lista de la 220 y `smi=` en cada línea; el equipo entero parado
+por el TSC frente a los tics (`parado=`, y la CMOS frente a los tics); en el
+AVISO, en qué parte se ha ido el rato (los sensores, ACPI, escribir), los SMI,
+quién ha tenido el procesador (la 224 con 7: los tics de cada tarea y las
+órdenes lentas de la memoria USB, usbalm.cas); la carga rota se vuelve a poner
+en marcha (la 224 con 6 despierta otra vez a los que se han parado solos) y,
+si no se puede, el veredicto dice desde cuándo no es completa y no da la
+temperatura por buena; en el INFORME, «PARONES DEL EQUIPO» y qué quiere decir
+el «ya estaba anotado al abrir» de PL1/PL2. En el USB: el traspaso del EHCI
+quita la BIOS si no suelta en 1 s (como Linux) y ARRANQUE.TXT dice cómo quedan
+los SMI del USB (USBLEGCTLSTS) y, en las Intel, a quién van los puertos
+(XUSB2PR, USB3_PSSEN). Por la BIOS, la primera entrada del menú pide 1920 x
+1080, 1366 x 768 o 1024 x 768 (con «auto», la VBE de GRUB sin EDID da
+640 x 480: así salió). La prueba: `PARON.PRU` en `\TERMO` («a b»: a los a s de
+carga, b s sin poder correr) y QEMU parado con `stop`/`cont`.
 
 Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
 

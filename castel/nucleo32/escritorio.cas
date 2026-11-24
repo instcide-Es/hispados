@@ -4408,6 +4408,7 @@ módulo Escritorio
         d[4] := fondo
         imprimir("escritorio: en marcha, %u x %u con %u bits por punto (el modo %s), tapiz %u\n", d)
         soltar_consola()
+        apunta0("escritorio: paso: en marcha; ahora, el dock, los accesos y los programas del arranque\n")   ; (TERMO)
         ; (dock) lo guardado del dock y los accesos soltados en el tapiz (se
         ; leen del disco ya con el escritorio en marcha)
         lee_ajustes_dock()
@@ -4454,6 +4455,7 @@ módulo Escritorio
         quieto_desde := tics
         ; (PANEL, NTP) la hora por Internet (HORARED.BIN /VIGILAR, de la carpeta
         ; del sistema: con su sello; si no está, nada)
+        apunta0("escritorio: paso: la hora por Internet (HORARED.BIN)\n")   ; (TERMO)
         t := cargar_servicio("HORARED.BIN", "/VIGILAR", an)
         si t <> nulo entonces t.padre := 0 fin
         mira_pantalla_guardada()      ; (EDID) también desde la memoria USB
@@ -4475,7 +4477,10 @@ módulo Escritorio
         fin
         arranque_hecho := cierto      ; (USUARIOS) ya se puede entrar (atiende_usuarios): lo de arriba es del sistema
         ; (TERMO) la memoria del Termómetro: con «termo» en la línea del cargador, se abre solo
-        si buscar(línea_del_cargador(), "termo") <> nulo entonces lanza("\\TERMO.BIN", "/ARRANQUE") fin
+        si buscar(línea_del_cargador(), "termo") <> nulo entonces
+            apunta0("escritorio: paso: el Termómetro (TERMO.BIN /ARRANQUE)\n")   ; (TERMO)
+            lanza("\\TERMO.BIN", "/ARRANQUE")
+        fin
         devolver 1
     fin
 

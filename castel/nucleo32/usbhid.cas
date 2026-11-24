@@ -53,6 +53,7 @@ módulo Usbhid
     público variable fallos_tubo: nat32         ; las veces que una tubería ha dado un fallo
     variable último_ratón: arreglo [8] de byte  ; el último informe de un ratón, tal cual
     variable último_largo: nat32
+    variable informes_dichos: nat32             ; (TERMO) los primeros informes, al registro
     variable hids: arreglo [MAX_HID] de Hid
     variable n_hids: nat32                      ; los que hay (en «hids», donde haya sitio)
     variable en_marcha: bool                    ; la tarea que los atiende
@@ -342,6 +343,19 @@ módulo Usbhid
 
     función guarda_último(p: puntero a byte, n: nat32)
         variable i: nat32
+        ; (TERMO) los 8 primeros informes de los ratones, al registro del
+        ; arranque (el Acer One 10: el panel del teclado mueve pero no hace
+        ; clic: ¿dónde lleva el botón?)
+        si informes_dichos < 8 entonces
+            informes_dichos := informes_dichos + 1
+            apunta1("usb: informe de un ratón (%u octetos):", n)
+            i := 0
+            mientras i < n y i < 16 hacer
+                apunta1(" %02X", p[i])
+                i := i + 1
+            fin
+            apunta0("\n")
+        fin
         último_largo := n
         para i desde 0 hasta 7 hacer
             si i < n entonces último_ratón[i] := p[i] sino último_ratón[i] := 0 fin
@@ -383,11 +397,41 @@ módulo Usbhid
 
     ; busca los teclados y los ratones entre los aparatos que ha enumerado
     ; usb.cas, y pone en marcha la tarea que los atiende. Da cuántos hay.
+    ; (TERMO) cada interfaz HID (clase 3) de cada aparato, al registro del
+    ; arranque: su subclase, su protocolo y su descriptor de informe en
+    ; hexadecimal (hasta 256 octetos), para ver dónde lleva un panel táctil
+    ; el botón (el Acer One 10: Synaptics 06CB:2968, mueve pero no hace clic)
+    función apunta_hid(a: nat32, k: nat32)
+        variable r: ent32
+        variable i, n: nat32
+        variable d: arreglo [4] de nat32
+        d[0] := a
+        d[1] := aparatos[a].interfaces[k].número
+        d[2] := aparatos[a].interfaces[k].subclase
+        d[3] := aparatos[a].interfaces[k].protocolo
+        apunta("usb: aparato %u, interfaz %u: HID, subclase %u, protocolo %u", d)
+        r := control(a, 0x81, PIDE_DESCRIPTOR, 0x2200, aparatos[a].interfaces[k].número, descriptor, 512)
+        si r <= 0 entonces
+            apunta0("; su descriptor de informe, no lo da\n")
+            devolver
+        fin
+        n := nat32(r)
+        apunta1("; su descriptor de informe, %u octetos:", n)
+        i := 0
+        mientras i < n y i < 256 hacer
+            si i mod 32 = 0 entonces apunta0("\n  ") fin
+            apunta1("%02X ", descriptor[i])
+            i := i + 1
+        fin
+        apunta0("\n")
+    fin
+
     público función prepara(): nat32
         variable a, k: nat32
         para a desde 0 hasta MAX_APARATOS - 1 hacer
             si aparatos[a].usado entonces
                 para k desde 1 hasta aparatos[a].n_interfaces hacer
+                    si aparatos[a].interfaces[k - 1].clase = 3 entonces apunta_hid(a, k - 1) fin
                     si aparatos[a].interfaces[k - 1].clase = 3 y (aparatos[a].interfaces[k - 1].protocolo = 1 o aparatos[a].interfaces[k - 1].protocolo = 2) entonces
                         mira(a, k - 1)
                     fin

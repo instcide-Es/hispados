@@ -76,6 +76,10 @@ módulo Ehci
     fin
 
     público variable ehcis: arreglo [MAX_EHCI] de Controladora
+    ; (TERMO) el traspaso desde la BIOS de cada una (0: sin esa capacidad; 1:
+    ; la soltó; 2: no la soltó en 1 s y se le quitó) y cómo quedan sus SMI
+    ; (USBLEGCTLSTS, después: los bits 0-15 tienen que quedar a 0)
+    público variable traspaso, legctl: arreglo [MAX_EHCI] de nat32
     público variable cuántas: nat32
 
     función lee(c: nat32, d: nat32): nat32
@@ -130,13 +134,24 @@ módulo Ehci
         ; Mac, que la usan con sus SMI sin decir que es suya); si la BIOS
         ; dice que es suya, esperar a que la suelte; y sus SMI, apagadas
         eecp := (hcc >> 8) yb 0xFF
+        traspaso[c] := 0
+        legctl[c] := 0
         si eecp >= 0x40 y (pci_leer(pci, eecp) yb 0xFF) = 1 entonces
             pci_escribir8(pci, eecp + 3, 1)
             i := tics + 100
             mientras pci_leer(pci, eecp) yb 0x10000 <> 0 y tics < i hacer
                 espera_ms(10)
             fin
+            traspaso[c] := 1
+            ; (TERMO) como Linux: si la BIOS no la suelta en 1 s, se le quita
+            ; (si no, sigue con sus SMI de la emulación del teclado: el MSI
+            ; GT80 por la BIOS/CSM)
+            si pci_leer(pci, eecp) yb 0x10000 <> 0 entonces
+                pci_escribir8(pci, eecp + 2, 0)
+                traspaso[c] := 2
+            fin
             pci_escribir(pci, eecp + 4, 0xE0000000)
+            legctl[c] := pci_leer(pci, eecp + 4)
         fin
         ; parar y reiniciar
         pon(c, USBCMD, lee(c, USBCMD) yb nob 1)

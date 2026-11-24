@@ -190,6 +190,10 @@ G
       menu_efi "Termometro (UEFI, 1024 x 600)" ESCRIT6.BIN "escritorio $N termo" "$M2" "1024x600x32,1024x600,auto"
       menu_efi "Termometro (UEFI, 800 x 600)" ESCRIT8.BIN "escritorio $N termo" "$M2" "800x600x32,800x600,auto"
       menu_efi "Termometro SIN ACPI (UEFI)" ESCRIT8.BIN "escritorio $N sinacpi termo" "$M2" auto
+      # (TERMO) para aislar un congelado (el Acer One 10): sin el 8042, o con
+      # ACPI pero sin mirar sus dispositivos
+      menu_efi "Termometro SIN el 8042 (UEFI)" ESCRIT8.BIN "escritorio $N sin8042 termo" "$M2" auto
+      menu_efi "Termometro con ACPI sin mirar sus dispositivos (UEFI)" ESCRIT8.BIN "escritorio $N acpisindisp termo" "$M2" auto
     fi
     menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (la medida de la pantalla, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "$M2" auto '  if [ "$modo" = auto ]; then
     set gfxpayload=auto
@@ -245,12 +249,19 @@ menuentry "Volver a la configuracion del firmware (UEFI)" {
 else
 G
   fi
-  # (TERMO) la memoria del Termómetro, por la BIOS: primero (y sola, a los 5 s)
+  # (TERMO) la memoria del Termómetro, por la BIOS: primero (y sola, a los 5 s).
+  # Con «auto», la VBE de GRUB pone la medida que dice la pantalla (su EDID)
+  # y, si no la dice, 640 x 480 (el MSI GT80, con su panel de 1920 x 1080, se
+  # veía enorme): GRUB no deja saber desde el menú si hay EDID, así que la
+  # primera pide 1920 x 1080, 1366 x 768 o 1024 x 768 (la primera que dé la
+  # BIOS) y solo si no, «auto»; la de la pantalla (EDID), en la segunda
   if [ -n "${TERMO:-}" ]; then
-    entrada "Termometro: medir la temperatura (la pantalla a su medida)" ESCRIT8.BIN "escritorio $N amedida termo" "auto"
+    entrada "Termometro: medir la temperatura (1920 x 1080, 1366 x 768 o 1024 x 768)" ESCRIT8.BIN "escritorio $N termo" "1920x1080x32,1920x1080x24,1366x768x32,1366x768x24,1024x768x32,1024x768x24,auto"
+    entrada "Termometro (la medida que diga la pantalla; si no la dice, 640 x 480)" ESCRIT8.BIN "escritorio $N amedida termo" "auto"
     entrada "Termometro (1024 x 600)" ESCRIT6.BIN "escritorio $N termo"
     entrada "Termometro (800 x 600)" ESCRIT8.BIN "escritorio $N termo"
     entrada "Termometro SIN ACPI (si se queda colgado al arrancar: sin zonas ni bateria)" ESCRIT8.BIN "escritorio $N sinacpi termo"
+    entrada "Termometro SIN el 8042 (el teclado y el raton PS/2)" ESCRIT8.BIN "escritorio $N sin8042 termo"
   fi
   # [EDID] la primera, con la medida de PANTALLA.ENV si la hay (y lo dice
   # antes de arrancar); «a la medida», con «amedida» (el núcleo sabe así

@@ -49,7 +49,7 @@ termo_qemu() {
   rm -f $Y/$n.mon
   # shellcheck disable=SC2086
   ${TQ_QEMU:-qemu-system-x86_64} $cpu ${TQ_FIRM:-} ${TQ_RED:--nic none} -m 512 -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
-    -acpitable file=$Y/termo.aml -device qemu-xhci -drive file=$img,format=raw,if=none,id=u -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
+    -acpitable file=$Y/termo.aml ${TQ_ACPI:-} -device qemu-xhci -drive file=$img,format=raw,if=none,id=u${TQ_USB_OPC:-} -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
   q=$!
   QPID=$q
   sleep 1
@@ -65,6 +65,89 @@ termo_qemu() {
   QPID=
   tr -d '\r' < $Y/$n.sal | iconv -f CP437 -t UTF-8 > $Y/$n.txt 2> /dev/null || tr -d '\r' < $Y/$n.sal > $Y/$n.txt
   S=$Y/$n.txt
+}
+
+# (TERMO) 6c. los parones (el MSI GT80, 23/11/2026: 8,6 s sin poder correr a
+# los 18 s de carga; el núcleo paró la carga y a los demás procesadores, y
+# nadie lo dijo). (a) El Termómetro, 9 s sin poder correr a los 18 s de carga
+# (\TERMO\PARON.PRU), con el equipo en marcha: el núcleo para la carga, el
+# AVISO dice cuánto, en qué parte y quién tenía el procesador, la carga se
+# vuelve a poner en marcha en los 4 y el resultado lo dice. (b) El equipo
+# entero parado 14 s (stop/cont del monitor, como un SMI largo: con KVM, el TSC
+# sigue y los demás procesadores se paran solos): se dice, se vuelven a poner a
+# cargar, y ninguna de las dos deja líneas DATOS dobles (seg= siempre sube)
+termo_dobles() {	# el .LOG de la imagen $1: «bien» si seg= sube siempre y no hay dos líneas iguales
+  local L
+  L=$(mdir -b -i $1@@1M ::TERMO 2> /dev/null | grep 'LOG$' | tr -d ' ')
+  mtype -i $1@@1M $L 2> /dev/null > $Y/dobles.log
+  awk '/ DATOS fase=/ { n++; if (match($0, /seg=[0-9]+/)) { s = substr($0, RSTART + 4, RLENGTH - 4) + 0; if (s <= a) m++; a = s } else m++; if (v[$0]++) m++ }
+       END { if (n >= 30 && !m) print "bien " n; else print "mal " n " " m }' $Y/dobles.log
+}
+termo_parones() {
+  local r
+  cp $Y/termo.img $Y/p.img
+  for f in $(mdir -b -i $Y/p.img@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT)$'); do mdel -i $Y/p.img@@1M "$f" > /dev/null 2>&1; done
+  printf '18 9\r\n' > $Y/PARON.PRU
+  mcopy -o -i $Y/p.img@@1M $Y/PARON.PRU ::TERMO/PARON.PRU
+  termo_qemu $Y/p.img t16 200 "-smp 4,cores=4,threads=1 -cpu Haswell" "44:sendkey 1" "46:sendkey c" "100:sendkey esc"
+  mira "un parón del Termómetro de 9 s en la carga (como el MSI GT80): el núcleo para la carga; el AVISO dice cuánto, en qué parte, los SMI y quién tenía el procesador; la carga vuelve en los 4 procesadores" \
+    "termo: (prueba) parón de 9 s a los 18 s de carga" "termo: la carga se para: el Termómetro no pregunta" \
+    "termo: suceso: AVISO: leer y apuntar ha tardado [0-9]* ms: los sensores .* escribir en la memoria .*SMI del firmware; el equipo entero parado: .*el procesador lo han tenido: TERMO.BIN" \
+    "termo: suceso: AVISO: la carga se había parado (el núcleo la para si el Termómetro no puede preguntar en 6 s) y se vuelve a poner en marcha a las [0-9:]* (a los [0-9]* s), en 4 procesadores" \
+    "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]" "termo: resumen: .*La carga se paró 1 vez por un parón del equipo y se volvió a poner en marcha"
+  if mtype -i $Y/p.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q '^PARONES DEL EQUIPO' && mtype -i $Y/p.img@@1M ::TERMO/INFORME.TXT | grep -q 'La carga se paró por eso y se volvió a poner en marcha 1 vez' \
+     && mtype -i $Y/p.img@@1M ::TERMO/INFORME.TXT | grep -q 'Interrupciones del firmware (SMI) contadas durante la prueba: 0'; then
+    ok "INFORME.TXT: «PARONES DEL EQUIPO» (los SMI contados, el Termómetro sin poder correr y la carga vuelta a poner)"
+  else ko "INFORME.TXT, los parones: $(mtype -i $Y/p.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -A4 '^PARONES' | tr '\n' ' ')"; fi
+  r=$(termo_dobles $Y/p.img)
+  if [ "${r%% *}" = bien ] && grep -q ' DATOS fase=carga.* | smi=0' $Y/dobles.log; then ok "con el parón, ni una línea DATOS doble (${r#* } líneas, seg= siempre sube) y cada una con smi= (MSR 34h)"
+  else ko "con el parón, las líneas DATOS: $r"; fi
+  # (b) el equipo entero parado: stop/cont
+  local cpu="-smp 4,cores=4,threads=1 -cpu Haswell" kvm=
+  [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host -smp 4" && kvm=1
+  cp $Y/termo.img $Y/p.img
+  for f in $(mdir -b -i $Y/p.img@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT)$'); do mdel -i $Y/p.img@@1M "$f" > /dev/null 2>&1; done
+  termo_qemu $Y/p.img t17 170 "$cpu" "48:sendkey 1" "50:sendkey c" "66:stop" "80:cont" "110:sendkey esc"
+  mira "la máquina entera parada 14 s a mitad de la carga (stop/cont, como un SMI largo): se dice" \
+    "termo: suceso: AVISO: \(el equipo entero ha estado parado [0-9]*,[0-9] s\|el reloj del sistema se ha quedado [0-9]* s atrás de golpe\)"
+  if [ -n "$kvm" ]; then
+    mira "con KVM (el TSC sigue, como en un SMI): los demás procesadores se paran solos y se vuelven a poner a cargar; el parón, medido con el TSC" \
+      "termo: suceso: AVISO: el equipo entero ha estado parado 1[0-9],[0-9] s en estos 2 s" \
+      "termo: suceso: AVISO: la carga se había parado (.* de los demás procesadores se había.* parado solo.*: no le.* llegaba el latido) y se vuelve a poner en marcha .* en 4 procesadores" \
+      "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]"
+  fi
+  r=$(termo_dobles $Y/p.img)
+  if [ "${r%% *}" = bien ]; then ok "con la máquina parada, ni una línea DATOS doble (${r#* } líneas, seg= siempre sube)"; else ko "con la máquina parada, las líneas DATOS: $r"; fi
+}
+
+# (TERMO) 9. guardar de verdad
+termo_guardar() {
+  local f n l c
+  cp $Y/termo.img $Y/g.img
+  mdeltree -i $Y/g.img@@1M ::TERMO > /dev/null 2>&1
+  termo_qemu $Y/g.img t13 100 "-cpu Haswell" "44:sendkey 1" "46:sendkey c"
+  mira "sin la carpeta TERMO: la hace, prueba a escribir y leer de vuelta, y guarda" "termo: prueba de escritura en X:.TERMO: bien (escrita y leída de vuelta)" \
+    "termo: suceso: EMPIEZA la prueba de esfuerzo"
+  if sano $Y/g.img 2048; then ok "matada a mitad de la carga: la FAT de la memoria, sana (fsck.fat)"; else ko "matada a mitad: la FAT, mal: $(head -n 3 $P/fsck.txt | tr '\n' ' ')"; fi
+  l=$(mdir -b -i $Y/g.img@@1M ::TERMO 2> /dev/null | grep 'LOG$' | head -n 1); c=$(mdir -b -i $Y/g.img@@1M ::TERMO 2> /dev/null | grep 'CSV$' | head -n 1)
+  n=$(mtype -i $Y/g.img@@1M "$c" 2> /dev/null | grep -c ';carga;')
+  if [ -n "$l" ] && mtype -i $Y/g.img@@1M "$l" | grep -q 'SUCESO EMPIEZA la prueba de esfuerzo' && mtype -i $Y/g.img@@1M "$l" | grep -q 'DATOS fase=carga' && [ "$n" -ge 10 ]; then
+    ok "matada a mitad de la carga: el .LOG (con la carga empezada) y el .CSV ($n líneas de la carga) quedan en la memoria"
+  else ko "matada a mitad: lo que queda: LOG «$l» CSV «$c» ($n líneas de la carga): $(mtype -i $Y/g.img@@1M "$l" 2> /dev/null | tail -n 3 | tr '\n' ' ')"; fi
+  # (b) de solo lectura (y un disco C: FAT16, que no se toca)
+  cp $Y/termo.img $Y/g.img
+  rm -f $Y/c.img; dd if=/dev/zero of=$Y/c.img bs=1M count=16 status=none; mkfs.fat -F 16 $Y/c.img > /dev/null
+  TQ_USB_OPC=",readonly=on" TQ_ACPI="-drive file=$Y/c.img,format=raw,if=ide,index=0" termo_qemu $Y/g.img t14 70 "-cpu Haswell" "60:screendump $Y/ro.ppm"
+  mira "la memoria de solo lectura: lo dice, con el motivo" "termo: prueba de escritura en X:.TERMO: MAL: " "termo: NO se puede guardar en X: (X:.TERMO): "
+  if ! mdir -i $Y/c.img ::TERMO > /dev/null 2>&1; then ok "el disco C: del equipo, sin tocar"; else ko "se ha escrito en C:"; fi
+  if python3 -I - $Y/ro.ppm << 'FIN'
+import sys
+d = open(sys.argv[1], 'rb').read()
+p = d.split(b'\n', 3); an, al = map(int, p[1].split()); px = p[3]
+rojo = sum(1 for i in range(0, len(px) - 2, 3) if px[i] > 160 and px[i + 1] < 70 and px[i + 2] < 60)
+sys.exit(0 if rojo > an * 20 else 1)
+FIN
+  then ok "en la pantalla, la franja roja grande de «NO se puede guardar»"; else ko "no se ve la franja roja en la pantalla"; fi
 }
 
 # (TERMO) 0. lo del anfitrión
@@ -92,6 +175,26 @@ termo_anfitrion() {
      && ! grep -q 'No se puede juzgar\|fuera de lo posible' $B/toshiba2.txt; then
     ok "el Toshiba NB250 con el sensor lento (16 °C fijos 150 s y luego a 23): «subió unos 7 °C (medida aproximada); se enfría bien», no «no se puede juzgar»"
   else ko "el veredicto del Toshiba con el sensor lento: $(head -c 300 $B/toshiba2.txt)"; fi
+  # (la Medion S2217, Atom Z3735F: el procesador a 499 MHz todo el rato, en 4
+  # procesadores; hecho del registro del HP Mini, cambiando la marca, la
+  # frecuencia y los procesadores: no es un registro de la Medion)
+  sed -e 's/procesador Intel(R) Atom(TM) CPU N455   @ 1.66GHz/procesador Intel(R) Atom(TM) CPU  Z3735F @ 1.33GHz/' -e 's/MHz=16[0-9][0-9]/MHz=499/' \
+      -e 's/^\(19:13:14 SUCESO\) EMPIEZA/\1 la carga, en 4 procesadores (este y 3 mas: 4 nucleos, 1 hilo por nucleo)\n&/' $T/pruebas/hpmini-5103-real.log > $B/lento.log
+  $B/lee_log $B/lento.log > $B/lento.txt
+  $B/lee_log $T/pruebas/hpmini-5103-real.log > $B/hpmini3.txt
+  if grep -q 'El procesador ha ido a 499 MHz de 1330: la prueba no lo ha calentado de verdad; el sistema no ha subido la frecuencia (estado P), y no se ha frenado por calor' $B/lento.txt \
+     && ! grep -q 'MHz de' $B/hpmini3.txt; then
+    ok "a 499 MHz de 1330 (Atom Z3735F, el estado P mínimo): lo dice, «no se ha frenado por calor»; el HP Mini a 1640 de 1660, no"
+  else ko "la frecuencia baja: $(head -c 400 $B/lento.txt)"; fi
+  # (TERMO) el MSI GT80: la carga rota por un parón y que no vuelve entera (un
+  # AVISO de TERMO.BIN metido en el registro del HP Mini): no se da por buena
+  awk '{print} /DATOS fase=carga/ {n++; if (n == 3) print "19:13:20 SUCESO AVISO: la carga se habia parado (el nucleo la para si el Termometro no puede preguntar en 6 s) y solo vuelve en 1 de los 2 procesadores: desde las 19:13:20 (a los 6 s) NO es completa"}' \
+    $T/pruebas/hpmini-5103-real.log > $B/rota.log
+  $B/lee_log $B/rota.log > $B/rota.txt
+  if grep -q 'OJO: la carga dejó de ser completa a los 6 s (a las 19:13:20)' $B/rota.txt && grep -q 'No se puede dar por buena la temperatura en carga' $B/rota.txt \
+     && ! grep -q 'La temperatura en carga es buena' $B/rota.txt; then
+    ok "la carga rota por un parón (el MSI GT80) y que no vuelve entera: el resultado dice desde cuándo y no da la temperatura por buena"
+  else ko "la carga rota: $(head -c 400 $B/rota.txt)"; fi
   if $B/tjmax > $B/tjmax.txt; then ok "la TjMax de los Intel que no la dicen: $(grep -c '^bien' $B/tjmax.txt) procesadores bien (el Atom N455 del HP Mini y del Toshiba, 100 °C; los N270, 90)"
   else ko "la TjMax: $(grep '^mal' $B/tjmax.txt | head -n 2)"; fi
   # el terminal de SSH.BIN
@@ -227,19 +330,37 @@ mira "al arrancar otra vez: «la última vez se apagó durante la prueba, a 80 �
 [ -w /dev/kvm ] && mira "con KVM: el MSR 19Ch, que este procesador no tiene, da la excepción 13 y el núcleo la recoge" "termo: MSR 19Ch sin sensor: no lo tiene (lectura recogida por el núcleo)"
 # 6. (TERMO) los demás procesadores: -smp 4 (como el MSI GT80: 4 núcleos), sin y con KVM
 mdel -i $Y/termo.img@@1M ::TERMO/INFORME.TXT > /dev/null 2>&1
-termo_qemu $Y/termo.img t4 140 "-smp 4 -cpu Haswell" "44:sendkey 1" "46:sendkey c" "60:$C" "60:o /b 0x71 91" "72:$C" "72:o /b 0x71 50" "100:screendump $Y/smp.ppm"
+termo_qemu $Y/termo.img t4 140 "-smp 4,cores=4,threads=1 -cpu Haswell" "44:sendkey 1" "46:sendkey c" "60:$C" "60:o /b 0x71 91" "72:$C" "72:o /b 0x71 50" "100:screendump $Y/smp.ppm"
 mira "-smp 4 (sin KVM): al calentar, el núcleo despierta a los otros 3 procesadores, cargan (sus vueltas suben) y se duermen otra vez al parar" \
-  "termo: suceso: la carga, en 4 procesadores (este y 3 más" "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]" \
+  "termo: suceso: la carga, en 4 procesadores (este y 3 más: 4 núcleos, 1 hilo por núcleo)" "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]" \
   "termo: suceso: informe para el técnico"
 if mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q 'en 4 procesadores (hilos)' && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^FRENADOS DEL PROCESADOR' \
    && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q '^RESULTADO'; then
   ok "INFORME.TXT para el técnico: el equipo, la carga en 4 procesadores, cada sensor, los frenados y el resultado"
 else ko "INFORME.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | head -n 12 | tr '\n' ' ')"; fi
+# 6b. (TERMO) 2 núcleos con 2 hilos cada uno (CPUID 0Bh), y la batería sin
+# enchufar (tests/acpi/bateria-qemu.aml: 1000 mA a 11 V, 11 W): del 42 % al 36 %
+# en unos 4 minutos, con la carga; en el informe, el consumo y la autonomía
+mdel -i $Y/termo.img@@1M ::TERMO/INFORME.TXT > /dev/null 2>&1
+local B="o /b 0x70 0x60"
+TQ_ACPI="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml" \
+  termo_qemu $Y/termo.img t12 390 "-smp 4,cores=2,threads=2 -cpu Haswell" "2:$B" "2:o /b 0x71 42" "3:o /b 0x70 0x61" "3:o /b 0x71 2" \
+  "44:sendkey 2" "46:sendkey c" "105:$B" "105:o /b 0x71 40" "170:$B" "170:o /b 0x71 38" "232:$B" "232:o /b 0x71 36" "244:$C" "244:o /b 0x71 91" "256:$C" "256:o /b 0x71 50"
+mira "-smp 4 con 2 núcleos de 2 hilos (CPUID 0Bh): lo dice bien; y la batería sin enchufar: lo que gasta (ACPI _BST)" \
+  "termo: topología: CPUID 0Bh sí, 1 bits de hilo en el APIC" "termo: suceso: la carga, en 4 procesadores (este y 3 más: 2 núcleos, 2 hilos por núcleo)" \
+  "termo: suceso: batería: SIN enchufar" "termo: suceso: batería: gasta unos 11,0 W (ACPI, _BST)" "termo: suceso: informe para el técnico"
+if mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -q 'Consumo sin enchufar: unos 11,0 W' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q 'Medido aquí: del 42 % al 36 % en [34] min' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q 'con la batería llena, unas [0-9]* h [0-9]* min' \
+   && mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT | grep -q 'prueba de esfuerzo, que gasta mucho más'; then
+  ok "INFORME.TXT: el consumo (11,0 W), lo que ha bajado la batería y la autonomía que sale, con la nota de la prueba de esfuerzo"
+else ko "INFORME.TXT, la batería: $(mtype -i $Y/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -A5 '^Batería' | tr '\n' ' ')"; fi
 if [ -w /dev/kvm ]; then
   termo_qemu $Y/termo.img t5 120 "-enable-kvm -cpu host -smp 4" "48:sendkey 1" "50:sendkey c" "78:$C" "78:o /b 0x71 91"
   mira "-smp 4 con KVM: lo mismo (los 3, a cargar y luego, dormidos)" "termo: suceso: la carga, en 4 procesadores (este y 3 más" \
     "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]"
 fi
+termo_parones
 termo_qemu $Y/termo.img t6 70 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "56:$C" "56:o /b 0x71 91"
 mira "con un solo procesador: lo dice y carga solo este" "termo: suceso: la carga, en este procesador solo: los demás no (ningún otro procesador ha contestado"
 mira "(NVIDIA) sin gráficas NVIDIA (QEMU): lo dice, sin colgarse" "termo: suceso: gráficas NVIDIA Maxwell: ninguna en el PCI"
@@ -255,6 +376,12 @@ if mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT 2> /dev/null | grep -q '^MEDID
 else ko "RENDIMIE.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT 2> /dev/null | head -n 6 | tr '\n' ' ')"; fi
 termo_qemu $Y/termo.img t10 75 "$cpum" "46:sendkey ret" "48:sendkey r" "56:sendkey esc"
 mira "«Rendimiento» se para con Esc" "termo: rendimiento: Medida cancelada (Esc)"
+# 9. (TERMO) guardar de verdad (los Intel nuevos que no guardaban nada):
+# (a) sin la carpeta TERMO (borrada entera antes de arrancar) y la máquina
+# matada a mitad de la carga: el .LOG y el .CSV quedan, hasta ese momento, y
+# la FAT, sana; (b) la memoria de solo lectura: lo dice en grande, con lo que
+# ha encontrado el sistema al arrancar, y no toca el disco C:
+termo_guardar
 # 7. (UEFI) la misma memoria por UEFI (OVMF, q35): el Termómetro, las zonas de
 # la SSDT de prueba (ACPI.BIN con la RSDP que le pasa el núcleo) y la carga
 termo_uefi
@@ -433,4 +560,12 @@ termo_uefi() {
     mira "por UEFI de 32 bits (OVMF ia32, BOOTIA32.EFI): el Termómetro se abre solo y lee la zona de la SSDT de prueba" \
       "escritorio: lanzo .TERMO.BIN" "termo: suceso: sensor «Zona ACPI ._TZ_.TZ01»: 45,0 °C (límite 100,0 °C)"
   else echo "  (sin OVMF de 32 bits o sin BOOTIA32.EFI en la memoria: sin el Termómetro por UEFI de 32 bits)"; fi
+  # (USB) OVMF con su ventana de 64 bits: el xHCI, por encima de los 4 GB (como
+  # en los Intel nuevos: el ThinkPad E14, el Monovate). El núcleo lo mueve
+  # debajo, y va el USB: X:, y el Termómetro guarda
+  cp $OV/OVMF_VARS_4M.fd $Y/vars64.fd
+  TQ_FIRM="-machine q35 -drive if=pflash,format=raw,readonly=on,file=$OV/OVMF_CODE_4M.fd -drive if=pflash,format=raw,file=$Y/vars64.fd" \
+    termo_qemu $Y/termo.img t15 90 "-cpu Haswell"
+  mira "por UEFI con el xHCI por encima de los 4 GB (OVMF con su ventana de 64 bits): el núcleo lo mueve debajo, va el USB y el Termómetro guarda" \
+    "pci: la zona de memoria del 00:..\.. estaba por encima de los 4 GB" "unidades: .*X: (disco 0, USB" "termo: prueba de escritura en X:.TERMO: bien"
 }

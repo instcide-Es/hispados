@@ -1387,8 +1387,13 @@ módulo Fat
         variable r: nat32
         tomar(cerrojo)
         si vale(m) entonces
+            ; (TERMO) si al pasarlo al disco falla una escritura (la entrada, la
+            ; FAT o lo último del archivo), se dice: MAL. Antes daba 0 y el
+            ; programa creía guardado lo que no había llegado a la memoria
+            fallo := falso
             cierra(m)
             r := 0
+            si fallo entonces r := MAL fin
         sino si m < MAX_ABIERTOS y abiertos[m].usado y abiertos[m].perdido y abiertos[m].dueño = actual.id entonces
             ; (el de un volumen que se ha ido: solo se suelta)
             abiertos[m].usado := falso

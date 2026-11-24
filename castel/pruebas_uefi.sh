@@ -133,7 +133,7 @@ mira "los discos: el SATA (AHCI) y la memoria USB (xHCI), que es X:, la del sist
 mira "la primera línea del registro dice por dónde ha arrancado (UEFI de 64 bits, la pantalla del GOP) y la línea del cargador" \
   "^arranque: por UEFI (64 bits, GOP 1280 x 800); la línea del cargador: .*escritorio escritura=usb unidad=X registro"
 mira "el 8042 y el ratón PS/2, en el registro (ps2: ...)" "^ps2: controlador 8042 sí; prueba de la boca 1 (teclado) 00, de la 2 (ratón) 00 (00: bien); el ratón contesta FA, id 0[03]"
-mira "el teclado y el ratón USB de velocidad plena (en el xHCI; el ratón, detrás de un concentrador) se enumeran por UEFI" "^usb: 1 teclados, 1 ratones, 1 memorias" \
+mira "el teclado y el ratón USB de velocidad plena (en el xHCI; el ratón, detrás de un concentrador) se enumeran por UEFI" "^usb: 1 teclado, 1 ratón, 1 memoria" \
   "^usb: aparato [0-9], 0627:0001, velocidad plena, en el puerto 1 del concentrador [0-9]; ratón"
 if grep -q "no se deja enumerar" $S; then ko "algo USB no se deja enumerar: $(grep 'no se deja enumerar' $S | head -1)"; else ok "nada USB se queda sin enumerar"; fi
 mira "el SMBIOS, de la tabla del sistema de EFI (sin BIOS no está en F0000h), se lo da el núcleo a ACPI.BIN" "^uefi: el SMBIOS, en 0x" "^ACPI: SMBIOS en [0-9A-F]*h"
@@ -209,7 +209,7 @@ local HUBS="-device ich9-usb-ehci1,id=e -device ich9-usb-uhci1,masterbus=e.0,fir
 maquina_uefi qemu-system-i386 bios "-machine pc -m 512 -drive file=$V/u3.img,format=raw,if=ide,index=0 $HUBS" ":espera 60 ^escritorio: en marcha" ":pausa 2" ":captura uefi4"
 mira "y la misma memoria por la BIOS (SeaBIOS): el GRUB de siempre, el escritorio a 800 x 600" "^escritorio: en marcha, 800 x 600"
 mira "y su registro dice que ha arrancado por la BIOS/CSM, con la VBE de GRUB, y lo del 8042" "^arranque: por la BIOS/CSM (VBE 800 x 600); la línea del cargador: " "^ps2: controlador 8042 sí; .*el ratón contesta FA"
-mira "y por la BIOS, el teclado y el ratón de velocidad plena detrás de concentradores (EHCI/UHCI y xHCI)" "^usb: 1 teclados, 1 ratones, 0 memorias"
+mira "y por la BIOS, el teclado y el ratón de velocidad plena detrás de concentradores (EHCI/UHCI y xHCI)" "^usb: 1 teclado, 1 ratón, 0 memorias"
 grep -q "no se deja enumerar" $S && ko "por la BIOS, algo USB no se deja enumerar: $(grep 'no se deja enumerar' $S | head -1)"
 if ! grep -q "^uefi:" $S; then ok "por la BIOS, nada de UEFI (multiboot de siempre: la consola es la de texto)"; else ko "por la BIOS dice cosas de UEFI: $(grep '^uefi:' $S | head -1)"; fi
 # 6. el CD por UEFI

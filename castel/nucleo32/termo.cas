@@ -37,17 +37,24 @@
 ;        las zonas hace menos de 6 s: si se cuelga o se cierra, la carga para);
 ;        (con la carga, también los demás procesadores: «Los otros
 ;        procesadores», abajo; EBX = 4, su tabla)
+;        EBX = 5: el registro del arranque (ECX octetos como mucho, en EDX)
 ;        EBX = 2: los tics que ha corrido la tarea ociosa (el «hlt»); 3: los
 ;        del reloj (con los dos, lo ocupado que está el procesador)
+;        EBX = 6: (TERMO) los demás procesadores, dormidos y despiertos otra
+;        vez (los que se han parado solos tras un parón del equipo); EBX = 7:
+;        en qué se va el procesador (las órdenes de la memoria USB y los tics
+;        de cada tarea): en ECX, EDX octetos
 ;        En la 220, también (Intel de Nehalem en adelante) 3F8h, 3F9h, 3FAh,
 ;        3FCh, 3FDh y 3FEh: lo que lleva el paquete y el núcleo en C3, C6 y C7;
+;        34h (MSR_SMI_COUNT: los SMI del firmware que ha atendido); 179h,
+;        17Ah y de 400h a 47Fh (Machine Check: los errores de hardware);
 ;        y 690h, 6B0h, 6B1h: por qué se frena (PROCHOT, térmico, la alarma
 ;        del regulador de tensión, los límites de potencia y de corriente)
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Termo
 
-    importar Cpu, Tareas, Paginas, Mem32, Energia, Multiboot, Formato
+    importar Cpu, Tareas, Paginas, Mem32, Energia, Multiboot, Formato, Registro, Usbalm, Textos32
 
     constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
     constante TAM_BLOQUE = 1024
@@ -147,13 +154,21 @@ módulo Termo
     función msr_de_la_lista(m: nat32): bool
         según m
             caso 0x19C, 0x1B1, 0x1A2, 0xE7, 0xE8, 0x198, 0xCE, 0x17, 0xEE: devolver cierto
+            ; (TERMO) MSR_SMI_COUNT (Intel de Nehalem en adelante): cuántas
+            ; interrupciones del firmware (SMI) ha atendido el procesador
+            caso 0x34: devolver cierto
             ; (TERMO) la residencia en los estados de reposo (Intel de Nehalem en
             ; adelante): el paquete en C3, C6 y C7, el núcleo en C3, C6 y C7
             caso 0x3F8, 0x3F9, 0x3FA, 0x3FC, 0x3FD, 0x3FE: devolver cierto
             ; (TERMO) por qué se frena (Intel de Haswell en adelante): el
             ; núcleo, la gráfica integrada y el anillo (MSR_*_PERF_LIMIT_REASONS)
             caso 0x690, 0x6B0, 0x6B1: devolver cierto
+            ; (TERMO) Machine Check: MCG_CAP, MCG_STATUS y los bancos (CTL,
+            ; STATUS, ADDR, MISC de hasta 32): los errores de hardware que ha
+            ; anotado el procesador (caché, memoria, bus, PCIe), solo leer
+            caso 0x179, 0x17A: devolver cierto
         fin
+        si m >= 0x400 y m < 0x480 entonces devolver cierto fin
         devolver falso
     fin
 
@@ -744,6 +759,7 @@ módulo Termo
     ; las llamadas 220 a 224 (usuario.cas)
     público función atender_termo(n: nat32, a: nat32, b: nat32, c: nat32): nat32
         variable p: puntero a nat32
+        variable k, n_t: nat32
         según n
             caso 220:
                 si no msr_de_la_lista(a) entonces devolver NO_VALE fin
@@ -802,6 +818,61 @@ módulo Termo
                         llenar(puntero(b + 16), 512, 0)
                     fin
                     devolver ap_activos
+                fin
+                ; (TERMO) 5: el registro del arranque (lo de ARRANQUE.TXT: el
+                ; USB, los discos, las unidades), hasta c octetos en b -> los
+                ; copiados. Para enseñarlo en pantalla si la memoria USB no
+                ; aparece (y entonces no hay ARRANQUE.TXT que leer)
+                si a = 5 entonces
+                    k := registro_largo
+                    si k > c entonces k := c fin
+                    si k = 0 entonces devolver 0 fin
+                    si no usuario_puede(actual.cr3, b, k, cierto) entonces devolver NO_VALE fin
+                    copiar_memoria(puntero(b), puntero(dirección(registro)), k)
+                    devolver k
+                fin
+                ; (TERMO) 6: los otros procesadores, otra vez (los que se han
+                ; parado solos porque el latido no cambiaba: un parón largo del
+                ; equipo, p. ej. el firmware con sus SMI, que no deja correr a
+                ; nadie pero el TSC sigue contando): se duermen y se despiertan.
+                ; Solo con la carga en marcha -> cuántos han llegado
+                si a = 6 entonces
+                    si carga <> 1 entonces devolver 0 fin
+                    duerme_ap()
+                    k := despierta_ap()
+                    visto := tics
+                    devolver k
+                fin
+                ; (TERMO) 7: en qué se va el procesador (para decir qué ha
+                ; frenado al Termómetro): 32 octetos de la memoria USB (las
+                ; órdenes, las que han tardado más de 500 ms, la que más (en
+                ; tics), los reinicios, los fallos) y luego, de cada tarea viva
+                ; (hasta c octetos), 24: su número, sus tics, su estado y su nombre
+                si a = 7 entonces
+                    si c < 32 o c > 32 + 24 * MAX_TAREAS entonces devolver NO_VALE fin
+                    si no usuario_puede(actual.cr3, b, c, cierto) entonces devolver NO_VALE fin
+                    p := puntero(b)
+                    p[0] := Usbalm.órdenes
+                    p[1] := Usbalm.lentas
+                    p[2] := Usbalm.la_más_lenta
+                    p[3] := Usbalm.reinicios
+                    p[4] := Usbalm.fallos_de_disco
+                    p[5] := tics
+                    p[6] := tics_de_la_ociosa()
+                    p[7] := 0
+                    n_t := 0
+                    para k desde 0 hasta MAX_TAREAS - 1 hacer
+                        si tareas[k].estado <> Tareas.LIBRE y tareas[k].estado <> ACABADA y 32 + (n_t + 1) * 24 <= c entonces
+                            p := puntero(b + 32 + n_t * 24)
+                            p[0] := tareas[k].id
+                            p[1] := tareas[k].tics_usados
+                            p[2] := tareas[k].estado
+                            llenar(puntero(b + 32 + n_t * 24 + 12), 12, 0)
+                            si tareas[k].nombre <> nulo entonces copiar_hasta(puntero(b + 32 + n_t * 24 + 12), tareas[k].nombre, 12) fin
+                            n_t := n_t + 1
+                        fin
+                    fin
+                    devolver n_t
                 fin
                 si a = 1 entonces
                     carga := b yb 1

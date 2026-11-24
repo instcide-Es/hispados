@@ -15,6 +15,7 @@
 #define SC_ARGUMENTOS 14
 #define SC_MAS_MEMORIA 17
 #define SC_ESCRIBIR_ARCHIVO 18
+#define SC_CREAR_CARPETA 23	/* (TERMO) \\TERMO\\EQUIPO */
 #define SC_CORTE 29		/* Ctrl+C: lo atiende el programa (no se le acaba) */
 #define SC_SERIE 61		/* solo al puerto serie */
 #define SC_PUERTO 150		/* EBX puerto, ECX valor, EDX octetos | ES_ESCRIBE -> lo leído */
