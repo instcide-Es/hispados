@@ -782,11 +782,11 @@ módulo Termo
         llenar(puntero(dest), tam, 0)
         d := gpu_bdf[i]
         p[0] := d
+        pu := gpu_puerto[i] yb 0x00FFFFFF
         si tam = 96 entonces
             p[9] := gpu_orden0[i]
             p[14] := gpu_puerto[i]
             p[15] := gpu_hecho[i]
-            pu := gpu_puerto[i] yb 0x00FFFFFF
             si gpu_puerto[i] <> 0 entonces
                 cap := capacidad(pu, 0x10)
                 si cap <> 0 entonces

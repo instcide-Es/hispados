@@ -49,9 +49,13 @@ Con Linux:
   (pulse Supr varias veces al encender), busque «Boot mode» / «CSM» y ponga
   «Legacy» o «UEFI with CSM» (y «Secure Boot» en «Disabled» si lo pide);
   guarde con F10. Al acabar se puede dejar como estaba. Las dos gráficas
-  NVIDIA (GTX 970M o 980M) salen como «GPU 1» y «GPU 2» si están encendidas
-  (si el interruptor de gráficos las tiene apagadas, lo dice). La prueba
-  calienta el procesador (todos sus núcleos), no las gráficas.
+  NVIDIA (GTX 970M o 980M) salen como «GPU 1» y «GPU 2», con su temperatura;
+  si falta una, INFORME.TXT («GRÁFICAS») dice cómo está cada puerto PCI
+  Express (si hay una tarjeta puesta que no enlaza, lo dice). La prueba
+  calienta el procesador (todos sus núcleos), no las gráficas. En las
+  gráficas no se cambia nada permanente: si su sensor está apagado, se
+  enciende como lo hace Linux (nouveau), y eso se pierde al apagar; con
+  «/SOLOLEER» en la orden del Termómetro, ni eso.
   Para Windows: el último controlador oficial de NVIDIA para esas gráficas
   (Maxwell, ya solo de seguridad: el 582.78) está en nvidia.com/Download,
   «GeForce 900M Series (Notebooks)»; y lo de MSI, en
@@ -125,8 +129,9 @@ con él encendido simplemente no arranca esta memoria.
   la BIOS lo da. La gráfica: los últimos 10 minutos; cada sensor con su color,
   su trazo (seguido, a rayas o de puntos) y su marca (círculo, cuadrado,
   triángulo...), y el límite con una raya.
-  La tarjeta gráfica (NVIDIA o AMD/ATI) no se puede leer sin su controlador:
-  solo sale si la BIOS la da como zona térmica. Si el procesador no deja leer
+  Las NVIDIA Maxwell y Pascal (GTX 9xxM, GTX 10xx) se leen directamente; las
+  demás (AMD/ATI...) no se pueden leer sin su controlador: solo salen si la
+  BIOS las da como zona térmica. Si el procesador no deja leer
   su temperatura, lo dice en rojo.
   Arriba a la derecha, lo ocupado que está el procesador («ocupado: 2 %»).
   Nota: Hispa-Pentium usa un solo núcleo del procesador. En los Intel, el

@@ -10218,6 +10218,37 @@ carga, b s sin poder correr) y QEMU parado con `stop`/`cont`.
 
 Probado en QEMU: -smp 4 (con y sin KVM) para los demás procesadores; sin NVIDIA (que no se cuelga). La lectura de las GPU y de los frenos de Haswell, en el GT80 de verdad.
 
+**Las gráficas NVIDIA (24/11, rama `termo-nvidia`, marca «(NVIDIA)»).** En el
+GT80 el Termómetro veía una sola GTX 970M y sin temperatura. Ahora la 225
+(`termo.cas`) recorre los 256 buses con todas sus funciones (también detrás
+de los puertos PCI Express y de un conmutador PLX/PEX) y da una ficha larga de
+cada NVIDIA de clase 03 (ID, subsistema, BAR0, estado de energía, enlace
+actual y máximo, puerto del que cuelga) y otra de cada puerto PCI Express
+(enlace, ranura con tarjeta o vacía, qué contesta detrás y el DEVEN del 0:0.0
+de Intel, que dice qué puertos de gráficas del procesador ha dejado la BIOS).
+La temperatura, como nouveau: Maxwell GM107/GM108/GM20x, `g84_temp_get`
+(fusible 1A8h en BAR0+212A8h a 1 y BAR0+20400h; la 20460h es de Pascal, no de
+Maxwell); Pascal GP10x, `gp100_temp_get` (20460h, válida con el bit 29); una
+lectura 0BADFxxxh no es una temperatura. Lo único que se escribe, y volátil:
+si el sensor de una Maxwell está apagado o forzado, lo de `g84_sensor_setup`
+(20008h y 2000Ch, una vez, 20 ms); y, como `pci_enable_device`, el bit
+«memoria» si el BAR0 cae en la ventana del puerto y D3hot→D0 solo con
+No_Soft_Reset. Nada con `/SOLOLEER`. Los relojes no se leen (nouveau no tiene
+«clk» para GM20x). Del ACPI (servicio.c), los objetos de energía de cada
+puerto del bus 0 y de su hijo de _ADR 0 (_PR0, _PR3, _PS0, _PS3, _DSM, _ON,
+_OFF: solo si existen) y, para leer, _PSC y el _STA del recurso de _PR0: con
+el enlace caído y el recurso apagado, «la gráfica NVIDIA está apagada por
+Optimus». No se enciende nunca (ni _PS0 ni _ON): tras D3cold la tarjeta vuelve
+sin BAR ni configuración y habría que reentrenar el enlace y rehacerla, que es
+cosa de su controlador; y en el GL553VD de verdad la GTX 1050 ya se leía (21→41
+°C) porque en Hispa-Pentium nadie la apaga. En INFORME.TXT, «GRÁFICAS
+(NVIDIA)»: cada GPU con la mínima, media y máxima de la carga, la de antes y
+la de enfriando, «caliente sin trabajar» (65 °C o más en reposo) o «le llega
+el calor del procesador» (15 °C o más de subida), y cada puerto; en el
+resultado, «GRÁFICA EN PELIGRO» desde 90 °C y «NO RESPONDE» si deja de
+contestar o hay una tarjeta puesta que no enlaza. Prueba en el anfitrión:
+`termo/pruebas/nvidia_prueba.c` (fichas de mentira del GT80 y del GL553VD).
+
 ## 14 quinvicies. El Asistente de compatibilidad (COMPAT.BIN, rama compat)
 
 *22/11/2026, la rama `compat`; aprobado por Carlos el 22/11. Todo lo cambiado

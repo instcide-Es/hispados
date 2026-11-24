@@ -455,14 +455,20 @@ int nv_informe(const struct nv_todo *t, char *d, int cabe)
 		lectura(g, l, sizeof l);
 		IN("%s", l);
 	}
-	if (t->np) {
-		IN("  Puertos PCI Express (por si falta una gráfica: cómo está cada puerto y qué tiene detrás):\r\n");
-		for (k = 0; k < t->np; k++) {
-			nv_describe_puerto(t, k, l, sizeof l);
-			IN("    %s\r\n", l);
-			if (!(t->p[k].bdf & 0xFF0000) && ((t->p[k].bdf >> 11) & 31) == 1)
-				intel_peg = 1;
-		}
+	/* (los puertos de las gráficas, los del procesador (00:01.x) y los que
+	 * no tienen nada que conteste o tienen el enlace caído; los demás, el
+	 * Wi-Fi o el disco con su enlace bien, solo en el .LOG) */
+	for (k = 0, i = 0; k < t->np; k++) {
+		const struct nv_puerto *p = &t->p[k];
+		int peg = !(p->bdf & 0xFF0000) && ((p->bdf >> 11) & 31) == 1;
+
+		intel_peg |= peg;
+		if (!peg && (p->detras_id & 0xFFFF) != 0x10DE && !puerto_caido(p) && (p->detras_id & 0xFFFF) != 0xFFFF)
+			continue;
+		if (!i++)
+			IN("  Puertos PCI Express (por si falta una gráfica: cómo está cada puerto y qué tiene detrás; todos, en el .LOG):\r\n");
+		nv_describe_puerto(t, k, l, sizeof l);
+		IN("    %s\r\n", l);
 	}
 	if (t->np && t->p[0].deven != 0xFFFFFFFFu && (intel_peg || t->n)) {
 		uint32_t v = t->p[0].deven;
