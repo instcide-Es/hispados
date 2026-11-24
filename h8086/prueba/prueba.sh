@@ -708,7 +708,8 @@ apaga
 
 . prueba/partes_09.sh
 . prueba/partes_10.sh
-PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 v86 pasar duro formatea sistema partir medidas fuentes"
+. prueba/partes_marcianos.sh
+PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 v86 pasar duro formatea sistema partir medidas fuentes marcianos"
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)

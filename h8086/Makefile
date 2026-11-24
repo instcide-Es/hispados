@@ -133,3 +133,26 @@ clean:
 	rm -rf $(B)
 
 .PHONY: all prueba clean
+
+# ---- Marcianada (juegos/marciana.asm) y el disquete de juegos ----
+# El disquete de juegos es de 360 K, sin sistema: se arranca con el de
+# Hispa-8086 y se pone en B: (o, con una sola disquetera, cuando lo pida).
+# MARPRUEB.COM es el mismo fuente con -DPRUEBA: la prueba del motor.
+$(B)/MARCIANA.COM: juegos/marciana.asm | $(B)
+	$(CP437) $< $(B)/gen/marciana.asm && $(NASM) -f bin -o $@ $(B)/gen/marciana.asm
+
+$(B)/MARPRUEB.COM: juegos/marciana.asm | $(B)
+	$(CP437) $< $(B)/gen/marprueb.asm && $(NASM) -f bin -DPRUEBA -o $@ $(B)/gen/marprueb.asm
+
+$(B)/JUEGOS.TXT: juegos/JUEGOS.TXT | $(B)
+	$(CP437) $< $(B)/gen/juegos.tmp && sed 's/$$/\r/' $(B)/gen/juegos.tmp > $@
+
+JUEGOS86 = $(B)/MARCIANA.COM $(B)/JUEGOS.TXT
+
+$(B)/hispa8086-juegos.img: $(JUEGOS86)
+	rm -f $@
+	mformat -C -f 360 -v JUEGOS -i $@ ::
+	mcopy -i $@ $(JUEGOS86) ::
+
+all: $(B)/hispa8086-juegos.img
+prueba: $(B)/hispa8086-juegos.img $(B)/MARPRUEB.COM

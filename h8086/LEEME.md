@@ -10,4 +10,8 @@ make            # los disquetes de 360 K, 720 K, 1,2 M y 1,44 M, en build/
 make prueba     # los arranca en QEMU y comprueba lo que sale
 ```
 
+`make` hace también el disquete de juegos, `build/hispa8086-juegos.img` (se
+pone en B:): de momento, **Marcianada** (`MARCIANA`), de marcianitos; ver
+[docs/8086/JUEGO-MARCIANADA.md](../docs/8086/JUEGO-MARCIANADA.md).
+
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

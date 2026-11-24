@@ -884,3 +884,20 @@ Cada prueba usa solo lo que ya se sabe que el procesador tiene:
    bits 12 a 14 de las banderas; en un 386, sí.
 4. Ya en un 386 (y solo entonces, con sus instrucciones): el 486 deja cambiar
    el bit AC de las banderas de 32 bits.
+
+## Juegos: el disquete de juegos
+
+`make -C h8086` hace también `h8086/build/hispa8086-juegos.img`, un
+disquete de 360 K sin sistema con los juegos y su manual (`JUEGOS.TXT`). Se
+arranca con el de Hispa-8086 y se pone en B: (con una sola disquetera, el
+sistema lo pide cuando hace falta).
+
+| Juego | Qué es |
+|---|---|
+| `MARCIANA.COM` | **Marcianada**, de marcianitos: la flota que baja, la churrera y las murallas. CGA (o EGA, VGA), MDA o Hercules en modo texto, monocromo con `/M`; 6,2 K. Ver [JUEGO-MARCIANADA.md](JUEGO-MARCIANADA.md) |
+
+| Archivo | Qué es |
+|---|---|
+| `h8086/juegos/marciana.asm` | Marcianada (con `-DPRUEBA`, `MARPRUEB.COM`: la prueba del motor) |
+| `h8086/juegos/JUEGOS.TXT` | el manual de los juegos, que va en el disquete |
+| `h8086/prueba/partes_marcianos.sh` | su parte de la prueba (`SOLO=marcianos`) |
