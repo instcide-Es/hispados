@@ -283,8 +283,20 @@ módulo Rwifi
     fin
 
     ; ¿conviene ir por el Wi-Fi? (con el cable conectado o no)
+    ; (0.8.10, el ASUS GL553VD: la 7265 sin firmware, «MAC 00:00:00:00:00:00»,
+    ; y al caerse el cable decía «la red va por el Wi-Fi») la tarjeta Wi-Fi,
+    ; lista: WIFI.BIN apuntado y con su MAC
+    público función wifi_lista(): bool
+        variable i: nat32
+        si dueño = 0 entonces devolver falso fin
+        para i desde 0 hasta 5 hacer
+            si mac_wifi[i] <> 0 entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
     público función conviene(cable_ok: bool): bool
-        si dueño = 0 o preferir = PREFIERE_CABLE entonces devolver falso fin
+        si no wifi_lista() o preferir = PREFIERE_CABLE entonces devolver falso fin
         si preferir = PREFIERE_WIFI entonces devolver cierto fin
         devolver no cable_ok
     fin

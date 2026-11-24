@@ -818,6 +818,7 @@ módulo Rpila
 
     función entra_dhcp(p: puntero a byte, n: nat32)
         variable i, clase_m, op, largo, ofrecida, srv, m, r, d, c: nat32
+        variable repetido: bool
         si n < 240 o p[0] <> 2 o lee32(p + 4) <> dhcp_xid o lee32(p + 236) <> 0x63825363 entonces devolver fin
         si comparar_memoria(p + 28, mac, 6) <> 0 entonces devolver fin
         ofrecida := lee_ip(p + 16)
@@ -857,6 +858,10 @@ módulo Rpila
             dhcp_manda(3)
             dhcp_próximo := ahora() + 200
         sino si clase_m = 5 y (dhcp_estado = D_PIDIENDO o dhcp_estado = D_HECHO) entonces
+            ; (0.8.10, el ASUS: las líneas de DHCP salían dos veces) un ACK
+            ; repetido (el de la petición mandada otra vez, o una renovación)
+            ; con lo mismo de antes no se dice otra vez
+            repetido := dhcp_estado = D_HECHO y ofrecida = ip_de_antes y r = puerta_de_antes
             ; (CORTES) ¿otra IP, u otra puerta, que las que se tenían?
             si ip_de_antes <> 0 y (ofrecida <> ip_de_antes o (r <> 0 y r <> puerta_de_antes)) entonces
                 red_cambió := cierto
@@ -879,7 +884,7 @@ módulo Rpila
             si c = 0 o c > 172800 entonces c := 172800 fin
             si c < 120 entonces c := 120 fin
             dhcp_próximo := ahora() + (c div 2) * 100
-            apunta_ip()
+            si no repetido entonces apunta_ip() fin
             ; que la red sepa quién somos (y quien la tenga ya, que conteste)
             arp(1, mi_ip, nulo)
             si puerta <> 0 entonces arp(1, puerta, nulo) fin

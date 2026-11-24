@@ -51,6 +51,7 @@ módulo Rrtl
     constante R_RCR = 0x44                      ; RxConfig
     constante R_9346 = 0x50                     ; Cfg9346: C0h desbloquea
     constante R_CFG2 = 0x53
+    constante R_CFG3 = 0x54                     ; (0.8.10) Config3: Rdy_to_L23 (bit 1)
     constante R_CFG5 = 0x56
     constante R_MSR8139 = 0x58                  ; (ENSAYO) el estado del enlace de la 8139
     constante R_PHYAR = 0x60                    ; el PHY (las de antes de la G)
@@ -188,14 +189,55 @@ módulo Rrtl
     función ocp_pon(r: nat32, v: nat32)
         w32(R_MACOCP, 0x80000000 ob (r << 15) ob (v yb 0xFFFF))
     fin
-    ; el FIFO compartido, listo (el bit 13 del OCP E00Eh)
+    ; el FIFO compartido, listo: LINK_LIST_RDY (el bit 1 de MCU, D3h), como
+    ; rtl_link_list_ready_cond de r8169 (0.8.10, el ASUS GL553VD: con el bit
+    ; 13 del OCP E00Eh, «no dice que esté listo» las dos veces)
     función espera_fifo(): bool
         variable i: nat32
         para i desde 1 hasta 420 hacer
-            si ocp_lee(0xE00E) yb 0x2000 <> 0 entonces devolver cierto fin
+            si r8(R_MCU) yb 0x02 <> 0 entonces devolver cierto fin
             espera_us(100)
         fin
         devolver falso
+    fin
+
+    ; (0.8.10) los registros del PHY por OCP (las G en adelante): página*16 +
+    ; (registro - 16) * 2, como phy_write_paged de r8169
+    función phy_ocp_lee(r: nat32): nat32
+        variable i, v: nat32
+        w32(R_GPHYOCP, r << 15)
+        para i desde 1 hasta 100 hacer
+            espera_us(25)
+            v := r32(R_GPHYOCP)
+            si v yb 0x80000000 <> 0 entonces devolver v yb 0xFFFF fin
+        fin
+        devolver 0xFFFF
+    fin
+    función phy_ocp_pon(r: nat32, v: nat32)
+        variable i: nat32
+        w32(R_GPHYOCP, 0x80000000 ob (r << 15) ob (v yb 0xFFFF))
+        para i desde 1 hasta 100 hacer
+            espera_us(25)
+            si r32(R_GPHYOCP) yb 0x80000000 = 0 entonces devolver fin
+        fin
+    fin
+
+    ; (0.8.10, el ASUS GL553VD con la RTL8168H: el enlace se caía y volvía a
+    ; 100 y a 10 Mbit/s) sin EEE ni ALDPS, como deja la 8168G/H r8169 con
+    ; «eee» apagado: el MAC sin EEE (OCP E040h, bits 0 y 1), el PHY sin
+    ; anunciarlo (A5D0h = 0: el registro 7.60 de EEE) y sin ALDPS (A430h, el
+    ; bit 2: el ahorro cuando no hay cable, que en la H corta el enlace);
+    ; el paso a L2/L3 (Config3, Rdy_to_L23), con lo demás de Config. Luego
+    ; se negocia otra vez
+    función sin_ahorro_g()
+        variable a, b, c: nat32
+        a := ocp_lee(0xE040)
+        ocp_pon(0xE040, a yb 0xFFFC)
+        b := phy_ocp_lee(0xA5D0)
+        phy_ocp_pon(0xA5D0, 0)
+        c := phy_ocp_lee(0xA430)
+        phy_ocp_pon(0xA430, c yb 0xFFFB)
+        apunta4("realtek: sin EEE ni ALDPS (MAC E040 %04X, EEE anunciado %04X, ALDPS A430 %04X: apagados)", a, b, c, 0)
     fin
 
     ; ---- el PHY: los registros MII de siempre (0: BMCR, 1: BMSR) ----
@@ -357,6 +399,7 @@ módulo Rrtl
             ; sin ASPM ni CLKREQ (portátiles: cortes y latencia)
             w8(R_CFG2, r8(R_CFG2) yb 0x7F)
             w8(R_CFG5, r8(R_CFG5) yb 0xFE)
+            si grupo = G_G entonces w8(R_CFG3, r8(R_CFG3) yb 0xFD) fin     ; (0.8.10) sin el paso a L2/L3 (rtl_pcie_state_l2l3_disable)
             w16(R_IMIT, 0)
             w16(R_CPCR, r16(R_CPCR) yb 0xFFBF)                 ; sin quitar las etiquetas VLAN
             ; el PLL encendido
@@ -395,7 +438,11 @@ módulo Rrtl
         si no ensayo entonces
             v := phy_lee(0)
             apunta4("realtek: PHY: BMCR %04X, BMSR %04X, PHYstatus %02X", v, phy_lee(1), r8(R_PHYST), 0)
-            si v <> 0xFFFF y (v yb 0x0800 <> 0 o v yb 0x1000 = 0) entonces
+            si grupo = G_G entonces
+                ; (0.8.10) sin EEE ni ALDPS, y a negociar otra vez sin ellos
+                sin_ahorro_g()
+                phy_pon(0, 0x1200)
+            sino si v <> 0xFFFF y (v yb 0x0800 <> 0 o v yb 0x1000 = 0) entonces
                 apunta("realtek: el PHY estaba apagado o sin negociación: se enciende y negocia")
                 phy_pon(0, 0x1200)
             fin

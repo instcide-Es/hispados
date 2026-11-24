@@ -29,7 +29,10 @@ Las tarjetas que lleva:
     busca las redes (aún no se conecta). Necesita el FIRMWARE DE INTEL, que
     no es libre y NO va en este paquete: hay que bajar
     iwlwifi-7265D-29.ucode de linux-firmware (kernel.org) y ponerlo en
-    C:\HISPA\FIRMWARE\ (o en X:\FIRMWARE\ en la memoria USB). Las Intel
+    X:\FIRMWARE\ de la memoria USB (se busca, por orden, en X:\FIRMWARE,
+    \FIRMWARE y \HISPA\FIRMWARE de la unidad del sistema, C:\FIRMWARE y
+    C:\HISPA\FIRMWARE; sin su nombre largo, vale cualquier .UCO de iwlwifi
+    en esas carpetas; si falta, WIFI.LOG dice dónde ha mirado). Las Intel
     más nuevas (9560, AX201, AX211) se reconocen y lo dice WIFI.LOG, pero
     todavía no se llevan.
 Redes abiertas y con WPA2-Personal (AES); 2,4 GHz, 802.11b/g. No: WEP, WPA

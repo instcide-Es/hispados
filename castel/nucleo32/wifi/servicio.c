@@ -67,7 +67,7 @@ struct conductor {
 static const struct conductor conductores[] = {
 	{ "Broadcom BCM43224/43225 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL },
 	{ "Atheros AR9285/AR9280/AR9287 (ath9k)", ath_busca, ath_monta, ath_enciende, ath_cuentas, ath_resumen },
-	{ "Intel Wireless-AC 7265/3165 (como iwlwifi/MVM; con su firmware en \\HISPA\\FIRMWARE)", iwl_busca, iwl_monta, iwl_enciende, iwl_cuentas, iwl_resumen },
+	{ "Intel Wireless-AC 7265/3165 (como iwlwifi/MVM; con su firmware en X:\\FIRMWARE, \\FIRMWARE o \\HISPA\\FIRMWARE)", iwl_busca, iwl_monta, iwl_enciende, iwl_cuentas, iwl_resumen },
 };
 static const struct conductor *cond;
 static const u16 ids_brcm[] = { 0x4353, 0x4357, 0x4727, 0x0576, 0xa8d8, 0 };
@@ -1208,47 +1208,105 @@ static int carga_fw(int i, const char *archivo, const char *nombre)
 }
 
 /* (INTEL) el firmware de las Intel: no es libre y no va con el sistema (ni en
- * el repositorio ni en la memoria USB). Se busca en \HISPA\FIRMWARE\ (o
- * \FIRMWARE\ en la raíz de la memoria), con el nombre de linux-firmware, el
- * primero que haya de los que dice radio_iwl.c para esta tarjeta. Se queda
- * en el montón (es memoria de DMA: las secciones se cargan desde ahí). */
+ * el repositorio ni en la memoria USB). (0.8.10, el ASUS GL553VD: el aviso
+ * decía \FIRMWARE y la tabla \HISPA\FIRMWARE) Se busca, por este orden, en
+ * X:\FIRMWARE (la memoria USB), \FIRMWARE y \HISPA\FIRMWARE de la unidad
+ * del sistema, C:\FIRMWARE y C:\HISPA\FIRMWARE, con el nombre de
+ * linux-firmware (su nombre largo de VFAT), el primero que haya de los que
+ * dice radio_iwl.c para esta tarjeta; y si no, cualquier .UCO de esas
+ * carpetas (la memoria copiada sin nombres largos: IWLWIF~1.UCO) que lleve
+ * la cabecera TLV de iwlwifi. Se queda en el montón (es memoria de DMA: las
+ * secciones se cargan desde ahí). */
+#define SC_ENTRADA 12		/* EBX manejador de una carpeta, ECX struct entrada -> 1 si hay otra */
+struct entrada_fat {
+	char nombre[13];
+	u8 atributos;
+	u16 reservado;
+	u32 tam;
+	u16 fecha, hora;
+	u32 cluster, libre;
+};
+static const char *const carpetas_fw[] = { "X:\\FIRMWARE", "\\FIRMWARE", "\\HISPA\\FIRMWARE", "C:\\FIRMWARE", "C:\\HISPA\\FIRMWARE", NULL };
+
+/* lee el firmware de «r»: 1 si vale y ya está puesto; 0 si no está; -1 si falla */
+static int prueba_fw(const char *r, const char *nombre, int con_cabecera)
+{
+	u32 m, n, l;
+	u8 *b;
+
+	m = sc(SC_ABRIR, (u32)r, 0, 0);
+	if (ES_ERROR(m))
+		return 0;
+	l = sc(SC_LARGO, m, 0, 0);
+	if (l < 1024 || l > 4u * 1024 * 1024) {
+		sc(SC_CERRAR, m, 0, 0);
+		hl_log(0, "%s: %u octetos no parece un firmware de Intel\n", r, l);
+		return 0;
+	}
+	b = hl_malloc(l + 16);
+	n = b ? sc(SC_LEER, m, (u32)b, l) : 0;
+	sc(SC_CERRAR, m, 0, 0);
+	if (!b || n != l) {
+		hl_log(0, "No se puede leer %s (%u octetos; ¿cabe en la memoria de la tarjeta?)\n", r, l);
+		return -1;
+	}
+	/* la cabecera TLV de iwlwifi: 0 y «IWL\n» */
+	if (con_cabecera && !(b[0] == 0 && b[1] == 0 && b[2] == 0 && b[3] == 0 && b[4] == 'I' && b[5] == 'W' && b[6] == 'L' && b[7] == '\n')) {
+		hl_log(0, "%s: no lleva la cabecera de un firmware de iwlwifi\n", r);
+		return 0;
+	}
+	hl_log(2, "Firmware de Intel: %s, %u octetos\n", r, l);
+	return iwl_pon_fw(b, l, nombre) == 0 ? 1 : -1;
+}
+
 static int carga_fw_intel(void)
 {
 	const char *const *nombres = iwl_nombres_fw();
 	char r[112];
-	u32 m, n, l;
-	u8 *b;
-	int i, k;
-	static const char *const donde[2] = { "%sFIRMWARE\\%s", "\\FIRMWARE\\%s" };
+	struct entrada_fat e;
+	u32 m;
+	int i, k, v, j;
 
 	for (i = 0; nombres && nombres[i]; i++)
-		for (k = 0; k < 2; k++) {
-			if (k == 0)
-				snprintf(r, sizeof r, donde[0], carpeta, nombres[i]);
-			else
-				snprintf(r, sizeof r, donde[1], nombres[i]);
-			m = sc(SC_ABRIR, (u32)r, 0, 0);
-			if (ES_ERROR(m))
-				continue;
-			l = sc(SC_LARGO, m, 0, 0);
-			if (l < 1024 || l > 4u * 1024 * 1024) {
-				sc(SC_CERRAR, m, 0, 0);
-				hl_log(0, "%s: %u octetos no parece un firmware de Intel\n", r, l);
-				continue;
-			}
-			b = hl_malloc(l + 16);
-			n = b ? sc(SC_LEER, m, (u32)b, l) : 0;
-			sc(SC_CERRAR, m, 0, 0);
-			if (!b || n != l) {
-				hl_log(0, "No se puede leer %s (%u octetos; ¿cabe en la memoria de la tarjeta?)\n", r, l);
-				return -1;
-			}
-			hl_log(2, "Firmware de Intel: %s, %u octetos\n", r, l);
-			return iwl_pon_fw(b, l, nombres[i]);
+		for (k = 0; carpetas_fw[k]; k++) {
+			snprintf(r, sizeof r, "%s\\%s", carpetas_fw[k], nombres[i]);
+			v = prueba_fw(r, nombres[i], 0);
+			if (v)
+				return v > 0 ? 0 : -1;
 		}
+	/* sin el nombre largo: cualquier .UCO con la cabecera de iwlwifi */
+	for (k = 0; nombres && nombres[0] && carpetas_fw[k]; k++) {
+		m = sc(SC_ABRIR, (u32)carpetas_fw[k], 0, 0);
+		if (ES_ERROR(m))
+			continue;
+		while (sc(SC_ENTRADA, m, (u32)&e, 0) == 1) {
+			e.nombre[12] = 0;
+			j = strlen(e.nombre);
+			if (j < 5 || (e.atributos & 0x18) || e.nombre[j - 4] != '.' || (e.nombre[j - 3] | 0x20) != 'u' || (e.nombre[j - 2] | 0x20) != 'c' || (e.nombre[j - 1] | 0x20) != 'o')
+				continue;
+			snprintf(r, sizeof r, "%s\\%s", carpetas_fw[k], e.nombre);
+			v = prueba_fw(r, nombres[0], 1);
+			if (v) {
+				sc(SC_CERRAR, m, 0, 0);
+				return v > 0 ? 0 : -1;
+			}
+		}
+		sc(SC_CERRAR, m, 0, 0);
+	}
 	hl_log(0, "FALTA EL FIRMWARE de la tarjeta Intel. Es de Intel (no es libre: no va con Hispa-DOS).\n");
-	for (i = 0; nombres && nombres[i]; i++)
-		hl_log(0, "  %s%sFIRMWARE\\%s\n", i ? "o en " : "Póngalo en ", carpeta, nombres[i]);
+	{
+		static char t[400];
+		int q = 0;
+
+		for (i = 0; nombres && nombres[i] && q < 300; i++)
+			q += snprintf(t + q, sizeof t - q, " %s", nombres[i]);
+		hl_log(0, "  Se ha buscado con estos nombres (el primero que haya):%s\n", t);
+		q = 0;
+		for (k = 0; carpetas_fw[k] && q < 300; k++)
+			q += snprintf(t + q, sizeof t - q, " %s", carpetas_fw[k]);
+		hl_log(0, "  en estas carpetas, por orden (y cualquier .UCO de iwlwifi en ellas):%s\n", t);
+	}
+	hl_log(0, "  (\\FIRMWARE y \\HISPA\\FIRMWARE, en la unidad del sistema). Póngalo en X:\\FIRMWARE\\%s de la memoria USB.\n", nombres && nombres[0] ? nombres[0] : "?");
 	hl_log(0, "  Se baja de linux-firmware: https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/intel/iwlwifi\n");
 	return -1;
 }
