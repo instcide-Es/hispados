@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0, 1, 2, 3, 4, 5, 6 y 7 están hechas** (secciones 6 a 13).
+**etapas 0, 1, 2, 3, 4, 5, 6 y 7 están hechas** (secciones 6 a 13), y la **8**, en lo principal (sección 14).
 
 ---
 
@@ -265,7 +265,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | **hecha (24/11)** | — |
 | 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento; la consola y el intérprete | **hecha (24/11)** | — |
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
-| 8 | Gráficos: compositor, ventanas, ratón, oficina | 5–7 sem. | 11 meses |
+| 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha en lo principal (24/11)**; lo que falta, en la 8 bis | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | 6–8 sem. (+ Wi-Fi 3–5 meses) | 12,5 meses |
 | 10 | Navegador moderno (Ladybird o WebKit) | 8–12 sem. | 15 meses |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | 4–6 sem. | (en paralelo) |
@@ -394,7 +394,16 @@ adelante); los discos que se enchufan en marcha pasan a la 8.
   `make` corriendo en Hispa-64; las pruebas de libc-test de musl.
 - **QEMU**: las pruebas de libc-test. **Taller**: la misma imagen.
 
-### Etapa 8 — gráficos, ventanas y la oficina
+### Etapa 8 — gráficos, ventanas y la oficina (hecha en lo principal: sección 14)
+
+Lo que cambió del plan al hacerla: el compositor es **un programa del anillo 3**
+(VENTANAS, en C con musl), no parte del núcleo: el núcleo da la pantalla
+(`/dev/fb0`, con doble búfer), el teclado y el puntero (`/dev/input/event0`)
+y la memoria compartida con nombre (`/dev/shm`), como Linux; el protocolo de
+las ventanas es propio, por memoria compartida y futex. La oficina de
+Hispa-Pentium (Pluma 2 y Cuentas 2) se compila **tal cual** con musl y
+`so_hispa64.c`. Quedan para la 8 bis: el lector de PDF, la transparencia de
+las ventanas, el SIMD del dibujo y el touchpad en el escritorio del taller.
 
 - Compositor, ventanas, cursor, la letra con suavizado (TTF de la oficina), el
   escritorio de Hispa; la oficina de Hispa-Pentium con `so_hispa64.c`.
@@ -2071,3 +2080,140 @@ octetos por hilo), PCID con varios hilos, y los procesadores híbridos.
 - **Gráficos, ventanas y la oficina** (la etapa 8 del plan): el compositor, el
   ratón, la letra con suavizado y la oficina de Hispa-Pentium; con musl, las
   bibliotecas de C de siempre (FreeType, libpng, zlib) se pueden traer ya.
+
+---
+
+## 14. La etapa 8, hecha en lo principal (24/11/2026): la pantalla para los programas, las ventanas y la oficina
+
+### Las decisiones
+
+- **La consola la dibuja un hilo, con las interrupciones puestas.** Escribir
+  en la consola (con el cerrojo de la consola, sin interrupciones) ya solo
+  cambia el texto y apunta, por cada fila, de qué casilla a qué casilla hay
+  que volver a dibujar (un `nat64` por fila, que el hilo toma y deja vacío de
+  una vez con `xchg`: nada se pierde); el texto es un **anillo de filas**
+  (subir es mover el principio, sin copiar). El hilo «pantalla» mira cada 20
+  ms si hay algo y lo dibuja con un mutex que duerme, sin ningún cerrojo de
+  espera activa. Antes de que haya hilos, y cuando Hispa-64 se para, se
+  dibuja al momento, como antes. Con eso, **el plazo del aviso de vaciar la
+  TLB vuelve a 2 s** (en la etapa 6 se subió a 10 s porque un procesador
+  podía pasarse más de 2 s dibujando con las interrupciones quitadas).
+- **El cursor se ve**: una raya de dos filas de la letra debajo de su
+  casilla, de la tinta con la que se escribe (se ve por la forma, no por el
+  color); `ESC [ ? 25 l` y `h` lo quitan y lo ponen. **Borrar la pantalla
+  es borrar** (`ESC [ 2 J`, también `0 J`, `1 J` y `K`), y `ESC [ fila ; col
+  H` y las flechas de VT100 (`A`, `B`, `C`) mueven el cursor.
+- **Los dispositivos, los de Linux** (`disp64.cas`), para que los programas
+  gráficos no necesiten llamadas propias:
+  - **`/dev/fb0`** (fbdev): `FBIOGET_VSCREENINFO`, `FBIOGET_FSCREENINFO`,
+    `FBIOPUT_VSCREENINFO` (sin cambiar de modo), `FBIOPAN_DISPLAY` y `mmap`,
+    con **doble búfer**: lo que da `mmap` mide el doble (`yres_virtual` = 2 ×
+    `yres`): la mitad de arriba es la pantalla (con escritura combinada) y la
+    de abajo un búfer en la RAM; `FBIOPAN_DISPLAY` con `yoffset = yres`
+    copia el de abajo a la pantalla (el GOP no sabe cambiar de búfer: se
+    copia) y **`FBIO_HISPA_COPIA` (0x46E0, propio)** copia solo un
+    rectángulo (cuatro `uint32_t`: x, y, ancho, alto), lo que ha cambiado.
+    El primer programa que pone la pantalla en su memoria **la tiene** (otro
+    recibe EBUSY) y la consola deja de dibujar (guarda lo escrito); al
+    acabar ese programa, la consola se pinta entera otra vez. Las páginas de
+    la pantalla llevan en sus tablas la marca **DISPOSITIVO** (el bit 11): no
+    son de la RAM y nunca se sueltan ni se cuentan; las marcas de caché (la
+    PAT) se respetan al cambiar los permisos.
+  - **`/dev/input/event0`** (evdev): la `struct input_event` de Linux (24
+    octetos); `EV_KEY` con los códigos de Linux (`KEY_*` desde los usos de
+    HID; 1 pulsada, 0 soltada, 2 repetida) y `BTN_LEFT`, `BTN_RIGHT`,
+    `BTN_MIDDLE`; **`EV_ABS` con `ABS_X` y `ABS_Y` en puntos de la
+    pantalla** (venga de un ratón, de una tableta o del touchpad: el núcleo
+    ya lleva la posición del puntero); `EV_REL` con `REL_WHEEL`; `EV_SYN`; y
+    uno propio, **`EV_LETRA` (0x1E)**: la letra ya hecha con el mapa español
+    del núcleo (acentos muertos, AltGr, mayúsculas, Bloq Mayús), en Unicode,
+    o el control (13 Intro, 127 Retroceso, 9 Tab, 27 Esc, Ctrl+A..Z = 1..26):
+    así los programas no repiten el mapa del teclado. Cada descriptor tiene
+    su cola de 1024 sucesos; `EVIOCGRAB` hace que las teclas no vayan a la
+    consola; `EVIOCGVERSION`, `EVIOCGID`, `EVIOCGNAME`; `read` espera (o
+    EAGAIN con O_NONBLOCK) y `poll`, `select` y `epoll` lo miran (de 10 en
+    10 ms, como las tuberías). Los avisos los da el ratón con su cerrojo
+    tomado: por eso no despiertan a nadie (nada de tomar el cerrojo del
+    planificador desde ahí).
+  - **`/dev/shm/NOMBRE`**: memoria compartida con nombre, lo que usa
+    `shm_open` de musl (`open`, `ftruncate`, `mmap` con `MAP_SHARED` de leer
+    y escribir, `fstat`, `unlink`), **entre procesos que no son padre e
+    hijo**. El objeto guarda sus marcos (y cuenta como uno más que los
+    tiene, con la tabla de «compartidos» de la etapa 7); cada `mmap` suma
+    uno; `unlink` le quita el nombre y se suelta cuando ya nadie lo tiene
+    abierto, y cada marco, cuando ya nadie lo tiene puesto. Hasta 64 objetos
+    de 128 MB.
+  - **`/dev/null` y `/dev/zero`**, que pedían muchas herramientas.
+- **El servidor de ventanas, un programa** (VENTANAS, en C con musl, en el
+  anillo 3), no parte del núcleo: si falla, se cierra él y vuelve la
+  consola. Compone en el búfer de atrás de `/dev/fb0` y copia a la pantalla
+  solo los rectángulos que cambian. **El protocolo** (`hv.h`) es por
+  memoria compartida y futex entre procesos: `/dev/shm/hispa-ventanas` con
+  lo que mide la pantalla, el portapapeles y 32 huecos de ventana (el
+  programa toma uno con `cmpxchg`); los puntos de cada ventana, en otra
+  memoria compartida del programa (`/dev/shm/hv-PID-N`) que el servidor pone
+  de solo leer en la suya; lo que pide el programa (título, maximizar,
+  centrar, cerrar, un menú emergente, un búfer nuevo, lo que ha pintado),
+  bits que el servidor toma de una vez; los sucesos, una cola en el hueco
+  con su futex. Un programa que acaba sin cerrar su ventana se ve (`kill`
+  con la señal 0 da ESRCH) y se le quita. Sin tuberías ni sockets: no hacía
+  falta nada más del núcleo.
+- **El escritorio, al estilo del de Hispa-Pentium**: el tapiz (azul, con
+  olas y «Hispa-64»), la barra de abajo con el botón **Inicio** (verde,
+  redondeado), un botón por ventana (la activa, subrayada; pulsarlo la trae
+  delante o la minimiza) y el reloj; el **menú Inicio** con los programas
+  que hay (Pluma, Cuentas, Notas) y «Salir del escritorio» (si un programa
+  pregunta si se guarda lo cambiado, no se sale); la tecla del logo o
+  Ctrl+Esc lo abren. Las ventanas: título (la activa, **oscura, en negrita
+  y con una raya clara debajo**; las demás, claras: se distinguen por la
+  luz y la forma, no por el color, para Carlos), los botones de minimizar,
+  maximizar y cerrar **dibujados** (_ □ X), arrastrarlas por el título,
+  cambiarles el tamaño por la esquina de abajo a la derecha (con sus tres
+  rayitas), el doble clic en el título, Alt+F4, el foco al pulsar, el doble
+  y el triple clic, la rueda, los menús emergentes de los programas
+  (`so_menu`), la forma del puntero (flecha o la I del texto) y el
+  portapapeles. Las letras, **las DejaVu con suavizado** de la oficina
+  (`comun/letras.c` y `lienzo.c`).
+- **La oficina, tal cual**: `castel/nucleo32/oficina/comun/so_hispa64.c` es
+  la capa «so» de Hispa-64 (la memoria y los archivos como
+  `so_anfitrion.c`, con las unidades de DOS: **`C:` es el disco de
+  `$HISPA_C`, o el que tenga la carpeta DOCUMENT, o el primero que no sea
+  el del arranque**; la ventana, con el protocolo de VENTANAS). Con ella,
+  **Pluma 2 y Cuentas 2 se compilan sin cambiar ni una línea** con
+  `musl-gcc` (estáticas: 0,8 MB cada una con sus letras). Y **NOTAS**, un
+  bloc de notas nuevo y sencillo con la misma capa (UTF-8, la DejaVu Sans
+  Mono, Ctrl+G guarda).
+- **`escritorio`** en la línea del núcleo arranca VENTANAS en vez del
+  intérprete (al salir de él, el intérprete); en el menú de GRUB es la
+  primera opción (y otra con `escribir`, para guardar en los discos de
+  prueba). Desde el intérprete: `VENTANAS`, o `VENTANAS NOTAS PLUMA` (los
+  programas, arrancados al empezar; `NOTAS=/sata1/A.TXT`, con su archivo).
+- Al hacerla salió **un fallo de la etapa 7 en las tuberías**: `cierra_`
+  soltaba el cerrojo para despertar a los que esperan y lo volvía a tomar
+  para ver si se soltaba la tubería; dos que cerraban a la vez (el
+  `execve` con O_CLOEXEC del hijo de `posix_spawn` y el `close` del padre)
+  podían soltarla dos veces (el núcleo se paraba en `Monton64.libera`). Ahora
+  se decide con el cerrojo tomado, y mientras se despierta cuenta como «en
+  uso».
+
+### Qué hace
+
+Hispa-64 0.8.0. Los módulos y programas nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `pant64.cas` | la consola: el anillo de filas, lo pendiente por fila, el hilo «pantalla», el cursor, borrar, mover el cursor, el modo gráfico |
+| `disp64.cas` | `/dev/fb0` (con el búfer de atrás), `/dev/input/event0`, `/dev/shm`, `/dev/null`, `/dev/zero` |
+| `sistema.cas` | los dispositivos en `open`, `read`, `write`, `close`, `dup`, `fcntl`, `fstat`, `stat`, `ftruncate`, `mmap`, `unlink`, `ioctl`, `poll`, `select`, `epoll`; uname 0.8.0 |
+| `espacios.cas`, `procesos.cas` | la marca DISPOSITIVO; el núcleo no toca la pantalla de un programa por el mapa directo; al acabar un proceso, Disp64 lo sabe (la pantalla vuelve a la consola) |
+| `teclas64.cas`, `raton64.cas` | los sucesos de `/dev/input/event0`; con EVIOCGRAB, las letras no van a la consola |
+| `tty64.cas` | `ESC [ J`, `K`, `H`, `A`, `B`, `C`, `? 25 h/l` |
+| `smp64.cas` | el aviso de la TLB, 2 s otra vez |
+| `tubos64.cas` | la carrera al cerrar (arriba) |
+| `hispa64.cas` | el hilo «pantalla», la opción `escritorio`, 0.8.0 |
+| `programas/ventanas/` | `hv.h` (el protocolo), `hdisp.h` (fbdev y evdev para musl), `ventanas.c` (VENTANAS), `notas.c` (NOTAS) |
+| `programas/hazventanas.sh` | VENTANAS, NOTAS, PLUMA y CUENTAS, con musl y la biblioteca común de la oficina (los objetos, en `build/ventanas-obj`) |
+| `programas/musl/mdisp.c` | MDISP: las pruebas de los dispositivos (en cada arranque) y `MDISP sucesos N` |
+| `nucleo32/oficina/comun/so_hispa64.c` | la capa «so» de la oficina para Hispa-64 |
+| `pantallazo.py` | el comparador: `foto`, `cuenta` (los puntos de un color en un rectángulo), `oscuros`, `difiere` |
+| `programas/teclas.py` | `{ctrl-LETRA}`, `{alt-f4}`, `{logo}`, `{ctrl-esc}` |

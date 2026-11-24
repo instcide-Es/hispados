@@ -3,9 +3,9 @@
  * (VENTANAS: castel/nucleo64/programas/ventanas/hv.h; docs/64/HISPA-64.md,
  * sección 14). Lo de los archivos y la memoria es como so_anfitrion.c (el
  * de Linux), con las unidades de DOS: «C:\DOCUMENT\x.plu» es
- * /DISCO/DOCUMENT/x.plu, con DISCO el de $HISPA_C o, si no se dice, el
- * primer disco que se pueda escribir (las carpetas de «/» que no son de la
- * unidad en memoria: sata0, nvme0p1...). La ventana es un hueco del
+ * /DISCO/DOCUMENT/x.plu, con DISCO el de $HISPA_C o, si no se dice, uno de
+ * los discos de «/» (sata1, nvme0p2...): el que tenga la carpeta DOCUMENT,
+ * o el primero que no sea el del arranque (disco_c). La ventana es un hueco del
  * servidor y sus puntos, una memoria compartida (/dev/shm/hv-PID-N).
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include <stdio.h>
@@ -80,11 +80,37 @@ u32 so_memoria_usada(void)
 /* ---- las rutas: «C:\x\y» -> /DISCO/x/y ---- */
 static char disco[256];
 
-/* el disco de «C:» */
+/* el disco de «C:»: $HISPA_C; si no, el primero de «/» con una carpeta
+ * DOCUMENT; si no, el primero que no es el del arranque (el que tiene
+ * \boot\HISPA64.BIN o \EFI\BOOT); si no, el primero */
+static void disco_mira(const char *r, int *nivel, char *d)
+{
+	char t[400];
+	struct stat st;
+	int n = 1;
+
+	fmt(t, sizeof t, "%s/DOCUMENT", r);
+	if (!stat(t, &st) && S_ISDIR(st.st_mode))
+		n = 3;
+	else {
+		fmt(t, sizeof t, "%s/boot/HISPA64.BIN", r);
+		if (stat(t, &st)) {
+			fmt(t, sizeof t, "%s/EFI/BOOT", r);
+			if (stat(t, &st))
+				n = 2;
+		}
+	}
+	if (n > *nivel) {
+		*nivel = n;
+		copia(d, r, 256);
+	}
+}
+
 static const char *disco_c(void)
 {
 	DIR *d;
 	struct dirent *e;
+	int nivel = 0;
 
 	if (disco[0])
 		return disco;
@@ -103,8 +129,7 @@ static const char *disco_c(void)
 			fmt(r, sizeof r, "/%s", e->d_name);
 			if (stat(r, &st) || !S_ISDIR(st.st_mode))
 				continue;
-			copia(disco, r, sizeof disco);
-			break;
+			disco_mira(r, &nivel, disco);
 		}
 		closedir(d);
 	}

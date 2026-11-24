@@ -20,7 +20,8 @@
  *    que haya (Pluma, Cuentas, Notas) y «Salir del escritorio»; la tecla
  *    del logo o Ctrl+Esc lo abren.
  * Las letras, las DejaVu con suavizado (oficina/comun: letras y lienzo).
- *   VENTANAS [PROGRAMA ...]   (los programas, arrancados al empezar)
+ *   VENTANAS [PROGRAMA[=ARGUMENTO] ...]   (los programas, arrancados al
+ *                                         empezar: «NOTAS=/sata1/A.TXT»)
  * Lo que pasa lo dice por la salida (el puerto serie): lo miran las pruebas.
  */
 #include <stdio.h>
@@ -500,8 +501,10 @@ static void mira_huecos(void)
 			if (!w->min && x1 > x0 && y1 > y0)
 				dana(w->x + x0, w->y + y0, x1 - x0, y1 - y0);
 		}
-		if (p & HV_P_MENU)
+		if (p & HV_P_MENU) {
 			abre_menu(i);
+			di("menú emergente de «%s» (%d opciones)", w->titulo, em_n);
+		}
 		/* (cada segundo y pico: ¿sigue vivo el programa?) */
 		if ((vuelta & 63) == (u32)i && kill(w->pid, 0) && errno == ESRCH)
 			quita(i, "el programa ha acabado");
@@ -832,13 +835,19 @@ static void manda_raton(int i, int clase, int veces)
 	manda(i, s);
 }
 
-static void lanza(const char *ruta)
+/* «/NOTAS» o «/NOTAS=ARGUMENTO» */
+static void lanza(const char *ruta_)
 {
-	char *argv[2];
+	char ruta[300], *arg, *argv[3];
 	pid_t h;
 
-	argv[0] = (char *)ruta;
-	argv[1] = NULL;
+	copia(ruta, ruta_, sizeof ruta);
+	arg = strchr(ruta, '=');
+	if (arg)
+		*arg++ = 0;
+	argv[0] = ruta;
+	argv[1] = arg;
+	argv[2] = NULL;
 	if (posix_spawn(&h, ruta, NULL, NULL, argv, environ))
 		di("no se puede arrancar %s", ruta);
 	else
@@ -999,11 +1008,14 @@ static void pulsa(int b)
 
 static void suelta_boton(void)
 {
-	if (arrastra >= 0)
+	if (arrastra >= 0) {
+		di("ventana «%s» movida a (%d, %d)", W[arrastra].titulo, W[arrastra].x, W[arrastra].y);
 		arrastra = -1;
+	}
 	if (estira >= 0) {
 		ven *w = &W[estira];
 
+		di("ventana «%s» de %dx%d", w->titulo, w->an, w->al);
 		if (w->an != w->ban || w->al != w->bal)
 			manda_clase(estira, SO_TAMANO, w->an, w->al);
 		estira = -1;
@@ -1254,6 +1266,34 @@ static int lee_sucesos(void)
 	return total;
 }
 
+/* salir del escritorio: que cierren los programas (2 s); si alguno sigue
+ * (pregunta si se guarda lo cambiado), no se sale: se le deja contestar */
+static int intenta_salir(void)
+{
+	int k, vuelta, quedan = 0;
+
+	for (k = 0; k < HV_MAX; k++)
+		if (W[k].usada)
+			manda_clase(k, SO_CERRAR, 0, 0);
+	for (vuelta = 0; vuelta < 200; vuelta++) {
+		quedan = 0;
+		mira_huecos();
+		for (k = 0; k < HV_MAX; k++)
+			if (W[k].usada) {
+				if (kill(W[k].pid, 0) && errno == ESRCH)
+					quita(k, "el programa ha acabado");
+				else
+					quedan++;
+			}
+		compone_lo_danado();
+		if (!quedan)
+			return 1;
+		so_duerme(10);
+	}
+	di("no se sale: %d programas siguen abiertos (quizá preguntan si se guarda lo cambiado)", quedan);
+	return 0;
+}
+
 static void al_acabar(int s)
 {
 	(void)s;
@@ -1264,7 +1304,7 @@ int ofi_principal(const char *args)
 {
 	struct fb_var_screeninfo v;
 	struct fb_fix_screeninfo f;
-	int fd, k;
+	int fd;
 	char a[1024], *s;
 
 	letras_inicia();
@@ -1337,45 +1377,26 @@ int ofi_principal(const char *args)
 		fmt(r, sizeof r, "%s%s", s[0] == '/' ? "" : "/", s);
 		lanza(r);
 	}
-	while (!saliendo) {
-		u32 visto = ctl->aviso;
-		int hubo = 0;
-		time_t t = time(NULL);
+	for (;;) {
+		while (!saliendo) {
+			u32 visto = ctl->aviso;
+			int hubo = 0;
+			time_t t = time(NULL);
 
-		hubo += lee_sucesos();
-		mira_huecos();
-		if ((int)(t / 60) != reloj_min) {
-			reloj_min = (int)(t / 60);
-			dana(AN - 90, AL - BARRA, 90, BARRA);
-		}
-		hubo += compone_lo_danado();
-		if (!hubo && visto == ctl->aviso)
-			hv_espera(&ctl->aviso, visto, 10);
-	}
-	/* salir: que cierren los programas (2 s), y luego fuera */
-	for (k = 0; k < HV_MAX; k++)
-		if (W[k].usada)
-			manda_clase(k, SO_CERRAR, 0, 0);
-	for (int vuelta = 0; vuelta < 200; vuelta++) {
-		int quedan = 0;
-
-		mira_huecos();
-		for (k = 0; k < HV_MAX; k++)
-			if (W[k].usada) {
-				if (kill(W[k].pid, 0) && errno == ESRCH)
-					quita(k, "el programa ha acabado");
-				else
-					quedan++;
+			hubo += lee_sucesos();
+			mira_huecos();
+			if ((int)(t / 60) != reloj_min) {
+				reloj_min = (int)(t / 60);
+				dana(AN - 90, AL - BARRA, 90, BARRA);
 			}
-		if (!quedan)
-			break;
-		so_duerme(10);
-	}
-	for (k = 0; k < HV_MAX; k++)
-		if (W[k].usada) {
-			kill(W[k].pid, SIGTERM);
-			quita(k, "se cierra el escritorio");
+			hubo += compone_lo_danado();
+			if (!hubo && visto == ctl->aviso)
+				hv_espera(&ctl->aviso, visto, 10);
 		}
+		if (intenta_salir())
+			break;
+		saliendo = 0;
+	}
 	ctl->magia = 0;
 	shm_unlink(HV_NOMBRE);
 	di("fuera; la pantalla vuelve a la consola");

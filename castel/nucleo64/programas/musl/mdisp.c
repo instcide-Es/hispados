@@ -211,6 +211,16 @@ static int sucesos(int n)
 		printf("MDISP: no se abre /dev/input/event0\n");
 		return 1;
 	}
+	/* (lo que quede de antes, como soltar el Intro de la orden, fuera) */
+	usleep(500000);
+	{
+		int fl = fcntl(fd, F_GETFL);
+
+		fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+		while (read(fd, &e, sizeof e) == sizeof e)
+			;
+		fcntl(fd, F_SETFL, fl);
+	}
 	printf("MDISP: esperando %d sucesos\n", n);
 	fflush(stdout);
 	while (k < n && read(fd, &e, sizeof e) == sizeof e) {

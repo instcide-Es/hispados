@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
-# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0 a 7:
+# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0 a 8:
 #   - el núcleo (hispa64.cas) se compila igual con ccastel.py y NASM que con
 #     ensambla.py (y, si se da CASTEL64=ruta y ENSAMB64=ruta, con ellos);
 #   - arranca en QEMU por multiboot (-kernel, con HISPA64.SIM de módulo) con
@@ -90,6 +90,13 @@
 #     y por UEFI con 1 y 4; después, nada de más; y en el intérprete, Lua y
 #     Ctrl+C a un programa que no llama al sistema (MBUCLE). Las vueltas que no
 #     las necesitan llevan «sinmusl».
+#   - [etapa 8] MDISP en cada arranque (/dev/null, /dev/zero, /dev/shm entre
+#     dos programas, /dev/fb0 con su doble búfer, /dev/input/event0); y por
+#     UEFI: los sucesos del teclado y la tableta (MDISP sucesos), VENTANAS con
+#     NOTAS (guarda en exFAT), arrastrar una ventana, el menú Inicio, Pluma 2 y
+#     Cuentas 2 (guardan en FAT32), Alt+F4, salir del escritorio, el cursor y
+#     cls; los pantallazos, comprobados con pantallazo.py (cuenta, oscuros,
+#     difiere).
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
@@ -103,7 +110,7 @@ OVMF_C=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_V=/usr/share/OVMF/OVMF_VARS_4M.fd
 DBG="-device isa-debug-exit,iobase=0xf4,iosize=0x04"
 
-echo "== Hispa-64, etapas 0 a 7 =="
+echo "== Hispa-64, etapas 0 a 8 =="
 # ---- compilar ----
 if python3 -I "$C/ccastel.py" "$AQUI/hispa64.cas" -o "$T/hispa64.asm" -I "$C/nucleo32" > "$T/comp.txt" 2>&1 \
    && nasm -f bin "$T/hispa64.asm" -o "$T/HISPA64.BIN" 2>> "$T/comp.txt" \
@@ -189,7 +196,7 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 25 archivos: " <<< "$v" \
+    && grep -q "^Unidad en memoria: 30 archivos: " <<< "$v" \
     && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.8.0 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
@@ -919,7 +926,7 @@ TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{pausa}{pausa}salir{intro}'
 con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
 v=$(serie "$T/e7.txt")
 if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.8.0, etapa 8 " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  25 archivos (" <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  30 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
    && grep -q "^mkdir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
@@ -1069,6 +1076,133 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
       ok "la consola se ve en la pantalla del GOP ($an x $al), con escritura combinada: $am puntos amarillos («Memoria: ...»), $gr grises (el texto) y $ve verdes («todo en orden»); en $T/pantalla.png"
     else ko "la pantalla no tiene la consola ($an x $al: $am amarillos, $gr grises, $ve verdes; $T/pantalla.png)"; fi
   else ko "no se ha podido sacar el pantallazo"; fi
+  # [etapa 8] la pantalla para los programas, las ventanas y la oficina (por
+  # UEFI: sin el GOP no hay /dev/fb0): MDISP con los sucesos del teclado y de
+  # la tableta; VENTANAS con NOTAS (guarda en un disco exFAT), arrastrar una
+  # ventana, el menú Inicio, Pluma 2 (guarda en FAT32), Cuentas 2 (una
+  # fórmula, guarda), Alt+F4, salir del escritorio (la consola vuelve, con
+  # el cursor) y cls (que borra de verdad). Los pantallazos, comprobados con
+  # pantallazo.py (los puntos de cada color en cada sitio); las teclas, por
+  # el monitor (teclas.py); el ratón, la tableta USB por QMP.
+  PZ="python3 -I $AQUI/pantallazo.py"
+  "$AQUI/imagen.sh" "$T/uefi-e8" prueba "apagar sinpruebas escribir ordenes" > "$T/img-e8.txt" 2>&1 || ko "imagen.sh no hace la imagen de la etapa 8: $(tail -2 "$T/img-e8.txt" | paste -sd ' ')"
+  rm -f "$T/e8fat.img" "$T/e8exfat.img"
+  truncate -s 48M "$T/e8fat.img" && mkfs.fat -F 32 -n DATOS "$T/e8fat.img" > /dev/null && mmd -i "$T/e8fat.img" ::/DOCUMENT
+  echo "volumen exFAT de la etapa 8" > "$T/e8leeme.txt"
+  python3 -I "$AQUI/programas/hazexfat.py" "$T/e8exfat.img" $(( 32 * 1048576 )) 0 EXFAT8 LEEME.TXT="$T/e8leeme.txt" > /dev/null
+  S8="$T/e8.txt"; M8="$T/mon8.sock"; Q8="$T/qmp8.sock"
+  rm -f "$S8" "$M8" "$Q8" "$T"/e8-*.ppm; cp $OVMF_V "$T/vars8.fd"
+  timeout 400 qemu-system-x86_64 -machine q35 -m 1024 -smp 2 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+    -drive if=pflash,format=raw,file="$T/vars8.fd" -drive file="$T/uefi-e8/hispa64.img",format=raw,if=none,id=d0 -device ide-hd,drive=d0,bus=ide.0 \
+    -drive file="$T/e8fat.img",format=raw,if=none,id=d1 -device ide-hd,drive=d1,bus=ide.1 \
+    -drive file="$T/e8exfat.img",format=raw,if=none,id=d2 -device ide-hd,drive=d2,bus=ide.2 \
+    -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -display none -serial file:"$S8" \
+    -monitor unix:"$M8",server,nowait -qmp unix:"$Q8",server,nowait $DBG -no-reboot -nic none > /dev/null 2>&1 &
+  q=$!
+  espera8() {   # PATRÓN SEGUNDOS: hasta que la salida lo tenga (o se acabe el plazo)
+    local i
+    for i in $(seq 1 $(( $2 * 5 ))); do serie "$S8" | grep -q "$1" && return 0; sleep 0.2; done
+    return 1
+  }
+  teclas8() { python3 -I "$AQUI/programas/teclas.py" "$M8" "$@" 2> /dev/null; sleep 0.3; }
+  raton8() {   # X Y [clic]: la tableta en el punto (X, Y) de la pantalla de 1280 x 800, y un clic
+    python3 -I - "$Q8" "$@" <<'PY' 2> /dev/null
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); f = s.makefile('rw')
+f.readline(); f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
+def manda(ev):
+    f.write(json.dumps({"execute": "input-send-event", "arguments": {"events": ev}}) + '\n'); f.flush(); f.readline()
+manda([{"type": "abs", "data": {"axis": "x", "value": (int(sys.argv[2]) * 32767 + 1278) // 1279}},
+       {"type": "abs", "data": {"axis": "y", "value": (int(sys.argv[3]) * 32767 + 798) // 799}}])
+if len(sys.argv) > 4:
+    time.sleep(0.15)
+    for d in (True, False):
+        manda([{"type": "btn", "data": {"button": "left", "down": d}}]); time.sleep(0.15)
+PY
+    sleep 0.4
+  }
+  boton8() {   # 1 o 0: el izquierdo, pulsado o soltado
+    python3 -I - "$Q8" "$1" <<'PY' 2> /dev/null
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); f = s.makefile('rw')
+f.readline(); f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
+f.write(json.dumps({"execute": "input-send-event", "arguments": {"events": [{"type": "btn", "data": {"button": "left", "down": sys.argv[2] == '1'}}]}}) + '\n'); f.flush(); f.readline()
+PY
+    sleep 0.3
+  }
+  foto8() { $PZ foto "$M8" "$T/e8-$1.ppm" 2> /dev/null; }
+  bien8=1
+  paso8() { if ! espera8 "$1" "$2"; then bien8=0; echo "  (etapa 8: no llega «$1»)"; fi; }
+  paso8 "^/> " 150
+  # /dev/input/event0 con un programa: MDISP lee 6 sucesos (la a, la tableta, la ñ)
+  teclas8 'MDISP sucesos 7{intro}'; paso8 "^MDISP: esperando 7 sucesos" 20
+  teclas8 'a'; raton8 640 400; teclas8 'ñ'; paso8 "^MDISP: 7 sucesos" 20; teclas8 '{retro}'
+  # (si llega antes el soltar del Intro de la orden, se salta: lo de la a en adelante)
+  EV8=$(serie "$S8" | grep '^suceso: ' | sed '/^suceso: tecla 30 1$/,$!d' | head -6 | paste -sd '|')
+  # el escritorio con NOTAS, que escribe en el disco exFAT
+  teclas8 'VENTANAS NOTAS=/sata2/NOTA.TXT{intro}'; paso8 "ventana nueva «Notas" 60
+  sleep 2
+  teclas8 'Hola, exFAT: ñandú y pingüino.{intro}Otra línea.{ctrl-g}'; paso8 "^NOTAS: guardado (" 20
+  sleep 1; foto8 notas
+  # arrastrar la ventana por su título: de (300, 33) a (500, 133)
+  raton8 300 33; boton8 1; raton8 400 83; raton8 500 133; boton8 0; paso8 "movida a (240, 148)" 10
+  sleep 1; foto8 movida
+  teclas8 '{esc}'; paso8 "ventana fuera «Notas" 15
+  # el menú Inicio con el ratón, y Pluma desde él
+  raton8 50 783 clic; paso8 "menú Inicio abierto" 10
+  sleep 1; foto8 inicio
+  raton8 100 615 clic; paso8 "ventana nueva «Pluma»" 60; paso8 "^pluma: lista" 30
+  sleep 2
+  teclas8 'Carta de prueba: ñandú y pingüino.{ctrl-g}'; paso8 "^pluma: cuadro «Guardar como»" 20
+  sleep 1; teclas8 'carta{intro}'; paso8 "^pluma: guardado C:.DOCUMENT.carta.PLU" 20
+  sleep 1; foto8 pluma
+  teclas8 '{alt-f4}'; paso8 "^pluma: adiós" 20
+  # Cuentas, con una fórmula
+  raton8 50 783 clic; sleep 0.5; raton8 100 655 clic; paso8 "ventana nueva «Cuentas»" 60; paso8 "^cuentas: lista" 30
+  sleep 2
+  teclas8 '12{intro}30{intro}=A1*A2+1{intro}'; sleep 2; foto8 cuentas
+  teclas8 '{ctrl-g}'; paso8 "^cuentas: cuadro «Guardar como»" 20
+  sleep 1; teclas8 'libro{intro}'; paso8 "^cuentas: guardado " 20
+  teclas8 '{alt-f4}'; paso8 "ventana fuera «libro" 20
+  # salir del escritorio: la consola otra vez; cls la borra y el cursor se ve
+  raton8 50 783 clic; sleep 0.5; raton8 100 735 clic; paso8 "fuera; la pantalla vuelve a la consola" 20
+  paso8 "^/> " 10; sleep 1; foto8 consola
+  teclas8 'cls{intro}'; sleep 1.5; foto8 cls
+  teclas8 'salir{intro}'
+  wait $q; c=$?
+  V8=$(serie "$S8")
+  # lo que se ve, en los pantallazos
+  r() { $PZ "$@" 2> /dev/null || echo 0; }
+  n_tit=$(r cuenta "$T/e8-notas.ppm" 40 21 768 24 1F3F6E)          # el título de la activa (oscuro)
+  n_txt=$(r oscuros "$T/e8-notas.ppm" 48 52 400 40)                 # el texto escrito
+  n_ini=$(r cuenta "$T/e8-notas.ppm" 4 770 92 26 2E7D32 6)          # el botón Inicio
+  n_mov=$(r cuenta "$T/e8-movida.ppm" 240 121 768 24 1F3F6E)        # el título, donde se ha llevado
+  n_dif=$(r difiere "$T/e8-notas.ppm" "$T/e8-movida.ppm" 0 0 1280 766)
+  n_men=$(r cuenta "$T/e8-inicio.ppm" 5 551 298 40 2E7D32 6)        # la cabecera del menú Inicio
+  n_plu=$(r cuenta "$T/e8-pluma.ppm" 240 170 780 500 FFFFFF)        # la página de Pluma
+  n_plt=$(r oscuros "$T/e8-pluma.ppm" 320 255 600 30)              # lo escrito en ella
+  n_cue=$(r oscuros "$T/e8-cuentas.ppm" 56 186 86 58)               # las cifras de A1 a A3
+  n_con=$(r cuenta "$T/e8-consola.ppm" 0 0 1280 800 AAAAAA)         # la consola, otra vez
+  n_cls=$(r cuenta "$T/e8-cls.ppm" 0 0 1280 800 AAAAAA)             # tras cls: «/> » y el cursor
+  n_cur=$(r cuenta "$T/e8-cls.ppm" 24 14 8 2 AAAAAA)                # el cursor: una raya debajo de la casilla 3 de la primera fila
+  if [ $c = 85 ] && [ $bien8 = 1 ] \
+     && [ "$EV8" = "suceso: tecla 30 1|suceso: letra 97|suceso: tecla 30 0|suceso: posición x 640|suceso: posición y 400|suceso: tecla 39 1" ]; then
+    ok "etapa 8, /dev/input/event0 (MDISP, con EVIOCGRAB): la a (KEY_A pulsada, EV_LETRA 97, soltada), la tableta en (640, 400) y la ñ"
+  else ko "etapa 8, /dev/input/event0 no da lo que debe (código $c): $EV8"; fi
+  if [ $bien8 = 1 ] && [ "$n_tit" -gt 8000 ] && [ "$n_txt" -gt 300 ] && [ "$n_ini" -gt 1500 ] && [ "$n_mov" -gt 8000 ] && [ "$n_dif" -gt 50000 ] && [ "$n_men" -gt 8000 ] \
+     && [ "$(python3 -I "$AQUI/programas/miraexfat.py" "$T/e8exfat.img" tipo NOTA.TXT 2> /dev/null)" = "$(printf 'Hola, exFAT: ñandú y pingüino.\nOtra línea.')" ] \
+     && python3 -I "$AQUI/programas/miraexfat.py" "$T/e8exfat.img" > /dev/null 2>&1; then
+    ok "etapa 8, VENTANAS y NOTAS: la ventana (título de la activa: $n_tit puntos oscuros; $n_txt de letra), la barra con Inicio ($n_ini), arrastrada por el título a (240, 148) ($n_dif puntos cambian), el menú Inicio con el ratón; NOTA.TXT guardado en el disco exFAT (miraexfat: bien, lo escrito con ñ y ü)"
+  else ko "etapa 8, VENTANAS y NOTAS no hacen lo que deben: título $n_tit, letra $n_txt, Inicio $n_ini, movida $n_mov/$n_dif, menú $n_men; $(grep -E '^VENTANAS|^NOTAS|parado' <<< "$V8" | tail -6 | paste -sd '|')"; fi
+  if [ $bien8 = 1 ] && [ "$n_plu" -gt 150000 ] && [ "$n_plt" -gt 400 ] && [ "$n_cue" -gt 60 ] && mdir -i "$T/e8fat.img" ::/DOCUMENT/carta.PLU > /dev/null 2>&1 \
+     && [ "$(mtype -i "$T/e8fat.img" ::/DOCUMENT/carta.PLU | head -c 4 | od -An -c | tr -d ' ')" != "" ] \
+     && mdir -b -i "$T/e8fat.img" ::/DOCUMENT 2> /dev/null | grep -qi 'libro' && fsck.fat -n "$T/e8fat.img" > /dev/null 2>&1; then
+    ok "etapa 8, la oficina de Hispa-Pentium con so_hispa64.c: Pluma 2 (desde el menú Inicio; escrito y guardado en FAT32: DOCUMENT/carta.PLU, $(mdir -i "$T/e8fat.img" ::/DOCUMENT/carta.PLU 2> /dev/null | grep -i carta | awk '{print $3}') octetos), Cuentas 2 (12, 30 y =A1*A2+1; guardado: $(mdir -b -i "$T/e8fat.img" ::/DOCUMENT | grep -i libro | sed 's|.*/||')), Alt+F4; fsck.fat sin quejas"
+  else ko "etapa 8, Pluma o Cuentas no hacen lo que deben: página $n_plu, letra $n_plt, celdas $n_cue; $(grep -E '^pluma|^cuentas|parado' <<< "$V8" | tail -6 | paste -sd '|'); $(mdir -b -i "$T/e8fat.img" ::/DOCUMENT 2>&1 | paste -sd ' ')"; fi
+  if [ $bien8 = 1 ] && [ "$n_con" -gt 20000 ] && [ "$n_cls" -lt 400 ] && [ "$n_cls" -gt 20 ] && [ "$n_cur" = 16 ] \
+     && grep -q "^VENTANAS: fuera; la pantalla vuelve a la consola$" <<< "$V8"; then
+    ok "etapa 8, salir del escritorio: la consola vuelve entera ($n_con puntos grises); cls la borra de verdad (quedan $n_cls: «/> » y el cursor, una raya de 8 x 2 debajo de la casilla)"
+  else ko "etapa 8, la consola al salir del escritorio no está bien: $n_con grises, tras cls $n_cls, el cursor $n_cur"; fi
 else
   echo "  (sin OVMF, grub-mkimage o mtools: no se prueba el arranque por UEFI)"
 fi
