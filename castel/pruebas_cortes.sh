@@ -142,6 +142,21 @@ if grep -q '^/rst/grande.bin bytes=[0-9]*-$' $K/srv/pedidos && grep -q '^/calla/
   && grep -q '^/norango/grande.bin bytes=' $K/srv/pedidos && [ "$(grep -c '^/cierra/grande.bin' $K/srv/pedidos)" = 2 ]; then
   ok "al servidor, el resto se le pide con «Range: bytes=N-» (y «If-Range»): una vez por corte"
 else ko "lo que se le pide al servidor no es lo que toca:"; sed 's/^/        /' $K/srv/pedidos; fi
+# (0.8.10, ESCMES.HPQ «al 12 %» en el HP Mini) DESCARGAR que no puede acabar
+# (el servidor corta y luego dice 503): lo bajado se queda en MUERE.PAR; la
+# vez siguiente, con la misma dirección, sigue desde ahí (Range e If-Range)
+cp $K/d.img $K/d1b.img
+ESCRIBE=1 DISCO=$K/d1b.img ARRANQUE=ordenes MODULOS= QEMU_MAS="$NIC" $AQUI/nucleo32/probar.sh $K/SEMILLA.BIN ":pausa 2" \
+  "descargar $U/muere/grande.bin muere.bin" ":pausa 12" "dir muere.*" "descargar $U/muere/grande.bin muere.bin" ":pausa 10" "dir muere.*" > $K/d1b.sal 2>&1
+tr -d '\r' < $K/d1b.sal > $K/d1b.txt
+S=$K/d1b.txt
+mira "(0.8.10) sin poder acabar (cortada y luego 503): lo bajado queda en MUERE.PAR; la vez siguiente, se sigue desde ahí y acaba" \
+  "^DESCARGAR: no se ha bajado nada (el servidor ha dicho 503)\.$" "^DESCARGAR: lo bajado (1500000 octetos) queda en muere\.PAR: la próxima vez se sigue desde ahí\.$" \
+  "^DESCARGAR: se sigue con lo bajado otra vez (1500000 octetos, de muere\.PAR)\.$" "^Se sigue desde el octeto 1500000 (de 3000000)" "^Hecho: muere\.bin, 3000000 octetos"
+if [ "$(grep -c '^/muere/grande.bin bytes=1500000-$' $K/srv/pedidos)" = 2 ] && saca $K/d1b.img MUERE.BIN $K/x.bin && cmp -s $K/x.bin $K/srv/grande.bin \
+  && ! mdir -b -i $K/d1b.img 2> /dev/null | grep -qi 'MUERE\.PA[RI]'; then
+  ok "y lo bajado así es igual, octeto a octeto, al del servidor (el resto, pedido con Range las dos veces; sin .PAR ni .PAI al acabar)"
+else ko "seguir con el .PAR no da el archivo bueno:"; grep muere $K/srv/pedidos | sed 's/^/        /'; mdir -b -i $K/d1b.img 2> /dev/null | grep -i muere | sed 's/^/        /'; fi
 iguales=1
 for f in CIERRA RST NORANGO CALLA LENTO; do saca $K/d1.img $f.BIN $K/x.bin && cmp -s $K/x.bin $K/srv/grande.bin || { iguales=0; echo "        $f.BIN no es igual"; }; done
 sano $K/d1.img

@@ -24,6 +24,9 @@ archivo entero; luego, bien):
   /lento/...       siempre, a unos 150 K/s (para cortar el enlace a mano o
                    pulsar «Cancelar» mientras tanto)
   /muylento/...    siempre, a unos 30 K/s
+  /muere/...       (0.8.10) manda la mitad y cierra; al siguiente pedido (el
+                   resto), 503; luego, bien: DESCARGAR no acaba, deja lo
+                   bajado en NOMBRE.PAR y la vez siguiente sigue desde ahí
 
 Los cortes, solo en lo que pasa de 100 K (no en el catálogo). Cada pedido
 se apunta en CARPETA/pedidos: «camino rango» (el Range, o -), y en
@@ -48,7 +51,8 @@ RAIZ = sys.argv[2] if len(sys.argv) > 2 else None
 rnd = random.Random(20261122)
 GRANDE = bytes(rnd.getrandbits(8) for _ in range(3000000))
 open(os.path.join(CARPETA, 'grande.bin'), 'wb').write(GRANDE)
-MODOS = ('calla', 'cierra', 'rst', 'norango', 'lento', 'muylento')
+MODOS = ('calla', 'cierra', 'rst', 'norango', 'lento', 'muylento', 'muere')
+muertes = {}
 vistos = {}
 cerrojo = threading.Lock()
 
@@ -91,6 +95,17 @@ class Atiende(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(m)
             return
+        if modo == 'muere':
+            with cerrojo:
+                k = muertes.get(c, 0)
+                muertes[c] = k + 1
+            if k == 1:
+                m = b'ahora no\r\n'
+                self.send_response(503)
+                self.send_header('Content-Length', str(len(m)))
+                self.end_headers()
+                self.wfile.write(m)
+                return
         etag = '"%08x-%x"' % (zlib.crc32(d), len(d))
         desde = 0
         if rango and modo != 'norango':
@@ -123,7 +138,7 @@ class Atiende(http.server.BaseHTTPRequestHandler):
             vistos[clave] = vistos.get(clave, 0) + 1
         mandado = 0
         try:
-            if modo in ('calla', 'cierra', 'rst', 'norango') and primera and desde == 0 and len(cuerpo) > 100000:
+            if modo in ('calla', 'cierra', 'rst', 'norango', 'muere') and primera and desde == 0 and len(cuerpo) > 100000:
                 mitad = len(cuerpo) // 2
                 for i in range(0, mitad, 16384):
                     self.wfile.write(cuerpo[i:min(i + 16384, mitad)])
