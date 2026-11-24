@@ -611,7 +611,7 @@ pinta_arriba:
         pop es
         mov di, ebuf2
         call fin_cad
-        mov ah, al
+        mov dl, al
         shr al, 1
         shr al, 1
         shr al, 1
@@ -632,7 +632,7 @@ pinta_arriba:
 .dec:
         mov al, ' '
         stosb
-        mov al, ah
+        mov al, dl
         and al, 15
         add al, '0'
         stosb
@@ -1270,15 +1270,24 @@ c_marcar:
         ret
 c_inicio:
         xor ax, ax
-        mov [cf], ax
-        mov [cc], al
-        jmp short a_celda
+        xor bl, bl
+        jmp short salta
 c_fin:
         call rango_usado
         mov ax, [q_f2]
+        mov bl, [q_c2]
+; ---- el cursor a AX, BL (con Mayúsculas o F8, marcando) ----
+salta:
+        push ax
+        push bx
+        xor dx, dx
+        call mueve
+        pop bx
+        pop ax
         mov [cf], ax
-        mov al, [q_c2]
-        mov [cc], al
+        mov [cc], bl
+        mov byte [sucio], 2
+        ret
 a_celda:
         mov byte [sel_on], 0
         mov byte [sucio], 2
@@ -1657,6 +1666,10 @@ edita_linea:
         xor ah, ah
         int 0x16
         mov bx, [el_x]
+        cmp al, ' '
+        jae .letra
+        mov byte [el_nuevo], 0
+.letra:
         cmp al, 0
         je .esp
         cmp al, 0xE0
@@ -1671,6 +1684,13 @@ edita_linea:
         je .retro
         cmp al, ' '
         jb .pinta
+        cmp byte [el_nuevo], 0      ; en una pregunta, lo primero que se
+        je .l0                      ; teclea sustituye a lo propuesto
+        xor bx, bx
+        mov [el_n], bx
+        mov [el_x], bx
+.l0:
+        mov byte [el_nuevo], 0
         mov cx, [el_n]              ; una letra: se mete
         cmp cx, LIN_MAX
         jae .pinta
@@ -1765,6 +1785,7 @@ pregunta:
 .f:
         mov [el_n], cx
         mov [el_x], cx
+        mov byte [el_nuevo], 1
         call edita_linea
         cmp al, 27
         je .no
@@ -1975,8 +1996,16 @@ c_abrir:
         jc .r
         mov si, ebuf
         call blancos
-        mov di, nombre
+        mov di, nombre2
         call palabra
+        mov word [aviso], m_no_abre
+        mov dx, nombre2             ; ¿existe? (si no, la hoja se queda)
+        call abre_lee
+        jc .r
+        call cierra
+        mov si, nombre2
+        mov di, nombre
+        call copia_cad
         call borra_hoja
         call carga
         mov word [aviso], m_abierto
@@ -2485,6 +2514,25 @@ c_ordenar:
         jc .r
         mov [o_desc], al
         call rango_sel
+        push ds                     ; ¿por qué columna? (la del cursor)
+        pop es
+        mov di, ebuf
+        mov bl, [cc]
+        call pon_col
+        mov byte [di], 0
+        mov si, m_por_col
+        call pregunta
+        jc .r
+        mov si, ebuf
+        call blancos
+        mov di, ebuf2
+        call palabra
+        mov ax, '1'
+        stosw
+        mov si, ebuf2
+        call lee_ref
+        jc .r
+        mov [o_kc], bl
         call ordena
         mov byte [sucio], 2
 .r:
@@ -2526,6 +2574,7 @@ m_ir        db "Ir a la celda: ", 0
 m_copiado   db "Copiado. Vaya adonde quiera la copia y pulse F4 (si marca un rango, lo llena).", 0
 m_nada_clip db "Primero marque lo que quiera copiar y pulse F3.", 0
 m_decimales db "Decimales: ", 0
+m_por_col   db "Ordenar por la columna: ", 0
 m_ancho     db "Ancho de la columna (1 a 75): ", 0
 m_imprimir  db "Imprimir en (PRN, la impresora, o un archivo): ", 0
 m_impreso   db "Impreso.", 0
@@ -2699,6 +2748,7 @@ mn_sel      resb 1
 mn_n        resb 1
 tecla_m     resb 1
 t_atr       resb 1
+el_nuevo    resb 1
 cs_c2       resb 1
 anch        resb NCOL
 nombre      resb 80
@@ -2713,7 +2763,7 @@ ebuf2       resb 256
 ebuf3       resb 256
 avbuf       resb 80
 dtx         resb 256
-ltx         resb 256 + 80
+ltx         resb 1024 + 80
 lbuf        resb 160
 iobuf       resb 512
 fh          resw 1

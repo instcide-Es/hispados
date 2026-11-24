@@ -34,7 +34,7 @@ ordena:
         add ax, [o_n]
         add ax, [o_n]
         mov [o_o], ax
-        mov al, [cc]                ; la columna que decide, dentro del rango
+        mov al, [o_kc]              ; la columna que decide, dentro del rango
         cmp al, [q_c1]
         jae .k1
         mov al, [q_c1]

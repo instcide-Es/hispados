@@ -63,6 +63,7 @@ lee_c:
         ret
 ; CX octetos a DS:DI; CF si se acaba antes
 lee_n:
+        clc
         jcxz .r
 .l:
         call lee_c
@@ -965,7 +966,7 @@ imprime:
         push dx
         mov bl, [q_c1]
         mov bh, [q_c2]
-        mov cx, 255
+        mov cx, 1024                ; (una impresora ancha, o un archivo)
         call construye
         mov cx, [ltx_n]             ; sin los blancos del final
         mov si, ltx

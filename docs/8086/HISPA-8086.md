@@ -86,6 +86,9 @@ Versión 0.10.
   FORMATEA, SISTEMA, PARTIR, REVISAR, ETIQUETA, ATRIBUTO, ARBOL, XCOPIAR,
   MAS, ORDENAR, TECLADO (el teclado español, residente) y PASAR (archivos
   por el puerto serie).
+- **El disquete de Oficina** (`build/oficina8086-360.img`, aparte del
+  sistema): **CUENTAS**, la hoja de cálculo (ver «CUENTAS», más abajo, y
+  [CUENTAS.md](CUENTAS.md)).
 - **Prueba automática** (`make -C h8086 prueba`): 470 comprobaciones en
   QEMU, en veintiuna partes (y la batería entera se pasa también con el
   núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
@@ -387,7 +390,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **casi**: todas las de MS-DOS 3.3 que hacen falta, EDITAR y TECLADO; falta PASAR por el puerto paralelo (y las menores: IMPRIMIR, COMPARAR, COPIADISCO) |
 | 6 | Modo 286: HMA y memoria extendida | **hecha** (0.10): gestor XMS 2.0 dentro del núcleo, A20, `DOS=ALTO`, DISCORAM `/E`; sin UMB |
 | 7 | Hispa-BASIC | |
-| 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | |
+| 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | **empezada**: CUENTAS, la hoja de cálculo, en el disquete de Oficina |
 | 9 | Juegos, manual, versión estable 1.0 | |
 
 Cada etapa se cierra con sus pruebas automáticas y probada en una máquina real.
@@ -823,6 +826,25 @@ de verdad en 1Ah los pierde (los de texto y los programas, no).
 Pendiente: el puerto paralelo (más rápido, y lo tienen todas estas máquinas)
 y un XMODEM de bloques de 1 K.
 
+## CUENTAS (la hoja de cálculo, en el disquete de Oficina)
+
+```
+CUENTAS [hoja] [/G destino] [/I destino]
+```
+
+Una hoja de 256 columnas por 9.999 filas en la que solo ocupa memoria lo que
+tiene algo. Usa números exactos en coma fija de 64 bits: 0,1 + 0,2 da 0,3, y
+REDONDEAR(2,675;2) da 2,68. Admite fórmulas en español y a la manera de hoy
+(`=SUMA(A1:A10)`), y también las de VisiCalc y 1-2-3 (`+A1`,
+`@SUM(A1...A10)`). Solo recalcula lo que depende de lo cambiado, en el orden
+de las dependencias, y avisa de las referencias circulares. Tiene deshacer
+(Ctrl+Z); copiar con referencias relativas y fijas (`$A$1`); formatos de
+euros, pesetas, tanto por ciento y fecha; ordenar e imprimir. Guarda en su
+formato (.CTA), en .CSV con «;» y en .DIF, según la extensión. Con `/G` o
+`/I` convierte o imprime sin pantalla. Ocupa 16,7 K. La historia de las hojas
+de cálculo de entonces, lo que tomamos de ellas y lo que hacemos mejor están
+en [CUENTAS.md](CUENTAS.md).
+
 ## Cómo se construye y se prueba
 
 ```
@@ -866,6 +888,8 @@ partes (veintiuna) y tarda unos TIEMPO minutos;
 | `h8086/prueba/partes_09.sh`, `partes_10.sh` | las partes de la prueba que llegaron con la 0.9 y con la 0.10 |
 | `h8086/prueba/xms.asm` | XMS.COM: prueba del gestor de memoria extendida, de A20 y de la HMA |
 | `h8086/prueba/v86_teclado.js`, `v86_discos.js` | TECLADO y dos disqueteras en el emulador v86 de la web (opcional) |
+| `h8086/programas/cuentas.asm`, `programas/cuentas/*.inc` | CUENTAS, la hoja de cálculo (ver [CUENTAS.md](CUENTAS.md)) |
+| `h8086/prueba/partes_cuentas.sh` | las partes de la prueba de CUENTAS |
 | `h8086/prueba/prueba.sh` | la prueba automática, por partes: `SOLO="partir sistema" ./prueba/prueba.sh` corre solo esas |
 | `h8086/pon_arranque.py` | pone el sector de arranque conservando la BPB del disquete |
 | `h8086/prueba/haz_duro.py` | hace el disco duro de prueba (una partición FAT16) |
