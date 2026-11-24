@@ -89,7 +89,7 @@ termo_qemu() {
 # cargar, y ninguna de las dos deja líneas DATOS dobles (seg= siempre sube)
 termo_dobles() {	# el .LOG de la imagen $1: «bien» si seg= sube siempre y no hay dos líneas iguales
   local L
-  L=$(mdir -b -i $1@@1M ::TERMO 2> /dev/null | grep 'LOG$' | tr -d ' ')
+  L=$(mdir -b -i $1@@1M ::TERMO 2> /dev/null | grep '[0-9]\{8\}\.LOG$' | tr -d ' ')
   mtype -i $1@@1M $L 2> /dev/null > $Y/dobles.log
   awk '/ DATOS fase=/ { n++; if (match($0, /seg=[0-9]+/)) { s = substr($0, RSTART + 4, RLENGTH - 4) + 0; if (s <= a) m++; a = s } else m++; if (v[$0]++) m++ }
        END { if (n >= 30 && !m) print "bien " n; else print "mal " n " " m }' $Y/dobles.log
@@ -140,7 +140,7 @@ termo_guardar() {
   mira "sin la carpeta TERMO: la hace, prueba a escribir y leer de vuelta, y guarda" "termo: prueba de escritura en X:.TERMO: bien (escrita y leída de vuelta)" \
     "termo: suceso: EMPIEZA la prueba de esfuerzo"
   if sano $Y/g.img 2048; then ok "matada a mitad de la carga: la FAT de la memoria, sana (fsck.fat)"; else ko "matada a mitad: la FAT, mal: $(head -n 3 $P/fsck.txt | tr '\n' ' ')"; fi
-  l=$(mdir -b -i $Y/g.img@@1M ::TERMO 2> /dev/null | grep 'LOG$' | head -n 1); c=$(mdir -b -i $Y/g.img@@1M ::TERMO 2> /dev/null | grep 'CSV$' | head -n 1)
+  l=$(mdir -b -i $Y/g.img@@1M ::TERMO 2> /dev/null | grep '[0-9]\{8\}\.LOG$' | head -n 1); c=$(mdir -b -i $Y/g.img@@1M ::TERMO 2> /dev/null | grep '[0-9]\{8\}\.CSV$' | head -n 1)
   n=$(mtype -i $Y/g.img@@1M "$c" 2> /dev/null | grep -c ';carga;')
   if [ -n "$l" ] && mtype -i $Y/g.img@@1M "$l" | grep -q 'SUCESO EMPIEZA la prueba de esfuerzo' && mtype -i $Y/g.img@@1M "$l" | grep -q 'DATOS fase=carga' && [ "$n" -ge 10 ]; then
     ok "matada a mitad de la carga: el .LOG (con la carga empezada) y el .CSV ($n líneas de la carga) quedan en la memoria"
@@ -325,16 +325,16 @@ if grep -q 'termo: estado fase=reposo .* sin_motivo=0$' $S && ! grep -q 'sin_mot
 else ko "(PARPADEO) se pinta sin motivo: $(grep -o 'pintados=.*' $S | tail -n 1)"; fi
 L=$(mdir -b -i $Y/termo.img@@1M ::TERMO 2> /dev/null | tr -d ' ')
 if echo "$L" | grep -q 'LOG$' && echo "$L" | grep -q 'CSV$' && echo "$L" | grep -q 'TXT$' \
-   && mtype -i $Y/termo.img@@1M $(echo "$L" | grep 'CSV$') | grep -q '^[0-9/]*;[0-9:]*;[0-9]*;carga;91,0;' \
-   && mtype -i $Y/termo.img@@1M $(echo "$L" | grep 'LOG$') | grep -q 'SUCESO ACABA la carga .*PARADA DE SEGURIDAD' \
-   && mtype -i $Y/termo.img@@1M $(echo "$L" | grep 'LOG$') | grep -q ' ARRANQUE '; then
+   && mtype -i $Y/termo.img@@1M $(echo "$L" | grep '[0-9]\{8\}\.CSV$') | grep -q '^[0-9/]*;[0-9:]*;[0-9]*;carga;91,0;' \
+   && mtype -i $Y/termo.img@@1M $(echo "$L" | grep '[0-9]\{8\}\.LOG$') | grep -q 'SUCESO ACABA la carga .*PARADA DE SEGURIDAD' \
+   && mtype -i $Y/termo.img@@1M $(echo "$L" | grep '[0-9]\{8\}\.LOG$') | grep -q ' ARRANQUE '; then
   ok "en la memoria, \\TERMO: el CSV (91,0 en la carga), el .LOG (el arranque, los sucesos) y el resumen .TXT"
 else ko "\\TERMO de la memoria: $(echo $L)"; fi
 # cada 2 s por el reloj (el HP Mini apuntaba a veces cada 4 s)
-N=$(mtype -i $Y/termo.img@@1M $(echo "$L" | grep 'CSV$') 2> /dev/null | awk -F';' 'NR > 1 && $3 ~ /^[0-9]+$/ { if (a != "") { d = $3 - a; if (d > 3) m++; n++ } a = $3 } END { printf "%d %d", n, m + 0 }')
+N=$(mtype -i $Y/termo.img@@1M $(echo "$L" | grep '[0-9]\{8\}\.CSV$') 2> /dev/null | awk -F';' 'NR > 1 && $3 ~ /^[0-9]+$/ { if (a != "") { d = $3 - a; if (d > 3) m++; n++ } a = $3 } END { printf "%d %d", n, m + 0 }')
 if [ "${N% *}" -ge 40 ] && [ "${N#* }" -le 1 ]; then ok "el registro, cada 2 s por el reloj: ${N% *} líneas y ${N#* } huecos de más de 3 s (con la carga y la memoria USB escribiendo)"
 else ko "el registro no va cada 2 s: líneas y huecos ${N:-?}"; fi
-N=$(mtype -i $Y/termo.img@@1M $(echo "$L" | grep 'LOG$') 2> /dev/null | sed -n 's/.*DATOS fase=reposo.*ocupado=\([0-9]*\)%.*/\1/p' | sort -n | head -n 5 | tail -n 1)
+N=$(mtype -i $Y/termo.img@@1M $(echo "$L" | grep '[0-9]\{8\}\.LOG$') 2> /dev/null | sed -n 's/.*DATOS fase=reposo.*ocupado=\([0-9]*\)%.*/\1/p' | sort -n | head -n 5 | tail -n 1)
 if [ -n "$N" ] && [ "$N" -le 15 ]; then ok "lo ocupado del procesador en reposo, en el .LOG (ocupado=...): $N % (el núcleo descansa con hlt; el Termómetro duerme entre lecturas)"
 else ko "lo ocupado en reposo: ${N:-no sale en el .LOG} %"; fi
 # 2. el apagón, calentando
@@ -342,8 +342,8 @@ for f in $(mdir -b -i $Y/termo.img@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CS
 termo_qemu $Y/termo.img t2 70 "-cpu Haswell" "46:sendkey c" "56:$C" "56:o /b 0x71 80"
 dd if=$Y/termo.img of=$Y/part.img bs=1M skip=1 status=none
 L=$(mdir -b -i $Y/part.img ::TERMO 2> /dev/null | tr -d ' ')
-if fsck.fat -n $Y/part.img > $Y/fsck.txt 2>&1 && mtype -i $Y/part.img $(echo "$L" | grep 'LOG$') | tail -n 1 | grep -q 'DATOS fase=carga max=80,0' \
-   && mtype -i $Y/part.img $(echo "$L" | grep 'CSV$') | tail -n 1 | grep -q ';carga;80,0;'; then
+if fsck.fat -n $Y/part.img > $Y/fsck.txt 2>&1 && mtype -i $Y/part.img $(echo "$L" | grep '[0-9]\{8\}\.LOG$') | tail -n 1 | grep -q 'DATOS fase=carga max=80,0' \
+   && mtype -i $Y/part.img $(echo "$L" | grep '[0-9]\{8\}\.CSV$') | tail -n 1 | grep -q ';carga;80,0;'; then
   ok "el equipo se apaga de golpe calentando: la FAT sana y el .LOG y el .CSV acaban en la carga, a 80 °C"
 else ko "el apagón: $(tail -n 2 $Y/fsck.txt | tr '\n' ' ')"; fi
 # 3. la vez siguiente
