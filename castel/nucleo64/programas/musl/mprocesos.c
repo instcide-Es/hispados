@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <sys/epoll.h>
 #include <spawn.h>
 #include <pthread.h>
 #include <sys/wait.h>
@@ -100,6 +101,31 @@ int main(int argc, char **argv)
 	MIRA(poll(&pf, 1, 50) == 1 && (pf.revents & POLLIN), "poll: POLLIN cuando hay algo");
 	close(t[0]);
 	close(t[1]);
+	/* epoll de una tubería */
+	{
+		int ep = epoll_create1(EPOLL_CLOEXEC);
+		struct epoll_event ev, sal[4];
+		pipe(t);
+		ev.events = EPOLLIN;
+		ev.data.u64 = 0x1234567890ABCDEFUL;
+		MIRA(ep >= 0 && epoll_ctl(ep, EPOLL_CTL_ADD, t[0], &ev) == 0, "epoll_create1 y EPOLL_CTL_ADD");
+		MIRA(epoll_ctl(ep, EPOLL_CTL_ADD, t[0], &ev) == -1 && errno == EEXIST, "EPOLL_CTL_ADD dos veces: EEXIST");
+		MIRA(epoll_wait(ep, sal, 4, 50) == 0, "epoll_wait de una tubería vacía: 0 al acabar el plazo");
+		write(t[1], "x", 1);
+		MIRA(epoll_wait(ep, sal, 4, 50) == 1 && (sal[0].events & EPOLLIN) && sal[0].data.u64 == 0x1234567890ABCDEFUL, "epoll_wait: EPOLLIN y su dato");
+		ev.events = EPOLLIN | EPOLLONESHOT;
+		epoll_ctl(ep, EPOLL_CTL_MOD, t[0], &ev);
+		MIRA(epoll_wait(ep, sal, 4, 0) == 1 && epoll_wait(ep, sal, 4, 0) == 0, "EPOLLONESHOT: una vez");
+		close(t[1]);
+		ev.events = EPOLLIN;
+		epoll_ctl(ep, EPOLL_CTL_MOD, t[0], &ev);
+		read(t[0], buf, 1);
+		MIRA(epoll_wait(ep, sal, 4, 0) == 1 && (sal[0].events & EPOLLHUP), "sin quien escriba: EPOLLHUP");
+		MIRA(epoll_ctl(ep, EPOLL_CTL_DEL, t[0], 0) == 0 && epoll_wait(ep, sal, 4, 0) == 0, "EPOLL_CTL_DEL");
+		close(t[0]);
+		close(ep);
+		printf("  epoll de una tubería: el plazo, EPOLLIN con su dato, EPOLLONESHOT, EPOLLHUP, EPOLL_CTL_DEL\n");
+	}
 	/* fork, dup2 y execve: la salida de MHOLA por una tubería */
 	texto = malloc(65536);
 	pipe(t);

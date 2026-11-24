@@ -182,7 +182,8 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver tty_lee(p, v, n)
         fin
-        ; [etapa 7] las tuberías
+        ; [etapa 7] las tuberías (y epoll, que no se lee)
+        si p.fd_clase[nat32(fd)] = F_EPOLL entonces devolver EINVAL fin
         si p.fd_clase[nat32(fd)] = F_TUBO_E entonces devolver EBADF fin
         si p.fd_clase[nat32(fd)] = F_TUBO_L entonces
             si pos >= 0 entonces devolver ESPIPE fin
@@ -221,7 +222,8 @@ módulo Sistema
             si n = 0 entonces devolver 0 fin
             devolver escribe_consola(p, v, n)
         fin
-        ; [etapa 7] las tuberías
+        ; [etapa 7] las tuberías (y epoll, que no se escribe)
+        si p.fd_clase[nat32(fd)] = F_EPOLL entonces devolver EINVAL fin
         si p.fd_clase[nat32(fd)] = F_TUBO_L entonces devolver EBADF fin
         si p.fd_clase[nat32(fd)] = F_TUBO_E entonces
             si pos >= 0 entonces devolver ESPIPE fin
@@ -386,6 +388,7 @@ módulo Sistema
             si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver 2 fin
             si p.fd_clase[nat32(fd)] = F_TUBO_L entonces devolver ent64(nat64(p.fd_nobloq[nat32(fd)]) << 11) fin
             si p.fd_clase[nat32(fd)] = F_TUBO_E entonces devolver ent64(1 ob (nat64(p.fd_nobloq[nat32(fd)]) << 11)) fin
+            si p.fd_clase[nat32(fd)] = F_EPOLL entonces devolver 2 fin
             devolver ent64(abierto(p, fd).marcas yb 0x403)
         fin
         devolver EINVAL
@@ -417,6 +420,12 @@ módulo Sistema
         si no fd_bien(p, fd) entonces devolver EBADF fin
         si p.fd_clase[nat32(fd)] = F_CONSOLA entonces
             stat_consola(nat64(dirección(st[0])))
+            r := 0
+        sino si p.fd_clase[nat32(fd)] = F_EPOLL entonces
+            ; [etapa 7] un epoll: un archivo sin nombre, 0600
+            stat_consola(nat64(dirección(st[0])))
+            pon_m32(nat64(dirección(st[0])) + 24, 0x8000 ob 0x180)
+            pon_m64(nat64(dirección(st[0])) + 40, 0)
             r := 0
         sino si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces
             ; [etapa 7] una tubería: S_IFIFO, 0600
@@ -562,7 +571,7 @@ módulo Sistema
 
     función fsync_(p: puntero a Proceso, fd: nat64): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
-        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver EINVAL fin
+        si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver EINVAL fin
         devolver vfs_fsync(abierto(p, fd))
     fin
 
@@ -1308,7 +1317,7 @@ módulo Sistema
                 ensamblador
                     xor ecx, ecx
                     db 0x48, 0x0F, 0xC7, 0xF0       ; rdrand rax
-                    setc cl
+                    db 0x0F, 0x92, 0xC1             ; setc cl
                     mov {r}, rax
                     mov {ok_}, rcx
                 fin
@@ -1319,7 +1328,7 @@ módulo Sistema
                 ensamblador
                     xor ecx, ecx
                     db 0x48, 0x0F, 0xC7, 0xF8       ; rdseed rax
-                    setc cl
+                    db 0x0F, 0x92, 0xC1             ; setc cl
                     mov {r}, rax
                     mov {ok_}, rcx
                 fin
@@ -1557,6 +1566,12 @@ módulo Sistema
             caso 99: r := sysinfo_(p, a1)
             caso 95: r := 18                                 ; umask: 022
             caso 98: r := uso_(p, a2)
+            caso 213:
+                si ent64(ent32(nat32(a1 yb 0xFFFFFFFF))) <= 0 entonces r := EINVAL sino r := epoll_crea(p, 0) fin
+            caso 291: r := epoll_crea(p, a1)
+            caso 233: r := epoll_ctl_(p, a1, a2, a3, a4)
+            caso 232: r := epoll_espera(p, a1, a2, a3, límite_ms(ent64(ent32(nat32(a4 yb 0xFFFFFFFF)))), 0)
+            caso 281: r := epoll_espera(p, a1, a2, a3, límite_ms(ent64(ent32(nat32(a4 yb 0xFFFFFFFF)))), a5)
             caso 324, 334, 435, 439: r := ENOSYS             ; membarrier, rseq, clone3, faccessat2 (musl se las arregla sin ellas)
             caso 63: r := nombre_(p, a1)
             caso 72: r := fcntl_(p, a1, a2, a3)
@@ -1609,6 +1624,179 @@ módulo Sistema
         devolver iret
     fin
 
+    ; ---- [etapa 7] epoll ----
+    ; Un epoll (F_EPOLL) es la lista de lo que se mira (hasta 64: el
+    ; descriptor, lo que se pide y el dato del programa); epoll_wait mira cada
+    ; uno como poll (listo_de) y duerme como poll (de 10 en 10 ms, o la consola,
+    ; y una señal lo despierta). EPOLLONESHOT, de verdad; EPOLLET, como si no
+    ; (avisa mientras siga listo: lo que se lee no se pierde). Un descriptor
+    ; que se cierra sin quitarlo deja de mirarse.
+    constante F_EPOLL = 5
+    constante MAX_EP = 64
+    tipo Epoll = estructura
+        refs, n: nat64
+        fd, ev, dato: arreglo [MAX_EP] de nat64
+    fin
+
+    función ep_(d: nat64): puntero a Epoll
+        devolver puntero(d)
+    fin
+
+    ; las de cada descriptor de otra clase: una referencia más (dup, fork) o una menos (close)
+    función otro_obj(clase: nat64, d: nat64)
+        variable e: puntero a Epoll
+        si clase = F_EPOLL entonces
+            e := ep_(d)
+            suma_atómica(dirección(e.refs), 1)
+        sino
+            otro_(clase, d)
+        fin
+    fin
+
+    función cierra_obj(clase: nat64, d: nat64)
+        variable e: puntero a Epoll
+        si clase = F_EPOLL entonces
+            e := ep_(d)
+            si suma_atómica(dirección(e.refs), nob nat64(0)) = 1 entonces libera(puntero(d)) fin
+        sino
+            cierra_(clase, d)
+        fin
+    fin
+
+    función epoll_crea(p: puntero a Proceso, marcas_: nat64): ent64
+        variable fd: ent32
+        variable e: puntero a Epoll
+        si marcas_ yb (nob nat64(O_CLOEXEC)) <> 0 entonces devolver EINVAL fin
+        fd := fd_libre(p, 0)
+        si fd < 0 entonces devolver EMFILE fin
+        e := puntero(nat64(reserva(tamaño(Epoll))))
+        si e = nulo entonces devolver ENOMEM fin
+        ceros_mem(nat64(e), tamaño(Epoll))
+        e.refs := 1
+        p.fd_clase[nat32(fd)] := F_EPOLL
+        p.fd_obj[nat32(fd)] := nat64(e)
+        p.fd_nobloq[nat32(fd)] := 0
+        p.fd_cloexec[nat32(fd)] := nat32((marcas_ >> 19) yb 1)
+        devolver ent64(fd)
+    fin
+
+    función epoll_de(p: puntero a Proceso, epfd: nat64, ref err: ent64): puntero a Epoll
+        err := 0
+        si no fd_bien(p, epfd) entonces
+            err := EBADF
+            devolver nulo
+        fin
+        si p.fd_clase[nat32(epfd)] <> F_EPOLL entonces
+            err := EINVAL
+            devolver nulo
+        fin
+        devolver ep_(p.fd_obj[nat32(epfd)])
+    fin
+
+    ; epoll_ctl: EPOLL_CTL_ADD 1, DEL 2, MOD 3 (struct epoll_event: 4 octetos de
+    ; lo que se pide y 8 del dato, juntos)
+    función epoll_ctl_(p: puntero a Proceso, epfd: nat64, op: nat64, fd: nat64, v_ev: nat64): ent64
+        variable e: puntero a Epoll
+        variable err: ent64
+        variable i, k: nat32
+        variable t: arreglo [2] de nat64
+        e := epoll_de(p, epfd, err)
+        si e = nulo entonces devolver err fin
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si fd = epfd entonces devolver EINVAL fin
+        k := 0xFFFFFFFF
+        i := 0
+        mientras nat64(i) < e.n hacer
+            si e.fd[i] = fd entonces k := i fin
+            i := i + 1
+        fin
+        si op = 1 o op = 3 entonces
+            si no copia_de(p, nat64(dirección(t[0])), v_ev, 12) entonces devolver EFAULT fin
+        fin
+        según op
+            caso 1:
+                si k <> 0xFFFFFFFF entonces devolver -17 fin          ; EEXIST
+                si e.n >= MAX_EP entonces devolver -28 fin           ; ENOSPC
+                k := nat32(e.n)
+                e.n := e.n + 1
+                e.fd[k] := fd
+                e.ev[k] := t[0] yb 0xFFFFFFFF
+                e.dato[k] := (t[0] >> 32) ob (t[1] << 32)
+            caso 2:
+                si k = 0xFFFFFFFF entonces devolver ENOENT fin
+                e.n := e.n - 1
+                e.fd[k] := e.fd[nat32(e.n)]
+                e.ev[k] := e.ev[nat32(e.n)]
+                e.dato[k] := e.dato[nat32(e.n)]
+            caso 3:
+                si k = 0xFFFFFFFF entonces devolver ENOENT fin
+                e.ev[k] := t[0] yb 0xFFFFFFFF
+                e.dato[k] := (t[0] >> 32) ob (t[1] << 32)
+            si no: devolver EINVAL
+        fin
+        devolver 0
+    fin
+
+    ; epoll_wait y epoll_pwait (con la máscara de señales de mientras, si la da)
+    función epoll_espera(p: puntero a Proceso, epfd: nat64, v_evs: nat64, máx: nat64, límite: nat64, v_másc: nat64): ent64
+        variable e: puntero a Epoll
+        variable err, n: ent64
+        variable i: nat32
+        variable fd, ev, rev, x, vieja: nat64
+        variable buf: puntero a nat32
+        variable consola, tubos_, con_másc: bool
+        variable h: puntero a Hilo
+        e := epoll_de(p, epfd, err)
+        si e = nulo entonces devolver err fin
+        si ent64(ent32(nat32(máx yb 0xFFFFFFFF))) <= 0 o máx > 1024 entonces devolver EINVAL fin
+        h := actual()
+        con_másc := falso
+        vieja := h.s_másc
+        si v_másc <> 0 entonces
+            si no copia_de(p, nat64(dirección(x)), v_másc, 8) entonces devolver EFAULT fin
+            h.s_másc := x yb (nob nat64(NO_BLOQUEABLES))
+            con_másc := cierto
+        fin
+        buf := puntero(nat64(reserva(máx * 12 + 16)))
+        si buf = nulo entonces devolver ENOMEM fin
+        n := 0
+        mientras cierto hacer
+            n := 0
+            consola := falso
+            tubos_ := falso
+            i := 0
+            mientras nat64(i) < e.n y nat64(n) < máx hacer
+                fd := e.fd[i]
+                ev := e.ev[i]
+                si fd_bien(p, fd) y ev yb 0xFFFF <> 0 entonces
+                    rev := nat64(listo_de(p, ent64(fd), nat32(ev yb 0xFFFF) ob 0x18))
+                    si rev <> 0 entonces
+                        buf[nat32(n) * 3] := nat32(rev)
+                        buf[nat32(n) * 3 + 1] := nat32(e.dato[i] yb 0xFFFFFFFF)
+                        buf[nat32(n) * 3 + 2] := nat32(e.dato[i] >> 32)
+                        n := n + 1
+                        ; (EPOLLONESHOT: no avisa más hasta otro EPOLL_CTL_MOD)
+                        si ev yb 0x40000000 <> 0 entonces e.ev[i] := ev yb 0xFFFF0000 fin
+                    sino
+                        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces consola := cierto fin
+                        si p.fd_clase[nat32(fd)] = F_TUBO_L o p.fd_clase[nat32(fd)] = F_TUBO_E entonces tubos_ := cierto fin
+                    fin
+                fin
+                i := i + 1
+            fin
+            si n > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
+            espera_hasta(p, límite, consola y no tubos_)
+        fin
+        si n > 0 entonces
+            si no copia_a(p, v_evs, nat64(buf), nat64(n) * 12) entonces n := EFAULT fin
+        sino si interrumpido(p) entonces
+            n := EINTR
+        fin
+        libera(puntero(nat64(buf)))
+        si con_másc entonces h.s_másc := vieja fin
+        devolver n
+    fin
+
     ; [etapa 7] gettimeofday
     función hora_del_día(p: puntero a Proceso, v: nat64): ent64
         variable tv: arreglo [2] de nat64
@@ -1635,6 +1823,8 @@ módulo Sistema
         época_ns := ahora_ns()
         prepara_futex()
         prepara_tubos()
+        al_otro_fd := nat64(dirección(otro_obj))
+        al_cierra_fd := nat64(dirección(cierra_obj))
         al_sistema := nat64(dirección(atiende))
     fin
 

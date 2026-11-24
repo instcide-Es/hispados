@@ -76,7 +76,7 @@ módulo Tubos64
     fin
 
     ; un descriptor más de ese extremo (dup, fork)
-    función otro_(clase: nat64, d: nat64)
+    público función otro_(clase: nat64, d: nat64)
         variable t: puntero a Tubo
         variable b: nat64
         t := tb(d)
@@ -86,7 +86,7 @@ módulo Tubos64
     fin
 
     ; uno menos (close, exit, execve con O_CLOEXEC)
-    función cierra_(clase: nat64, d: nat64)
+    público función cierra_(clase: nat64, d: nat64)
         variable t: puntero a Tubo
         variable b: nat64
         t := tb(d)
@@ -259,8 +259,6 @@ módulo Tubos64
     fin
 
     público función prepara_tubos()
-        al_otro_fd := nat64(dirección(otro_))
-        al_cierra_fd := nat64(dirección(cierra_))
     fin
 
 fin Tubos64.

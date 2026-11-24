@@ -1348,7 +1348,7 @@ módulo Hispa64
         pruebas2()
         etapa6()
         ; [etapa 7] musl: los programas de C de hoy
-        si no tiene("sinpruebas") y tic_va entonces pruebas_musl() fin
+        si no tiene("sinpruebas") y no tiene("sinmusl") y tic_va entonces pruebas_musl() fin
         si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 > 0 entonces
             pon_color(12, 0)
             escribir("Hispa-64 etapa 7: con fallos (los «MAL» de arriba).\n")

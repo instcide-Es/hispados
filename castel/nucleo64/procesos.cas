@@ -1167,7 +1167,8 @@ módulo Procesos
     función bajo(x: nat64): nat32
         variable r: nat64
         ensamblador
-            bsf rax, {x}
+            mov rcx, {x}
+            db 0x48, 0x0F, 0xBC, 0xC1       ; bsf rax, rcx
             mov {r}, rax
         fin
         devolver nat32(r)
@@ -2651,7 +2652,9 @@ módulo Procesos
         si pid < -1 entonces g := nat64(-pid) fin
         z := nulo
         hay := falso
-        b := toma(dirección(hijos_espera.cerrojo))
+        ; ([etapa 7] primero el de la tabla y luego el de la espera, como quien
+        ; manda una señal: procs_cerrojo, h_cerrojo y el de la espera)
+        b := sin_ints()
         mientras cierto hacer
             toma_sin(dirección(procs_cerrojo))
             hay := falso
@@ -2671,15 +2674,22 @@ módulo Procesos
                 fin
                 i := i + 1
             fin
+            si z <> nulo o no hay o opciones yb 1 <> 0 o interrumpido(p) entonces
+                suelta_sin(dirección(procs_cerrojo))
+                romper
+            fin
+            ; (con el de la espera antes de soltar el de la tabla: el hijo que acabe
+            ; ahora, despierta_todos, espera a que este duerma)
+            toma_sin(dirección(hijos_espera.cerrojo))
             suelta_sin(dirección(procs_cerrojo))
-            si z <> nulo o no hay o opciones yb 1 <> 0 o interrumpido(p) entonces romper fin
             espera_interrumpible(dirección(hijos_espera))
             duerme_en(dirección(hijos_espera))
             toma_sin(dirección(hijos_espera.cerrojo))
             fin_interrumpible()
+            sal_de(dirección(hijos_espera))
+            suelta_sin(dirección(hijos_espera.cerrojo))
         fin
-        sal_de(dirección(hijos_espera))
-        suelta(dirección(hijos_espera.cerrojo), b)
+        restaura(b)
         si z = nulo entonces
             si no hay entonces devolver -10 fin                 ; ECHILD
             si interrumpido(p) entonces devolver ERESTARTSYS fin
