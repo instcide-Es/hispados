@@ -2106,7 +2106,7 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
         "escritorio: lanzo .BLOC.BIN" "^bloc: guardado NOTAS.TXT, 8 octetos"
       dd if=$N/g$hc.img of=$N/g$hc.vol bs=1M skip=1 status=none
       saca $N/g$hc.vol NOTAS.TXT $N/notas.txt; saca $N/g$hc.vol ARRANQUE.TXT $N/arranque.txt
-      if cap $G/g$hc.ppm texto 94 146 102 156 "hola usb" && [ "$(cat $N/notas.txt 2> /dev/null)" = "hola usb" ] && grep -q "^usb: 1 teclado, 1 rat.n, 1 memoria" $N/arranque.txt && grep -q "la del sistema, X:" $N/arranque.txt \
+      if cap $G/g$hc.ppm texto 94 146 102 156 "hola usb" && [ "$(cat $N/notas.txt 2> /dev/null)" = "hola usb" ] && LC_ALL=C grep -q "^usb: 1 teclado, 1 rat.n, 1 memoria" $N/arranque.txt && grep -q "la del sistema, X:" $N/arranque.txt \
         && fsck.fat -n $N/g$hc.vol > $P/fsck.txt 2>&1; then
         ok "$que: lo tecleado con el teclado USB y guardado con el Bloc de notas está en la memoria (sana), con el registro del arranque (ARRANQUE.TXT)"
       else ko "$que: en la memoria USB de arranque no queda lo guardado, o no queda sana:"; sed 's/^/        /' $P/fsck.txt | head -6; fi

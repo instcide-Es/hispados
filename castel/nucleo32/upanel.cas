@@ -665,9 +665,12 @@ módulo UPanel
         yy := yy + desplegable(ID_DISTRIBUCIÓN, sx, yy, an * 2 div 3, "Distribuci\xA2n del teclado", DISTRIBUCIONES, elegida(ID_DISTRIBUCIÓN), falso) + 3 * E
         yy := yy + desplegable(ID_RETARDO, sx, yy, an * 2 div 3, "Al dejar una tecla pulsada, empieza a repetirse", RETARDOS, elegida(ID_RETARDO), falso) + 3 * E
         yy := yy + desplegable(ID_RITMO, sx, yy, an * 2 div 3, "Y se repite", RITMOS, elegida(ID_RITMO), falso) + 3 * E
-        ; (0.8.10) apagado (por omisión: como Windows), encendido o como lo dejó el firmware
-        yy := yy + desplegable(ID_BLOQ_NUM, sx, yy, an * 2 div 3, "Bloq Num al arrancar", BLOQ_NUMS, elegida(ID_BLOQ_NUM), falso) + 3 * E
-        campo(ID_ESCRIBE, sx, yy, an, "Pruebe aqu\xA1 el teclado", escrito, falso)
+        ; (0.8.10) el campo de prueba donde estaba (debajo de lo de antes, la
+        ; casilla de Bloq Num) y, debajo, «Bloq Num al arrancar»: apagado (por
+        ; omisión: como Windows), encendido o como lo dejó el firmware
+        yy := yy + LT + 4 * E
+        yy := yy + campo(ID_ESCRIBE, sx, yy, an, "Pruebe aqu\xA1 el teclado", escrito, falso) + 3 * E
+        desplegable(ID_BLOQ_NUM, sx, yy, an * 2 div 3, "Bloq Num al arrancar", BLOQ_NUMS, elegida(ID_BLOQ_NUM), falso)
     fin
 
     función pinta_red(yy: ent32, abajo: ent32)
