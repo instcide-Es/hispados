@@ -222,9 +222,9 @@ LA RED (por cable)
 
 EL WI-FI
   Con una tarjeta Wi-Fi de las que lleva (Broadcom BCM43224/43225, la del HP
-  Mini 5103; Atheros AR9285 y su familia), el icono de la red de la bandeja
-  son cuatro rayitas: llenas, las de la señal; huecas y con un aspa, sin
-  conectar. Con un clic se abre la ventana del Wi-Fi: las redes a la vista
+  Mini 5103; Broadcom BCM4313, EN PRUEBAS; Atheros AR9285 y su familia), el
+  icono de la red de la bandeja son cuatro rayitas: llenas, las de la señal;
+  huecas y con un aspa, sin conectar. Con un clic se abre la ventana del Wi-Fi: las redes a la vista
   (con un candado las que piden contraseña), la contraseña, «Conectar
   automáticamente», Conectar, Desconectar y Olvidar. Las redes se recuerdan
   en WIFI.INI (sin la contraseña) y el equipo se conecta solo a ellas.
@@ -233,6 +233,20 @@ EL WI-FI
   En la Consola: REDWIFI /REDES, REDWIFI /CONECTAR red (pregunta la
   contraseña),
   REDWIFI /ESTADO. Si no va, mande el archivo C:\HISPA\WIFI.LOG.
+  PRUEBA DE LA BROADCOM BCM4313 (el otro HP Mini de la asociación; es nueva
+  y solo se ha probado sin la tarjeta). Antes de arrancar, ponga la línea
+  Registro=SI en RED.INI (en la carpeta HISPA de la memoria USB; si no hay
+  esa carpeta, en su raíz; si no está, créelo con esa línea). Con el cable
+  de red QUITADO:
+    1. Arranque y espere a que salga el icono del Wi-Fi (1 minuto).
+    2. Un clic en el icono: ¿salen las redes de alrededor, con su señal?
+    3. Conecte con la de la asociación (su contraseña) y espere.
+    4. En la Consola: IPCONFIG y PING 8.8.8.8; y una descarga:
+       DESCARGAR https://hispados.es/ (o abra una página en el Navegador).
+    5. Déjelo 10 minutos conectado (mejor con una descarga larga).
+  Apunte lo que haya visto (redes, si conecta, si se corta) y devuelva
+  WIFI.LOG y RED.LOG (en \HISPA de la memoria, o en su raíz), aunque no
+  haya funcionado: con ellos se ve en qué paso se queda.
 
 SSH Y TAILSCALE (la red privada de sus equipos)
   En la Consola:

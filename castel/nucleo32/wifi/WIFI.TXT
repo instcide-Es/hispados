@@ -20,10 +20,11 @@ Lo que hay en C:\HISPA:
 Las tarjetas que lleva:
   - Broadcom BCM43224 y BCM43225 (la del HP Mini 5103, la del MacBook Air de
     2012): el controlador «brcmsmac» de Linux.
+  - (EN PRUEBAS) Broadcom BCM4313 (la de otros HP Mini): el mismo
+    «brcmsmac», con su parte de radio, el PHY «LCN». Solo se ha probado
+    contra un modelo de la tarjeta: si no va, mande WIFI.LOG.
   - Atheros AR9285, AR9280, AR9287 y otras de la familia AR9002 (la del
     Toshiba NB250): el controlador «ath9k» de Linux.
-  La Broadcom BCM4313 se encuentra, pero todavía no funciona (le falta su
-  parte de radio, el PHY «LCN»).
   - (EN PRUEBAS) Intel Wireless-AC 7265, 3165 y 3168 (la del ASUS GL553VD):
     un controlador propio que hace lo de «iwlwifi» de Linux. De momento solo
     busca las redes (aún no se conecta). Necesita el FIRMWARE DE INTEL, que

@@ -65,7 +65,7 @@ struct conductor {
 	void (*resumen)(void);
 };
 static const struct conductor conductores[] = {
-	{ "Broadcom BCM43224/43225 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL },
+	{ "Broadcom BCM43224/43225/4313 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL },
 	{ "Atheros AR9285/AR9280/AR9287 (ath9k)", ath_busca, ath_monta, ath_enciende, ath_cuentas, ath_resumen },
 	{ "Intel Wireless-AC 7265/3165 (como iwlwifi/MVM; con su firmware en X:\\FIRMWARE, \\FIRMWARE o \\HISPA\\FIRMWARE)", iwl_busca, iwl_monta, iwl_enciende, iwl_cuentas, iwl_resumen },
 };
@@ -82,7 +82,7 @@ static const u16 ids_ath[] = { 0x002B, 0x002A, 0x002E, 0x0029, 0x002D, 0x0024, 0
 static struct radio *ap_sim;
 static int (*canal_real)(int);
 static void (*sondear_real)(void);
-static int canal_sim(int c) { tsim_canal = c; return canal_real(c); }
+static int canal_sim(int c) { if (!tsim_4313) tsim_canal = c; return canal_real(c); }	/* (en la BCM4313, el canal lo saca el modelo del PHY) */
 static void sondear_sim(void) { ap_sim->canal(tsim_canal); ap_sim->sondear(); sondear_real(); }
 #endif
 
@@ -1345,7 +1345,7 @@ static int arranca(void)
 		return 0;
 	}
 #ifdef CHIP_SIMULADO
-	hl_log(2, "NÚCLEO DE PRUEBAS: tarjeta BCM43224 simulada, red «HispaPrueba» en el canal 6\n");
+	hl_log(2, "NÚCLEO DE PRUEBAS: tarjeta %s simulada, red «HispaPrueba» en el canal 6\n", tsim_4313 ? "BCM4313" : "BCM43224");
 	sim_configura("HispaPrueba", "clave de prueba", 6);
 	sim_renovar_pares_cada = 6000;	/* (como la radio simulada) */
 	sim_renovar_grupo_cada = 9000;

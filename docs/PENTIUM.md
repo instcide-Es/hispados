@@ -6246,8 +6246,8 @@ con Hispa-Pentium, como ya va en Hispa-486 (docs/WIFI.md: el HP Mini con su
 Broadcom y el Toshiba NB250 con su Atheros AR9285, conectados por WPA2 de
 verdad). Es **el mismo núcleo Wi-Fi de Hispa-486**, sin reescribir: `wifi/`
 entero (la gestión 802.11 y WPA2 propias; `brcmsmac` y `bcma` de Linux para
-las Broadcom BCM43224/43225; `ath9k` de Linux para las Atheros AR9285, AR9280,
-AR9287 y su familia; la radio de mentira de las pruebas), compilado como
+las Broadcom BCM43224/43225 y, desde el 24/11, la BCM4313; `ath9k` de Linux para
+las Atheros AR9285, AR9280, AR9287 y su familia; la radio de mentira de las pruebas), compilado como
 programa del anillo 3 con `-DHL_PENTIUM`, como `TLS.BIN` con BearSSL.
 
 | | |
@@ -6294,8 +6294,8 @@ si lo estaba, se para). Al contrario que en Hispa-486, **no hace falta
 reiniciar** para cambiar.
 
 Lo que admite es lo de Hispa-486: redes abiertas y **WPA2-Personal con AES**;
-2,4 GHz, 802.11b/g. No: WEP, WPA (TKIP), WPA2-Empresa, WPA3; la BCM4313 se
-encuentra pero no va (su PHY «LCN» no está incluido).
+2,4 GHz, 802.11b/g. No: WEP, WPA (TKIP), WPA2-Empresa, WPA3. La BCM4313, en
+pruebas: abajo, «La BCM4313».
 
 ### Cómo está hecho
 
@@ -6627,14 +6627,81 @@ con el IML (TLV 52) y el **PNVM** (`iwlwifi-so-a0-gf-a0.pnvm` /
 `…-hr-b0`), que se carga tras el ALIVE. Es el mismo trabajo que la etapa 3
 más el PNVM: primero la 3.
 
+### La BCM4313 (el PHY LCN; 24/11, rama `wifi-bcm4313`, marcado «(BCM4313)»)
+
+La **Broadcom BCM4313** (PCI `14E4:4727`; chip `0x4313` rev. 1, núcleo 802.11
+rev. 24, **PHY LCN** rev. 1 con la radio **2064**; 802.11b/g/n, 1x1, solo
+2,4 GHz) es la del otro HP Mini de la asociación. `WIFI.BIN` ya la encontraba
+(`ids_brcm`), pero brcmsmac paraba al montar: faltaba su PHY.
+
+- **Lo portado**: `phy_lcn.c` (5.151 líneas: la puesta en marcha de la radio
+  2064 y su PLL, la RCAL, el cambio de canal 1 a 14 con su VCO, las
+  calibraciones de TX IQ/LO y de RX IQ, la estimación de IQ, el control de
+  potencia por temperatura o por TSSI, el sensor de temperatura y de
+  tensión) y `phytbl_lcn.c` (3.170: las tablas) de **Linux 5.10** (etiqueta
+  `v5.10`), **sin tocar**, con su aviso «Copyright (c) 2010 Broadcom
+  Corporation» y la licencia **ISC** (como el resto de brcmsmac: compatible
+  con la GPL-2.0; wifi/LEEME.md y WIFI.TXT lo dicen). `phy_qmath.c` y
+  `phy_cmn.c` (lo común) ya estaban. En `wifi/nucleo/radio_brcm.c` se
+  quitan las funciones vacías que hacían de PHY LCN. Ocupa unos 42 KB más
+  en `WIFI.BIN` (y en `HSPWIFI.BIN` de Hispa-486, que la lleva igual).
+- **El microcódigo**: nada nuevo. `BCM43XX.FW` (el `brcm/bcm43xx-0.fw` de
+  linux-firmware que ya iba) lleva también las variantes de la LCN
+  (`d11lcn0/1/2initvals24`, `d11lcn0/1/2bsinitvals24` y el microcódigo
+  `bcm43xx_24_lcn`), y `ucode_loader.c` las carga siempre; `main.c` elige
+  la LCN con el núcleo rev. 24. Misma licencia (repartible tal cual).
+- **La antena y el Bluetooth**: lo que hace Linux, que lo decide la SPROM de
+  la tarjeta: con `BFL_FEM` (amplificador de fuera, ePA) y `BFL_FEM_BT` (la
+  antena compartida con el Bluetooth) se carga una u otra tabla de
+  conmutación (`dot11lcn_sw_ctrl_tbl_4313`, `_epa`, `_bt_ipa`, `_bt_epa`,
+  `_bt_epa_p250`), y `main.c` pone lo suyo (`ai_epa_4313war`, `MHF4_EXTPA`
+  o `MHF5_4313_GPIOCTRL`). Hispa-DOS no tiene Bluetooth: como en Linux sin
+  él, la tabla es la que diga la SPROM. `WIFI.LOG` dice cuál ha salido.
+- **La potencia**: brcmsmac sobre bcma (Linux 5.10) no lee `tempsense_option`
+  de la SPROM; con la LCN rev. 1 eso deja el **control por temperatura**
+  (no el lazo cerrado por TSSI). Igual aquí.
+- **`WIFI.LOG`**, al encender (solo mira, no mide): `PHY LCN rev. 1, radio
+  2064 rev. N; amplificador de dentro (iPA)/de fuera (ePA); sin Bluetooth al
+  lado / la SPROM dice que comparte la antena con el Bluetooth; tabla de la
+  antena: …`, el modo de la potencia, el índice de potencia, el cristal y
+  lo que han dado las calibraciones (TX IQ a/b, LO, RX IQ a0/b0).
+- **El modelo** (`tests/wifi/tarjeta_sim.c` con `tsim_4313`): el mínimo para
+  la 4313: el PCI `14E4:4727`, los núcleos (ChipCommon rev. 36, 802.11 rev.
+  24, PCIe rev. 17), el chip `0x4313` encapsulado 8, una sola banda, la SPROM
+  1x1 (sin indicadores; o, con `4313bt`, ePA y Bluetooth), el PHY LCN rev. 1,
+  la radio 2064 (por `3D8h`/`3DAh`, como en los núcleos rev. 24, leída en
+  «dirección | 0x200»), lo que se escribe al PHY con `write_phy_reg` (32 bits
+  por `3FCh`) y los bits de «hecho» de las esperas (RCAL, IQ/LO, estimación
+  de IQ, temperatura). **El modelo oye y emite en el canal que programa el
+  PHY LCN** (lo saca de `657h`, el `ptcentreTs20` del canal): si el cambio
+  de canal no llegase a la radio, la búsqueda no vería las redes de otros
+  canales. Además, el MDIO del núcleo PCIe contesta «hecho» (también para la
+  43224: se ahorran 0,8 s de esperas en vano). Las calibraciones dan lo que
+  den con estos registros: se comprueba que el código las recorre, no que
+  calibren.
+- **Pruebas**: `chip_sim 4313` y `chip_sim 4313bt`, 28 comprobaciones cada
+  una (las 25 de la 43224 y tres de la LCN: las calibraciones al encender,
+  el PHY puesto en los canales 1 a 13 al buscar, y en el 6 al conectar); en
+  la parte 27 (`SOLO=wifi`), esas dos y `WIFISIM.BIN` hecho con el modelo
+  de la 4313 (`hacer.sh … chip4313`) en QEMU: se encuentra, monta el PHY
+  LCN, conecta con WPA2, DHCP y cinco PING.
+- **Sin verificar en el equipo**: todo lo de la radio de verdad (que la 2064
+  sintonice y las calibraciones den valores buenos, la potencia, la
+  sensibilidad, la tabla de antena de esa placa, el Bluetooth si lo
+  lleva). La prueba la explica el `LEEME.TXT` de la memoria (EL WI-FI,
+  «PRUEBA DE LA BROADCOM BCM4313»): `Registro=SI` en `RED.INI`, buscar,
+  conectar, `PING`, una descarga y 10 minutos conectado; devolver
+  `WIFI.LOG` y `RED.LOG`.
+
 ### Lo que falta
 
 - **Probarlo en el HP Mini** (y en el Toshiba, con la Atheros) y corregir con
   `WIFI.LOG`.
 - La interrupción de la tarjeta (hoy se mira en cada vuelta, como en
   Hispa-486); con ella, `WIFI.BIN` no daría vueltas sin nada que hacer.
+- **Probar la BCM4313** en el HP Mini de la asociación (arriba, «La BCM4313»).
 - Lo que falta también en Hispa-486: 802.11n y 5 GHz, la clave de grupo TKIP
-  (los routers en modo mixto), la BCM4313 (su PHY LCN), otras tarjetas
+  (los routers en modo mixto), otras tarjetas
   (Realtek `rtw88`; las Intel, por etapas: arriba, «El Wi-Fi de Intel»).
 - Redes ocultas por su nombre; una IP puesta a mano por red.
 

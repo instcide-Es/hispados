@@ -22,6 +22,8 @@
 #include "pub.h"
 #include "mac80211_if.h"
 #include "main.h"
+#include "phy_int.h"
+#include "phy_lcn.h"
 #include "nucleo.h"
 
 int hl_modinit_bcma_host_pci_init(void);
@@ -63,17 +65,6 @@ void brcms_debugfs_exit(void) { }
 void brcms_debugfs_attach(struct brcms_pub *d) { }
 void brcms_debugfs_detach(struct brcms_pub *d) { }
 void brcms_debugfs_create_files(struct brcms_pub *d) { }
-
-/* el PHY LCN (BCM4313) no se incluye: solo el PHY N */
-struct brcms_phy;
-bool wlc_phy_attach_lcnphy(struct brcms_phy *pi) { hl_log(0, "esta tarjeta lleva el PHY LCN (BCM4313), que no está incluido\n"); return false; }
-void wlc_lcnphy_calib_modes(struct brcms_phy *pi, uint mode) { }
-void wlc_lcnphy_deaf_mode(struct brcms_phy *pi, bool mode) { }
-s8 wlc_lcnphy_get_tssi(struct brcms_phy *pi, s8 *ofdm, s8 *cck) { return 0; }
-int wlc_lcnphy_rx_signal_power(struct brcms_phy *pi, s32 gain) { return 0; }
-s8 wlc_lcnphy_tempsense_degree(struct brcms_phy *pi, bool mode) { return 0; }
-s8 wlc_lcnphy_vbatsense(struct brcms_phy *pi, bool mode) { return 0; }
-bool wlc_phy_tpc_isenabled_lcnphy(struct brcms_phy *pi) { return false; }
 
 /* ----------------------------------------------------------- el bus bcma */
 int pci_register_driver(struct pci_driver *d) { puente = d; return 0; }
@@ -136,7 +127,10 @@ int bcma_bus_register(struct bcma_bus *bus)
 		hl_log(0, "bcma: no se pueden leer los núcleos de la tarjeta (%d)\n", err);
 		return err;
 	}
-	hl_log(2, "Chip BCM%u (0x%04X), revisión %u, encapsulado %u\n",
+	/* (el número del chip: en decimal si pasa de 0x9999, como 43224; si no,
+	 * en hexadecimal, como 0x4313: así los nombra Broadcom) */
+	hl_log(2, bus->chipinfo.id > 0x9999 ? "Chip BCM%u (0x%04X), revisión %u, encapsulado %u\n"
+					     : "Chip BCM%X (0x%04X), revisión %u, encapsulado %u\n",
 	       bus->chipinfo.id, bus->chipinfo.id, bus->chipinfo.rev, bus->chipinfo.pkg);
 	list_for_each_entry(core, &bus->cores, list)
 		hl_log(2, "  núcleo %d: fabricante %03X, tipo %03X, revisión %d, en %08X (envoltorio %08X)\n",
@@ -558,7 +552,8 @@ int brcm_busca(void)
 			       hl_pci_lee(tarjeta.bus0.number, tarjeta.devfn, i + 12));
 	}
 	tarjeta.bar0 = b0 & ~0xfu;
-	brcm.nombre = tarjeta.device == 0x4353 ? "Broadcom BCM43224" : "Broadcom 802.11n";
+	brcm.nombre = tarjeta.device == 0x4353 ? "Broadcom BCM43224"
+		    : tarjeta.device == 0x4727 ? "Broadcom BCM4313" : "Broadcom 802.11n";
 	return 0;
 }
 
@@ -599,6 +594,40 @@ int brcm_monta(struct radio **r)
 	return 0;
 }
 
+/* (BCM4313) Lo que ha quedado del PHY LCN al encender, para WIFI.LOG: qué
+ * placa dice la SPROM que es (amplificador de dentro o de fuera, Bluetooth
+ * al lado: de eso sale la tabla de conmutación de la antena, como en Linux),
+ * cómo se controla la potencia y lo que han dado las calibraciones. Solo
+ * mira: no mide nada nuevo. */
+static void brcm_lcn_resumen(void)
+{
+	struct brcms_info *wl = equipo->priv;
+	struct brcms_c_info *wlc = wl->wlc;
+	struct brcms_phy *pi;
+	struct brcms_phy_lcnphy *lcn;
+	struct lcnphy_cal_results *c;
+	u32 bf = wlc->hw->boardflags;
+
+	if (wlc->band->phytype != PHY_TYPE_LCN || !wlc->band->pi)
+		return;
+	pi = container_of(wlc->band->pi, struct brcms_phy, pubpi_ro);
+	lcn = pi->u.pi_lcnphy;
+	if (!lcn)
+		return;
+	c = &lcn->lcnphy_cal_results;
+	hl_log(2, "PHY LCN rev. %d, radio 2064 rev. %d; amplificador %s; %s; tabla de la antena: %s\n",
+	       pi->pubpi.phy_rev, pi->pubpi.radiorev, (bf & BFL_FEM) ? "de fuera (ePA)" : "de dentro (iPA)",
+	       (bf & BFL_FEM_BT) ? "la SPROM dice que comparte la antena con el Bluetooth" : "sin Bluetooth al lado",
+	       (bf & BFL_FEM) ? ((bf & BFL_FEM_BT) ? (wlc->hw->boardrev < 0x1250 ? "4313_bt_epa" : "4313_bt_epa_p250") : "4313_epa")
+			      : ((bf & BFL_FEM_BT) ? "4313_bt_ipa" : "4313"));
+	hl_log(2, "PHY LCN: potencia %s; índice de potencia %d; cristal %u kHz; temperatura (última medida) %d\n",
+	       pi->hwpwrctrl ? "por TSSI (lazo cerrado)" : pi->temppwrctrl_capable ? "por la temperatura" : "fija",
+	       wlc_lcnphy_get_current_tx_pwr_idx(pi), pi->xtalfreq / 1000, lcn->lcnphy_lastsensed_temperature);
+	hl_log(2, "PHY LCN: calibración TX IQ a=%d b=%d, LO di/dq %04X, LO radio ei0=%u eq0=%u fi0=%u fq0=%u; RX IQ a0=%d b0=%d\n",
+	       (s16)c->txiqlocal_a, (s16)c->txiqlocal_b, c->txiqlocal_didq, c->txiqlocal_ei0, c->txiqlocal_eq0,
+	       c->txiqlocal_fi0, c->txiqlocal_fq0, (s16)c->rxiqcal_coeff_a0, (s16)c->rxiqcal_coeff_b0);
+}
+
 /* Paso 3: encender (microcódigo, PHY y radio), modo estación, canal 1. */
 int brcm_enciende(void)
 {
@@ -607,7 +636,8 @@ int brcm_enciende(void)
 	unsigned int filtro = FIF_BCN_PRBRESP_PROMISC;
 	int err, i;
 
-	hl_log(2, "Encendiendo la radio (microcódigo, PHY N, calibración)...\n");
+	hl_log(2, "Encendiendo la radio (microcódigo, PHY %s, calibración)...\n",
+	       ((struct brcms_info *)equipo->priv)->wlc->band->phytype == PHY_TYPE_LCN ? "LCN" : "N");
 	/* como mac80211: el canal y los límites tienen que estar puestos antes
 	 * de arrancar (brcms_c_init los lee) */
 	equipo->conf.chandef.chan = &sb->channels[0];
@@ -654,6 +684,7 @@ int brcm_enciende(void)
 		hl_log(2, "Microcódigo en marcha: versión %d.%d; potencia pedida %d dBm\n",
 		       wl->wlc->ucode_rev >> 16, wl->wlc->ucode_rev & 0xffff, equipo->conf.power_level);
 	}
+	brcm_lcn_resumen();
 	hl_log(2, "Radio encendida en el canal 1\n");
 	return 0;
 }

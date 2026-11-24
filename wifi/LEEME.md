@@ -18,10 +18,12 @@ Son los de **Linux 5.10** (etiqueta `v5.10` de
 modificar**:
 
 - `drivers/net/wireless/broadcom/brcm80211/brcmsmac/` → `linux/brcmsmac/`,
-  menos `Makefile`, `debug.c`, `led.c`, las trazas (`brcms_trace_*`) y el PHY
-  LCN (`phy/phy_lcn.c`, `phy/phytbl_lcn.c`: es el de la BCM4313 y son 8.000
-  líneas más; lo que el resto llama de él está como funciones vacías en
-  `nucleo/radio_brcm.c`).
+  menos `Makefile`, `debug.c`, `led.c` y las trazas (`brcms_trace_*`). El PHY
+  LCN de la BCM4313 (`phy/phy_lcn.c` y `phy/phytbl_lcn.c`, Copyright (c) 2010
+  Broadcom Corporation, ISC: el aviso, al principio de cada uno) entró el
+  24/11/2026, también de la etiqueta `v5.10` y sin modificar; antes
+  estaba fuera y lo que el resto llama de él eran funciones vacías en
+  `nucleo/radio_brcm.c`.
 - `drivers/net/wireless/broadcom/brcm80211/brcmutil/` → `linux/brcmutil/` y
   `.../brcm80211/include/` → `linux/brcminc/`.
 - De `drivers/bcma/`: `scan.c`, `scan.h`, `core.c`, `sprom.c`,

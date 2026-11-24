@@ -482,7 +482,11 @@ tiene).
    vuelta, acuses y subida de velocidad, renovación de las claves (la de
    grupo y la de pares, y 300 ecos de 1400 con las dos renovándose), parada, sin
    pérdidas de memoria. El modelo dice lo que el controlador *espera* de la
-   tarjeta: prueba nuestro código, no la tarjeta.
+   tarjeta: prueba nuestro código, no la tarjeta. Con **`chip_sim 4313`** (y
+   `4313bt`: la placa con amplificador de fuera y Bluetooth), lo mismo con el
+   modelo de la **BCM4313**: su PHY LCN con la radio 2064, sus
+   calibraciones, los canales 1 a 13 (el modelo oye en el canal que
+   programa el PHY) y WPA2.
 4. **En QEMU, con la radio simulada** (`HSPWIFI /SIMULA`): el residente, el
    paso a modo protegido, el controlador de paquetes y la orden `WIFI` enteros, con
    `CONFRED` (DHCP) y `PING` de verdad por encima; la clave preguntada sin
@@ -578,8 +582,11 @@ registro nuevo lleva el estado del vídeo en cada paso).
 - 802.11n (MCS, agregación) y 5 GHz: el controlador de la radio ya los lleva.
 - La clave de grupo TKIP (routers en modo mixto WPA/WPA2).
 - Usar la interrupción de la tarjeta cuando se sepa que su línea es solo suya.
-- Otras tarjetas: BCM4313 (falta incluir su PHY LCN, que está en Linux),
-  Realtek RTL8822BE (Lenovo A275: `rtw88`, con microcódigo repartible),
+- Probar en un equipo de verdad la **BCM4313** (PCI `14E4:4727`): desde el
+  24/11/2026 lleva su PHY LCN (`phy_lcn.c` y `phytbl_lcn.c` de Linux 5.10,
+  ISC, sin tocar) y pasa la prueba del modelo (`chip_sim 4313`), pero no
+  se ha probado con la tarjeta (detalles en docs/PENTIUM.md, «La BCM4313»).
+- Otras tarjetas: Realtek RTL8822BE (Lenovo A275: `rtw88`, con microcódigo repartible),
   Atheros (`ath9k`, sin microcódigo). La gestión, WPA2 y el residente valen
   para todas: solo cambia la «radio».
 - La capa NDIS para controladores de Windows XP (ver «Decisiones»).

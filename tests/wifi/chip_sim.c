@@ -87,7 +87,10 @@ void w_entrega_eth(const o8 *t, int n) { memcpy(ultima, t, n); ultima_n = n; ent
 
 static int mi_canal(int c)
 {
-	canal_radio = c;
+	/* (BCM4313) el canal en que la tarjeta oye y emite lo pone el modelo
+	 * con lo que programa el PHY LCN, no lo que se le pide */
+	if (!tsim_4313)
+		canal_radio = c;
 	return canal_de_verdad(c);
 }
 
@@ -198,9 +201,16 @@ static void prueba(void)
 	comprueba((cfg[5] & 4) != 0 && (cfg[4] & 6) == 6, "PCI: memoria y bus master encendidos, interrupción apagada");
 	comprueba((cfg[0x44] & 3) == 0, "PCI: la tarjeta dormida (D3) se despierta");
 	k = brcm_enciende();
-	comprueba(k == 0, "la radio se enciende (microcódigo, PHY N)");
+	comprueba(k == 0, tsim_4313 ? "la radio se enciende (microcódigo, PHY LCN y radio 2064, calibraciones)"
+				    : "la radio se enciende (microcódigo, PHY N)");
 	if (k)
 		return;
+	if (tsim_4313) {
+		char b[160];
+		snprintf(b, sizeof b, "(BCM4313) al encender, las calibraciones del PHY LCN: TX IQ/LO (%u), IQ de RX y potencia (%u), RCAL de la 2064 (%u), temperatura (%u)",
+			 tsim_lcn_cal[0], tsim_lcn_cal[1], tsim_lcn_cal[2], tsim_lcn_cal[3]);
+		comprueba(tsim_lcn_cal[0] && tsim_lcn_cal[1] && tsim_lcn_cal[2] && tsim_lcn_cal[3], b);
+	}
 	canal_de_verdad = r->canal;
 	r->canal = mi_canal;
 	w80211_inicia(r);
@@ -216,6 +226,9 @@ static void prueba(void)
 		if (l[k].ssid_n == 10)
 			comprueba(l[k].canal == 6 && l[k].seguridad == W_SEG_WPA2, "búsqueda: «Biblioteca» en el canal 6 con WPA2");
 	comprueba(tramas_tx >= 11 && tx_malas == 0, "búsqueda: los sondeos salen por el anillo de envío, bien formados");
+	if (tsim_4313)
+		comprueba((tsim_lcn_canales & 0x3ffe) == 0x3ffe,
+			  "(BCM4313) búsqueda: el PHY LCN se ha puesto en los canales 1 a 13 (y la radio oye en el que él programa)");
 
 	/* WPA2 */
 	pbkdf2_empieza(&p, "clave de la prueba", (const o8 *)"Biblioteca", 10);
@@ -225,6 +238,8 @@ static void prueba(void)
 	comprueba(espera_estado(W_CONECTADO, 5000), "conecta con WPA2 a través del controlador");
 	w80211_estado(&i);
 	comprueba(i.canal == 6, "queda en el canal 6");
+	if (tsim_4313)
+		comprueba(canal_radio == 6, "(BCM4313) el PHY LCN queda programado en el canal 6");
 	entregadas = 0;
 	comprueba(manda_arp() == 0, "ARP cifrado");
 	corre(60);
@@ -283,12 +298,26 @@ char _fin_bss[4];
 
 void entrada_c(long *pila)
 {
-	char b[64];
+	char b[128];
 
-	charla = pila[0] > 1;
+	{
+		/* «chip_sim [4313|4313bt] [charla]»: con «4313», el modelo de la
+		 * BCM4313; con «4313bt», el de la placa con amplificador de fuera
+		 * (ePA) y la antena compartida con el Bluetooth */
+		int k;
+		for (k = 1; k < pila[0]; k++) {
+			const char *a = (const char *)pila[k + 1];
+			if (!strcmp(a, "4313"))
+				tsim_4313 = 1;
+			else if (!strcmp(a, "4313bt"))
+				tsim_4313 = 2;
+			else
+				charla = 1;
+		}
+	}
 	prueba();
 	vuelca_registro();
-	snprintf(b, sizeof(b), "Wi-Fi (chip simulado): %d comprobaciones, %d fallos\n", hechas, fallos);
+	snprintf(b, sizeof(b), "Wi-Fi (chip simulado, %s): %d comprobaciones, %d fallos\n", tsim_4313 == 2 ? "BCM4313 con ePA y Bluetooth" : tsim_4313 ? "BCM4313" : "BCM43224", hechas, fallos);
 	di(b);
 	sal(fallos != 0);
 }

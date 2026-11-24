@@ -226,7 +226,7 @@
 #      y al arrancar otra vez, se conecta sola; con la e1000: Automático,
 #      Wi-Fi y Cable (RED.INI); el controlador de verdad (brcmsmac y bcma)
 #      contra el modelo de la tarjeta (WIFISIM.BIN) con el microcódigo del
-#      disco; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
+#      disco, la BCM43224 y (BCM4313) la BCM4313 con su PHY LCN; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
 #      (la lista, la contraseña con asteriscos, conectar) y Configuración.
 #  54. (INTEL, SOLO=intel) El Wi-Fi de Intel (wifi/nucleo/radio_iwl.c): el lector del
 #      firmware (.ucode) y el controlador de la 7265 contra el modelo de la tarjeta
@@ -5728,8 +5728,15 @@ if make -s -C $AQUI/.. build/prueba_wifi build/chip_sim > $Wf/make.txt 2>&1; the
   else ko "build/prueba_wifi falla:"; tail -5 $Wf/anf.txt | sed 's/^/        /'; fi
   if $AQUI/../build/chip_sim > $Wf/chip.txt 2>&1 && grep -q ", 0 fallos" $Wf/chip.txt; then ok "en el anfitrión, brcmsmac contra el modelo de la tarjeta: $(tail -1 $Wf/chip.txt | iconv -f CP437 -t UTF-8)"
   else ko "build/chip_sim falla:"; tail -5 $Wf/chip.txt | iconv -f CP437 -t UTF-8 | sed 's/^/        /'; fi
+  # (BCM4313) el PHY LCN (phy_lcn.c de Linux) contra el modelo de la BCM4313:
+  # la placa sin Bluetooth (iPA) y la de amplificador de fuera con Bluetooth
+  for v in 4313 4313bt; do
+    if $AQUI/../build/chip_sim $v > $Wf/chip$v.txt 2>&1 && grep -q ", 0 fallos" $Wf/chip$v.txt; then ok "(BCM4313) en el anfitrión, brcmsmac con el PHY LCN: $(tail -1 $Wf/chip$v.txt | iconv -f CP437 -t UTF-8)"
+    else ko "(BCM4313) build/chip_sim $v falla:"; grep -a "FALLA" $Wf/chip$v.txt | tail -5 | iconv -f CP437 -t UTF-8 | sed 's/^/        /'; tail -1 $Wf/chip$v.txt | iconv -f CP437 -t UTF-8 | sed 's/^/        /'; fi
+  done
 else ko "no se hacen build/prueba_wifi y build/chip_sim: $(tail -2 $Wf/make.txt)"; fi
-if $AQUI/nucleo32/disco.sh $Wf/d.img 16 red wifisim > $Wf/disco.txt 2>&1 && bash $AQUI/nucleo32/wifi/hacer.sh $Wf/WIFISIM.BIN chip > $Wf/chip_hacer.txt 2>&1; then
+if $AQUI/nucleo32/disco.sh $Wf/d.img 16 red wifisim > $Wf/disco.txt 2>&1 && bash $AQUI/nucleo32/wifi/hacer.sh $Wf/WIFISIM.BIN chip > $Wf/chip_hacer.txt 2>&1 \
+   && bash $AQUI/nucleo32/wifi/hacer.sh $Wf/WIFISIM4313.BIN chip4313 > $Wf/chip4313_hacer.txt 2>&1; then
 # 1. sin cable, la radio de mentira: buscar, conectar (WPA2), DHCP y PING por RED.BIN
 cp $Wf/d.img $Wf/e.img
 MEMORIA=64 ESCRIBE=1 DISCO=$Wf/e.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "redwifi /estado" ":pausa 6" "redwifi /redes" ":pausa 2" \
@@ -5813,6 +5820,21 @@ mira "WIFISIM.BIN: brcmsmac y bcma de Linux en el anillo 3, con los anillos de D
 mira "y con él: WPA2, DHCP y cinco PING sin perder ninguno" "^wifi: brcmsmac: brcms_ops_bss_info_changed: associated$" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" \
   "red: DHCP: IP 192\.168\.77\.10" "^    Paquetes: enviados = 5, recibidos = 5, perdidos = 0"
 mira "y la clave por pares se renueva por él sin cortar (el punto de acceso de mentira, cada 6 s)" "wifi: WPA2: clave por pares renovada (n\.º 1)$"
+# 4 ter. (BCM4313) lo mismo con el modelo de la BCM4313: el PHY LCN y la radio
+# 2064 (phy_lcn.c de Linux) se montan, se encienden con sus calibraciones,
+# buscan (el modelo oye en el canal que programa el PHY) y conectan
+cp $Wf/d.img $Wf/k4.img
+mcopy -o -i $Wf/k4.img $Wf/WIFISIM4313.BIN ::WIFI.BIN && mcopy -o -i $Wf/k4.img $Wf/RED.INI ::
+MEMORIA=64 DISCO=$Wf/k4.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "redwifi /estado" ":pausa 8" "redwifi /conectar HispaPrueba" "clave de prueba" ":pausa 2" \
+  "ping -n 5 192.168.77.1" ":pausa 5" > $Wf/k4.sal 2>&1
+tr -d '\r' < $Wf/k4.sal > $Wf/k4.txt
+S=$Wf/k4.txt
+mira "(BCM4313) WIFISIM.BIN con el modelo de la BCM4313: se encuentra (14E4:4727), chip 0x4313, PHY LCN rev. 1 con la radio 2064, sin Bluetooth (tabla de antena «4313»)" \
+  "^wifi: Tarjeta Wi-Fi: 14E4:4727 (subsistema 103C:1483)" "^wifi: Chip BCM4313 (0x4313), revisión 1" "^wifi: Encendiendo la radio (microcódigo, PHY LCN, calibración)\.\.\.$" \
+  "^wifi: PHY LCN rev\. 1, radio 2064 rev\. 0; amplificador de dentro (iPA); sin Bluetooth al lado; tabla de la antena: 4313$" \
+  "^wifi: PASO 3 de 3 hecho: radio en marcha" "^red: Wi-Fi Broadcom BCM4313$"
+mira "(BCM4313) y con ella: WPA2, DHCP y cinco PING sin perder ninguno" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" \
+  "red: DHCP: IP 192\.168\.77\.10" "^    Paquetes: enviados = 5, recibidos = 5, perdidos = 0"
 # 4 bis. (seguridad) una red ABIERTA falsa con el nombre de la WPA2 (WifiSimulada=GEMELA:
 # en el canal 1, se ve antes): se conecta a la WPA2, la lista enseña las dos
 # por separado, la abierta no se usa ni rebaja la recordada, y al arrancar

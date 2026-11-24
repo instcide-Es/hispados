@@ -11,7 +11,8 @@
 # -m32), nasm, ld y objcopy. Sin «make -j».
 # Con «chip», WIFISIM.BIN, el de las pruebas: el mismo, con el modelo de la
 # tarjeta de tests/wifi/tarjeta_sim.c dentro (el controlador de verdad contra
-# una BCM43224 de mentira; en build/wifi-pentium-chip/).
+# una BCM43224 de mentira; en build/wifi-pentium-chip/). Con «chip4313», contra
+# una BCM4313 de mentira (en build/wifi-pentium-chip4313/).
 set -e
 # (0.8.6) la fecha que pone __DATE__ (servicio.c y wifi/nucleo/nucleo.c): la
 # del paquete wifi 0.8.5, para que WIFI.BIN salga igual octeto a octeto cada
@@ -25,6 +26,8 @@ cd "$RAIZ"
 O=build/wifi-pentium
 CHIP=
 if [ "${2:-}" = chip ]; then O=build/wifi-pentium-chip; CHIP="-DHL_SIMULA_ES -DCHIP_SIMULADO -Itests/wifi"; fi
+# (BCM4313) «chip4313»: el mismo, con el modelo de la BCM4313 (PHY LCN) en vez del de la 43224
+if [ "${2:-}" = chip4313 ]; then O=build/wifi-pentium-chip4313; CHIP="-DHL_SIMULA_ES -DCHIP_SIMULADO -DTSIM_4313 -Itests/wifi"; fi
 mkdir -p $O
 BASEF="-m32 -std=gnu11 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
        -fno-strict-aliasing -fno-common -mno-80387 -nostdinc -isystem $(gcc -m32 -print-file-name=include)

@@ -4,7 +4,8 @@
 #     PBKDF2, PRF, AES, envoltorio de claves, CCMP) y la gestión 802.11 con
 #     WPA2 contra el punto de acceso de mentira.
 #  2. build/chip_sim (anfitrión): el controlador de la Broadcom (brcmsmac,
-#     bcma y nuestra capa) contra el modelo de la tarjeta.
+#     bcma y nuestra capa) contra el modelo de la tarjeta (la BCM43224; con
+#     «4313» y «4313bt», la BCM4313 con su PHY LCN).
 #  3. QEMU, HSPWIFI /SIMULA: el residente, el paso a modo protegido, el
 #     packet driver y la orden WIFI con la radio simulada: buscar, conectar
 #     (clave equivocada, clave preguntada sin enseñarla, por número, un
@@ -45,6 +46,10 @@ echo "== Wi-Fi: normas y gestión 802.11 (anfitrión) =="
 if $B/prueba_wifi > $T/host.txt 2>&1 && grep -q ", 0 fallos" $T/host.txt; then ok "$(tail -1 $T/host.txt)"; else ko "prueba_wifi"; tail -20 $T/host.txt; fi
 echo "== Wi-Fi: controlador de la BCM43224 contra el modelo de la tarjeta (anfitrión) =="
 if $B/chip_sim > $T/chip.txt 2>&1 && grep -q ", 0 fallos" $T/chip.txt; then ok "$(tail -1 $T/chip.txt)"; else ko "chip_sim"; tail -20 $T/chip.txt | iconv -f CP437 -t UTF-8 -c; fi
+echo "== Wi-Fi: lo mismo con la BCM4313 (el PHY LCN) contra su modelo (anfitrión) =="
+for v in 4313 4313bt; do
+  if $B/chip_sim $v > $T/chip$v.txt 2>&1 && grep -q ", 0 fallos" $T/chip$v.txt; then ok "$(tail -1 $T/chip$v.txt | iconv -f CP437 -t UTF-8 -c)"; else ko "chip_sim $v"; tail -20 $T/chip$v.txt | iconv -f CP437 -t UTF-8 -c; fi
+done
 
 mkimg() {   # mkimg nombre núcleo config
   cp "$IMG" $T/$1.img

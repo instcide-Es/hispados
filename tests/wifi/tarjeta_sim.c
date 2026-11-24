@@ -1,6 +1,6 @@
 /*
- * tarjeta_sim.c - Un MODELO de la tarjeta Broadcom BCM43224 para probar su
- * controlador sin tenerla: la configuración PCI, los núcleos del bus interno
+ * tarjeta_sim.c - Un MODELO de la tarjeta Broadcom BCM43224 (o, con
+ * tsim_4313, de la BCM4313) para probar su controlador sin tenerla: la configuración PCI, los núcleos del bus interno
  * (ChipCommon, 802.11 y PCIe, con su EROM y una SPROM de revisión 8), los
  * registros del núcleo 802.11 (PHY, radio, memoria compartida) y los anillos
  * de DMA de envío y recepción. Lo que la «tarjeta» emite llega al punto de
@@ -13,6 +13,15 @@
  *
  * OJO: el modelo dice lo que el controlador ESPERA de la tarjeta, no lo que
  * la tarjeta hace: prueba nuestro código, no el hardware.
+ *
+ * (BCM4313) La BCM4313 (PCI 14E4:4727) es otra: núcleo 802.11 de revisión
+ * 24, PHY LCN de revisión 1 con la radio 2064, una sola banda (2,4 GHz) y una
+ * sola cadena. Lo que el modelo añade para ella es lo mínimo para que el PHY
+ * LCN de brcmsmac (phy_lcn.c) pase por su puesta en marcha: el número de la
+ * radio, que la 2064 se lee en «dirección | 0x200» y los bits de «hecho» de
+ * sus esperas (la calibración de la resistencia, la estimación de IQ, el
+ * sensor de temperatura). Las calibraciones dan lo que den con estos
+ * registros: comprueban que el código las recorre, no que calibren.
  *
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
  */
@@ -66,6 +75,18 @@ static int txs_cab, txs_fin;
 static int tx_cur[6];
 static int rx_cur;
 int tsim_canal = 1;
+/* (BCM4313) los canales a los que el PHY LCN se ha puesto (bit c) */
+u32 tsim_lcn_canales;
+/* (BCM4313) cuántas veces se ha esperado a cada calibración: 0 TX IQ/LO, 1
+ * estimación de IQ (la de RX IQ y la potencia), 2 RCAL, 3 temperatura */
+u32 tsim_lcn_cal[4];
+/* (BCM4313) 1: el modelo es de una BCM4313 en vez de una BCM43224 (2: la
+ * BCM4313 de la placa con amplificador de fuera y Bluetooth al lado) */
+#ifdef TSIM_4313
+int tsim_4313 = 1;
+#else
+int tsim_4313;
+#endif
 #define canal_radio tsim_canal
 static struct radio *ap;	/* el punto de acceso de mentira (sim.c) */
 u32 tsim_tx, tsim_rx, tsim_tx_malas, tsim_accesos;
@@ -156,6 +177,66 @@ static void envia_cola(int i, u32 ptr)
 	pon(r_d11, 0x200 + 0x40 * i + 0x10, 4, 0x20000000 | (ptr & 0x1fff));
 }
 
+/* (BCM4313) El PHY LCN: lo que sus esperas miran. Los disparos se dan por
+ * hechos en cuanto se leen. (Aquí, a diferencia del modelo de la 43224, lo
+ * que se escribe con write_phy_reg, en 32 bits por 3FCh, se guarda y se lee
+ * después: el PHY LCN lee y modifica mucho lo que acaba de escribir.) */
+static u32 lcn_phy_lee(u32 r)
+{
+	u32 v = phy[r];
+
+	switch (r) {
+	case 0x451:			/* calibración de IQ/LO en marcha (bits 14 y 15) */
+		tsim_lcn_cal[0]++;
+		return v & 0x3fff;
+	case 0x481:			/* estimación de IQ en marcha (bit 9) */
+		tsim_lcn_cal[1]++;
+		return v & ~0x200u;
+	case 0x476:			/* sensor de temperatura/tensión: medida hecha */
+		tsim_lcn_cal[3]++;
+		return v | 0x8000;
+	}
+	return v;
+}
+
+static void lcn_phy_escribe(u32 r, u32 v)
+{
+	phy[r] = v;
+	/* el canal: el que el PHY LCN programa al cambiarlo
+	 * (wlc_phy_chanspec_set_lcnphy pone en 657h el ptcentreTs20 de su
+	 * tabla lcnphy_sfo_cfg: 965 + 2 por canal; el 14, 994). La tarjeta
+	 * oye y emite en ESE canal: si el PHY no lo cambia, no se ve ninguna
+	 * red de otro canal */
+	if (r == 0x657) {
+		int c = v == 994 ? 14 : (int)(v - 965) / 2 + 1;
+		if (c >= 1 && c <= 14 && (v == 994 || !((v - 965) & 1))) {
+			canal_radio = c;
+			tsim_lcn_canales |= 1u << c;
+		}
+	}
+}
+
+/* La radio 2064: se escribe en la dirección y se lee en «dirección | 0x200»;
+ * sin el 0x200 (solo para leer su número), los registros 0 a 2 dicen
+ * 0x2064, revisión 0 */
+static u32 lcn_radio_lee(u32 r)
+{
+	if (!(r & 0x200)) {
+		if (r == 0)
+			return 0x00;		/* revisión y versión */
+		if (r == 1)
+			return 0x64;
+		if (r == 2)
+			return 0x20;
+	}
+	r &= 0x1ff;
+	if (r == 0x05c) {		/* la calibración de la resistencia (RCAL), hecha */
+		tsim_lcn_cal[2]++;
+		return radio_r[r] | 0x20;
+	}
+	return radio_r[r];
+}
+
 static u32 plano_lee(u32 dir, int tam)
 {
 	u32 base = dir & ~0xfffu, off = dir & 0xfff;
@@ -194,11 +275,19 @@ static u32 plano_lee(u32 dir, int tam)
 			return v | 0x00030000 | ((v & 0x700) << 16);
 		}
 		case 0x3e0:
+			if (tsim_4313)
+				return 0x0801;		/* (BCM4313) PHY LCN, revisión 1 */
 			return 0x0406;			/* PHY N, revisión 6 */
 		case 0x3fe:
+			if (tsim_4313)
+				return lcn_phy_lee(le(r_d11, 0x3fc, 2) & 0xfff);
 			if ((le(r_d11, 0x3fc, 2) & 0xfff) == 0x78 || (le(r_d11, 0x3fc, 2) & 0xfff) == 0x129)
 				return 0;		/* los disparos (secuencias, medidas) se borran solos */
 			return phy[le(r_d11, 0x3fc, 2) & 0xfff];
+		case 0x3da:			/* (BCM4313: núcleo rev. 24, la radio va por 3D8h/3DAh) */
+			if (tsim_4313)
+				return lcn_radio_lee(le(r_d11, 0x3d8, 2) & 0xfff);
+			break;
 		case 0x3fa:
 			if ((le(r_d11, 0x3f6, 2) & 0xfff) == 1)
 				return ((5u << 28) | (0x2056 << 12) | 0x17f) & 0xffff;
@@ -212,10 +301,14 @@ static u32 plano_lee(u32 dir, int tam)
 		}
 		return le(r_d11, off, tam);
 	}
-	if (base == PCIE)
+	if (base == PCIE) {
+		if (off == 0x128)		/* MDIO (la SerDes del PCIe): hecho en el acto */
+			return le(r_pcie, off, tam) | 0x100;
 		return le(r_pcie, off, tam);
+	}
 	if (base == ENV + 0x1000 && off == 0x500)
-		return 0x000c;				/* doble banda, y el reloj rápido listo */
+		return tsim_4313 ? 0x0005		/* (BCM4313) solo 2,4 GHz, y el reloj rápido listo */
+				 : 0x000c;		/* doble banda, y el reloj rápido listo */
 	if (base == ENV || base == ENV + 0x1000 || base == ENV + 0x3000)
 		return le(r_env[(base - ENV) >> 12 == 3 ? 2 : (base - ENV) >> 12], off, tam);
 	return 0xffffffff;
@@ -254,9 +347,27 @@ static void plano_escribe(u32 dir, int tam, u32 v)
 	case 0x164:
 		shm[(le(r_d11, 0x160, 4) >> 16) & 3][le(r_d11, 0x160, 4) & 0x3fff] = v;
 		return;
+	case 0x3fc:
+		/* (BCM4313) write_phy_reg: dirección y dato de una vez, en 32 bits */
+		if (tsim_4313 && tam == 4) {
+			pon(r_d11, off, 2, v);
+			lcn_phy_escribe(v & 0xfff, v >> 16);
+			return;
+		}
+		break;
 	case 0x3fe:
+		if (tsim_4313) {
+			lcn_phy_escribe(le(r_d11, 0x3fc, 2) & 0xfff, v & 0xffff);
+			return;
+		}
 		phy[le(r_d11, 0x3fc, 2) & 0xfff] = v;
 		return;
+	case 0x3da:
+		if (tsim_4313) {
+			radio_r[le(r_d11, 0x3d8, 2) & 0x1ff] = v;	/* (la 2064 se lee en +0x200) */
+			return;
+		}
+		break;
 	case 0x3fa:
 		radio_r[le(r_d11, 0x3f6, 2) & 0xfff] = v;
 		return;
@@ -335,13 +446,13 @@ void tarjeta_sim_monta(struct radio *punto_de_acceso)
 	ap = punto_de_acceso;
 	sim_entrega = anillo_rx;
 
-	/* PCI: 14E4:4353, red, BAR0 de memoria de 64 bits, IRQ 10; capacidades
-	 * de energía (40h) y PCIe (D0h) */
-	pon(cfg, 0, 4, 0x435314e4);
+	/* PCI: 14E4:4353 (o 14E4:4727, la BCM4313), red, BAR0 de memoria de 64
+	 * bits, IRQ 10; capacidades de energía (40h) y PCIe (D0h) */
+	pon(cfg, 0, 4, tsim_4313 ? 0x472714e4 : 0x435314e4);
 	pon(cfg, 4, 4, 0x00100000);
 	pon(cfg, 8, 4, 0x02800001);
 	pon(cfg, 0x10, 4, BAR | 4);
-	pon(cfg, 0x2c, 4, 0x1510103c);
+	pon(cfg, 0x2c, 4, tsim_4313 ? 0x1483103c : 0x1510103c);	/* (subsistemas de HP; el de la 4313, uno cualquiera) */
 	cfg[0x34] = 0x40; cfg[0x3c] = 10; cfg[0x3d] = 1;
 	cfg[0x40] = 1; cfg[0x41] = 0xd0; cfg[0x44] = 3;	/* dormida (D3): hay que despertarla */
 	cfg[0xd0] = 0x10; cfg[0xd1] = 0;
@@ -354,13 +465,17 @@ void tarjeta_sim_monta(struct radio *punto_de_acceso)
 		erom[n++] = (dir) | 0x5; \
 		erom[n++] = (env) | 0x85; \
 	} while (0)
-	NUCLEO(0x800, 0x22, CC, ENV, 0);
-	NUCLEO(0x812, 0x17, D11, ENV + 0x1000, 1);
-	NUCLEO(0x820, 0x0f, PCIE, ENV + 0x3000, 1);
+	/* (BCM4313: ChipCommon rev. 36, 802.11 rev. 24, PCIe rev. 17) */
+	NUCLEO(0x800, tsim_4313 ? 0x24 : 0x22, CC, ENV, 0);
+	NUCLEO(0x812, tsim_4313 ? 0x18 : 0x17, D11, ENV + 0x1000, 1);
+	NUCLEO(0x820, tsim_4313 ? 0x11 : 0x0f, PCIE, ENV + 0x3000, 1);
 	erom[n++] = 0xf;
-	/* ChipCommon: BCM43224 rev. 1, con PMU y SPROM */
-	pon(r_cc, 0, 4, 43224 | (1 << 16) | (0xa << 20) | (3 << 24) | (1u << 28));
-	pon(r_cc, 4, 4, 0x50000000 | 0x22);
+	/* ChipCommon: BCM43224 rev. 1 (o BCM4313 rev. 1, encapsulado 8), con PMU y SPROM */
+	if (tsim_4313)
+		pon(r_cc, 0, 4, 0x4313 | (1 << 16) | (8 << 20) | (3 << 24) | (1u << 28));
+	else
+		pon(r_cc, 0, 4, 43224 | (1 << 16) | (0xa << 20) | (3 << 24) | (1u << 28));
+	pon(r_cc, 4, 4, 0x50000000 | (tsim_4313 ? 0x24 : 0x22));
 	pon(r_cc, 0xfc, 4, EROM);
 	pon(r_cc, 0x190, 4, 1);
 	pon(r_cc, 0x604, 4, 0x00000006);		/* PMU rev. 6 */
@@ -374,6 +489,15 @@ void tarjeta_sim_monta(struct radio *punto_de_acceso)
 	sprom[0x9c / 2] = 0x0303;			/* antenas disponibles */
 	sprom[0x9e / 2] = 0x0202;			/* ganancia de las antenas */
 	sprom[0xa2 / 2] = 0x0233;			/* dos cadenas de envío y dos de recepción */
+	if (tsim_4313) {
+		/* (BCM4313) sin Bluetooth al lado ni amplificador de fuera (iPA):
+		 * los indicadores, a cero; una cadena de envío y una de recepción.
+		 * Con tsim_4313 = 2, la otra placa: amplificador de fuera (ePA,
+		 * BFL_FEM) y la antena compartida con el Bluetooth (BFL_FEM_BT) */
+		sprom[0x84 / 2] = tsim_4313 == 2 ? 0x0800 : 0;
+		sprom[0x86 / 2] = tsim_4313 == 2 ? 0x0040 : 0;
+		sprom[0xa2 / 2] = 0x0211;
+	}
 	for (i = 0; i < 2; i++) {
 		int b = (0xc0 + 0x20 * i) / 2;
 		sprom[b] = 0x4a3e;			/* potencia máxima e ITSSI (2,4 GHz) */
