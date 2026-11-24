@@ -607,8 +607,18 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 		return 0;
 	}
 
-	if ((info & KI_PAR) && !(info & KI_MIC) && w->paso == 2)
-		return 0;	/* un paso 1 sin firmar con las claves ya puestas: no */
+	if ((info & KI_PAR) && !(info & KI_MIC) && w->paso == 2) {
+		/* un paso 1 sin firmar con las claves ya puestas: no (aún no se
+		 * renueva la clave por pares: haría falta una PTK nueva aparte, sin
+		 * dejar la de ahora hasta el paso 3). (0.8.10, el HP Mini: una
+		 * descarga larga por el Wi-Fi se cortaba) Se dice, una vez: si el
+		 * punto de acceso la renueva cada tanto, desasocia al no tenerla */
+		static int dicho;
+
+		if (!dicho++)
+			hl_log(0, "WPA: el punto de acceso pide renovar la clave por pares (un paso 1 con las claves ya puestas): aún no se hace; si luego se corta la conexión, es esto\n");
+		return 0;
+	}
 	if ((info & KI_PAR) && !(info & KI_MIC)) {
 		/* mensaje 1: el ANonce. Sacamos el SNonce y la PTK. */
 		o8 semilla[32 + 6 + 8];

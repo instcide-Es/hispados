@@ -540,7 +540,8 @@ OPCIONALES = [
      + [('NAVEGA.MNU', r'\HISPA\MENU\NAVEGA.MNU'), ('NAVEGA.ICP', r'\HISPA\MENU\NAVEGA.ICP')]),
     # (ESCUDO) el antivirus (castel/nucleo32/escudo/paquete.sh). Sus firmas, aparte
     # (los paquetes «escbase», «escmes» y «escdia», que hace tools/escudo_firmas.py)
-    ('escudo', '0.2.1', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
+    # (0.8.10) 0.2.2: sin la lista de paquetes, otra vez a los 10 s, y el aviso en corto (el HP Mini)
+    ('escudo', '0.2.2', 'Escudo: el antivirus (con las firmas de ClamAV), para el equipo y para revisar memorias USB',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('ESCUDO.BIN', r'\HISPA\ESCUDO.BIN'), ('ESCUDO/LEEME.TXT', r'\HISPA\ESCUDO\LEEME.TXT'),
         ('MENU/ESCUDO.MNU', r'\HISPA\MENU\ESCUDO.MNU'), ('MENU/ESCUDO.ICP', r'\HISPA\MENU\ESCUDO.ICP')]),

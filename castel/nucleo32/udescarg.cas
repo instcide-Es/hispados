@@ -24,8 +24,15 @@
 ;  red (hasta 2 minutos cada vez) y se sigue desde donde iba, pidiendo el
 ;  resto («Range: bytes=N-», con «If-Range» para que sea el mismo archivo);
 ;  si el servidor no lo deja (contesta 200 con todo), se empieza de nuevo.
-;  Hasta 8 intentos (3, y 20 s de espera a la red, si aún no se ha bajado
-;  nada). Acaba con 3 si se ha cancelado.
+;  Hasta 5 intentos (3, y 20 s de espera a la red, si aún no se ha bajado
+;  nada), con «Reintentando (2 de 5)» en el avance. Acaba con 3 si se ha
+;  cancelado.
+;  (0.8.10, ESCMES.HPQ de 25 MB que se quedaba «al 12 %») Si no se puede
+;  acabar, lo bajado se queda en NOMBRE.PAR, y en NOMBRE.PAI la dirección y
+;  lo que dice qué archivo es (ETag, Last-Modified): la próxima vez que se
+;  pida LA MISMA dirección al mismo archivo, se sigue desde ahí («Range» con
+;  «If-Range»; si el servidor ya tiene otro, se empieza de nuevo). Quien lo
+;  usa (PAQUETES) comprueba la suma al final.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Udescarg
@@ -40,7 +47,7 @@ módulo Udescarg
     constante TROZO_ESPERA = 50                 ; se espera lo que llega de medio segundo en medio segundo
     constante ESPERA_RED = 12000                ; tics (2 min): lo que se espera a que vuelva la red
     constante ESPERA_RED_ANTES = 2000           ; (20 s, si aún no se ha bajado nada: sin red desde el principio, no se espera tanto)
-    constante MAX_INTENTOS = 8
+    constante MAX_INTENTOS = 5                  ; (0.8.10: eran 8; cada vez se espera más: 1, 2, 4, 8 y 15 s)
     constante CORTADO = 0xFFFFFFFE              ; lo que da una(): se ha cortado, y se puede volver a probar
     constante SIN_OCTETOS = 0xFFFFFFFD          ; (el error de llena: 30 s sin que llegue nada)
 
@@ -176,7 +183,8 @@ módulo Udescarg
         si cerrada entonces devolver falso fin
         ; (CORTES) a trozos de medio segundo: entre uno y otro, ¿cancelar?;
         ; y 30 s sin un octeto, cortada
-        quieto := 0
+        ; (0.8.10) lo que pasa de verdad, por el reloj (no lo que se ha pedido esperar)
+        quieto := tics()
         mientras cierto hacer
             r := recibir(sock, buf, CABE, TROZO_ESPERA)
             si r <> TIEMPO entonces romper fin
@@ -185,8 +193,7 @@ módulo Udescarg
                 cerrada := cierto
                 devolver falso
             fin
-            quieto := quieto + TROZO_ESPERA
-            si quieto >= ESPERA entonces
+            si tics() - quieto >= ESPERA entonces
                 error_red := SIN_OCTETOS
                 cerrada := cierto
                 devolver falso
@@ -515,7 +522,7 @@ módulo Udescarg
         fin
         ; (CORTES) lo que contesta a «el resto»
         si a_rango entonces
-            si código = 416 y total_ > 0 y escritos = total_ entonces
+            si código = 416 y (total_ = 0 o escritos = total_) entonces
                 ; (ya estaba todo)
                 cerrar_conexión(sock)
                 devolver 200
@@ -528,6 +535,7 @@ módulo Udescarg
                     empieza_de_nuevo()
                     devolver CORTADO
                 fin
+                si total_ = 0 entonces total_ := tot_r fin         ; (0.8.10: seguido de un .PAR)
                 imprimir2("Se sigue desde el octeto %u (de %u)", escritos, total_)
             sino si código = 200 entonces
                 escribir("DESCARGAR: el servidor no deja seguir desde donde iba (o el archivo ha cambiado): se empieza de nuevo.\n")
@@ -762,6 +770,7 @@ módulo Udescarg
             ; (CORTES) el archivo, el mismo aunque se vuelva a probar
             si no creado entonces
                 si dado entonces copiar_hasta(archivo, pal, 128) sino nombre_de_archivo() fin
+                si intentos = 0 y vueltas = 0 entonces sigue_a_medias() fin      ; (0.8.10)
             fin
             código := una()
             si cancelado entonces devolver acaba(3) fin
@@ -777,7 +786,12 @@ módulo Udescarg
                     si cancelado entonces devolver acaba(3) fin
                     devolver acaba(1)
                 fin
-                imprimir1("Otra vez (el intento %u)...\n", intentos + 1)
+                imprimir2("Otra vez (el intento %u de %u)...\n", intentos + 1, MAX_INTENTOS)
+                ; (0.8.10) y en el avance (la ventana de PAQUETES), en vez de quedarse en el %
+                d[0] := intentos + 1
+                d[1] := MAX_INTENTOS
+                formatear(pal, 128, "Reintentando (%u de %u):", d)
+                di_avance_texto(pal)
                 seguir
             fin
             si código = 0 entonces devolver acaba(1) fin
@@ -817,6 +831,92 @@ módulo Udescarg
         devolver 0
     fin
 
+    ; (0.8.10) NOMBRE.PAR / NOMBRE.PAI: el archivo con la extensión cambiada
+    función con_extensión(t: puntero a byte, ext: puntero a byte)
+        variable i, k: nat32
+        copiar_hasta(t, archivo, 120)
+        k := longitud(t)
+        i := k
+        mientras i > 0 y t[i - 1] <> '.' y t[i - 1] <> '\\' y t[i - 1] <> ':' hacer i := i - 1 fin
+        si i > 0 y t[i - 1] = '.' entonces t[i - 1] := 0 fin
+        concatenar(t, ext)
+    fin
+
+    ; (0.8.10) lo bajado a medias, para la próxima vez
+    función guarda_a_medias()
+        variable par, pai: arreglo [128] de byte
+        variable x: arreglo [700] de byte
+        variable m: nat32
+        si escritos = 0 entonces devolver fin
+        con_extensión(par, ".PAR")
+        con_extensión(pai, ".PAI")
+        borrar(par)
+        si es_error(renombrar(archivo, par)) entonces devolver fin
+        Textos32.copiar(x, url)
+        concatenar(x, "\r\n")
+        concatenar(x, etiqueta)
+        concatenar(x, "\r\n")
+        concatenar(x, modificado)
+        concatenar(x, "\r\n")
+        m := crear(pai)
+        si no es_error(m) entonces
+            escribir_archivo(m, x, longitud(x))
+            cerrar(m)
+        fin
+        imprimir2("DESCARGAR: lo bajado (%u octetos) queda en %s: la próxima vez se sigue desde ahí.\n", escritos, nat32(dirección(par[0])))
+    fin
+
+    ; (0.8.10) ¿hay NOMBRE.PAR de esta misma dirección? Entonces se sigue con él
+    función sigue_a_medias()
+        variable par, pai: arreglo [128] de byte
+        variable x: arreglo [700] de byte
+        variable m, n, i, j: nat32
+        si a_pantalla entonces devolver fin
+        con_extensión(par, ".PAR")
+        con_extensión(pai, ".PAI")
+        m := abrir_para(pai, PARA_LEER)
+        si es_error(m) entonces devolver fin
+        n := leer(m, x, 699)
+        cerrar(m)
+        si es_error(n) entonces n := 0 fin
+        x[n] := 0
+        ; la primera línea, la dirección
+        i := 0
+        mientras i < n y x[i] <> '\r' y x[i] <> '\n' hacer i := i + 1 fin
+        x[i] := 0
+        si no iguales(x, url) entonces
+            borrar(par)
+            borrar(pai)
+            devolver
+        fin
+        ; la segunda, la ETag; la tercera, Last-Modified
+        i := i + 2
+        j := i
+        mientras j < n y x[j] <> '\r' hacer j := j + 1 fin
+        x[j] := 0
+        copiar_hasta(etiqueta, dirección(x[i]), 100)
+        i := j + 2
+        j := i
+        mientras j < n y x[j] <> '\r' hacer j := j + 1 fin
+        si j < 700 entonces x[j] := 0 fin
+        si i < n entonces copiar_hasta(modificado, dirección(x[i]), 64) fin
+        borrar(archivo)
+        si es_error(renombrar(par, archivo)) entonces devolver fin
+        borrar(pai)
+        salida := abrir_para(archivo, PARA_AÑADIR)
+        si es_error(salida) entonces devolver fin
+        escritos := largo_de(salida)
+        si escritos = 0 entonces
+            cerrar(salida)
+            devolver
+        fin
+        creado := cierto
+        total_ := 0
+        próximo_punto := 32768
+        próximo_avance := 16384
+        imprimir2("DESCARGAR: se sigue con lo bajado otra vez (%u octetos, de %s).\n", escritos, nat32(dirección(par[0])))
+    fin
+
     ; (CORTES) al acabar: el archivo, cerrado; si se ha cancelado, lo bajado a
     ; medias, borrado (que todo quede como estaba). Da el código
     función acaba(c: nat32): byte
@@ -824,6 +924,7 @@ módulo Udescarg
             cerrar(salida)
             escribir("\n")
             si c = 3 entonces borrar(archivo) fin
+            si c = 1 entonces guarda_a_medias() fin          ; (0.8.10)
         fin
         creado := falso
         devolver byte(c)

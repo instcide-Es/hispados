@@ -1071,6 +1071,8 @@ static void haz(int id)
 			formatear(aviso_abajo, sizeof aviso_abajo, "[i] Cancelado: las firmas siguen como estaban.");
 		else if (r == -2)
 			formatear(aviso_abajo, sizeof aviso_abajo, "[!] Sin PAQUETES: el sistema no está instalado en el disco.");
+		else if (act_dice[0] && strstr(act_dice, "lista de paquetes"))
+			formatear(aviso_abajo, sizeof aviso_abajo, "[!] Sin la lista de paquetes: mire la red o el Wi-Fi y pruebe otra vez.");	/* (0.8.10: que quepa) */
 		else if (act_dice[0])
 			formatear(aviso_abajo, sizeof aviso_abajo, "[!] No se han podido poner: %s", act_dice);
 		else

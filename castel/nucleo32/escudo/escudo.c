@@ -921,7 +921,7 @@ static void lee_avance_paquetes(const char *ruta)
 			*p = 0;
 }
 
-int actualiza_firmas_con(int (*cada)(void))
+static int actualiza_firmas_una(int (*cada)(void))
 {
 	char r[RUTA], q[RUTA], a[RUTA], av[RUTA], ca[RUTA], sal[RUTA];
 	const char *orden;
@@ -1002,6 +1002,21 @@ int actualiza_firmas_con(int (*cada)(void))
 		firmas_cargadas = 0;
 	}
 	return c == 0 ? 0 : act_cancelando ? -3 : -1;
+}
+
+/* (0.8.10, el HP Mini: tras un corte, «hace falta escdia y no hay un
+ * catálogo...») si PAQUETES no ha podido traer la lista de paquetes, Escudo
+ * lo intenta él otra vez, a los 10 s, antes de rendirse */
+int actualiza_firmas_con(int (*cada)(void))
+{
+	int r = actualiza_firmas_una(cada);
+
+	if (r == -1 && strstr(act_dice, "lista de paquetes") && !act_cancelando) {
+		apunta("actualizar las firmas: sin la lista de paquetes; otra vez, a los 10 s");
+		dormir(10 * (hz() ? hz() : 100));
+		r = actualiza_firmas_una(cada);
+	}
+	return r;
 }
 
 int actualiza_firmas(void)

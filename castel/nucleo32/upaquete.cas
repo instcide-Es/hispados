@@ -157,6 +157,10 @@ módulo UPaquetes
     variable cat: puntero a byte                ; CATALOGO.TXT entero
     variable cat_n: nat32
     variable cat_mirado, hay_catálogo: bool
+    ; (0.8.10, el HP Mini: «hace falta escdia y no hay un catálogo don...»,
+    ; cortado) por qué no hay catálogo: 1, no se ha podido traer; 2, no es un
+    ; catálogo; 3, su firma o su serie no valen
+    variable cat_porqué: nat32
     variable cat_nombre: arreglo [MAX_PAQ] de arreglo [12] de byte
     variable cat_versión: arreglo [MAX_PAQ] de arreglo [16] de byte
     variable cat_archivo: arreglo [MAX_PAQ] de arreglo [16] de byte
@@ -1156,9 +1160,11 @@ módulo UPaquetes
         variable w: arreglo [24] de byte
         si cat_mirado entonces devolver hay_catálogo fin
         cat_mirado := cierto
+        cat_porqué := 1
         si no trae("CATALOGO.TXT", r) entonces devolver falso fin
         m := abrir(r)
         si es_error(m) entonces devolver falso fin
+        cat_porqué := 2
         n := 0
         mientras n < MAX_CATÁLOGO hacer
             k := leer(m, cat + n, MAX_CATÁLOGO - n)
@@ -1171,6 +1177,7 @@ módulo UPaquetes
             imprimir1("paquetes: %s no es un catálogo de paquetes\n", pt(r))
             devolver falso
         fin
+        cat_porqué := 3
         si no firma_del_catálogo(n) entonces devolver falso fin
         ; cada línea, un texto aparte (los fines de línea, a 0)
         para k desde 1 hasta n hacer
@@ -1410,7 +1417,17 @@ módulo UPaquetes
             devolver falso
         fin
         si no carga_catálogo() entonces
-            imprimir("paquetes: hace falta %s%s%s y no hay un catálogo donde buscarlo\n", dirección(d[0]))
+            ; (0.8.10) la causa, en corto (Escudo enseña esta línea abajo)
+            si cat_porqué = 1 y es_red entonces
+                escribir("paquetes: no se ha podido traer la lista de paquetes: mire la red o el Wi-Fi y pruebe otra vez\n")
+            sino si cat_porqué = 1 entonces
+                imprimir1("paquetes: no está la lista de paquetes (CATALOGO.TXT) en %s\n", pt(origen))
+            sino si cat_porqué = 3 entonces
+                escribir("paquetes: la lista de paquetes no lleva una firma buena (o es más vieja que la que ya se vio)\n")
+            sino
+                escribir("paquetes: lo traído no es una lista de paquetes (¿otro servidor?)\n")
+            fin
+            imprimir("  (hace falta %s%s%s)\n", dirección(d[0]))
             devolver falso
         fin
         c := mejor_del_catálogo(nombre, op, versión)
