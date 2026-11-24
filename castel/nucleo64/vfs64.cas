@@ -58,6 +58,14 @@ módulo Vfs64
     función unidad_busca(m: nat32, nombre: puntero a byte): puntero a Nodo
         variable k: ent32
         variable n: puntero a Nodo
+        ; [etapa 7] /lib, /usr y /bin son la misma unidad (el cargador
+        ; dinámico de musl es /lib/ld-musl-x86_64.so.1, y sus bibliotecas,
+        ; /lib o /usr/lib)
+        si igual_nombre(nombre, "lib") o igual_nombre(nombre, "usr") o igual_nombre(nombre, "bin") entonces
+            n := nodo(mm(m).raíz)
+            toma_nodo(n)
+            devolver n
+        fin
         k := busca_archivo(nombre)
         si k < 0 entonces
             fs_error := ENOENT

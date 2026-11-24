@@ -49,7 +49,14 @@ módulo Entradas
 
     público variable manejadores: arreglo [256] de nat64   ; la función de Castel de cada vector
     público variable al_sistema: nat64          ; la función de las llamadas al sistema: al_sistema(marco)
+    público variable al_volver: nat64           ; [etapa 7] lo de antes de volver de una interrupción al anillo 3: al_volver(marco)
     público variable con_smep, con_smap, con_umip, con_pcid, con_rdrand: bool
+    ; [etapa 7] AVX: los registros de los programas con xsave (XCR0: x87, SSE,
+    ; AVX y, si los hay, los de AVX-512), de tam_fpu octetos; sin AVX, fxsave (512)
+    público variable con_xsave, con_rdseed: bool
+    público variable xcr0: nat64
+    público variable tam_fpu: nat64
+    público variable hwcap: nat64                ; lo de cpuid 1 (EDX): AT_HWCAP
     variable visto: bool
     variable sitio: nat64
 
@@ -148,7 +155,51 @@ módulo Entradas
             mov rbx, [rax+rbx*8]
             jmp E64_nucleo
         ; ---- la vuelta al anillo 3 de una interrupción ----
+        ; [etapa 7] antes, con un marco como el de syscall (los quince
+        ; registros encima del de iretq), al_volver(marco): las señales que
+        ; haya que entregar (Ctrl+C a un programa que no llama al sistema, un
+        ; kill, la de un fallo) cambian el marco
         E64_salida:
+            push rax
+            push rcx
+            push rdx
+            push rbx
+            push rbp
+            push rsi
+            push rdi
+            push r8
+            push r9
+            push r10
+            push r11
+            push r12
+            push r13
+            push r14
+            push r15
+            mov rax, {al_volver}
+            test rax, rax
+            jz E64_salida_ya
+            mov rbp, rsp
+            cld
+            mov rcx, rsp
+            push rcx
+            call rax
+            cli
+        E64_salida_ya:
+            pop r15
+            pop r14
+            pop r13
+            pop r12
+            pop r11
+            pop r10
+            pop r9
+            pop r8
+            pop rdi
+            pop rsi
+            pop rbp
+            pop rbx
+            pop rdx
+            pop rcx
+            pop rax
             db 0x0F, 0x01, 0xF8         ; swapgs
             iretq
         ; ---- syscall ----
@@ -184,6 +235,10 @@ módulo Entradas
             mov rax, {al_sistema}
             call rax
             cli
+            ; [etapa 7] al_sistema devuelve 1 si hay que volver con iretq (todos
+            ; los registros del marco, también RCX y R11: rt_sigreturn)
+            test rax, rax
+            jnz E64_sistema_iret
             pop r15
             pop r14
             pop r13
@@ -204,6 +259,24 @@ módulo Entradas
             mov rsp, [rsp+24]
             db 0x0F, 0x01, 0xF8                                 ; swapgs
             db 0x48, 0x0F, 0x07                                 ; sysretq
+        E64_sistema_iret:
+            pop r15
+            pop r14
+            pop r13
+            pop r12
+            pop r11
+            pop r10
+            pop r9
+            pop r8
+            pop rdi
+            pop rsi
+            pop rbp
+            pop rbx
+            pop rdx
+            pop rcx
+            pop rax
+            db 0x0F, 0x01, 0xF8                                 ; swapgs
+            iretq
         ; ---- una entrada por vector ----
         E64_v0:
             push rax
@@ -1277,12 +1350,44 @@ módulo Entradas
         cpuid(1, 0)
         con_pcid := rc yb 0x20000 <> 0
         con_rdrand := rc yb 0x40000000 <> 0
+        hwcap := nat64(rd)
+        ; [etapa 7] XSAVE y AVX (con OSXSAVE lo pone prepara_cpu)
+        con_xsave := rc yb 0x04000000 <> 0 y rc yb 0x10000000 <> 0 y máx >= 13
+        tam_fpu := 512
+        xcr0 := 3
         si máx >= 7 entonces
             cpuid(7, 0)
             con_smep := rb yb 0x80 <> 0
             con_smap := rb yb 0x100000 <> 0
             con_umip := rc yb 4 <> 0
+            con_rdseed := rb yb 0x40000 <> 0
         fin
+        si con_xsave entonces
+            cpuid(13, 0)
+            ; x87, SSE y AVX; y los tres de AVX-512 si están los tres
+            xcr0 := nat64(ra) yb 0x07
+            si nat64(ra) yb 0xE0 = 0xE0 entonces xcr0 := xcr0 ob 0xE0 fin
+            si xcr0 yb 7 <> 7 entonces
+                con_xsave := falso
+                xcr0 := 3
+            fin
+        fin
+    fin
+
+    ; [etapa 7] OSXSAVE y XCR0 en este procesador; el tamaño del área de xsave
+    función pon_xsave()
+        variable a, d: nat64
+        cr4_ob(0x40000)
+        a := xcr0 yb 0xFFFFFFFF
+        d := xcr0 >> 32
+        ensamblador
+            xor ecx, ecx
+            mov rax, {a}
+            mov rdx, {d}
+            db 0x0F, 0x01, 0xD1         ; xsetbv
+        fin
+        cpuid(13, 0)
+        si nat64(rb) > tam_fpu entonces tam_fpu := nat64(rb) fin
     fin
 
     ; sin PCID aunque lo haya («sinpcid» en la línea de órdenes: el TCG de QEMU
@@ -1334,6 +1439,7 @@ módulo Entradas
         si con_umip entonces b := b ob 0x800 fin
         si con_pcid entonces b := b ob 0x20000 fin
         cr4_ob(b)
+        si con_xsave entonces pon_xsave() fin
         ensamblador
             db 0xDB, 0xE3               ; fninit
         fin

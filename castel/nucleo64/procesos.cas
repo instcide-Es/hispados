@@ -34,13 +34,37 @@
 ;  huérfanos se sueltan solos al acabar y los zombis los recoge su padre (o,
 ;  si el padre acaba antes, se sueltan con él). Ctrl+C (señala_grupo): el que
 ;  no ignora SIGINT se cierra al volver de su llamada al sistema (con 130).
+;  [etapa 7] Lo que pide musl (docs/64/HISPA-64.md, sección 13):
+;   - **varios hilos por proceso** (clone con CLONE_VM, CLONE_THREAD,
+;     CLONE_SETTLS, CLONE_PARENT_SETTID, CLONE_CHILD_SETTID y
+;     CLONE_CHILD_CLEARTID): cada hilo con su número (tid), sus registros
+;     (x87, SSE y AVX: xsave), su FS, su máscara de señales y su pila de
+;     señales; exit acaba el hilo (el último, el proceso) y exit_group todos;
+;   - **las señales de verdad**: las pendientes del proceso (kill) y las de
+;     cada hilo (tgkill, las de los fallos del procesador), la máscara, las
+;     acciones (sa_flags, sa_mask, sa_restorer), el marco de Linux en la pila
+;     del programa (rt_sigframe: ucontext con los registros y los de x87,
+;     SSE y AVX, y siginfo) y rt_sigreturn; se entregan al volver de una
+;     llamada al sistema y al volver de una interrupción (Entradas.al_volver):
+;     así le llegan también a un programa que no llama al sistema (Ctrl+C,
+;     kill); las esperas largas (la consola, wait4, futex, tuberías, dormir)
+;     se interrumpen (EINTR, o se repiten con SA_RESTART); SIGCHLD al padre;
+;   - **fork con copiar al escribir** (Espacios.copia_espacio) y clone con
+;     CLONE_VM y CLONE_VFORK (el posix_spawn de musl: el hijo usa el espacio
+;     del padre, que espera a que haga execve o acabe);
+;   - **ELF de posición libre (PIE) y dinámicos**: con PT_INTERP se carga
+;     también su cargador (el ld-musl de musl, /lib/ld-musl-x86_64.so.1) y se
+;     empieza en él, con AT_BASE y AT_ENTRY.
+;  La memoria de un proceso (sus regiones y sus páginas) lleva un mutex
+;  (los fallos de página de varios hilos, mmap, munmap, fork).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Procesos
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64, Vfs64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Entradas, Espacios, Unidad64, Vfs64
 
-    público constante MAX_REG = 48
+    público constante MAX_REG = 256             ; (48 hasta la etapa 6)
+    público constante MAX_HILOS = 64            ; [etapa 7] los hilos de un proceso
     público constante MAX_FD = 32               ; (16 hasta la etapa 4)
     público constante LEER = 1                  ; los permisos (los PROT_ de Linux)
     público constante ESCRIBE = 2
@@ -49,6 +73,8 @@ módulo Procesos
     público constante R_PILA = 2
     público constante R_MONTÓN = 3
     público constante R_MMAP = 4
+    público constante R_COMPARTIDA = 1          ; [etapa 7] (reg_ext) MAP_SHARED anónima
+    público constante R_ARCHIVO = 2             ; [etapa 7] (reg_ext) de un archivo
     público constante F_CONSOLA = 1             ; las clases de archivo abierto
     público constante F_ARCHIVO = 2             ; [etapa 5] uno del VFS (Vfs64.Abierto)
     público constante PILA_PROG = 0x800000           ; 8 MB de pila
@@ -59,6 +85,32 @@ módulo Procesos
     público constante SIGFPE = 8
     público constante SIGKILL = 9
     público constante SIGSEGV = 11
+    ; [etapa 7] las demás que se usan aquí, y lo de sigaction
+    público constante SIGABRT = 6
+    público constante SIGUSR1 = 10
+    público constante SIGPIPE = 13
+    público constante SIGTERM = 15
+    público constante SIGCHLD = 17
+    público constante SIGCONT = 18
+    público constante SIGSTOP = 19
+    público constante SIGTSTP = 20
+    público constante SIGTTIN = 21
+    público constante SIGTTOU = 22
+    público constante SIGURG = 23
+    público constante SIGWINCH = 28
+    público constante SA_SIGINFO = 4
+    público constante SA_NOCLDWAIT = 2
+    público constante SA_RESTORER = 0x04000000
+    público constante SA_ONSTACK = 0x08000000
+    público constante SA_RESTART = 0x10000000
+    público constante SA_NODEFER = 0x40000000
+    público constante SA_RESETHAND = 0x80000000
+    público constante NO_BLOQUEABLES = 0x40100          ; SIGKILL y SIGSTOP
+    público constante ERESTARTSYS = -512                ; (dentro del núcleo: repetir la llamada o EINTR)
+    público constante ERESTARTNOHAND = -514
+    constante BASE_PIE = 0x0000555555554000             ; donde va un programa de posición libre
+    constante BASE_INTERP = 0x00007F0000000000          ; y su cargador dinámico
+    constante LARGO_MARCO = 440                         ; el rt_sigframe de Linux x86-64 (sin los registros de x87, SSE y AVX)
 
     público tipo Proceso = estructura
         id: nat64
@@ -95,6 +147,33 @@ módulo Procesos
         marco: arreglo [20] de nat64            ; los registros del padre en el syscall de fork
         acción: arreglo [65] de nat64           ; lo de cada señal: 0 SIG_DFL, 1 SIG_IGN, o una función
         fd_cloexec: arreglo [MAX_FD] de nat32   ; O_CLOEXEC (FD_CLOEXEC): se cierra en execve
+        ; [etapa 7] los hilos, las señales y la memoria
+        m_cerrojo, m_primero, m_último, m_dueño, m_veces, m_esperas: nat64     ; el mutex de la memoria (la forma de Sinc64.Mutex)
+        reg_ext: arreglo [MAX_REG] de nat32     ; 0; R_COMPARTIDA (MAP_SHARED anónima); R_ARCHIVO (mmap de un archivo)
+        fd_nobloq: arreglo [MAX_FD] de nat32    ; O_NONBLOCK (de las tuberías)
+        n_hilos: nat64              ; los que tiene
+        hilos: arreglo [MAX_HILOS] de nat64
+        h_cerrojo: nat64            ; el de la lista de los hilos y las señales pendientes
+        s_pend: nat64               ; las señales pendientes del proceso (kill)
+        s_info: arreglo [64] de nat64
+        acc_marcas, acc_rest, acc_másc: arreglo [65] de nat64       ; sa_flags, sa_restorer y sa_mask
+        saliendo: nat64             ; 1: exit_group o una señal que lo cierra (los hilos acaban al volver)
+        solo: nat64                 ; execve con más hilos: el tid del que se queda
+        prestado: nat64             ; 1: (CLONE_VM y CLONE_VFORK) el espacio es de su padre
+        vfork_padre: nat64          ; el padre que espera a que haga execve o acabe (puntero a Proceso)
+        esperando_vfork: nat64      ; el id del hijo al que espera así
+        base_interp: nat64          ; AT_BASE (0: sin cargador dinámico)
+        al_entrada: nat64           ; AT_ENTRY (la entrada del programa; «entrada», la del cargador si lo hay)
+        ini_másc: nat64             ; (fork) la máscara del hilo que lo ha hecho
+        ini_alt_sp, ini_alt_tam, ini_alt_marcas: nat64
+        ini_fpu: nat64              ; el bloque de los registros del primer hilo
+    fin
+
+    ; [etapa 7] lo que arranca un hilo nuevo (clone con CLONE_THREAD)
+    tipo Arranque = estructura
+        proceso, tid, fs, gs, borra_tid, máscara, fpu_bloque, fpu: nat64
+        alt_sp, alt_tam, alt_marcas: nat64
+        marco: arreglo [20] de nat64
     fin
 
     público variable motivo: puntero a byte     ; por qué no se ha podido arrancar
@@ -103,7 +182,11 @@ módulo Procesos
     público variable páginas_al_tocar: nat64    ; las que ha puesto un fallo de página
     variable próximo_pid: nat64
     variable azar_estado: nat64
-    variable plantilla: arreglo [512] de byte alineado 16      ; los registros x87 y SSE al empezar (fxsave)
+    variable plantilla: nat64                   ; los registros x87, SSE y AVX al empezar (fxsave o xsave; tam_fpu octetos alineados a 64)
+    variable mxcsr_máscara: nat32               ; los bits de MXCSR que se pueden poner (rt_sigreturn)
+    público variable al_futex: nat64            ; [etapa 7] Futex64.despierta(p, dir, n) (CLONE_CHILD_CLEARTID)
+    variable quietos: Espera                    ; [etapa 7] los que duermen hasta una señal (pause, sigsuspend, nanosleep)
+    público variable señales_entregadas, hilos_creados: nat64
     ; [etapa 6] la tabla de los procesos (los vivos y los zombis), para wait4,
     ; los huérfanos y Ctrl+C
     público constante MAX_PROC = 256
@@ -144,6 +227,17 @@ módulo Procesos
         variable p: puntero a nat64
         p := puntero(d)
         valor(p) := v
+    fin
+
+    ; [etapa 7] f(a, b, c), una función de Castel de otro módulo
+    función llama3(f: nat64, a: nat64, b: nat64, c: nat64)
+        ensamblador
+            push qword {c}
+            push qword {b}
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
     fin
 
     público función copia_mem(a: nat64, de: nat64, n: nat64)
@@ -204,6 +298,7 @@ módulo Procesos
         p.reg_fin[i] := b
         p.reg_prot[i] := prot
         p.reg_clase[i] := clase
+        p.reg_ext[i] := 0
         p.n_reg := p.n_reg + 1
         devolver cierto
     fin
@@ -215,6 +310,7 @@ módulo Procesos
         p.reg_fin[i] := p.reg_fin[u]
         p.reg_prot[i] := p.reg_prot[u]
         p.reg_clase[i] := p.reg_clase[u]
+        p.reg_ext[i] := p.reg_ext[u]
         p.n_reg := p.n_reg - 1
     fin
 
@@ -227,6 +323,7 @@ módulo Procesos
         k := nat32(i)
         si p.reg_ini[k] = v entonces devolver cierto fin
         si no nueva_región(p, v, p.reg_fin[k], p.reg_prot[k], p.reg_clase[k]) entonces devolver falso fin
+        p.reg_ext[nat32(p.n_reg) - 1] := p.reg_ext[k]
         p.reg_fin[k] := v
         devolver cierto
     fin
@@ -290,6 +387,22 @@ módulo Procesos
         devolver nueva_región(p, a, b, prot, clase)
     fin
 
+    ; [etapa 7] lo mismo, con lo de reg_ext (R_COMPARTIDA, R_ARCHIVO)
+    público función pon_región_ext(p: puntero a Proceso, a: nat64, b: nat64, prot: nat32, clase: nat32, ext: nat32): bool
+        si no nueva_región(p, a, b, prot, clase) entonces devolver falso fin
+        p.reg_ext[nat32(p.n_reg) - 1] := ext
+        devolver cierto
+    fin
+
+    ; [etapa 7] el mutex de la memoria del proceso (regiones y páginas)
+    público función cierra_mem(p: puntero a Proceso)
+        cierra_mutex(puntero(nat64(dirección(p.m_cerrojo))))
+    fin
+
+    público función abre_mem(p: puntero a Proceso)
+        abre_mutex(puntero(nat64(dirección(p.m_cerrojo))))
+    fin
+
     ; cambia los permisos de [a, b): 0, o -ENOMEM si algo de ahí no es de una región
     público función protege(p: puntero a Proceso, a: nat64, b: nat64, prot: nat32): ent64
         variable v: nat64
@@ -315,13 +428,21 @@ módulo Procesos
     ; ---- la memoria del programa, desde el núcleo ----
     ; una página a cero en v (que no está), con los permisos prot; falso si no hay memoria
     función pon_página(p: puntero a Proceso, v: nat64, prot: nat32): bool
-        variable f: nat64
+        variable f, fl: nat64
+        variable i: ent32
         f := pide()
         si f = 0 entonces devolver falso fin
         ceros_mem(virt(f), 4096)
-        si no mapea_u(espacio_de(p), abajo(v), f, marcas(prot)) entonces
+        fl := marcas(prot)
+        ; [etapa 7] las de MAP_SHARED, con COMPARTIDA (se comparten al bifurcar)
+        i := región_de(p, v)
+        si i >= 0 entonces
+            si p.reg_ext[nat32(i)] = R_COMPARTIDA entonces fl := fl ob COMPARTIDA fin
+        fin
+        si no mapea_u(espacio_de(p), abajo(v), f, fl) entonces
             devuelve(f)
-            devolver falso
+            ; (ya la había puesto otro hilo)
+            devolver pte(espacio_de(p), v) yb PRESENTE <> 0
         fin
         suma_atómica(dirección(páginas_al_tocar), 1)
         devolver cierto
@@ -329,8 +450,9 @@ módulo Procesos
 
     ; la dirección física del octeto v del programa, si puede tocarlo (escribir:
     ; si va a escribir); si la página no está y es de una región con permiso,
-    ; se pone. nob 0 si no.
-    público función toca(p: puntero a Proceso, v: nat64, para_escribir: bool): nat64
+    ; se pone; [etapa 7] si es de copiar al escribir, se rompe la copia. nob 0
+    ; si no. (Con el mutex de la memoria tomado.)
+    función toca_(p: puntero a Proceso, v: nat64, para_escribir: bool): nat64
         variable x: nat64
         variable i: ent32
         variable prot: nat32
@@ -345,8 +467,25 @@ módulo Procesos
             x := pte(espacio_de(p), v)
         fin
         si x yb USUARIO = 0 entonces devolver nob nat64(0) fin
-        si para_escribir y x yb ESCRIBIR = 0 entonces devolver nob nat64(0) fin
+        si para_escribir y x yb ESCRIBIR = 0 entonces
+            si x yb COPIAR = 0 entonces devolver nob nat64(0) fin
+            i := región_de(p, v)
+            si i < 0 entonces devolver nob nat64(0) fin
+            prot := p.reg_prot[nat32(i)]
+            si prot yb ESCRIBE = 0 entonces devolver nob nat64(0) fin
+            si no rompe_copia(espacio_de(p), abajo(v), marcas(prot)) entonces devolver nob nat64(0) fin
+            x := pte(espacio_de(p), v)
+            si x yb ESCRIBIR = 0 entonces devolver nob nat64(0) fin
+        fin
         devolver marco_de(x) + (v yb 4095)
+    fin
+
+    público función toca(p: puntero a Proceso, v: nat64, para_escribir: bool): nat64
+        variable r: nat64
+        cierra_mem(p)
+        r := toca_(p, v, para_escribir)
+        abre_mem(p)
+        devolver r
     fin
 
     ; ¿es [v, v + n) del programa (sin dar la vuelta ni pasar de lo suyo)?
@@ -355,12 +494,17 @@ módulo Procesos
     fin
 
     ; n octetos de k (el núcleo) a v (el programa); falso si alguno no es suyo o no puede escribirlo
+    ; ([etapa 7] con el mutex de la memoria: nadie quita las páginas mientras)
     público función copia_a(p: puntero a Proceso, v: nat64, k: nat64, n: nat64): bool
         variable f, trozo: nat64
         si no rango_bien(v, n) entonces devolver falso fin
+        cierra_mem(p)
         mientras n > 0 hacer
-            f := toca(p, v, cierto)
-            si f = nob nat64(0) entonces devolver falso fin
+            f := toca_(p, v, cierto)
+            si f = nob nat64(0) entonces
+                abre_mem(p)
+                devolver falso
+            fin
             trozo := 4096 - (v yb 4095)
             si trozo > n entonces trozo := n fin
             copia_mem(virt(f), k, trozo)
@@ -368,6 +512,7 @@ módulo Procesos
             k := k + trozo
             n := n - trozo
         fin
+        abre_mem(p)
         devolver cierto
     fin
 
@@ -375,9 +520,13 @@ módulo Procesos
     público función copia_de(p: puntero a Proceso, k: nat64, v: nat64, n: nat64): bool
         variable f, trozo: nat64
         si no rango_bien(v, n) entonces devolver falso fin
+        cierra_mem(p)
         mientras n > 0 hacer
-            f := toca(p, v, falso)
-            si f = nob nat64(0) entonces devolver falso fin
+            f := toca_(p, v, falso)
+            si f = nob nat64(0) entonces
+                abre_mem(p)
+                devolver falso
+            fin
             trozo := 4096 - (v yb 4095)
             si trozo > n entonces trozo := n fin
             copia_mem(k, virt(f), trozo)
@@ -385,6 +534,7 @@ módulo Procesos
             k := k + trozo
             n := n - trozo
         fin
+        abre_mem(p)
         devolver cierto
     fin
 
@@ -393,15 +543,25 @@ módulo Procesos
     público función texto_de(p: puntero a Proceso, t: puntero a byte, v: nat64, máx: nat32): ent64
         variable f: nat64
         variable i: nat32
+        variable r: ent64
+        cierra_mem(p)
+        r := -36
         i := 0
         mientras i < máx hacer
-            f := toca(p, v + i, falso)
-            si f = nob nat64(0) entonces devolver -14 fin
+            f := toca_(p, v + i, falso)
+            si f = nob nat64(0) entonces
+                r := -14
+                romper
+            fin
             t[i] := byte(l8(virt(f)))
-            si t[i] = 0 entonces devolver ent64(i) fin
+            si t[i] = 0 entonces
+                r := ent64(i)
+                romper
+            fin
             i := i + 1
         fin
-        devolver -36
+        abre_mem(p)
+        devolver r
     fin
 
     ; ---- lo que hace el planificador al cambiar de hilo ----
@@ -411,18 +571,49 @@ módulo Procesos
         valor(p) := v
     fin
 
-    función guarda_fpu(d: nat64)
-        ensamblador
-            mov rax, {d}
-            db 0x48, 0x0F, 0xAE, 0x00   ; fxsave64 [rax]
+    ; [etapa 7] con AVX, xsave y xrstor (lo de XCR0); sin él, fxsave y fxrstor
+    público función guarda_fpu(d: nat64)
+        si con_xsave entonces
+            ensamblador
+                mov rcx, {d}
+                mov eax, 0xFFFFFFFF
+                mov edx, 0xFFFFFFFF
+                db 0x48, 0x0F, 0xAE, 0x21   ; xsave64 [rcx]
+            fin
+        sino
+            ensamblador
+                mov rax, {d}
+                db 0x48, 0x0F, 0xAE, 0x00   ; fxsave64 [rax]
+            fin
         fin
     fin
 
-    función pon_fpu(d: nat64)
-        ensamblador
-            mov rax, {d}
-            db 0x48, 0x0F, 0xAE, 0x08   ; fxrstor64 [rax]
+    público función pon_fpu(d: nat64)
+        si con_xsave entonces
+            ensamblador
+                mov rcx, {d}
+                mov eax, 0xFFFFFFFF
+                mov edx, 0xFFFFFFFF
+                db 0x48, 0x0F, 0xAE, 0x29   ; xrstor64 [rcx]
+            fin
+        sino
+            ensamblador
+                mov rax, {d}
+                db 0x48, 0x0F, 0xAE, 0x08   ; fxrstor64 [rax]
+            fin
         fin
+    fin
+
+    ; [etapa 7] un bloque para los registros de un hilo (tam_fpu octetos,
+    ; alineados a 64): el bloque del montón (0 si no hay memoria) y en «fpu»
+    ; dónde van
+    función nuevo_fpu(ref fpu: nat64): nat64
+        variable b: nat64
+        b := nat64(reserva(tam_fpu + 64))
+        fpu := 0
+        si b = 0 entonces devolver 0 fin
+        fpu := (b + 63) yb (nob nat64(63))
+        devolver b
     fin
 
     ; (sin interrupciones) de «de» a «a»: lo del programa que deja y lo del que entra
@@ -453,10 +644,11 @@ módulo Procesos
         variable i: nat32
         i := 0
         mientras i < MAX_FD hacer
-            si p.fd_clase[i] = F_ARCHIVO y p.fd_obj[i] <> 0 entonces vfs_cierra(puntero(p.fd_obj[i])) fin
+            si p.fd_clase[i] <> 0 entonces cierra_fd_obj(p.fd_clase[i], p.fd_obj[i]) fin
             p.fd_clase[i] := 0
             p.fd_obj[i] := 0
             p.fd_cloexec[i] := 0
+            p.fd_nobloq[i] := 0
             i := i + 1
         fin
     fin
@@ -507,13 +699,129 @@ módulo Procesos
         suelta(dirección(procs_cerrojo), b)
     fin
 
-    ; el programa que corre acaba (con ese código, o cerrado por la señal); no vuelve.
-    ; [etapa 6] Sus hijos se quedan huérfanos (los zombis, fuera ya); si lo
-    ; arrancó el núcleo, lo recoge espera_proceso; si tiene padre, queda zombi
-    ; hasta que el padre lo recoja (wait4); si es huérfano, se suelta solo.
-    público función sal(código: nat64, señal: nat64)
+    ; ---- [etapa 7] salir: el hilo, el proceso ----
+    ; (sin interrupciones) el hilo h deja de ser de un programa: el espacio del
+    ; núcleo, sin registros de usuario; su bloque de los registros, devuelto
+    función deja_programa(h: puntero a Hilo)
+        variable b, f: nat64
+        b := sin_ints()
+        h.espacio := 0
+        activa_espacio(nulo)
+        h.usuario := 0
+        h.fpu := 0
+        f := h.fpu_bloque
+        h.fpu_bloque := 0
+        restaura(b)
+        si f <> 0 entonces libera(puntero(f)) fin
+    fin
+
+    ; (con h_cerrojo) h, fuera de la lista de los hilos de p; cuántos quedan
+    función quita_hilo(p: puntero a Proceso, h: puntero a Hilo): nat64
+        variable i: nat32
+        i := 0
+        mientras i < MAX_HILOS hacer
+            si p.hilos[i] = nat64(h) entonces
+                p.hilos[i] := 0
+                romper
+            fin
+            i := i + 1
+        fin
+        si p.n_hilos > 0 entonces p.n_hilos := p.n_hilos - 1 fin
+        devolver p.n_hilos
+    fin
+
+    ; (con h_cerrojo) h, en la lista; falso si no cabe
+    función mete_hilo(p: puntero a Proceso, h: puntero a Hilo): bool
+        variable i: nat32
+        i := 0
+        mientras i < MAX_HILOS hacer
+            si p.hilos[i] = 0 entonces
+                p.hilos[i] := nat64(h)
+                devolver cierto
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; el hilo que corre acaba él solo (exit; o porque otro ha hecho exit_group
+    ; o execve); si es el último del proceso, acaba el proceso. No vuelve.
+    público función sal_hilo(código: nat64)
         variable h: puntero a Hilo
-        variable p, q: puntero a Proceso
+        variable p: puntero a Proceso
+        variable b, queda: nat64
+        variable x: nat32
+        h := actual()
+        p := puntero(h.proceso)
+        ; CLONE_CHILD_CLEARTID (pthread_join): un 0 en su tid y FUTEX_WAKE
+        si h.borra_tid <> 0 y p.saliendo = 0 entonces
+            x := 0
+            si copia_a(p, h.borra_tid, nat64(dirección(x)), 4) y al_futex <> 0 entonces llama3(al_futex, nat64(p), h.borra_tid, 1) fin
+            h.borra_tid := 0
+        fin
+        b := toma(dirección(p.h_cerrojo))
+        queda := quita_hilo(p, h)
+        suelta(dirección(p.h_cerrojo), b)
+        si queda = 0 entonces
+            si p.saliendo <> 0 entonces sal_último(p.código, p.señal) sino sal_último(código, 0) fin
+        fin
+        ; quedan otros: solo este
+        deja_programa(h)
+        si p.del_núcleo = 0 o nat64(h) <> p.hilo entonces
+            si nat64(h) = p.hilo entonces p.hilo := 0 fin
+            h.proceso := 0
+            suéltalo(h)
+        fin
+        termina()
+    fin
+
+    ; el programa que corre acaba (exit_group, o cerrado por la señal): todos
+    ; sus hilos (los demás, al volver al anillo 3 o de su llamada al sistema).
+    ; No vuelve.
+    público función sal(código: nat64, señal: nat64)
+        variable h, t: puntero a Hilo
+        variable p: puntero a Proceso
+        variable b: nat64
+        variable i: nat32
+        h := actual()
+        p := puntero(h.proceso)
+        b := toma(dirección(p.h_cerrojo))
+        si p.saliendo = 0 entonces
+            p.saliendo := 1
+            p.código := código yb 255
+            p.señal := señal
+            si señal <> 0 entonces p.matar := señal sino p.matar := SIGKILL fin
+        fin
+        i := 0
+        mientras i < MAX_HILOS hacer
+            si p.hilos[i] <> 0 y p.hilos[i] <> nat64(h) entonces
+                t := puntero(p.hilos[i])
+                interrumpe(t)
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(p.h_cerrojo), b)
+        sal_hilo(código)
+    fin
+
+    ; [etapa 7] (CLONE_VFORK) el padre que espera, suelto
+    función suelta_vfork(p: puntero a Proceso)
+        variable q: puntero a Proceso
+        si p.vfork_padre = 0 entonces devolver fin
+        q := puntero(p.vfork_padre)
+        p.vfork_padre := 0
+        q.esperando_vfork := 0
+        despierta_todos(dirección(hijos_espera))
+    fin
+
+    ; el último hilo del proceso acaba (con ese código, o cerrado por la señal);
+    ; no vuelve. [etapa 6] Sus hijos se quedan huérfanos (los zombis, fuera
+    ; ya); si lo arrancó el núcleo, lo recoge espera_proceso; si tiene padre,
+    ; queda zombi hasta que el padre lo recoja (wait4); si es huérfano (o su
+    ; padre ignora SIGCHLD), se suelta solo. [etapa 7] Al padre, SIGCHLD.
+    función sal_último(código: nat64, señal: nat64)
+        variable h: puntero a Hilo
+        variable p, q, padre_: puntero a Proceso
         variable e: puntero a Espacio
         variable b: nat64
         variable lista: arreglo [MAX_PROC] de nat64
@@ -528,32 +836,27 @@ módulo Procesos
         ; [etapa 5] sus archivos, cerrados
         cierra_todos(p)
         ; el espacio del núcleo, ya (y que el planificador no vuelva a poner el suyo)
-        b := sin_ints()
-        h.espacio := 0
-        activa_espacio(nulo)
-        si no nk entonces
-            ; (el hilo ya no es de un programa: nadie mira ya su proceso ni sus registros SSE)
-            h.usuario := 0
-            h.fpu := 0
-            h.proceso := 0
-        fin
-        restaura(b)
+        deja_programa(h)
+        ; (al hilo lo suelta la tarea ociosa; menos al primero de uno que
+        ; arrancó el núcleo: lo suelta espera_proceso, con une)
+        si no nk o nat64(h) <> p.hilo entonces h.proceso := 0 fin
         p.espacio := 0
-        si e <> nulo entonces destruye_espacio(e) fin
-        si no nk entonces
-            si p.fpu_bloque <> 0 entonces libera(puntero(p.fpu_bloque)) fin
-            p.fpu_bloque := 0
-            suéltalo(h)
-        fin
+        ; ([etapa 7] el de su padre, si era prestado, se queda)
+        si e <> nulo y p.prestado = 0 entonces destruye_espacio(e) fin
+        p.prestado := 0
+        suelta_vfork(p)
+        si no nk o nat64(h) <> p.hilo entonces suéltalo(h) fin
         suma_atómica(dirección(vivos), nob nat64(0))
         ; los hijos, huérfanos; él, zombi (o suelto)
         n := 0
         suelto_ := falso
         b := toma(dirección(procs_cerrojo))
+        padre_ := nulo
         i := 0
         mientras i < MAX_PROC hacer
             si tabla[i] <> 0 y tabla[i] <> nat64(p) entonces
                 q := puntero(tabla[i])
+                si q.id = p.padre y q.terminado = 0 entonces padre_ := q fin
                 si q.padre = p.id y q.del_núcleo = 0 entonces
                     q.padre := 0
                     huérfanos_n := huérfanos_n + 1
@@ -570,11 +873,20 @@ módulo Procesos
         p.terminado := 1
         si nk entonces
             ; (lo recoge espera_proceso)
-        sino si p.padre = 0 entonces
+        sino si p.padre = 0 o padre_ = nulo entonces
+            saca_de_tabla(p)
+            suelto_ := cierto
+        sino si padre_.acción[SIGCHLD] = 1 o padre_.acc_marcas[SIGCHLD] yb SA_NOCLDWAIT <> 0 entonces
+            ; (el padre ignora SIGCHLD: los hijos no quedan zombis)
             saca_de_tabla(p)
             suelto_ := cierto
         sino
             p.zombi := 1
+            si señal <> 0 entonces
+                señala_proceso_(padre_, SIGCHLD, 2 ob (señal << 8), p.id)                 ; CLD_KILLED
+            sino
+                señala_proceso_(padre_, SIGCHLD, 1 ob ((código yb 255) << 8), p.id)      ; CLD_EXITED
+            fin
         fin
         suelta(dirección(procs_cerrojo), b)
         ; (desde aquí, p no se toca: su padre puede recogerlo ya)
@@ -588,10 +900,156 @@ módulo Procesos
         termina()
     fin
 
-    ; Ctrl+C: la señal s a los del grupo g (0: a todos), si no la ignoran ni la
-    ; atienden (las funciones de las señales llegan en la etapa 7): se cierran
-    ; en cuanto vuelvan de una llamada al sistema (o la que esperan en la
-    ; consola). Cuántos se cierran.
+    ; ---- [etapa 7] las señales ----
+    función bit_de(s: nat64): nat64
+        devolver nat64(1) << (s - 1)
+    fin
+
+    ; ¿no hace nada la señal s en p (SIG_IGN, o SIG_DFL de las que no hacen nada)?
+    función se_ignora(p: puntero a Proceso, s: nat64): bool
+        variable a: nat64
+        si s = SIGKILL o s = SIGSTOP entonces devolver falso fin
+        a := p.acción[nat32(s)]
+        si a = 1 entonces devolver cierto fin
+        si a = 0 y (s = SIGCHLD o s = SIGURG o s = SIGWINCH o s = SIGCONT) entonces devolver cierto fin
+        devolver falso
+    fin
+
+    ; (con h_cerrojo de p) SIGKILL: todos sus hilos acaban
+    función mata_todos_(p: puntero a Proceso, s: nat64)
+        variable i: nat32
+        si p.saliendo = 0 entonces
+            p.saliendo := 1
+            p.código := 0
+            p.señal := s
+            p.matar := s
+        fin
+        i := 0
+        mientras i < MAX_HILOS hacer
+            si p.hilos[i] <> 0 entonces interrumpe(puntero(p.hilos[i])) fin
+            i := i + 1
+        fin
+    fin
+
+    ; (con procs_cerrojo, o desde un hilo de p) la señal s al proceso p:
+    ; pendiente en él; se despierta (o se avisa) a uno de sus hilos que no la
+    ; bloquee. cód: el si_code (y lo de SIGCHLD); quién: el pid que la manda.
+    función señala_proceso_(p: puntero a Proceso, s: nat64, cód: nat64, quién: nat64)
+        variable b: nat64
+        variable i: nat32
+        variable t: puntero a Hilo
+        si s < 1 o s > 64 o p.terminado <> 0 entonces devolver fin
+        b := toma(dirección(p.h_cerrojo))
+        si s = SIGKILL entonces
+            mata_todos_(p, SIGKILL)
+        sino si no se_ignora(p, s) entonces
+            p.s_pend := p.s_pend ob bit_de(s)
+            p.s_info[nat32(s) - 1] := (cód yb 0xFFFFFFFF) ob (quién << 32)
+            i := 0
+            mientras i < MAX_HILOS hacer
+                si p.hilos[i] <> 0 entonces
+                    t := puntero(p.hilos[i])
+                    si t.s_másc yb bit_de(s) = 0 entonces
+                        interrumpe(t)
+                        romper
+                    fin
+                fin
+                i := i + 1
+            fin
+        fin
+        suelta(dirección(p.h_cerrojo), b)
+    fin
+
+    ; la señal s al hilo t (que es de p): pendiente en él
+    función señala_hilo_(p: puntero a Proceso, t: puntero a Hilo, s: nat64, cód: nat64, quién: nat64)
+        variable b: nat64
+        si s < 1 o s > 64 entonces devolver fin
+        b := toma(dirección(p.h_cerrojo))
+        si s = SIGKILL entonces
+            mata_todos_(p, SIGKILL)
+        sino si no se_ignora(p, s) entonces
+            t.s_pend := t.s_pend ob bit_de(s)
+            t.s_info[nat32(s) - 1] := (cód yb 0xFFFFFFFF) ob (quién << 32)
+            si t.s_másc yb bit_de(s) = 0 entonces interrumpe(t) fin
+        fin
+        suelta(dirección(p.h_cerrojo), b)
+    fin
+
+    ; la señal s al hilo que corre (SIGPIPE, raise...)
+    público función señala_me(s: nat64)
+        variable h: puntero a Hilo
+        h := actual()
+        si h.proceso <> 0 entonces señala_hilo_(puntero(h.proceso), h, s, 0x80, 0) fin
+    fin
+
+    ; kill: pid > 0, ese proceso; 0, los de su grupo; -1, todos los demás;
+    ; < -1, los del grupo -pid. s = 0: solo mira si está. 0, o -ESRCH (-3),
+    ; -EINVAL (-22)
+    público función mata(yo_: puntero a Proceso, pid: ent64, s: nat64): ent64
+        variable b: nat64
+        variable i: nat32
+        variable q: puntero a Proceso
+        variable hay: bool
+        variable g: nat64
+        si s > 64 entonces devolver -22 fin
+        g := 0
+        si pid = 0 entonces g := yo_.grupo fin
+        si pid < -1 entonces g := nat64(-pid) fin
+        hay := falso
+        b := toma(dirección(procs_cerrojo))
+        i := 0
+        mientras i < MAX_PROC hacer
+            si tabla[i] <> 0 entonces
+                q := puntero(tabla[i])
+                si q.terminado = 0 y ((pid > 0 y q.id = nat64(pid)) o (pid = -1 y q <> yo_) o (pid <= 0 y pid <> -1 y q.grupo = g)) entonces
+                    hay := cierto
+                    si s <> 0 entonces señala_proceso_(q, s, 0, yo_.id) fin
+                fin
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(procs_cerrojo), b)
+        si no hay entonces devolver -3 fin
+        devolver 0
+    fin
+
+    ; tkill y tgkill: al hilo tid (del proceso tgid, si no es 0)
+    público función mata_hilo(yo_: puntero a Proceso, tgid: nat64, tid: nat64, s: nat64): ent64
+        variable b: nat64
+        variable i, k: nat32
+        variable q: puntero a Proceso
+        variable t: puntero a Hilo
+        variable hay: bool
+        si s > 64 entonces devolver -22 fin
+        hay := falso
+        b := toma(dirección(procs_cerrojo))
+        i := 0
+        mientras i < MAX_PROC y no hay hacer
+            si tabla[i] <> 0 entonces
+                q := puntero(tabla[i])
+                si q.terminado = 0 y (tgid = 0 o q.id = tgid) entonces
+                    k := 0
+                    mientras k < MAX_HILOS hacer
+                        si q.hilos[k] <> 0 entonces
+                            t := puntero(q.hilos[k])
+                            si t.tid = tid entonces
+                                hay := cierto
+                                si s <> 0 entonces señala_hilo_(q, t, s, nob nat64(5), yo_.id) fin      ; SI_TKILL (-6)
+                                romper
+                            fin
+                        fin
+                        k := k + 1
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(procs_cerrojo), b)
+        si no hay entonces devolver -3 fin
+        devolver 0
+    fin
+
+    ; Ctrl+C (Tty64): la señal s a los del grupo g (0: a todos); cuántos
     público función señala_grupo(g: nat64, s: nat64): nat32
         variable b: nat64
         variable i, n: nat32
@@ -602,8 +1060,8 @@ módulo Procesos
         mientras i < MAX_PROC hacer
             si tabla[i] <> 0 entonces
                 q := puntero(tabla[i])
-                si q.terminado = 0 y (g = 0 o q.grupo = g) y q.acción[nat32(s)] = 0 entonces
-                    q.matar := s
+                si q.terminado = 0 y (g = 0 o q.grupo = g) entonces
+                    señala_proceso_(q, s, 0x80, 0)          ; SI_KERNEL
                     n := n + 1
                 fin
             fin
@@ -616,6 +1074,366 @@ módulo Procesos
     ; ¿atiende p la señal s con una función suya?
     público función la_atiende(p: puntero a Proceso, s: nat64): bool
         devolver p.acción[nat32(s)] > 1
+    fin
+
+    ; ¿tiene el hilo h (de p) algo que le saque de una espera: una señal que
+    ; puede recibir, o que su proceso acabe (o haga execve)?
+    función hay_señal(p: puntero a Proceso, h: puntero a Hilo): bool
+        variable perm: nat64
+        si p.saliendo <> 0 entonces devolver cierto fin
+        si p.solo <> 0 y p.solo <> h.tid entonces devolver cierto fin
+        si h.forzada <> 0 entonces devolver cierto fin
+        perm := (nob h.s_másc) ob NO_BLOQUEABLES
+        devolver (h.s_pend ob p.s_pend) yb perm <> 0
+    fin
+
+    ; (lo que miran las esperas de las llamadas al sistema) ¿hay que dejar de
+    ; esperar? (antes de la etapa 7: p.matar <> 0)
+    público función interrumpido(p: puntero a Proceso): bool
+        variable h: puntero a Hilo
+        h := actual()
+        si h.proceso <> nat64(p) entonces devolver p.matar <> 0 fin
+        devolver hay_señal(p, h)
+    fin
+
+    ; [etapa 7] (para dormir en una espera de la que saca una señal) pone y
+    ; quita la espera e del hilo que corre (con el cerrojo de e tomado)
+    público función espera_interrumpible(e: puntero a Espera)
+        actual().interrumpible := nat64(e)
+    fin
+
+    público función fin_interrumpible()
+        actual().interrumpible := 0
+    fin
+
+    ; [etapa 7] el hilo que corre duerme hasta «límite» (ns de ahora_ns; nob
+    ; 0: sin plazo) o hasta que le llegue una señal: cierto si ha sido la señal
+    público función duerme_hasta(p: puntero a Proceso, límite: nat64): bool
+        variable b: nat64
+        variable r: bool
+        r := falso
+        b := toma(dirección(quietos.cerrojo))
+        mientras cierto hacer
+            si interrumpido(p) entonces
+                r := cierto
+                romper
+            fin
+            si límite <> nob nat64(0) y ahora_ns() >= límite entonces romper fin
+            espera_interrumpible(dirección(quietos))
+            si límite <> nob nat64(0) entonces duerme_en_hasta(dirección(quietos), límite) sino duerme_en(dirección(quietos)) fin
+            toma_sin(dirección(quietos.cerrojo))
+            fin_interrumpible()
+            sal_de(dirección(quietos))
+        fin
+        sal_de(dirección(quietos))
+        suelta(dirección(quietos.cerrojo), b)
+        devolver r
+    fin
+
+    ; la próxima señal que puede recibir el hilo h de p (0: ninguna), fuera
+    ; de las pendientes; en «info», su código y quién; en «forz», si es la de
+    ; un fallo del procesador
+    función saca_señal(p: puntero a Proceso, h: puntero a Hilo, ref info: nat64, ref forz: bool): nat64
+        variable b, x, perm, s: nat64
+        s := 0
+        forz := falso
+        info := 0
+        b := toma(dirección(p.h_cerrojo))
+        si h.forzada <> 0 entonces
+            s := h.forzada
+            h.forzada := 0
+            forz := cierto
+        sino
+            perm := (nob h.s_másc) ob NO_BLOQUEABLES
+            x := h.s_pend yb perm
+            si x <> 0 entonces
+                s := nat64(bajo(x)) + 1
+                h.s_pend := h.s_pend yb (nob bit_de(s))
+                info := h.s_info[nat32(s) - 1]
+            sino
+                x := p.s_pend yb perm
+                si x <> 0 entonces
+                    s := nat64(bajo(x)) + 1
+                    p.s_pend := p.s_pend yb (nob bit_de(s))
+                    info := p.s_info[nat32(s) - 1]
+                fin
+            fin
+        fin
+        suelta(dirección(p.h_cerrojo), b)
+        devolver s
+    fin
+
+    ; el bit más bajo puesto de x (que no es 0)
+    función bajo(x: nat64): nat32
+        variable r: nat64
+        ensamblador
+            bsf rax, {x}
+            mov {r}, rax
+        fin
+        devolver nat32(r)
+    fin
+
+    ; el marco de la señal s en la pila del programa (el rt_sigframe de
+    ; Linux) y los registros del marco m para entrar en su función; falso si
+    ; no se ha podido escribir (la pila no es suya)
+    función pon_marco(p: puntero a Proceso, h: puntero a Hilo, m: nat64, s: nat64, info: nat64, forz: bool): bool
+        variable t: arreglo [56] de nat64
+        variable sp, fpst, marco, k, kb, másc, mar: nat64
+        variable i: nat32
+        variable en_alt, bien: bool
+        mar := p.acc_marcas[nat32(s)]
+        sp := l64(m + 144)
+        en_alt := h.alt_tam > 0 y sp >= h.alt_sp y sp < h.alt_sp + h.alt_tam
+        si mar yb SA_ONSTACK <> 0 y h.alt_tam > 0 y h.alt_marcas yb 2 = 0 y no en_alt entonces
+            sp := h.alt_sp + h.alt_tam
+            en_alt := cierto
+        fin
+        sp := sp - 128
+        fpst := (sp - tam_fpu) yb (nob nat64(63))
+        marco := ((fpst - LARGO_MARCO) yb (nob nat64(15))) - 8
+        ; los registros de x87, SSE y AVX (los del programa: el núcleo no los usa)
+        kb := nuevo_fpu(k)
+        si kb = 0 entonces devolver falso fin
+        guarda_fpu(k)
+        bien := copia_a(p, fpst, k, tam_fpu)
+        libera(puntero(kb))
+        si no bien entonces devolver falso fin
+        ceros_mem(nat64(dirección(t[0])), 448)
+        t[0] := p.acc_rest[nat32(s)]                    ; pretcode: sa_restorer
+        si con_xsave entonces t[1] := 1 fin              ; uc_flags: UC_FP_XSTATE
+        t[3] := h.alt_sp                                 ; uc_stack
+        si h.alt_tam = 0 o h.alt_marcas yb 2 <> 0 entonces t[4] := 2 sino si en_alt entonces t[4] := 1 fin
+        t[5] := h.alt_tam
+        ; uc_mcontext: R8 ... R15, RDI, RSI, RBP, RBX, RDX, RAX, RCX, RSP, RIP, EFL
+        t[6] := l64(m + 56)
+        t[7] := l64(m + 48)
+        t[8] := l64(m + 40)
+        t[9] := l64(m + 32)
+        t[10] := l64(m + 24)
+        t[11] := l64(m + 16)
+        t[12] := l64(m + 8)
+        t[13] := l64(m)
+        t[14] := l64(m + 64)
+        t[15] := l64(m + 72)
+        t[16] := l64(m + 80)
+        t[17] := l64(m + 88)
+        t[18] := l64(m + 96)
+        t[19] := l64(m + 112)
+        t[20] := l64(m + 104)
+        t[21] := l64(m + 144)
+        t[22] := l64(m + 120)
+        t[23] := l64(m + 136)
+        t[24] := (l64(m + 128) yb 0xFFFF) ob ((l64(m + 152) yb 0xFFFF) << 48)       ; CS, GS, FS, SS
+        si forz entonces
+            t[25] := h.f_err
+            t[26] := h.f_trap
+            t[28] := h.f_dir
+        fin
+        t[27] := h.s_másc                                ; oldmask
+        t[29] := fpst                                    ; fpstate
+        ; uc_sigmask: la de antes (la de antes de rt_sigsuspend, si la hay)
+        másc := h.s_másc
+        si h.s_guardada yb (nat64(1) << 63) <> 0 entonces másc := h.s_guardada yb (nob (nat64(1) << 63)) fin
+        t[38] := másc
+        ; siginfo: si_signo, si_errno, si_code y lo de cada clase
+        t[39] := s
+        si forz entonces
+            t[40] := h.f_cód
+            t[41] := h.f_dir                             ; si_addr
+        sino
+            t[40] := info yb 0xFFFFFFFF
+            t[41] := info >> 32                          ; si_pid (si_uid: 0)
+            si s = SIGCHLD entonces
+                t[40] := info yb 0xFF                    ; CLD_EXITED, CLD_KILLED
+                t[42] := (info >> 8) yb 0xFFFFFF         ; si_status
+            fin
+        fin
+        si no copia_a(p, marco, nat64(dirección(t[0])), LARGO_MARCO) entonces devolver falso fin
+        ; a su función, con (s, &info, &uc)
+        p64(m + 144, marco)
+        p64(m + 120, p.acción[nat32(s)])
+        p64(m + 64, s)
+        p64(m + 72, marco + 312)
+        p64(m + 96, marco + 8)
+        p64(m + 112, 0)
+        p64(m + 136, (l64(m + 136) yb 0xCD5 yb (nob nat64(0x400))) ob 0x202)
+        ; la máscara mientras: la de ahora, más su sa_mask y ella misma (sin SA_NODEFER)
+        másc := h.s_másc ob p.acc_másc[nat32(s)]
+        si mar yb SA_NODEFER = 0 entonces másc := másc ob bit_de(s) fin
+        h.s_másc := másc yb (nob nat64(NO_BLOQUEABLES))
+        h.s_guardada := 0
+        si mar yb SA_RESETHAND <> 0 entonces
+            p.acción[nat32(s)] := 0
+            p.acc_marcas[nat32(s)] := 0
+        fin
+        ; sus registros de x87, SSE y AVX, los de empezar
+        pon_fpu(plantilla)
+        suma_atómica(dirección(señales_entregadas), 1)
+        devolver cierto
+    fin
+
+    ; lo que hace sin función: cerrar el proceso, o nada
+    función por_defecto(p: puntero a Proceso, h: puntero a Hilo, s: nat64, forz: bool)
+        variable b: nat64
+        si s = SIGCHLD o s = SIGURG o s = SIGWINCH o s = SIGCONT entonces devolver fin
+        ; (sin control de trabajos todavía: parar es no hacer nada)
+        si s = SIGSTOP o s = SIGTSTP o s = SIGTTIN o s = SIGTTOU entonces devolver fin
+        si forz entonces
+            b := empieza_aviso(p)
+            escribir("ha recibido la señal ", s, " de un fallo y no se ha podido atender (la tenía bloqueada o ignorada).\n")
+            suelta(dirección(cerrojo_consola), b)
+            suma_atómica(dirección(cerrados_por_fallo), 1)
+        fin
+        sal(0, s)
+    fin
+
+    ; [etapa 7] antes de volver al anillo 3 (de una llamada al sistema, con su
+    ; resultado en RAX del marco m y n su número; o de una interrupción): si
+    ; el proceso acaba, el hilo acaba; si hay una señal que puede recibir, se
+    ; entrega (con su función, o lo que hace sin ella); una llamada que ha
+    ; dejado ERESTARTSYS se repite (o da EINTR si se entra en una función sin
+    ; SA_RESTART)
+    público función antes_de_volver(m: nat64, en_sistema: bool, n: nat64)
+        variable h: puntero a Hilo
+        variable p: puntero a Proceso
+        variable s, info, a, r: nat64
+        variable forz: bool
+        h := actual()
+        p := puntero(h.proceso)
+        si p = nulo entonces devolver fin
+        mientras cierto hacer
+            si p.saliendo <> 0 entonces sal_hilo(0) fin
+            si p.solo <> 0 y p.solo <> h.tid entonces sal_hilo(0) fin
+            s := saca_señal(p, h, info, forz)
+            si s = 0 entonces romper fin
+            a := p.acción[nat32(s)]
+            si forz y (a <= 1 o h.s_másc yb bit_de(s) <> 0) entonces
+                por_defecto(p, h, s, cierto)
+            sino si a = 0 entonces
+                por_defecto(p, h, s, falso)
+            sino si a > 1 entonces
+                si en_sistema entonces
+                    r := l64(m + 112)
+                    si r = nat64(ERESTARTSYS) y p.acc_marcas[nat32(s)] yb SA_RESTART <> 0 entonces
+                        p64(m + 120, l64(m + 120) - 2)
+                        p64(m + 112, n)
+                    sino si r = nat64(ERESTARTSYS) o r = nat64(ERESTARTNOHAND) entonces
+                        p64(m + 112, nob nat64(3))               ; -EINTR
+                    fin
+                    en_sistema := falso
+                fin
+                si no pon_marco(p, h, m, s, info, forz) entonces
+                    b_aviso(p, "no ha podido recibir una señal: su pila no es válida (se cierra con SIGSEGV).\n")
+                    sal(0, SIGSEGV)
+                fin
+                romper
+            fin
+        fin
+        ; una llamada interrumpida sin función que la atienda: se repite
+        si en_sistema entonces
+            r := l64(m + 112)
+            si r = nat64(ERESTARTSYS) o r = nat64(ERESTARTNOHAND) entonces
+                p64(m + 120, l64(m + 120) - 2)
+                p64(m + 112, n)
+            fin
+        fin
+        ; (rt_sigsuspend sin función que atender: la máscara de antes)
+        si h.s_guardada yb (nat64(1) << 63) <> 0 entonces
+            h.s_másc := h.s_guardada yb (nob (nat64(1) << 63))
+            h.s_guardada := 0
+        fin
+    fin
+
+    función b_aviso(p: puntero a Proceso, t: puntero a byte)
+        variable b: nat64
+        b := empieza_aviso(p)
+        escribir(t)
+        suelta(dirección(cerrojo_consola), b)
+    fin
+
+    ; (Entradas.al_volver: con las interrupciones quitadas) antes de volver
+    ; de una interrupción al anillo 3
+    función al_volver_(m: nat64)
+        variable h: puntero a Hilo
+        variable p: puntero a Proceso
+        h := actual()
+        si h.usuario = 0 o h.proceso = 0 entonces devolver fin
+        si l64(m + 128) yb 3 <> 3 entonces devolver fin
+        p := puntero(h.proceso)
+        si no hay_señal(p, h) entonces devolver fin
+        enciende()
+        antes_de_volver(m, falso, 0)
+        apaga()
+    fin
+
+    ; rt_sigreturn: los registros (y la máscara, y los de x87, SSE y AVX) del
+    ; marco de la señal, que está en la pila del programa (RSP - 8: ya ha
+    ; hecho «ret» a sa_restorer); el RAX de entonces
+    público función vuelve_de_señal(p: puntero a Proceso, m: nat64): ent64
+        variable t: arreglo [56] de nat64
+        variable marco, k, kb: nat64
+        variable h: puntero a Hilo
+        variable bien: bool
+        h := actual()
+        marco := l64(m + 144) - 8
+        si no copia_de(p, nat64(dirección(t[0])), marco, LARGO_MARCO) entonces
+            b_aviso(p, "ha vuelto de una señal con la pila mal (rt_sigreturn): se cierra con SIGSEGV.\n")
+            sal(0, SIGSEGV)
+        fin
+        p64(m + 56, t[6])
+        p64(m + 48, t[7])
+        p64(m + 40, t[8])
+        p64(m + 32, t[9])
+        p64(m + 24, t[10])
+        p64(m + 16, t[11])
+        p64(m + 8, t[12])
+        p64(m, t[13])
+        p64(m + 64, t[14])
+        p64(m + 72, t[15])
+        p64(m + 80, t[16])
+        p64(m + 88, t[17])
+        p64(m + 96, t[18])
+        p64(m + 112, t[19])
+        p64(m + 104, t[20])
+        p64(m + 144, t[21])
+        p64(m + 120, t[22])
+        p64(m + 136, (t[23] yb 0xCD5) ob 0x202)
+        h.s_másc := t[38] yb (nob nat64(NO_BLOQUEABLES))
+        ; los de x87, SSE y AVX: comprobados antes (lo que haría fallar a fxrstor o xrstor, fuera)
+        si t[29] <> 0 entonces
+            kb := nuevo_fpu(k)
+            si kb <> 0 entonces
+                bien := copia_de(p, k, t[29], tam_fpu)
+                si bien entonces
+                    limpia_fpu(k)
+                    pon_fpu(k)
+                fin
+                libera(puntero(kb))
+                si no bien entonces
+                    b_aviso(p, "ha vuelto de una señal con sus registros de coma flotante mal: se cierra con SIGSEGV.\n")
+                    sal(0, SIGSEGV)
+                fin
+            fin
+        fin
+        devolver ent64(t[19])
+    fin
+
+    ; lo de una imagen de fxsave o xsave que haría fallar al ponerla: MXCSR
+    ; (los bits que no hay), la cabecera de xsave (XSTATE_BV solo con lo de
+    ; XCR0, XCOMP_BV y lo reservado a 0)
+    función limpia_fpu(k: nat64)
+        variable q: puntero a nat32
+        variable i: nat32
+        q := puntero(k + 24)
+        valor(q) := valor(q) yb mxcsr_máscara
+        si con_xsave entonces
+            p64(k + 512, l64(k + 512) yb xcr0)
+            i := 0
+            mientras i < 7 hacer
+                p64(k + 520 + nat64(i) * 8, 0)
+                i := i + 1
+            fin
+        fin
     fin
 
     ; ---- los fallos del programa ----
@@ -635,14 +1453,19 @@ módulo Procesos
     ; arreglado; si no, lo explica y cierra el programa (no vuelve)
     función al_fallo_(n: nat64, d: nat64, err: nat64, c2: nat64): bool
         variable p: puntero a Proceso
+        variable h: puntero a Hilo
         variable i: ent32
         variable prot: nat32
-        variable b, señal: nat64
+        variable b, señal, x, cód: nat64
         variable bien: bool
         p := mío()
         si p = nulo entonces devolver falso fin
-        ; un fallo de página de algo suyo que aún no está: se pone, y sigue
-        si n = 14 y err yb 1 = 0 y c2 < TOPE entonces
+        h := actual()
+        ; un fallo de página de algo suyo que aún no está: se pone, y sigue;
+        ; [etapa 7] o al escribir en una página de copiar al escribir: se
+        ; rompe la copia (con el mutex de la memoria: otros hilos, a la vez)
+        si n = 14 y c2 < TOPE entonces
+            cierra_mem(p)
             i := región_de(p, c2)
             si i >= 0 entonces
                 prot := p.reg_prot[nat32(i)]
@@ -650,13 +1473,69 @@ módulo Procesos
                 si err yb 2 <> 0 y prot yb ESCRIBE = 0 entonces bien := falso fin
                 si err yb 16 <> 0 y prot yb EJECUTAR = 0 entonces bien := falso fin
                 si bien entonces
-                    si pon_página(p, c2, prot) entonces devolver cierto fin
-                    b := empieza_aviso(p)
-                    escribir("necesita más memoria y no queda: se cierra.\n")
-                    suelta(dirección(cerrojo_consola), b)
-                    sal(0, SIGKILL)
+                    x := pte(espacio_de(p), c2)
+                    si x yb PRESENTE = 0 entonces
+                        si pon_página(p, c2, prot) entonces
+                            abre_mem(p)
+                            devolver cierto
+                        fin
+                        abre_mem(p)
+                        b := empieza_aviso(p)
+                        escribir("necesita más memoria y no queda: se cierra.\n")
+                        suelta(dirección(cerrojo_consola), b)
+                        sal(0, SIGKILL)
+                    fin
+                    si x yb USUARIO <> 0 y err yb 2 <> 0 y x yb ESCRIBIR = 0 y x yb COPIAR <> 0 entonces
+                        si rompe_copia(espacio_de(p), abajo(c2), marcas(prot)) entonces
+                            abre_mem(p)
+                            devolver cierto
+                        fin
+                        abre_mem(p)
+                        b := empieza_aviso(p)
+                        escribir("necesita más memoria (copiar al escribir) y no queda: se cierra.\n")
+                        suelta(dirección(cerrojo_consola), b)
+                        sal(0, SIGKILL)
+                    fin
+                    ; (otro hilo ya lo ha arreglado: la entrada ya deja hacerlo)
+                    si x yb USUARIO <> 0 y (err yb 2 = 0 o x yb ESCRIBIR <> 0) y (err yb 16 = 0 o x yb bit_nx() = 0) entonces
+                        abre_mem(p)
+                        devolver cierto
+                    fin
                 fin
             fin
+            abre_mem(p)
+        fin
+        ; [etapa 7] la señal del fallo: si tiene una función para ella (y no
+        ; la bloquea), se le entrega al volver (Entradas.al_volver), con
+        ; si_addr y si_code; si no, se explica y se cierra, como antes
+        señal := SIGSEGV
+        cód := 1                                        ; SEGV_MAPERR
+        si n = 14 y err yb 1 <> 0 entonces cód := 2 fin  ; SEGV_ACCERR
+        si n = 0 entonces
+            señal := SIGFPE
+            cód := 1                                    ; FPE_INTDIV
+        sino si n = 16 o n = 19 entonces
+            señal := SIGFPE
+            cód := 0
+        sino si n = 6 entonces
+            señal := SIGILL
+            cód := 2                                    ; ILL_ILLOPN
+        sino si n = 1 o n = 3 entonces
+            señal := SIGTRAP
+            cód := 1                                    ; TRAP_BRKPT
+        sino si n = 17 entonces
+            señal := SIGBUS
+            cód := 1                                    ; BUS_ADRALN
+        sino si n = 13 entonces
+            cód := 0x80                                 ; SI_KERNEL
+        fin
+        si la_atiende(p, señal) y h.s_másc yb bit_de(señal) = 0 y h.forzada = 0 entonces
+            h.forzada := señal
+            h.f_cód := cód
+            h.f_err := err
+            h.f_trap := n
+            si n = 14 entonces h.f_dir := c2 sino h.f_dir := l64(d) fin
+            devolver cierto
         fin
         b := empieza_aviso(p)
         señal := SIGSEGV
@@ -750,35 +1629,65 @@ módulo Procesos
         devolver cierto
     fin
 
-    función carga_elf(p: puntero a Proceso, d: nat64, tam: nat64): bool
-        variable phoff, ph, off, va, fsz, msz, a, b: nat64
+    ; [etapa 7] una imagen ELF64 en la memoria del programa: un ejecutable
+    ; (ET_EXEC, donde dice) o uno de posición libre (ET_DYN: un PIE o el
+    ; cargador dinámico, desde «base_pie»). En ent, la entrada; en fdir y fnum,
+    ; dónde se ven sus cabeceras de programa (AT_PHDR) y cuántas; en fin_, lo
+    ; más alto; en interp e interp_l, su PT_INTERP (o 0); en base, lo que se
+    ; ha sumado a sus direcciones
+    función carga_imagen(p: puntero a Proceso, d: nat64, tam: nat64, base_pie: nat64, ref ent: nat64, ref fdir: nat64, ref fnum: nat32, ref fin_: nat64, ref interp: nat64, ref interp_l: nat64, ref base: nat64): bool
+        variable phoff, ph, off, va, fsz, msz, a, b, mín: nat64
         variable phnum, i, tipo_, fl: nat32
         variable prot: nat32
-        variable hay_carga: bool
-        p.al_dir := 0
+        variable hay_carga, dinámico: bool
+        fdir := 0
+        interp := 0
+        interp_l := 0
+        fin_ := 0
+        base := 0
         si tam < 64 entonces devolver mal_elf("no es un programa (es demasiado corto para ser un ELF)") fin
         si l32(d) <> 0x464C457F entonces devolver mal_elf("no es un programa ELF") fin
         si l8(d + 4) <> 2 o l8(d + 5) <> 1 entonces devolver mal_elf("es un ELF, pero no de 64 bits (o no es «little endian»)") fin
         si l16(d + 18) <> 62 entonces devolver mal_elf("es un ELF, pero no de x86-64") fin
-        si l16(d + 16) = 3 entonces devolver mal_elf("es un ELF de posición libre (PIE) o dinámico: aún no se saben cargar (etapa 7)") fin
-        si l16(d + 16) <> 2 entonces devolver mal_elf("es un ELF, pero no un ejecutable") fin
-        p.entrada := l64(d + 24)
+        dinámico := l16(d + 16) = 3
+        si l16(d + 16) <> 2 y no dinámico entonces devolver mal_elf("es un ELF, pero no un ejecutable") fin
         phoff := l64(d + 32)
         phnum := l16(d + 56)
         si l16(d + 54) <> 56 o phnum = 0 o phnum > 64 entonces devolver mal_elf("su tabla de segmentos (las cabeceras de programa) no es válida") fin
         si phoff >= tam o phoff + nat64(phnum) * 56 > tam entonces devolver mal_elf("su tabla de segmentos se sale del archivo") fin
-        p.al_phnum := phnum
+        fnum := phnum
+        ; (de posición libre: lo más bajo de lo que se carga va a base_pie)
+        si dinámico entonces
+            mín := nob nat64(0)
+            i := 0
+            mientras i < phnum hacer
+                ph := d + phoff + nat64(i) * 56
+                si l32(ph) = 1 y abajo(l64(ph + 16)) < mín entonces mín := abajo(l64(ph + 16)) fin
+                i := i + 1
+            fin
+            si mín = nob nat64(0) entonces devolver mal_elf("no tiene nada que cargar (ningún PT_LOAD)") fin
+            base := base_pie - mín
+        fin
+        ent := base + l64(d + 24)
         hay_carga := falso
-        p.brk_ini := 0
         i := 0
         mientras i < phnum hacer
             ph := d + phoff + nat64(i) * 56
             tipo_ := l32(ph)
-            si tipo_ = 3 entonces devolver mal_elf("pide un cargador dinámico (PT_INTERP): aún no se sabe (etapa 7)") fin
+            si tipo_ = 3 entonces
+                ; PT_INTERP: el nombre de su cargador dinámico
+                off := l64(ph + 8)
+                fsz := l64(ph + 32)
+                si fsz < 2 o fsz > 255 o off + fsz < off o off + fsz > tam entonces devolver mal_elf("el nombre de su cargador dinámico (PT_INTERP) no es válido") fin
+                si l8(d + off + fsz - 1) <> 0 entonces devolver mal_elf("el nombre de su cargador dinámico (PT_INTERP) no acaba en 0") fin
+                interp := d + off
+                interp_l := fsz - 1
+            fin
+            si tipo_ = 6 entonces fdir := base + l64(ph + 16) fin          ; PT_PHDR
             si tipo_ = 1 entonces
                 fl := l32(ph + 4)
                 off := l64(ph + 8)
-                va := l64(ph + 16)
+                va := base + l64(ph + 16)
                 fsz := l64(ph + 32)
                 msz := l64(ph + 40)
                 si fsz > msz o off + fsz < off o off + fsz > tam entonces devolver mal_elf("un segmento se sale del archivo") fin
@@ -797,17 +1706,54 @@ módulo Procesos
                     si no nueva_región(p, a, b, prot, R_PROGRAMA) entonces devolver mal_elf("tiene demasiados segmentos") fin
                 fin
                 si no copia_trozo(p, va, d + off, fsz, prot) entonces devolver mal_elf("no queda memoria") fin
-                si b > p.brk_ini entonces p.brk_ini := b fin
-                si phoff >= off y phoff + nat64(phnum) * 56 <= off + fsz entonces p.al_dir := va + (phoff - off) fin
+                si b > fin_ entonces fin_ := b fin
+                si fdir = 0 y phoff >= off y phoff + nat64(phnum) * 56 <= off + fsz entonces fdir := va + (phoff - off) fin
                 hay_carga := cierto
             fin
             i := i + 1
         fin
         si no hay_carga entonces devolver mal_elf("no tiene nada que cargar (ningún PT_LOAD)") fin
+        si región_de(p, ent) < 0 entonces devolver mal_elf("su punto de entrada no está en ningún segmento") fin
+        si p.reg_prot[nat32(región_de(p, ent))] yb EJECUTAR = 0 entonces devolver mal_elf("su punto de entrada no es código") fin
+        devolver cierto
+    fin
+
+    ; el programa (y, si lo pide, su cargador dinámico: PT_INTERP, por el
+    ; VFS; /lib es la unidad en memoria) en la memoria de p
+    función carga_elf(p: puntero a Proceso, d: nat64, tam: nat64): bool
+        variable ent, fdir, fin_, interp, il, base, ent2, fdir2, fin2, interp2, il2, base2, buf, t2: nat64
+        variable fnum, fnum2, i: nat32
+        variable err: ent64
+        variable ruta: arreglo [256] de byte
+        p.al_dir := 0
+        p.base_interp := 0
+        si no carga_imagen(p, d, tam, BASE_PIE, ent, fdir, fnum, fin_, interp, il, base) entonces devolver falso fin
+        p.entrada := ent
+        p.al_entrada := ent
+        p.al_dir := fdir
+        p.al_phnum := fnum
+        p.brk_ini := fin_
+        p.brk := fin_
+        si interp = 0 entonces devolver cierto fin
         i := 0
-        si región_de(p, p.entrada) < 0 entonces devolver mal_elf("su punto de entrada no está en ningún segmento") fin
-        si p.reg_prot[nat32(región_de(p, p.entrada))] yb EJECUTAR = 0 entonces devolver mal_elf("su punto de entrada no es código") fin
-        p.brk := p.brk_ini
+        mientras nat64(i) < il hacer
+            ruta[i] := byte(l8(interp + i))
+            i := i + 1
+        fin
+        ruta[i] := 0
+        buf := vfs_entero(dirección(ruta[0]), t2, err)
+        si buf = 0 entonces
+            motivo := "su cargador dinámico (PT_INTERP: /lib/ld-musl-x86_64.so.1, el de musl) no está"
+            devolver falso
+        fin
+        si no carga_imagen(p, buf, t2, BASE_INTERP, ent2, fdir2, fnum2, fin2, interp2, il2, base2) entonces
+            libera(puntero(buf))
+            devolver falso
+        fin
+        libera(puntero(buf))
+        si interp2 <> 0 entonces devolver mal_elf("su cargador dinámico pide a su vez otro") fin
+        p.entrada := ent2
+        p.base_interp := base2
         devolver cierto
     fin
 
@@ -830,7 +1776,7 @@ módulo Procesos
     ; [etapa 6] textos: los argc argumentos y los envc del entorno, seguidos
     ; (cada uno acabado en 0), en la memoria del núcleo
     función pon_pila_v(p: puntero a Proceso, textos: puntero a byte, argc: nat32, envc: nat32): bool
-        variable tabla: arreglo [168] de nat64
+        variable tabla: arreglo [180] de nat64
         variable dirs: arreglo [136] de nat64
         variable sp, rnd, plat_v: nat64
         variable i, j, n, nt, k: nat32
@@ -891,7 +1837,7 @@ módulo Procesos
         tabla[j + 6] := 6               ; AT_PAGESZ
         tabla[j + 7] := 4096
         tabla[j + 8] := 9               ; AT_ENTRY
-        tabla[j + 9] := p.entrada
+        tabla[j + 9] := p.al_entrada
         tabla[j + 10] := 25             ; AT_RANDOM
         tabla[j + 11] := rnd
         tabla[j + 12] := 15             ; AT_PLATFORM
@@ -908,9 +1854,20 @@ módulo Procesos
         tabla[j + 23] := 0
         tabla[j + 24] := 23             ; AT_SECURE
         tabla[j + 25] := 0
-        tabla[j + 26] := 0              ; AT_NULL
-        tabla[j + 27] := 0
-        j := j + 28
+        ; [etapa 7] AT_BASE (el cargador dinámico), AT_FLAGS, AT_HWCAP, AT_HWCAP2, AT_MINSIGSTKSZ
+        tabla[j + 26] := 7
+        tabla[j + 27] := p.base_interp
+        tabla[j + 28] := 8
+        tabla[j + 29] := 0
+        tabla[j + 30] := 16
+        tabla[j + 31] := hwcap
+        tabla[j + 32] := 26
+        tabla[j + 33] := 0
+        tabla[j + 34] := 51
+        tabla[j + 35] := LARGO_MARCO + 128 + tam_fpu + 64
+        tabla[j + 36] := 0              ; AT_NULL
+        tabla[j + 37] := 0
+        j := j + 38
         ; (argc en una dirección múltiplo de 16)
         sp := sp - nat64(j) * 8
         sp := sp yb (nob nat64(15))
@@ -962,6 +1919,19 @@ módulo Procesos
         variable h: puntero a Hilo
         variable b: nat64
         p := puntero(arg)
+        ; [etapa 7] el primer hilo: su número (el del proceso), su máscara y su
+        ; pila de señales (las del que hizo fork), en la lista de los hilos
+        h := actual()
+        h.tid := p.id
+        h.fpu_bloque := p.ini_fpu
+        p.ini_fpu := 0
+        h.s_másc := p.ini_másc
+        h.alt_sp := p.ini_alt_sp
+        h.alt_tam := p.ini_alt_tam
+        h.alt_marcas := p.ini_alt_marcas
+        b := toma(dirección(p.h_cerrojo))
+        mete_hilo(p, h)
+        suelta(dirección(p.h_cerrojo), b)
         si p.de_fork <> 0 entonces
             ; [etapa 6] el hijo de fork: con FS y GS del padre, sigue donde él, con RAX = 0
             h := actual()
@@ -1014,9 +1984,34 @@ módulo Procesos
     fin
 
     función suelta_proceso(p: puntero a Proceso)
-        si p.espacio <> 0 entonces destruye_espacio(espacio_de(p)) fin
-        si p.fpu_bloque <> 0 entonces libera(puntero(p.fpu_bloque)) fin
+        si p.espacio <> 0 y p.prestado = 0 entonces destruye_espacio(espacio_de(p)) fin
+        si p.ini_fpu <> 0 entonces libera(puntero(p.ini_fpu)) fin
         libera(puntero(nat64(p)))
+    fin
+
+    ; [etapa 7] lo de etapa 7 de un proceso nuevo, a cero (tras copiar el del padre)
+    función limpia_nuevo(q: puntero a Proceso)
+        variable i: nat32
+        q.m_cerrojo := 0
+        q.m_primero := 0
+        q.m_último := 0
+        q.m_dueño := 0
+        q.m_veces := 0
+        q.m_esperas := 0
+        q.n_hilos := 1
+        i := 0
+        mientras i < MAX_HILOS hacer
+            q.hilos[i] := 0
+            i := i + 1
+        fin
+        q.h_cerrojo := 0
+        q.s_pend := 0
+        q.saliendo := 0
+        q.solo := 0
+        q.prestado := 0
+        q.vfork_padre := 0
+        q.esperando_vfork := 0
+        q.ini_fpu := 0
     fin
 
     ; arranca el programa de la línea («HOLA uno dos»: el archivo HOLA de la
@@ -1132,15 +2127,15 @@ módulo Procesos
             devolver nulo
         fin
         p.mmap_próx := nat64(0x1000) << 32
-        ; sus registros x87 y SSE, los de empezar
-        p.fpu_bloque := nat64(reserva(528))
-        si p.fpu_bloque = 0 entonces
+        p.n_hilos := 1
+        ; sus registros x87, SSE y AVX, los de empezar
+        p.ini_fpu := nuevo_fpu(fpu)
+        si p.ini_fpu = 0 entonces
             motivo := "no queda memoria"
             suelta_proceso(p)
             devolver nulo
         fin
-        fpu := (p.fpu_bloque + 15) yb (nob nat64(15))
-        copia_mem(fpu, nat64(dirección(plantilla)), 512)
+        copia_mem(fpu, plantilla, tam_fpu)
         si no registra(p) entonces
             motivo := "hay demasiados procesos"
             suelta_proceso(p)
@@ -1160,20 +2155,30 @@ módulo Procesos
     fin
 
     ; ---- [etapa 6] fork, execve y wait4 ----
-    ; fork (y vfork y clone con solo SIGCHLD): un hijo igual, con una copia de
-    ; las páginas que el padre tiene puestas (copiar al escribir: etapa 7), los
-    ; descriptores compartiendo lo abierto (la posición), la carpeta actual y
-    ; las señales; su hilo sigue en el marco m del syscall con RAX = 0. El id
-    ; del hijo, o el error.
+    ; fork (y vfork y clone sin CLONE_VM): un hijo igual, [etapa 7] con las
+    ; páginas del padre compartidas hasta que uno escriba (copiar al
+    ; escribir), los descriptores compartiendo lo abierto (la posición), la
+    ; carpeta actual y las señales (sin las pendientes); solo con el hilo que
+    ; lo hace; su hilo sigue en el marco m del syscall con RAX = 0 (y con la
+    ; pila «pila», si no es 0). Con «presta» (clone con CLONE_VM y
+    ; CLONE_VFORK: el posix_spawn de musl), el hijo usa el espacio del padre,
+    ; y el padre espera a que haga execve o acabe. El id del hijo, o el error.
     público función bifurca(p: puntero a Proceso, m: nat64): ent64
+        devolver bifurca_(p, m, falso, 0)
+    fin
+
+    público función bifurca_(p: puntero a Proceso, m: nat64, presta: bool, pila: nat64): ent64
         variable q: puntero a Proceso
         variable e: puntero a Espacio
-        variable h: puntero a Hilo
-        variable fpu, b: nat64
+        variable h, yo_: puntero a Hilo
+        variable fpu, b, id: nat64
         variable i: nat32
+        variable bien: bool
+        yo_ := actual()
         q := puntero(nat64(reserva(tamaño(Proceso))))
         si q = nulo entonces devolver -12 fin
         copia_mem(nat64(q), nat64(p), tamaño(Proceso))
+        limpia_nuevo(q)
         q.id := suma_atómica(dirección(próximo_pid), 1) + 1
         q.padre := p.id
         q.del_núcleo := 0
@@ -1187,35 +2192,47 @@ módulo Procesos
         q.hilo := 0
         q.espacio := 0
         q.fpu_bloque := 0
-        e := crea_espacio()
-        si e = nulo entonces
+        q.ini_másc := yo_.s_másc
+        q.ini_alt_sp := yo_.alt_sp
+        q.ini_alt_tam := yo_.alt_tam
+        q.ini_alt_marcas := yo_.alt_marcas
+        si presta entonces
+            q.espacio := p.espacio
+            q.prestado := 1
+        sino
+            e := crea_espacio()
+            si e = nulo entonces
+                libera(puntero(nat64(q)))
+                devolver -12
+            fin
+            q.espacio := nat64(e)
+            cierra_mem(p)
+            bien := copia_espacio(espacio_de(p), e)
+            abre_mem(p)
+            si no bien entonces
+                destruye_espacio(e)
+                libera(puntero(nat64(q)))
+                devolver -12
+            fin
+        fin
+        q.ini_fpu := nuevo_fpu(fpu)
+        si q.ini_fpu = 0 entonces
+            si q.prestado = 0 entonces destruye_espacio(espacio_de(q)) fin
             libera(puntero(nat64(q)))
             devolver -12
         fin
-        q.espacio := nat64(e)
-        si no copia_espacio(espacio_de(p), e) entonces
-            destruye_espacio(e)
-            libera(puntero(nat64(q)))
-            devolver -12
-        fin
-        q.fpu_bloque := nat64(reserva(528))
-        si q.fpu_bloque = 0 entonces
-            destruye_espacio(e)
-            libera(puntero(nat64(q)))
-            devolver -12
-        fin
-        fpu := (q.fpu_bloque + 15) yb (nob nat64(15))
         guarda_fpu(fpu)                 ; (los del padre, que son los que hay ahora: el núcleo no los usa)
         ; los descriptores: lo abierto, compartido
         i := 0
         mientras i < MAX_FD hacer
-            si q.fd_clase[i] = F_ARCHIVO y q.fd_obj[i] <> 0 entonces vfs_otro(puntero(q.fd_obj[i])) fin
+            si q.fd_clase[i] <> 0 entonces otro_fd(q, i) fin
             i := i + 1
         fin
         ; el marco del padre, con RAX = 0 y las banderas limpias
         copia_mem(nat64(dirección(q.marco[0])), m, 160)
         q.marco[14] := 0
         q.marco[17] := (q.marco[17] yb 0xCD5) ob 0x202
+        si pila <> 0 entonces q.marco[18] := pila fin
         q.de_fork := 1
         b := sin_ints()
         q.fs_ini := lee_msr(0xC0000100)
@@ -1226,8 +2243,14 @@ módulo Procesos
             suelta_proceso(q)
             devolver -11                ; EAGAIN
         fin
+        id := q.id
+        si presta entonces
+            q.vfork_padre := nat64(p)
+            p.esperando_vfork := id
+        fin
         h := crea_de_programa(nat64(dirección(arranca_hilo)), nat64(q), dirección(q.nombre[0]), nat64(q), q.espacio, fpu)
         si h = nulo entonces
+            p.esperando_vfork := 0
             desregistra(q)
             cierra_todos(q)
             suelta_proceso(q)
@@ -1237,7 +2260,163 @@ módulo Procesos
         suma_atómica(dirección(vivos), 1)
         suma_atómica(dirección(arrancados), 1)
         suma_atómica(dirección(forks), 1)
-        devolver ent64(q.id)
+        ; (CLONE_VFORK: hasta que el hijo haga execve o acabe; q ya no se toca)
+        si presta entonces
+            b := toma(dirección(hijos_espera.cerrojo))
+            mientras p.esperando_vfork <> 0 hacer
+                duerme_en(dirección(hijos_espera))
+                toma_sin(dirección(hijos_espera.cerrojo))
+            fin
+            sal_de(dirección(hijos_espera))
+            suelta(dirección(hijos_espera.cerrojo), b)
+        fin
+        devolver ent64(id)
+    fin
+
+    ; [etapa 7] el descriptor i de q, uno más (fork: lo abierto, compartido);
+    ; lo de las tuberías lo hace quien las tiene (al_otro_fd)
+    público variable al_otro_fd: nat64          ; f(clase, objeto): una referencia más
+    público variable al_cierra_fd: nat64        ; f(clase, objeto): una menos
+    público función otro_fd(q: puntero a Proceso, i: nat32)
+        si q.fd_clase[i] = F_ARCHIVO y q.fd_obj[i] <> 0 entonces
+            vfs_otro(puntero(q.fd_obj[i]))
+        sino si q.fd_clase[i] > F_ARCHIVO y al_otro_fd <> 0 entonces
+            llama2_(al_otro_fd, nat64(q.fd_clase[i]), q.fd_obj[i])
+        fin
+    fin
+
+    público función cierra_fd_obj(clase: nat32, obj: nat64)
+        si clase = F_ARCHIVO y obj <> 0 entonces
+            vfs_cierra(puntero(obj))
+        sino si clase > F_ARCHIVO y al_cierra_fd <> 0 entonces
+            llama2_(al_cierra_fd, nat64(clase), obj)
+        fin
+    fin
+
+    función llama2_(f: nat64, a: nat64, b: nat64)
+        ensamblador
+            push qword {b}
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    ; [etapa 7] clone con CLONE_THREAD (pthread_create de musl): un hilo
+    ; nuevo de p, en su espacio, que sigue en el marco m con RAX = 0, la pila
+    ; «pila» y, con CLONE_SETTLS, FS = tls. Su tid, o el error.
+    público función crea_hilo(p: puntero a Proceso, m: nat64, marcas_: nat64, pila: nat64, v_ptid: nat64, v_ctid: nat64, tls: nat64): ent64
+        variable a: puntero a Arranque
+        variable h, yo_: puntero a Hilo
+        variable b, tid, fpu: nat64
+        variable x: nat32
+        variable bien: bool
+        yo_ := actual()
+        a := puntero(nat64(reserva(tamaño(Arranque))))
+        si a = nulo entonces devolver -12 fin
+        a.fpu_bloque := nuevo_fpu(fpu)
+        a.fpu := fpu
+        si a.fpu_bloque = 0 entonces
+            libera(puntero(nat64(a)))
+            devolver -12
+        fin
+        guarda_fpu(a.fpu)
+        tid := suma_atómica(dirección(próximo_pid), 1) + 1
+        a.proceso := nat64(p)
+        a.tid := tid
+        b := sin_ints()
+        a.fs := lee_msr(0xC0000100)
+        a.gs := lee_msr(0xC0000102)
+        restaura(b)
+        si marcas_ yb 0x80000 <> 0 entonces a.fs := tls fin                 ; CLONE_SETTLS
+        a.borra_tid := 0
+        si marcas_ yb 0x200000 <> 0 entonces a.borra_tid := v_ctid fin      ; CLONE_CHILD_CLEARTID
+        a.máscara := yo_.s_másc
+        a.alt_sp := 0
+        a.alt_tam := 0
+        a.alt_marcas := 2
+        copia_mem(nat64(dirección(a.marco[0])), m, 160)
+        a.marco[14] := 0
+        a.marco[17] := (a.marco[17] yb 0xCD5) ob 0x202
+        si pila <> 0 entonces a.marco[18] := pila fin
+        b := toma(dirección(p.h_cerrojo))
+        bien := p.n_hilos < MAX_HILOS y p.saliendo = 0
+        si bien entonces p.n_hilos := p.n_hilos + 1 fin
+        suelta(dirección(p.h_cerrojo), b)
+        si no bien entonces
+            libera(puntero(a.fpu_bloque))
+            libera(puntero(nat64(a)))
+            devolver -11                ; EAGAIN
+        fin
+        x := nat32(tid)
+        si marcas_ yb 0x100000 <> 0 entonces copia_a(p, v_ptid, nat64(dirección(x)), 4) fin      ; CLONE_PARENT_SETTID
+        si marcas_ yb 0x01000000 <> 0 entonces copia_a(p, v_ctid, nat64(dirección(x)), 4) fin    ; CLONE_CHILD_SETTID
+        h := crea_de_programa(nat64(dirección(arranca_clon)), nat64(a), dirección(p.nombre[0]), nat64(p), p.espacio, a.fpu)
+        si h = nulo entonces
+            b := toma(dirección(p.h_cerrojo))
+            p.n_hilos := p.n_hilos - 1
+            suelta(dirección(p.h_cerrojo), b)
+            libera(puntero(a.fpu_bloque))
+            libera(puntero(nat64(a)))
+            devolver -12
+        fin
+        suma_atómica(dirección(hilos_creados), 1)
+        devolver ent64(tid)
+    fin
+
+    ; lo que hace el hilo nuevo: entrar en el programa (no vuelve)
+    función arranca_clon(arg: nat64)
+        variable a: puntero a Arranque
+        variable p: puntero a Proceso
+        variable h: puntero a Hilo
+        variable marco: arreglo [20] de nat64
+        variable b: nat64
+        a := puntero(arg)
+        p := puntero(a.proceso)
+        h := actual()
+        h.tid := a.tid
+        h.fpu_bloque := a.fpu_bloque
+        h.s_másc := a.máscara
+        h.borra_tid := a.borra_tid
+        h.alt_sp := a.alt_sp
+        h.alt_tam := a.alt_tam
+        h.alt_marcas := a.alt_marcas
+        copia_mem(nat64(dirección(marco[0])), nat64(dirección(a.marco[0])), 160)
+        b := sin_ints()
+        h.fs_u := a.fs
+        h.gs_u := a.gs
+        pon_msr(0xC0000100, a.fs)
+        pon_msr(0xC0000102, a.gs)
+        restaura(b)
+        libera(puntero(nat64(a)))
+        b := toma(dirección(p.h_cerrojo))
+        mete_hilo(p, h)
+        suelta(dirección(p.h_cerrojo), b)
+        ; (si mientras tanto el proceso acaba o hace execve)
+        si p.saliendo <> 0 o (p.solo <> 0 y p.solo <> h.tid) entonces sal_hilo(0) fin
+        a_usuario_marco(nat64(dirección(marco[0])))
+    fin
+
+    ; [etapa 7] execve con más hilos: los demás acaban (y se espera a que acaben)
+    función solo_este(p: puntero a Proceso)
+        variable h, t: puntero a Hilo
+        variable b: nat64
+        variable i: nat32
+        h := actual()
+        si p.n_hilos <= 1 entonces devolver fin
+        b := toma(dirección(p.h_cerrojo))
+        p.solo := h.tid
+        i := 0
+        mientras i < MAX_HILOS hacer
+            si p.hilos[i] <> 0 y p.hilos[i] <> nat64(h) entonces
+                t := puntero(p.hilos[i])
+                interrumpe(t)
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(p.h_cerrojo), b)
+        mientras p.n_hilos > 1 hacer duerme_ms(1) fin
+        p.solo := 0
     fin
 
     ; los textos de una lista de punteros del programa (argv o envp, acabada en
@@ -1342,7 +2521,11 @@ módulo Procesos
             devolver r
         fin
         ; ---- desde aquí no hay vuelta atrás ----
+        ; [etapa 7] los demás hilos, fuera
+        solo_este(p)
         p.entrada := q.entrada
+        p.al_entrada := q.al_entrada
+        p.base_interp := q.base_interp
         p.pila := q.pila
         p.pila_ini := q.pila_ini
         p.brk_ini := q.brk_ini
@@ -1356,11 +2539,13 @@ módulo Procesos
             p.reg_fin[i] := q.reg_fin[i]
             p.reg_prot[i] := q.reg_prot[i]
             p.reg_clase[i] := q.reg_clase[i]
+            p.reg_ext[i] := q.reg_ext[i]
             i := i + 1
         fin
         p.mmap_próx := nat64(0x1000) << 32
         p.tid_dir := 0
         p.de_fork := 0
+        cierra_mem(p)
         viejo := espacio_de(p)
         p.espacio := nat64(e)
         h := actual()
@@ -1371,9 +2556,18 @@ módulo Procesos
         h.gs_u := 0
         pon_msr(0xC0000100, 0)
         pon_msr(0xC0000102, 0)
-        pon_fpu(nat64(dirección(plantilla)))
+        pon_fpu(plantilla)
         restaura(b)
-        destruye_espacio(viejo)
+        abre_mem(p)
+        ; ([etapa 7] el espacio prestado por su padre, CLONE_VFORK, se queda: el padre sigue)
+        si p.prestado = 0 entonces destruye_espacio(viejo) fin
+        p.prestado := 0
+        suelta_vfork(p)
+        h.borra_tid := 0
+        h.alt_sp := 0
+        h.alt_tam := 0
+        h.alt_marcas := 2
+        p.s_pend := 0
         libera(puntero(nat64(q)))
         ; el nombre (el último trozo de la ruta, sin la extensión, en mayúsculas) y la línea
         i := 0
@@ -1411,7 +2605,8 @@ módulo Procesos
         i := 0
         mientras i < MAX_FD hacer
             si p.fd_cloexec[i] <> 0 entonces
-                si p.fd_clase[i] = F_ARCHIVO y p.fd_obj[i] <> 0 entonces vfs_cierra(puntero(p.fd_obj[i])) fin
+                si p.fd_clase[i] <> 0 entonces cierra_fd_obj(p.fd_clase[i], p.fd_obj[i]) fin
+                p.fd_nobloq[i] := 0
                 p.fd_clase[i] := 0
                 p.fd_obj[i] := 0
                 p.fd_cloexec[i] := 0
@@ -1420,7 +2615,11 @@ módulo Procesos
         fin
         i := 0
         mientras i < 65 hacer
-            si p.acción[i] > 1 entonces p.acción[i] := 0 fin
+            si p.acción[i] > 1 entonces
+                p.acción[i] := 0
+                p.acc_marcas[i] := 0
+                p.acc_másc[i] := 0
+            fin
             i := i + 1
         fin
         ; el marco: los registros a cero, en la entrada, con la pila nueva
@@ -1473,15 +2672,17 @@ módulo Procesos
                 i := i + 1
             fin
             suelta_sin(dirección(procs_cerrojo))
-            si z <> nulo o no hay o opciones yb 1 <> 0 o p.matar <> 0 entonces romper fin
+            si z <> nulo o no hay o opciones yb 1 <> 0 o interrumpido(p) entonces romper fin
+            espera_interrumpible(dirección(hijos_espera))
             duerme_en(dirección(hijos_espera))
             toma_sin(dirección(hijos_espera.cerrojo))
+            fin_interrumpible()
         fin
         sal_de(dirección(hijos_espera))
         suelta(dirección(hijos_espera.cerrojo), b)
         si z = nulo entonces
             si no hay entonces devolver -10 fin                 ; ECHILD
-            si p.matar <> 0 entonces devolver -4 fin            ; EINTR
+            si interrumpido(p) entonces devolver ERESTARTSYS fin
             devolver 0
         fin
         si z.señal <> 0 entonces est := z.señal sino est := (z.código yb 255) << 8 fin
@@ -1506,7 +2707,15 @@ módulo Procesos
     ; espera a que acabe p y lo suelta; el código con el que ha acabado (como en
     ; la consola de Linux: 128 + la señal si lo ha cerrado un fallo)
     público función espera_proceso(p: puntero a Proceso): nat64
-        variable r: nat64
+        variable r, b: nat64
+        ; [etapa 7] hasta que acabe el último de sus hilos (y el primero, del todo)
+        b := toma(dirección(hijos_espera.cerrojo))
+        mientras p.terminado = 0 hacer
+            duerme_en_hasta(dirección(hijos_espera), ahora_ns() + 50000000)
+            toma_sin(dirección(hijos_espera.cerrojo))
+        fin
+        sal_de(dirección(hijos_espera))
+        suelta(dirección(hijos_espera.cerrojo), b)
         une(puntero(p.hilo))
         r := p.código
         si p.señal <> 0 entonces r := 128 + p.señal fin
@@ -1531,9 +2740,18 @@ módulo Procesos
             detén_fin()
         fin
         azar_estado := tsc()
-        guarda_fpu(nat64(dirección(plantilla)))
+        ; [etapa 7] los registros de empezar (fxsave o xsave), la tabla de copiar al escribir
+        plantilla := (nat64(reserva(tam_fpu + 64)) + 63) yb (nob nat64(63))
+        guarda_fpu(plantilla)
+        mxcsr_máscara := nat32(l32(plantilla + 28))
+        si mxcsr_máscara = 0 entonces mxcsr_máscara := 0xFFBF fin
+        si no prepara_compartidos() entonces
+            detén_ini("no hay memoria para la tabla de copiar al escribir")
+            detén_fin()
+        fin
         al_fallo_usuario := nat64(dirección(al_fallo_))
         al_cambiar := nat64(dirección(al_cambiar_))
+        al_volver := nat64(dirección(al_volver_))
     fin
 
 fin Procesos.

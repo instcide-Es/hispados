@@ -86,7 +86,20 @@ módulo Hilos64
         espacio: nat64              ; su espacio de direcciones (Espacios), o 0: el del núcleo
         proceso: nat64              ; su proceso (Procesos), o 0
         fs_u, gs_u: nat64           ; FS_BASE y el GS del programa (KERNEL_GS_BASE, dentro del núcleo)
-        fpu: nat64                  ; dónde se guardan sus registros x87 y SSE (fxsave, 512 octetos alineados a 16)
+        fpu: nat64                  ; dónde se guardan sus registros x87, SSE y AVX (fxsave o xsave, alineados a 64)
+        ; [etapa 7] lo de POSIX de cada hilo de un programa (Procesos)
+        tid: nat64                  ; su número (gettid; el del primero, el del proceso)
+        fpu_bloque: nat64           ; el bloque del montón de sus registros (fpu, alineado dentro)
+        s_másc: nat64               ; las señales que tiene bloqueadas (la s, el bit s - 1)
+        s_pend: nat64               ; las pendientes de este hilo (tkill, tgkill, SIGPIPE...)
+        s_guardada: nat64           ; la máscara de antes de rt_sigsuspend (con el bit 63 de «hay»)
+        alt_sp, alt_tam, alt_marcas: nat64      ; la pila de las señales (sigaltstack)
+        borra_tid: nat64            ; CLONE_CHILD_CLEARTID y set_tid_address: al acabar, 0 y FUTEX_WAKE
+        robusta, robusta_largo: nat64           ; set_robust_list
+        forzada: nat64              ; la señal de un fallo del procesador, para entregarla al volver
+        f_dir, f_cód, f_err, f_trap: nat64      ; lo de esa señal (si_addr, si_code, el error y la excepción)
+        interrumpible: nat64        ; la Espera de la que le saca una señal (o 0)
+        s_info: arreglo [64] de nat64           ; de cada pendiente suya: el código (abajo) y quién (arriba)
     fin
 
     público tipo Espera = estructura
@@ -684,6 +697,43 @@ módulo Hilos64
         si e.último = x entonces e.último := antes fin
         h.sig_espera := 0
         h.en_espera := 0
+    fin
+
+    ; [etapa 7] (con e.cerrojo tomado) quita h de e, si está en ella (lo
+    ; despierta después quien llama, sin el cerrojo: despierta)
+    público función quita_de_espera(e: puntero a Espera, h: puntero a Hilo)
+        si h.en_espera = nat64(e) entonces quita_de(e, h) fin
+    fin
+
+    ; [etapa 7] saca a h de su espera si duerme en una de las que se pueden
+    ; interrumpir (h.interrumpible: las de los programas, que miran otra vez
+    ; lo que esperan al despertar) y lo despierta; si corre en otro
+    ; procesador, le avisa (al volver al anillo 3 mira sus señales)
+    público función interrumpe(h: puntero a Hilo)
+        variable b, e: nat64
+        variable c: puntero a Cpu
+        variable sacado: bool
+        sacado := falso
+        b := sin_ints()
+        e := h.interrumpible
+        si e <> 0 entonces
+            toma_sin(dirección(es_espera(e).cerrojo))
+            si h.interrumpible = e entonces
+                si h.en_espera = e entonces quita_de(es_espera(e), h) fin
+                sacado := cierto
+            fin
+            suelta_sin(dirección(es_espera(e).cerrojo))
+        fin
+        restaura(b)
+        si sacado entonces despierta(h) fin
+        b := sin_ints()
+        c := yo()
+        si h.estado = CORRIENDO y h.cpu <> c.número y h.cpu < n_cpus entonces ipi(cpu(h.cpu).apic, 0x4000 ob V_PLAN) fin
+        restaura(b)
+    fin
+
+    función es_espera(d: nat64): puntero a Espera
+        devolver puntero(d)
     fin
 
     ; (con e.cerrojo tomado) el hilo que corre, que ya no espera en e, sale de

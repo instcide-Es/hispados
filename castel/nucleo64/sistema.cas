@@ -28,11 +28,26 @@
 ;  vfork (como fork), 59 execve, 61 wait4, 109 setpgid, 110 getppid, 111
 ;  getpgrp, 112 setsid, 121 getpgid, 124 getsid, 270 pselect6, 271 ppoll;
 ;  O_CLOEXEC (open, dup3, fcntl) se cierra en execve.
+;  [etapa 7] Lo que pide musl (sección 13): 15 rt_sigreturn, 13 rt_sigaction
+;  y 14 rt_sigprocmask de verdad, 127 rt_sigpending, 130 rt_sigsuspend, 131
+;  sigaltstack, 34 pause, 62 kill, 200 tkill, 234 tgkill; 56 clone (hilos:
+;  CLONE_THREAD; CLONE_VM con CLONE_VFORK; y como fork), 60 exit (el hilo),
+;  231 exit_group, 202 futex, 273 set_robust_list, 274 get_robust_list; 22
+;  pipe y 293 pipe2 (Tubos64); 9 mmap de archivos (MAP_PRIVATE y MAP_SHARED
+;  de solo leer: una copia; MAP_SHARED anónima, compartida de verdad con los
+;  hijos); 28 madvise; 318 getrandom (RDRAND, o RDSEED, o lo del TSC); 230
+;  clock_nanosleep (y nanosleep, que se interrumpe), 229 clock_getres, 96
+;  gettimeofday, 201 time; 302 prlimit64, 97 getrlimit, 160 setrlimit; 203 y
+;  204 sched_setaffinity y sched_getaffinity; 99 sysinfo; 95 umask; 98
+;  getrusage; las de ioctl de la consola (TCGETS, TCSETS, TIOCGWINSZ...) y
+;  FIONREAD de las tuberías. Al volver, Procesos.antes_de_volver: las
+;  señales y repetir lo interrumpido (SA_RESTART); rt_sigreturn vuelve con
+;  iretq (todos los registros).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64
 
     constante EPERM = -1
     constante ENOENT = -2
@@ -53,6 +68,10 @@ módulo Sistema
     constante O_CLOEXEC = 0x80000
     constante EINTR = -4
     constante ECHILD = -10
+    constante EAGAIN = -11
+    constante EACCES = -13
+    constante ESRCH = -3
+    constante O_NONBLOCK = 0x800
     constante TROZO = 16384                     ; lo que se copia de una vez (read, write, getdents64)
 
     público variable llamadas: nat64            ; cuántas se han atendido
@@ -163,6 +182,12 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver tty_lee(p, v, n)
         fin
+        ; [etapa 7] las tuberías
+        si p.fd_clase[nat32(fd)] = F_TUBO_E entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_TUBO_L entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            devolver tubo_lee(p, p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0)
+        fin
         si n = 0 entonces devolver 0 fin
         k := nat64(reserva(TROZO))
         si k = 0 entonces devolver ENOMEM fin
@@ -195,6 +220,12 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             si n = 0 entonces devolver 0 fin
             devolver escribe_consola(p, v, n)
+        fin
+        ; [etapa 7] las tuberías
+        si p.fd_clase[nat32(fd)] = F_TUBO_L entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_TUBO_E entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            devolver tubo_escribe(p, p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0)
         fin
         si n = 0 entonces devolver 0 fin
         k := nat64(reserva(TROZO))
@@ -296,8 +327,15 @@ módulo Sistema
     fin
 
     función cierra(p: puntero a Proceso, fd: nat64): ent64
+        variable c: nat32
+        variable ob_: nat64
         si no fd_bien(p, fd) entonces devolver EBADF fin
-        si p.fd_clase[nat32(fd)] = F_ARCHIVO entonces vfs_cierra(abierto(p, fd)) fin
+        c := p.fd_clase[nat32(fd)]
+        ob_ := p.fd_obj[nat32(fd)]
+        p.fd_clase[nat32(fd)] := 0
+        p.fd_obj[nat32(fd)] := 0
+        p.fd_nobloq[nat32(fd)] := 0
+        cierra_fd_obj(c, ob_)
         p.fd_clase[nat32(fd)] := 0
         p.fd_obj[nat32(fd)] := 0
         p.fd_cloexec[nat32(fd)] := 0
@@ -320,7 +358,8 @@ módulo Sistema
         p.fd_clase[nat32(n)] := p.fd_clase[nat32(fd)]
         p.fd_obj[nat32(n)] := p.fd_obj[nat32(fd)]
         p.fd_cloexec[nat32(n)] := 0
-        si p.fd_clase[nat32(n)] = F_ARCHIVO entonces vfs_otro(abierto(p, fd)) fin
+        p.fd_nobloq[nat32(n)] := p.fd_nobloq[nat32(fd)]
+        otro_fd(p, nat32(n))
         devolver ent64(n)
     fin
 
@@ -339,9 +378,14 @@ módulo Sistema
             p.fd_cloexec[nat32(fd)] := nat32(arg yb 1)
             devolver 0
         fin
-        si orden = 4 entonces devolver 0 fin                                             ; F_SETFL
+        si orden = 4 entonces                                                            ; F_SETFL
+            si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces p.fd_nobloq[nat32(fd)] := nat32((arg >> 11) yb 1) fin
+            devolver 0
+        fin
         si orden = 3 entonces                                                            ; F_GETFL
             si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver 2 fin
+            si p.fd_clase[nat32(fd)] = F_TUBO_L entonces devolver ent64(nat64(p.fd_nobloq[nat32(fd)]) << 11) fin
+            si p.fd_clase[nat32(fd)] = F_TUBO_E entonces devolver ent64(1 ob (nat64(p.fd_nobloq[nat32(fd)]) << 11)) fin
             devolver ent64(abierto(p, fd).marcas yb 0x403)
         fin
         devolver EINVAL
@@ -349,7 +393,7 @@ módulo Sistema
 
     función sitúa(p: puntero a Proceso, fd: nat64, d: ent64, de_dónde: nat64): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
-        si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver ESPIPE fin
+        si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ESPIPE fin
         devolver vfs_sitúa(abierto(p, fd), d, de_dónde)
     fin
 
@@ -373,6 +417,14 @@ módulo Sistema
         si no fd_bien(p, fd) entonces devolver EBADF fin
         si p.fd_clase[nat32(fd)] = F_CONSOLA entonces
             stat_consola(nat64(dirección(st[0])))
+            r := 0
+        sino si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces
+            ; [etapa 7] una tubería: S_IFIFO, 0600
+            stat_consola(nat64(dirección(st[0])))
+            pon_m32(nat64(dirección(st[0])) + 24, 0x1000 ob 0x180)
+            pon_m64(nat64(dirección(st[0])) + 40, 0)
+            pon_m64(nat64(dirección(st[0])) + 8, p.fd_obj[nat32(fd)] >> 4)
+            pon_m64(nat64(dirección(st[0])) + 56, 4096)
             r := 0
         sino
             r := vfs_fstat(abierto(p, fd), nat64(dirección(st[0])))
@@ -565,41 +617,145 @@ módulo Sistema
     fin
 
     ; ---- la memoria ----
-    función mapea_(p: puntero a Proceso, dir_: nat64, largo: nat64, prot: nat64, marcas_: nat64, fd: ent64): ent64
+    función mapea_(p: puntero a Proceso, dir_: nat64, largo: nat64, prot: nat64, marcas_: nat64, fd: ent64, desp: nat64): ent64
         variable a, l: nat64
+        variable ab: puntero a Abierto
+        variable ext: nat32
+        variable r: ent64
+        variable anónima, compartida: bool
         si largo = 0 o prot yb (nob nat64(7)) <> 0 entonces devolver EINVAL fin
-        si marcas_ yb 3 <> 1 y marcas_ yb 3 <> 2 entonces devolver EINVAL fin
-        ; (de un archivo: etapa 7; como Linux, -EBADF si no está abierto)
-        si marcas_ yb 0x20 = 0 entonces
+        si marcas_ yb 3 = 0 entonces devolver EINVAL fin
+        compartida := marcas_ yb 3 <> 2                 ; MAP_SHARED (y MAP_SHARED_VALIDATE)
+        anónima := marcas_ yb 0x20 <> 0
+        ab := nulo
+        ext := 0
+        si anónima y compartida entonces ext := R_COMPARTIDA fin
+        ; [etapa 7] de un archivo: una copia de lo que tiene (MAP_PRIVATE, y
+        ; MAP_SHARED de solo leer); MAP_SHARED de escribir, aún no
+        si no anónima entonces
             si fd < 0 entonces devolver EBADF fin
             si no fd_bien(p, nat64(fd)) entonces devolver EBADF fin
-            devolver ENODEV
+            si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ENODEV fin
+            ab := abierto(p, nat64(fd))
+            si vfs_es_carpeta(ab) entonces devolver ENODEV fin
+            si ab.marcas yb O_ACCESO = O_WRONLY entonces devolver EACCES fin
+            si desp yb 4095 <> 0 entonces devolver EINVAL fin
+            si compartida y prot yb 2 <> 0 entonces
+                si ab.marcas yb O_ACCESO <> O_RDWR entonces devolver EACCES fin
+                devolver ENODEV
+            fin
+            ext := R_ARCHIVO
         fin
         l := arriba(largo)
         si l < largo o l > nat64(1) << 40 entonces devolver ENOMEM fin
+        cierra_mem(p)
+        a := 0
         si marcas_ yb 0x10 <> 0 entonces
             ; MAP_FIXED: ahí, quitando lo que hubiese
-            si dir_ yb 4095 <> 0 entonces devolver EINVAL fin
-            si dir_ < MÍNIMO entonces devolver EPERM fin
-            si dir_ + l < dir_ o dir_ + l > TOPE entonces devolver ENOMEM fin
-            si no quita_de(p, dir_, dir_ + l) entonces devolver ENOMEM fin
-            si no pon_región(p, dir_, dir_ + l, nat32(prot), R_MMAP) entonces devolver ENOMEM fin
-            devolver ent64(dir_)
+            r := 0
+            si dir_ yb 4095 <> 0 entonces r := EINVAL
+            sino si dir_ < MÍNIMO entonces r := EPERM
+            sino si dir_ + l < dir_ o dir_ + l > TOPE entonces r := ENOMEM
+            sino si no quita_de(p, dir_, dir_ + l) entonces r := ENOMEM
+            fin
+            si r < 0 entonces
+                abre_mem(p)
+                devolver r
+            fin
+            a := dir_
+        sino
+            ; la pista, si está libre
+            si dir_ >= MÍNIMO y dir_ yb 4095 = 0 y dir_ + l > dir_ y dir_ + l <= TOPE entonces
+                si hueco(p, l, dir_, dir_ + l) = dir_ entonces a := dir_ fin
+            fin
+            si a = 0 y marcas_ yb 0x40 <> 0 entonces a := hueco(p, l, 0x40000000, 0x80000000) fin    ; MAP_32BIT
+            si a = 0 y marcas_ yb 0x40 = 0 entonces
+                a := hueco(p, l, p.mmap_próx, TOPE - PILA_PROG)
+                si a = 0 entonces a := hueco(p, l, nat64(0x1000) << 32, TOPE - PILA_PROG) fin
+            fin
+            si a = 0 entonces
+                abre_mem(p)
+                devolver ENOMEM
+            fin
         fin
-        a := 0
-        ; la pista, si está libre
-        si dir_ >= MÍNIMO y dir_ yb 4095 = 0 y dir_ + l > dir_ y dir_ + l <= TOPE entonces
-            si hueco(p, l, dir_, dir_ + l) = dir_ entonces a := dir_ fin
+        si no pon_región_ext(p, a, a + l, nat32(prot), R_MMAP, ext) entonces
+            abre_mem(p)
+            devolver ENOMEM
         fin
-        si a = 0 y marcas_ yb 0x40 <> 0 entonces a := hueco(p, l, 0x40000000, 0x80000000) fin    ; MAP_32BIT
-        si a = 0 y marcas_ yb 0x40 = 0 entonces
-            a := hueco(p, l, p.mmap_próx, TOPE - PILA_PROG)
-            si a = 0 entonces a := hueco(p, l, nat64(0x1000) << 32, TOPE - PILA_PROG) fin
+        si marcas_ yb 0x50 = 0 entonces p.mmap_próx := a + l fin
+        si ab <> nulo entonces
+            r := llena_de_archivo(p, a, l, ab, desp, nat32(prot))
+            si r < 0 entonces
+                quita_de(p, a, a + l)
+                abre_mem(p)
+                devolver r
+            fin
         fin
-        si a = 0 entonces devolver ENOMEM fin
-        si no pon_región(p, a, a + l, nat32(prot), R_MMAP) entonces devolver ENOMEM fin
-        si marcas_ yb 0x40 = 0 entonces p.mmap_próx := a + l fin
+        abre_mem(p)
         devolver ent64(a)
+    fin
+
+    ; [etapa 7] (con el mutex de la memoria) las páginas de [a, a + l) con lo
+    ; del archivo desde «desp» (lo que pase del final, a cero al tocarlo)
+    función llena_de_archivo(p: puntero a Proceso, a: nat64, l: nat64, ab: puntero a Abierto, desp: nat64, prot: nat32): ent64
+        variable tam, v, pos, f, n: nat64
+        variable r: ent64
+        variable e: puntero a Espacio
+        e := puntero(p.espacio)
+        tam := vfs_tamaño(ab)
+        v := a
+        mientras v < a + l y desp + (v - a) < tam hacer
+            pos := desp + (v - a)
+            f := pide()
+            si f = 0 entonces devolver ENOMEM fin
+            ceros_mem(virt(f), 4096)
+            n := tam - pos
+            si n > 4096 entonces n := 4096 fin
+            r := vfs_lee(ab, ent64(pos), virt(f), n)
+            si r < 0 entonces
+                devuelve(f)
+                devolver r
+            fin
+            si no mapea_u(e, v, f, marcas_de_prot(prot)) entonces
+                devuelve(f)
+                devolver ENOMEM
+            fin
+            v := v + 4096
+        fin
+        ; (sin ningún permiso: las páginas se quedan, sin la marca de usuario)
+        si prot = 0 entonces remarca_rango(e, a, a + l, 0, cierto) fin
+        devolver 0
+    fin
+
+    función marcas_de_prot(prot: nat32): nat64
+        variable fl: nat64
+        fl := 0
+        si prot yb 2 <> 0 entonces fl := ESCRIBIR fin
+        si prot yb 4 = 0 entonces fl := fl ob bit_nx() fin
+        devolver fl
+    fin
+
+    ; [etapa 7] madvise: MADV_DONTNEED (4) suelta las páginas de la memoria
+    ; anónima y privada (al tocarlas otra vez, a cero, como en Linux); lo
+    ; demás (MADV_FREE, las pistas), aceptado sin más
+    función aconseja(p: puntero a Proceso, dir_: nat64, largo: nat64, qué: nat64): ent64
+        variable l: nat64
+        variable i: nat32
+        variable solo_anónima: bool
+        si dir_ yb 4095 <> 0 entonces devolver EINVAL fin
+        l := arriba(largo)
+        si l < largo o dir_ + l < dir_ o dir_ + l > TOPE entonces devolver EINVAL fin
+        si qué <> 4 entonces devolver 0 fin
+        cierra_mem(p)
+        solo_anónima := cierto
+        i := 0
+        mientras nat64(i) < p.n_reg hacer
+            si p.reg_ini[i] < dir_ + l y p.reg_fin[i] > dir_ y p.reg_ext[i] <> 0 entonces solo_anónima := falso fin
+            i := i + 1
+        fin
+        si solo_anónima entonces quita_rango(puntero(p.espacio), dir_, dir_ + l) fin
+        abre_mem(p)
+        devolver 0
     fin
 
     función desmapea_(p: puntero a Proceso, dir_: nat64, largo: nat64): ent64
@@ -607,21 +763,38 @@ módulo Sistema
         si dir_ yb 4095 <> 0 o largo = 0 entonces devolver EINVAL fin
         l := arriba(largo)
         si l < largo o dir_ + l < dir_ o dir_ + l > TOPE entonces devolver EINVAL fin
-        si no quita_de(p, dir_, dir_ + l) entonces devolver ENOMEM fin
+        cierra_mem(p)
+        si no quita_de(p, dir_, dir_ + l) entonces
+            abre_mem(p)
+            devolver ENOMEM
+        fin
+        abre_mem(p)
         devolver 0
     fin
 
     función protege_(p: puntero a Proceso, dir_: nat64, largo: nat64, prot: nat64): ent64
         variable l: nat64
+        variable r: ent64
         si dir_ yb 4095 <> 0 o prot yb (nob nat64(7)) <> 0 entonces devolver EINVAL fin
         si largo = 0 entonces devolver 0 fin
         l := arriba(largo)
         si l < largo o dir_ + l < dir_ o dir_ + l > TOPE entonces devolver ENOMEM fin
-        devolver protege(p, dir_, dir_ + l, nat32(prot))
+        cierra_mem(p)
+        r := protege(p, dir_, dir_ + l, nat32(prot))
+        abre_mem(p)
+        devolver r
     fin
 
     ; brk: lo nuevo, o lo de antes si no se puede (como Linux)
     función brk_(p: puntero a Proceso, nuevo: nat64): ent64
+        variable r: ent64
+        cierra_mem(p)
+        r := brk__(p, nuevo)
+        abre_mem(p)
+        devolver r
+    fin
+
+    función brk__(p: puntero a Proceso, nuevo: nat64): ent64
         variable viejo_fin, nuevo_fin: nat64
         variable i: nat32
         variable hecho: bool
@@ -658,6 +831,7 @@ módulo Sistema
         según cuál
             caso 0, 5: ns := época * 1000000000 + (ns - época_ns)      ; REALTIME, REALTIME_COARSE
             caso 1, 4, 6, 7: ns := ns                                   ; MONOTONIC, _RAW, _COARSE, BOOTTIME
+            caso 2, 3: ns := ns                                         ; [etapa 7] PROCESS_CPUTIME, THREAD_CPUTIME (lo que lleva en marcha)
             si no: devolver EINVAL
         fin
         ts[0] := ns div 1000000000
@@ -666,13 +840,43 @@ módulo Sistema
         devolver 0
     fin
 
-    función duerme_(p: puntero a Proceso, v: nat64): ent64
+    ; nanosleep y [etapa 7] clock_nanosleep (con TIMER_ABSTIME): se
+    ; interrumpen con una señal (-EINTR, y lo que quedaba en «v_resto»)
+    función duerme_(p: puntero a Proceso, v: nat64, v_resto: nat64): ent64
+        devolver duerme_reloj(p, 1, 0, v, v_resto)
+    fin
+
+    función duerme_reloj(p: puntero a Proceso, cuál: nat64, marcas_: nat64, v: nat64, v_resto: nat64): ent64
         variable ts: arreglo [2] de nat64
+        variable límite, ahora, d: nat64
+        si cuál <> 0 y cuál <> 1 y cuál <> 7 entonces devolver EINVAL fin
         si no copia_de(p, nat64(dirección(ts[0])), v, 16) entonces devolver EFAULT fin
         si ts[0] >= nat64(1) << 62 o ts[1] >= 1000000000 entonces devolver EINVAL fin
-        si ts[0] > 1000000 entonces ts[0] := 1000000 fin
-        duerme_ns(ts[0] * 1000000000 + ts[1])
-        devolver 0
+        si ts[0] > 100000000 entonces ts[0] := 100000000 fin
+        d := ts[0] * 1000000000 + ts[1]
+        ahora := ahora_ns()
+        si marcas_ yb 1 <> 0 entonces
+            ; TIMER_ABSTIME: hasta esa hora (la de ese reloj)
+            si cuál = 0 entonces
+                si d <= época * 1000000000 + (ahora - época_ns) entonces devolver 0 fin
+                límite := ahora + (d - (época * 1000000000 + (ahora - época_ns)))
+            sino
+                límite := d
+            fin
+        sino
+            límite := ahora + d
+        fin
+        si no duerme_hasta(p, límite) entonces devolver 0 fin
+        ; (interrumpido)
+        si v_resto <> 0 y marcas_ yb 1 = 0 entonces
+            ahora := ahora_ns()
+            d := 0
+            si límite > ahora entonces d := límite - ahora fin
+            ts[0] := d div 1000000000
+            ts[1] := d mod 1000000000
+            copia_a(p, v_resto, nat64(dirección(ts[0])), 16)
+        fin
+        devolver EINTR
     fin
 
     ; ---- lo demás ----
@@ -695,8 +899,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.6.0")
-        pon_texto(dirección(t[0]), 195, "etapa 6 (la entrada y el intérprete)")
+        pon_texto(dirección(t[0]), 130, "0.7.0")
+        pon_texto(dirección(t[0]), 195, "etapa 7 (musl y POSIX)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -740,6 +944,10 @@ módulo Sistema
             si hay_datos() entonces devolver ev yb 0x145 fin
             devolver ev yb 0x104
         fin
+        ; [etapa 7] las tuberías (POLLHUP y POLLERR, aunque no se pidan)
+        si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces
+            devolver tubo_listo(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)]) yb (ev ob 0x18)
+        fin
         ; (los archivos, siempre listos)
         devolver ev yb 0x145
     fin
@@ -754,9 +962,10 @@ módulo Sistema
         fin
         ahora := ahora_ns()
         si ahora >= límite entonces devolver fin
+        ; ([etapa 7] de 10 en 10 ms: las tuberías no avisan a poll; una señal, sí)
         d := límite - ahora
-        si d > 1000000000 entonces d := 1000000000 fin
-        duerme_ns(d)
+        si d > 10000000 entonces d := 10000000 fin
+        duerme_hasta(p, ahora + d)
     fin
 
     ; el límite de un plazo en ms (negativo: sin límite)
@@ -789,7 +998,7 @@ módulo Sistema
         variable listos: ent64
         variable fd: ent64
         variable ev, rev: nat32
-        variable consola: bool
+        variable consola, tubos_: bool
         si n > 64 entonces devolver EINVAL fin
         si n > 0 entonces
             si no copia_de(p, nat64(dirección(fds[0])), v, n * 8) entonces devolver EFAULT fin
@@ -797,6 +1006,7 @@ módulo Sistema
         mientras cierto hacer
             listos := 0
             consola := falso
+            tubos_ := falso
             i := 0
             mientras nat64(i) < n hacer
                 fd := ent64(ent32(nat32(fds[i] yb 0xFFFFFFFF)))
@@ -804,18 +1014,19 @@ módulo Sistema
                 rev := listo_de(p, fd, ev)
                 si fd >= 0 y rev = 0 y fd_bien(p, nat64(fd)) entonces
                     si p.fd_clase[nat32(fd)] = F_CONSOLA y ev yb 0x41 <> 0 entonces consola := cierto fin
+                    si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces tubos_ := cierto fin
                 fin
                 fds[i] := (fds[i] yb 0xFFFFFFFF) ob ((nat64(ev) yb 0xFFFF) << 32) ob (nat64(rev) << 48)
                 si rev <> 0 entonces listos := listos + 1 fin
                 i := i + 1
             fin
-            si listos > 0 o ahora_ns() >= límite o p.matar <> 0 entonces romper fin
-            espera_hasta(p, límite, consola)
+            si listos > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
+            espera_hasta(p, límite, consola y no tubos_)
         fin
         si n > 0 entonces
             si no copia_a(p, v, nat64(dirección(fds[0])), n * 8) entonces devolver EFAULT fin
         fin
-        si listos = 0 y p.matar <> 0 entonces devolver EINTR fin
+        si listos = 0 y interrumpido(p) entonces devolver ERESTARTNOHAND fin
         devolver listos
     fin
 
@@ -825,7 +1036,7 @@ módulo Sistema
         variable largo: nat64
         variable i: nat32
         variable listos: ent64
-        variable consola: bool
+        variable consola, tubos_: bool
         si n > 1024 entonces devolver EINVAL fin
         largo := ((n + 63) div 64) * 8
         si largo > 8 entonces largo := 8 fin
@@ -860,6 +1071,7 @@ módulo Sistema
             rr := 0
             ww := 0
             consola := falso
+            tubos_ := falso
             i := 0
             mientras i < MAX_FD hacer
                 si r yb (nat64(1) << i) <> 0 entonces
@@ -871,13 +1083,17 @@ módulo Sistema
                     fin
                 fin
                 si w yb (nat64(1) << i) <> 0 entonces
-                    ww := ww ob (nat64(1) << i)
-                    listos := listos + 1
+                    ; ([etapa 7] una tubería llena no está lista)
+                    si listo_de(p, ent64(i), 4) <> 0 entonces
+                        ww := ww ob (nat64(1) << i)
+                        listos := listos + 1
+                    fin
                 fin
+                si (r ob w) yb (nat64(1) << i) <> 0 y p.fd_clase[i] >= F_TUBO_L entonces tubos_ := cierto fin
                 i := i + 1
             fin
-            si listos > 0 o ahora_ns() >= límite o p.matar <> 0 entonces romper fin
-            espera_hasta(p, límite, consola)
+            si listos > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
+            espera_hasta(p, límite, consola y no tubos_)
         fin
         e := 0
         si largo > 0 entonces
@@ -891,47 +1107,294 @@ módulo Sistema
                 si no copia_a(p, ve, nat64(dirección(e)), largo) entonces devolver EFAULT fin
             fin
         fin
-        si listos = 0 y p.matar <> 0 entonces devolver EINTR fin
+        si listos = 0 y interrumpido(p) entonces devolver ERESTARTNOHAND fin
         devolver listos
     fin
 
-    ; ---- [etapa 6] las señales, lo mínimo (las de verdad, con musl: etapa 7) ----
-    ; rt_sigaction: se guarda lo de cada una (SIG_DFL 0, SIG_IGN 1 o una
-    ; función, que aún no se llama); SIGKILL y SIGSTOP no se pueden cambiar
+    ; ---- [etapa 7] las señales ----
+    ; rt_sigaction: lo de cada una (la función, o SIG_DFL 0, o SIG_IGN 1;
+    ; sa_flags, sa_restorer y sa_mask); SIGKILL y SIGSTOP no se pueden
+    ; cambiar. Una que pasa a ignorarse deja de estar pendiente.
     función sigaction_(p: puntero a Proceso, sig: nat64, v_act: nat64, v_viejo: nat64, tam: nat64): ent64
         variable act: arreglo [4] de nat64
+        variable k: nat32
         si sig < 1 o sig > 64 entonces devolver EINVAL fin
         si tam <> 8 entonces devolver EINVAL fin
+        k := nat32(sig)
+        si v_act <> 0 entonces
+            si sig = 9 o sig = 19 entonces devolver EINVAL fin
+        fin
         si v_viejo <> 0 entonces
-            act[0] := p.acción[nat32(sig)]
-            act[1] := 0
-            act[2] := 0
-            act[3] := 0
+            act[0] := p.acción[k]
+            act[1] := p.acc_marcas[k]
+            act[2] := p.acc_rest[k]
+            act[3] := p.acc_másc[k]
             si no copia_a(p, v_viejo, nat64(dirección(act[0])), 32) entonces devolver EFAULT fin
         fin
         si v_act <> 0 entonces
-            si sig = 9 o sig = 19 entonces devolver EINVAL fin
             si no copia_de(p, nat64(dirección(act[0])), v_act, 32) entonces devolver EFAULT fin
-            p.acción[nat32(sig)] := act[0]
+            p.acción[k] := act[0]
+            p.acc_marcas[k] := act[1]
+            p.acc_rest[k] := act[2]
+            p.acc_másc[k] := act[3] yb (nob nat64(NO_BLOQUEABLES))
+            si act[0] = 1 o (act[0] = 0 y (sig = SIGCHLD o sig = SIGURG o sig = SIGWINCH o sig = SIGCONT)) entonces olvida_señal(p, sig) fin
         fin
         devolver 0
     fin
 
-    función sigprocmask_(p: puntero a Proceso, v_viejo: nat64, tam: nat64): ent64
+    ; rt_sigprocmask: la máscara del hilo (SIG_BLOCK 0, SIG_UNBLOCK 1,
+    ; SIG_SETMASK 2); SIGKILL y SIGSTOP no se bloquean
+    función sigprocmask_(p: puntero a Proceso, cómo: nat64, v_set: nat64, v_viejo: nat64, tam: nat64): ent64
+        variable h: puntero a Hilo
+        variable viejo, x: nat64
+        si tam <> 8 entonces devolver EINVAL fin
+        h := actual()
+        viejo := h.s_másc
+        si v_set <> 0 entonces
+            si no copia_de(p, nat64(dirección(x)), v_set, 8) entonces devolver EFAULT fin
+            según cómo
+                caso 0: h.s_másc := (h.s_másc ob x) yb (nob nat64(NO_BLOQUEABLES))
+                caso 1: h.s_másc := h.s_másc yb (nob x)
+                caso 2: h.s_másc := x yb (nob nat64(NO_BLOQUEABLES))
+                si no: devolver EINVAL
+            fin
+        fin
+        si v_viejo <> 0 entonces
+            si no copia_a(p, v_viejo, nat64(dirección(viejo)), 8) entonces devolver EFAULT fin
+        fin
+        devolver 0
+    fin
+
+    ; rt_sigpending: las pendientes que tiene bloqueadas
+    función sigpending_(p: puntero a Proceso, v: nat64, tam: nat64): ent64
+        variable h: puntero a Hilo
         variable x: nat64
         si tam <> 8 entonces devolver EINVAL fin
-        x := 0
+        h := actual()
+        x := (h.s_pend ob p.s_pend) yb h.s_másc
+        si no copia_a(p, v, nat64(dirección(x)), 8) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; rt_sigsuspend: con esa máscara, hasta que llegue una señal (la máscara
+    ; de antes vuelve al acabar su función: uc_sigmask); y pause
+    función sigsuspend_(p: puntero a Proceso, v: nat64, tam: nat64): ent64
+        variable h: puntero a Hilo
+        variable x: nat64
+        si tam <> 8 entonces devolver EINVAL fin
+        si no copia_de(p, nat64(dirección(x)), v, 8) entonces devolver EFAULT fin
+        h := actual()
+        h.s_guardada := h.s_másc ob (nat64(1) << 63)
+        h.s_másc := x yb (nob nat64(NO_BLOQUEABLES))
+        duerme_hasta(p, nob nat64(0))
+        devolver ERESTARTNOHAND
+    fin
+
+    ; sigaltstack: la pila de las señales del hilo (ss_sp, ss_flags, ss_size)
+    función sigaltstack_(p: puntero a Proceso, m: nat64, v_ss: nat64, v_viejo: nat64): ent64
+        variable h: puntero a Hilo
+        variable t: arreglo [3] de nat64
+        variable sp: nat64
+        variable en: bool
+        h := actual()
+        sp := l64(m + 144)
+        en := h.alt_tam > 0 y h.alt_marcas yb 2 = 0 y sp >= h.alt_sp y sp < h.alt_sp + h.alt_tam
         si v_viejo <> 0 entonces
-            si no copia_a(p, v_viejo, nat64(dirección(x)), 8) entonces devolver EFAULT fin
+            t[0] := h.alt_sp
+            t[1] := 0
+            si h.alt_tam = 0 o h.alt_marcas yb 2 <> 0 entonces t[1] := 2 sino si en entonces t[1] := 1 fin
+            t[2] := h.alt_tam
+            si no copia_a(p, v_viejo, nat64(dirección(t[0])), 24) entonces devolver EFAULT fin
+        fin
+        si v_ss <> 0 entonces
+            si no copia_de(p, nat64(dirección(t[0])), v_ss, 24) entonces devolver EFAULT fin
+            si en entonces devolver EPERM fin
+            t[1] := t[1] yb 0xFFFFFFFF
+            si t[1] yb 2 <> 0 entonces
+                h.alt_sp := 0
+                h.alt_tam := 0
+                h.alt_marcas := 2
+            sino
+                si t[1] yb 0x7FFFFFFF <> 0 entonces devolver EINVAL fin
+                si t[2] < 2048 entonces devolver ENOMEM fin
+                h.alt_sp := t[0]
+                h.alt_tam := t[2]
+                h.alt_marcas := 0
+            fin
         fin
         devolver 0
     fin
 
-    ; clone: solo como fork (SIGCHLD, y como mucho CLONE_CHILD_SETTID y
-    ; CLONE_CHILD_CLEARTID, sin pila); los hilos de POSIX, con musl (etapa 7)
-    función clone_(p: puntero a Proceso, m: nat64, marcas_: nat64, pila: nat64): ent64
-        si pila <> 0 o marcas_ yb (nob nat64(0x01200000 ob 0xFF)) <> 0 entonces devolver EINVAL fin
-        devolver bifurca(p, m)
+    ; clone: [etapa 7] con CLONE_THREAD, un hilo (pthread_create); con
+    ; CLONE_VM y CLONE_VFORK, un hijo con el espacio del padre (posix_spawn);
+    ; sin CLONE_VM, como fork (con la pila nueva, si la da)
+    función clone_(p: puntero a Proceso, m: nat64, marcas_: nat64, pila: nat64, v_ptid: nat64, v_ctid: nat64, tls: nat64): ent64
+        si marcas_ yb 0x10000 <> 0 entonces
+            si marcas_ yb 0x900 <> 0x900 entonces devolver EINVAL fin           ; CLONE_VM y CLONE_SIGHAND
+            devolver crea_hilo(p, m, marcas_, pila, v_ptid, v_ctid, tls)
+        fin
+        si marcas_ yb 0x100 <> 0 entonces
+            si marcas_ yb 0x4000 = 0 entonces devolver EINVAL fin                ; (CLONE_VM sin CLONE_VFORK: aún no)
+            devolver bifurca_(p, m, cierto, pila)
+        fin
+        devolver bifurca_(p, m, falso, pila)
+    fin
+
+    ; [etapa 7] pipe y pipe2 (O_CLOEXEC, O_NONBLOCK)
+    función tubo_(p: puntero a Proceso, v: nat64, marcas_: nat64): ent64
+        variable fds: arreglo [2] de nat32
+        variable a, b: ent32
+        variable t: nat64
+        si marcas_ yb (nob nat64(O_CLOEXEC ob O_NONBLOCK)) <> 0 entonces devolver EINVAL fin
+        a := fd_libre(p, 0)
+        si a < 0 entonces devolver EMFILE fin
+        p.fd_clase[nat32(a)] := F_TUBO_L               ; (apartado mientras se busca el otro)
+        b := fd_libre(p, 0)
+        p.fd_clase[nat32(a)] := 0
+        si b < 0 entonces devolver EMFILE fin
+        t := nuevo_tubo()
+        si t = 0 entonces devolver ENOMEM fin
+        fds[0] := nat32(a)
+        fds[1] := nat32(b)
+        si no copia_a(p, v, nat64(dirección(fds[0])), 8) entonces
+            cierra_fd_obj(F_TUBO_L, t)
+            cierra_fd_obj(F_TUBO_E, t)
+            devolver EFAULT
+        fin
+        p.fd_clase[nat32(a)] := F_TUBO_L
+        p.fd_obj[nat32(a)] := t
+        p.fd_clase[nat32(b)] := F_TUBO_E
+        p.fd_obj[nat32(b)] := t
+        p.fd_cloexec[nat32(a)] := nat32((marcas_ >> 19) yb 1)
+        p.fd_cloexec[nat32(b)] := nat32((marcas_ >> 19) yb 1)
+        p.fd_nobloq[nat32(a)] := nat32((marcas_ >> 11) yb 1)
+        p.fd_nobloq[nat32(b)] := nat32((marcas_ >> 11) yb 1)
+        devolver 0
+    fin
+
+    ; [etapa 7] getrandom: RDRAND (o RDSEED), o lo del TSC si no hay
+    función azar_(p: puntero a Proceso, v: nat64, n: nat64): ent64
+        variable t: arreglo [32] de nat64
+        variable hecho, trozo: nat64
+        variable i: nat32
+        si n > 1048576 entonces n := 1048576 fin
+        hecho := 0
+        mientras hecho < n hacer
+            i := 0
+            mientras i < 32 hacer
+                t[i] := un_azar()
+                i := i + 1
+            fin
+            trozo := n - hecho
+            si trozo > 256 entonces trozo := 256 fin
+            si no copia_a(p, v + hecho, nat64(dirección(t[0])), trozo) entonces
+                si hecho = 0 entonces devolver EFAULT fin
+                devolver ent64(hecho)
+            fin
+            hecho := hecho + trozo
+        fin
+        devolver ent64(hecho)
+    fin
+
+    variable azar_x: nat64
+    función un_azar(): nat64
+        variable r, ok_: nat64
+        variable k: nat32
+        r := 0
+        ok_ := 0
+        k := 0
+        si con_rdrand entonces
+            mientras ok_ = 0 y k < 10 hacer
+                ensamblador
+                    xor ecx, ecx
+                    db 0x48, 0x0F, 0xC7, 0xF0       ; rdrand rax
+                    setc cl
+                    mov {r}, rax
+                    mov {ok_}, rcx
+                fin
+                k := k + 1
+            fin
+        sino si con_rdseed entonces
+            mientras ok_ = 0 y k < 100 hacer
+                ensamblador
+                    xor ecx, ecx
+                    db 0x48, 0x0F, 0xC7, 0xF8       ; rdseed rax
+                    setc cl
+                    mov {r}, rax
+                    mov {ok_}, rcx
+                fin
+                k := k + 1
+            fin
+        fin
+        ; (y siempre, mezclado con el TSC: si no hay ninguna de las dos, es lo que hay)
+        azar_x := (azar_x xob tsc()) * 6364136223846793005 + 1442695040888963407
+        devolver r xob (azar_x xob (azar_x >> 29))
+    fin
+
+    ; [etapa 7] prlimit64, getrlimit: los límites (los de siempre)
+    función límite_rec(p: puntero a Proceso, pid: nat64, rec: nat64, v_nuevo: nat64, v_viejo: nat64): ent64
+        variable l: arreglo [2] de nat64
+        si pid <> 0 y pid <> p.id entonces devolver ESRCH fin
+        si rec >= 16 entonces devolver EINVAL fin
+        si v_viejo <> 0 entonces
+            l[0] := nob nat64(0)
+            l[1] := nob nat64(0)
+            si rec = 3 entonces l[0] := PILA_PROG fin                    ; RLIMIT_STACK
+            si rec = 7 entonces                                          ; RLIMIT_NOFILE
+                l[0] := MAX_FD
+                l[1] := MAX_FD
+            fin
+            si rec = 4 entonces l[0] := 0 fin                            ; RLIMIT_CORE
+            si no copia_a(p, v_viejo, nat64(dirección(l[0])), 16) entonces devolver EFAULT fin
+        fin
+        devolver 0
+    fin
+
+    ; [etapa 7] sched_getaffinity: los procesadores en marcha
+    función afinidad_(p: puntero a Proceso, largo: nat64, v: nat64): ent64
+        variable x: nat64
+        si largo < 8 entonces devolver EINVAL fin
+        x := nob nat64(0)
+        si n_en_marcha < 64 entonces x := (nat64(1) << nat64(n_en_marcha)) - 1 fin
+        si no copia_a(p, v, nat64(dirección(x)), 8) entonces devolver EFAULT fin
+        devolver 8
+    fin
+
+    ; [etapa 7] sysinfo: lo que lleva en marcha, la memoria, los procesos
+    función sysinfo_(p: puntero a Proceso, v: nat64): ent64
+        variable t: arreglo [14] de nat64
+        variable i: nat32
+        i := 0
+        mientras i < 14 hacer
+            t[i] := 0
+            i := i + 1
+        fin
+        t[0] := ahora_ns() div 1000000000
+        t[4] := marcos * 4096
+        t[5] := libres * 4096
+        t[10] := en_tabla
+        t[13] := 1                      ; mem_unit
+        si no copia_a(p, v, nat64(dirección(t[0])), 112) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; [etapa 7] lo de olvidar una señal pendiente que pasa a ignorarse
+    función olvida_señal(p: puntero a Proceso, s: nat64)
+        variable b, x: nat64
+        variable i: nat32
+        variable t: puntero a Hilo
+        x := nob (nat64(1) << (s - 1))
+        b := toma(dirección(p.h_cerrojo))
+        p.s_pend := p.s_pend yb x
+        i := 0
+        mientras i < MAX_HILOS hacer
+            si p.hilos[i] <> 0 entonces
+                t := puntero(p.hilos[i])
+                t.s_pend := t.s_pend yb x
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(p.h_cerrojo), b)
     fin
 
     función setpgid_(p: puntero a Proceso, pid: nat64, g: nat64): ent64
@@ -953,19 +1416,24 @@ módulo Sistema
         devolver ENOSYS
     fin
 
-    ; la llamada del marco m (Entradas): el resultado, en su RAX
-    función atiende(m: nat64)
+    ; la llamada del marco m (Entradas): el resultado, en su RAX. [etapa 7]
+    ; Devuelve 1 si hay que volver con iretq (rt_sigreturn: también RCX y R11)
+    función atiende(m: nat64): nat64
         variable p: puntero a Proceso
-        variable n, a1, a2, a3, a4, a5, lím: nat64
+        variable h: puntero a Hilo
+        variable n, a1, a2, a3, a4, a5, a6, lím, iret: nat64
         variable r: ent64
         p := mío()
+        h := actual()
         n := l64(m + 112)
         a1 := l64(m + 64)
         a2 := l64(m + 72)
         a3 := l64(m + 96)
         a4 := l64(m + 40)
         a5 := l64(m + 56)
-        llamadas := llamadas + 1
+        a6 := l64(m + 48)
+        iret := 0
+        suma_atómica(dirección(llamadas), 1)
         según n
             caso 0: r := lee(p, a1, a2, a3, -1)
             caso 1: r := escribe(p, a1, a2, a3, -1)
@@ -974,25 +1442,32 @@ módulo Sistema
             caso 4, 6: r := stat_(p, -100, a1, a2, 0)
             caso 5: r := fstat_(p, a1, a2)
             caso 8: r := sitúa(p, a1, ent64(a2), a3)
-            caso 9: r := mapea_(p, a1, a2, a3, a4, ent64(a5))
+            caso 9: r := mapea_(p, a1, a2, a3, a4, ent64(ent32(nat32(a5 yb 0xFFFFFFFF))), a6)
             caso 10: r := protege_(p, a1, a2, a3)
             caso 11: r := desmapea_(p, a1, a2)
             caso 12: r := brk_(p, a1)
             caso 7: r := sondea(p, a1, a2, límite_ms(ent64(ent32(nat32(a3 yb 0xFFFFFFFF)))))
             caso 13: r := sigaction_(p, a1, a2, a3, a4)
-            caso 14: r := sigprocmask_(p, a3, a4)
+            caso 14: r := sigprocmask_(p, a1, a2, a3, a4)
+            caso 15:
+                r := vuelve_de_señal(p, m)
+                iret := 1
             caso 16:
                 si no fd_bien(p, a1) entonces
                     r := EBADF
                 sino si p.fd_clase[nat32(a1)] = F_CONSOLA entonces
                     r := tty_ioctl(p, a2 yb 0xFFFFFFFF, a3)
+                sino si p.fd_clase[nat32(a1)] = F_TUBO_L y a2 yb 0xFFFFFFFF = 0x541B entonces
+                    ; FIONREAD
+                    lím := tubo_cuánto(p.fd_obj[nat32(a1)])
+                    si copia_a(p, a3, nat64(dirección(lím)), 4) entonces r := 0 sino r := EFAULT fin
                 sino
                     r := ENOTTY
                 fin
             caso 23:
                 lím := límite_de(p, a5, 1000, r)
                 si r = 0 entonces r := selecciona(p, a1, a2, a3, a4, lím) fin
-            caso 56: r := clone_(p, m, a1, a2)
+            caso 56: r := clone_(p, m, a1, a2, a3, a4, a5)
             caso 57, 58: r := bifurca(p, m)
             caso 59: r := ejecuta(p, m, a1, a2, a3)
             caso 61: r := espera_hijo(p, ent64(ent32(nat32(a1 yb 0xFFFFFFFF))), a2, a3, a4)
@@ -1022,9 +1497,67 @@ módulo Sistema
                 r := 0
             caso 32: r := duplica(p, a1, -1, 0)
             caso 33: r := duplica(p, a1, ent64(a2), 0)
-            caso 35: r := duerme_(p, a1)
-            caso 39, 186: r := ent64(p.id)
-            caso 60, 231: sal(a1, 0)
+            caso 35: r := duerme_(p, a1, a2)
+            caso 39: r := ent64(p.id)
+            caso 186: r := ent64(h.tid)
+            caso 60: sal_hilo(a1)
+            caso 231: sal(a1, 0)
+            ; [etapa 7]
+            caso 22: r := tubo_(p, a1, 0)
+            caso 293: r := tubo_(p, a1, a2)
+            caso 25: r := ENOMEM                            ; mremap: no (musl copia)
+            caso 28: r := aconseja(p, a1, a2, a3)
+            caso 34:
+                duerme_hasta(p, nob nat64(0))
+                r := ERESTARTNOHAND
+            caso 62: r := mata(p, ent64(ent32(nat32(a1 yb 0xFFFFFFFF))), a2)
+            caso 200: r := mata_hilo(p, 0, a1, a2)
+            caso 234: r := mata_hilo(p, a1, a2, a3)
+            caso 127: r := sigpending_(p, a1, a2)
+            caso 130: r := sigsuspend_(p, a1, a2)
+            caso 131: r := sigaltstack_(p, m, a1, a2)
+            caso 202: r := futex_(p, a1, a2, a3 yb 0xFFFFFFFF, a4, a5, a6)
+            caso 273:
+                si a2 <> 24 entonces r := EINVAL sino
+                    h.robusta := a1
+                    h.robusta_largo := a2
+                    r := 0
+                fin
+            caso 274:
+                si a1 <> 0 y a1 <> h.tid entonces r := ESRCH sino
+                    lím := 24
+                    si copia_a(p, a2, nat64(dirección(h.robusta)), 8) y copia_a(p, a3, nat64(dirección(lím)), 8) entonces r := 0 sino r := EFAULT fin
+                fin
+            caso 318: r := azar_(p, a1, a2)
+            caso 230: r := duerme_reloj(p, a1, a2, a3, a4)
+            caso 229:
+                si a2 <> 0 entonces
+                    lím := 0
+                    si copia_a(p, a2, nat64(dirección(lím)), 8) entonces
+                        lím := 1
+                        si copia_a(p, a2 + 8, nat64(dirección(lím)), 8) entonces r := 0 sino r := EFAULT fin
+                    sino
+                        r := EFAULT
+                    fin
+                sino
+                    r := 0
+                fin
+            caso 96: r := hora_del_día(p, a1)
+            caso 201:
+                lím := época + (ahora_ns() - época_ns) div 1000000000
+                r := ent64(lím)
+                si a1 <> 0 entonces
+                    si no copia_a(p, a1, nat64(dirección(lím)), 8) entonces r := EFAULT fin
+                fin
+            caso 302: r := límite_rec(p, a1, a2, a3, a4)
+            caso 97: r := límite_rec(p, 0, a1, 0, a2)
+            caso 160: r := 0
+            caso 203: r := 0
+            caso 204: r := afinidad_(p, a2, a3)
+            caso 99: r := sysinfo_(p, a1)
+            caso 95: r := 18                                 ; umask: 022
+            caso 98: r := uso_(p, a2)
+            caso 324, 334, 435, 439: r := ENOSYS             ; membarrier, rseq, clone3, faccessat2 (musl se las arregla sin ellas)
             caso 63: r := nombre_(p, a1)
             caso 72: r := fcntl_(p, a1, a2, a3)
             caso 74, 75: r := fsync_(p, a1)
@@ -1044,8 +1577,8 @@ módulo Sistema
                 r := 0
             caso 217: r := lista_(p, a1, a2, a3)
             caso 218:
-                p.tid_dir := a1
-                r := ent64(p.id)
+                h.borra_tid := a1
+                r := ent64(h.tid)
             caso 228: r := reloj(p, a1, a2)
             caso 257: r := abre(p, ent64(a1), a2, a3)
             caso 258: r := con_ruta(p, ent64(a1), a2, 0)
@@ -1069,14 +1602,39 @@ módulo Sistema
         ; (las marcas_ que puede devolver sysret: las de las cuentas, con IF)
         p64(m + 136, (l64(m + 136) yb 0xCD5) ob 0x202)
         si l64(m + 120) >= TOPE entonces sal(0, SIGSEGV) fin
-        ; [etapa 6] Ctrl+C (o lo que lo cierre): ahora, al volver
-        si p.matar <> 0 entonces sal(0, p.matar) fin
+        ; [etapa 7] las señales (Ctrl+C, kill...), que el proceso acabe, y
+        ; repetir lo interrumpido
+        antes_de_volver(m, cierto, n)
+        si l64(m + 120) >= TOPE entonces sal(0, SIGSEGV) fin
+        devolver iret
+    fin
+
+    ; [etapa 7] gettimeofday
+    función hora_del_día(p: puntero a Proceso, v: nat64): ent64
+        variable tv: arreglo [2] de nat64
+        variable ns: nat64
+        si v = 0 entonces devolver 0 fin
+        ns := época * 1000000000 + (ahora_ns() - época_ns)
+        tv[0] := ns div 1000000000
+        tv[1] := (ns mod 1000000000) div 1000
+        si no copia_a(p, v, nat64(dirección(tv[0])), 16) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; [etapa 7] getrusage: a cero
+    función uso_(p: puntero a Proceso, v: nat64): ent64
+        variable ru: arreglo [18] de nat64
+        ceros_mem(nat64(dirección(ru[0])), 144)
+        si no copia_a(p, v, nat64(dirección(ru[0])), 144) entonces devolver EFAULT fin
+        devolver 0
     fin
 
     ; las llamadas al sistema, en marcha (después de Procesos.prepara_procesos)
     público función prepara_sistema()
         época := segundos_unix()
         época_ns := ahora_ns()
+        prepara_futex()
+        prepara_tubos()
         al_sistema := nat64(dirección(atiende))
     fin
 

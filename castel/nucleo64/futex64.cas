@@ -1,0 +1,336 @@
+; =============================================================================
+;  futex64.cas - Hispa-64, etapa 7: futex, lo que usan los hilos de musl para
+;  esperarse (docs/64/HISPA-64.md, sección 13): los mutex, las condiciones,
+;  pthread_join (CLONE_CHILD_CLEARTID), los semáforos...
+;
+;  Un futex es un entero de 32 bits del programa. FUTEX_WAIT (y
+;  FUTEX_WAIT_BITSET): si aún vale lo que dice el programa, el hilo duerme
+;  hasta que otro haga FUTEX_WAKE en la misma dirección, se acabe el plazo
+;  (-ETIMEDOUT) o le llegue una señal (-EINTR); si ya no vale eso, -EAGAIN.
+;  FUTEX_WAKE (y FUTEX_WAKE_BITSET) despierta a n de los que esperan en ella;
+;  FUTEX_REQUEUE y FUTEX_CMP_REQUEUE despiertan a n y pasan otros a otra
+;  dirección (lo de pthread_cond_broadcast).
+;
+;  La clave de cada espera: con FUTEX_PRIVATE_FLAG (lo de siempre en musl:
+;  los hilos de un proceso), el espacio de direcciones y la dirección; sin
+;  ella (entre procesos: memoria de MAP_SHARED), la dirección física. Los
+;  que esperan, en 64 cubos (por la clave), cada uno con su cerrojo y su
+;  lista; lo de cada uno (Esperante) está en su pila mientras espera. Leer
+;  el valor y ponerse a esperar se hace con el cerrojo del cubo tomado: un
+;  FUTEX_WAKE (que lo toma también) no se puede perder entre medias.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Futex64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Espacios, Procesos
+
+    constante N_CUBOS = 64
+    constante EAGAIN = -11
+    constante EINVAL = -22
+    constante EFAULT = -14
+    constante ETIMEDOUT = -110
+    constante ENOSYS = -38
+
+    tipo Esperante = estructura
+        sig: nat64                  ; el siguiente del cubo
+        clave1, clave2: nat64
+        hilo: nat64
+        despierto: nat64            ; 1: lo ha despertado un FUTEX_WAKE
+        bits: nat64                 ; FUTEX_WAIT_BITSET
+        cubo: nat64                 ; el cubo en el que está (REQUEUE lo cambia)
+    fin
+
+    ; cada cubo: su Espera (el cerrojo y la cola de los dormidos) y la lista
+    variable cubos: arreglo [N_CUBOS] de Espera
+    variable listas: arreglo [N_CUBOS] de nat64
+    público variable esperas, despertados, plazos: nat64
+
+    función l32(d: nat64): nat32
+        variable p: puntero a nat32
+        p := puntero(d)
+        devolver valor(p)
+    fin
+
+    función es(d: nat64): puntero a Esperante
+        devolver puntero(d)
+    fin
+
+    función cubo_de(k1: nat64, k2: nat64): nat32
+        variable x: nat64
+        x := (k2 >> 2) xob (k2 >> 12) xob (k1 >> 4)
+        devolver nat32(x yb (N_CUBOS - 1))
+    fin
+
+    ; la clave de uaddr: falso si no es del programa
+    función clave(p: puntero a Proceso, uaddr: nat64, privado: bool, ref k1: nat64, ref k2: nat64): bool
+        variable f: nat64
+        si uaddr yb 3 <> 0 entonces devolver falso fin
+        si privado entonces
+            si toca(p, uaddr, falso) = nob nat64(0) entonces devolver falso fin
+            k1 := p.espacio
+            k2 := uaddr
+            devolver cierto
+        fin
+        ; (entre procesos: el marco; se escribe en él, que no sea de copiar al escribir)
+        f := toca(p, uaddr, cierto)
+        si f = nob nat64(0) entonces
+            f := toca(p, uaddr, falso)
+            si f = nob nat64(0) entonces devolver falso fin
+        fin
+        k1 := 0
+        k2 := f
+        devolver cierto
+    fin
+
+    ; (con el cerrojo del cubo c) quita x de su lista
+    función quita(c: nat32, x: puntero a Esperante)
+        variable d, antes: nat64
+        antes := 0
+        d := listas[c]
+        mientras d <> 0 y d <> nat64(x) hacer
+            antes := d
+            d := es(d).sig
+        fin
+        si d = 0 entonces devolver fin
+        si antes = 0 entonces listas[c] := x.sig sino es(antes).sig := x.sig fin
+        x.sig := 0
+    fin
+
+    ; (con el cerrojo del cubo c) x, al principio de su lista
+    función mete(c: nat32, x: puntero a Esperante)
+        x.sig := listas[c]
+        listas[c] := nat64(x)
+        x.cubo := nat64(c)
+    fin
+
+    ; FUTEX_WAIT: hasta «límite» (ns de ahora_ns; nob 0: sin plazo)
+    función espera(p: puntero a Proceso, uaddr: nat64, val: nat32, límite: nat64, privado: bool, bits: nat64): ent64
+        variable k1, k2, b, f: nat64
+        variable c, c2: nat32
+        variable eb: arreglo [8] de nat64
+        variable e: puntero a Esperante
+        variable h: puntero a Hilo
+        variable r: ent64
+        e := es(nat64(dirección(eb[0])))
+        si bits = 0 entonces devolver EINVAL fin
+        si no clave(p, uaddr, privado, k1, k2) entonces devolver EFAULT fin
+        f := toca(p, uaddr, falso)
+        si f = nob nat64(0) entonces devolver EFAULT fin
+        h := actual()
+        c := cubo_de(k1, k2)
+        e.clave1 := k1
+        e.clave2 := k2
+        e.hilo := nat64(h)
+        e.despierto := 0
+        e.bits := bits
+        e.sig := 0
+        b := toma(dirección(cubos[c].cerrojo))
+        si l32(virt(f)) <> val entonces
+            suelta(dirección(cubos[c].cerrojo), b)
+            devolver EAGAIN
+        fin
+        mete(c, e)
+        suma_atómica(dirección(esperas), 1)
+        r := 0
+        mientras cierto hacer
+            si e.despierto <> 0 entonces romper fin
+            si interrumpido(p) entonces
+                r := -4                 ; EINTR
+                romper
+            fin
+            si límite <> nob nat64(0) y ahora_ns() >= límite entonces
+                r := ETIMEDOUT
+                suma_atómica(dirección(plazos), 1)
+                romper
+            fin
+            espera_interrumpible(dirección(cubos[c]))
+            si límite <> nob nat64(0) entonces duerme_en_hasta(dirección(cubos[c]), límite) sino duerme_en(dirección(cubos[c])) fin
+            fin_interrumpible()
+            ; (despierto: fuera de la cola en la que dormía, si sigue en ella)
+            toma_sin(dirección(cubos[c].cerrojo))
+            sal_de(dirección(cubos[c]))
+            ; (REQUEUE lo ha podido pasar a otro cubo)
+            mientras nat32(e.cubo) <> c hacer
+                c2 := nat32(e.cubo)
+                suelta_sin(dirección(cubos[c].cerrojo))
+                c := c2
+                toma_sin(dirección(cubos[c].cerrojo))
+            fin
+        fin
+        si e.despierto = 0 entonces quita(c, e) fin
+        sal_de(dirección(cubos[c]))
+        suelta(dirección(cubos[c].cerrojo), b)
+        si e.despierto <> 0 entonces devolver 0 fin
+        devolver r
+    fin
+
+    ; despierta a n de los que esperan en (k1, k2) (con bits en común); cuántos
+    función despierta_k(k1: nat64, k2: nat64, n: nat64, bits: nat64): nat64
+        variable c: nat32
+        variable b, d, sig, hechos: nat64
+        variable x: puntero a Esperante
+        variable lista: arreglo [32] de nat64
+        variable k, i: nat32
+        c := cubo_de(k1, k2)
+        hechos := 0
+        k := 0
+        b := toma(dirección(cubos[c].cerrojo))
+        d := listas[c]
+        mientras d <> 0 y hechos < n y k < 32 hacer
+            x := es(d)
+            sig := x.sig
+            si x.clave1 = k1 y x.clave2 = k2 y x.bits yb bits <> 0 entonces
+                quita(c, x)
+                x.despierto := 1
+                quita_de_espera(dirección(cubos[c]), puntero(x.hilo))
+                lista[k] := x.hilo
+                k := k + 1
+                hechos := hechos + 1
+            fin
+            d := sig
+        fin
+        suelta(dirección(cubos[c].cerrojo), b)
+        ; (los despertados ya no tocan su Esperante sin el cerrojo: lo de la lista es suyo)
+        i := 0
+        mientras i < k hacer
+            despierta(puntero(lista[i]))
+            i := i + 1
+        fin
+        suma_atómica(dirección(despertados), hechos)
+        devolver hechos
+    fin
+
+    ; FUTEX_WAKE
+    función despierta_(p: puntero a Proceso, uaddr: nat64, n: nat64, privado: bool, bits: nat64): ent64
+        variable k1, k2, total, r: nat64
+        si bits = 0 entonces devolver EINVAL fin
+        si no clave(p, uaddr, privado, k1, k2) entonces devolver EFAULT fin
+        total := 0
+        mientras total < n hacer
+            r := despierta_k(k1, k2, n - total, bits)
+            total := total + r
+            si r < 32 entonces romper fin
+        fin
+        devolver ent64(total)
+    fin
+
+    ; (de Procesos, al acabar un hilo con CLONE_CHILD_CLEARTID) FUTEX_WAKE privado
+    función despierta_hilo(pp: nat64, uaddr: nat64, n: nat64)
+        variable p: puntero a Proceso
+        p := puntero(pp)
+        despierta_(p, uaddr, n, cierto, nob nat64(0))
+        despierta_(p, uaddr, n, falso, nob nat64(0))
+    fin
+
+    ; FUTEX_REQUEUE y FUTEX_CMP_REQUEUE: despierta a n1 de uaddr y pasa
+    ; hasta n2 de los demás a uaddr2 (con CMP, si uaddr aún vale val3)
+    función repone(p: puntero a Proceso, uaddr: nat64, n1: nat64, n2: nat64, uaddr2: nat64, con_cmp: bool, val3: nat32, privado: bool): ent64
+        variable k1, k2, j1, j2, b, b2, d, sig, f: nat64
+        variable c, c2: nat32
+        variable x: puntero a Esperante
+        variable movidos, hechos: nat64
+        si no clave(p, uaddr, privado, k1, k2) entonces devolver EFAULT fin
+        si no clave(p, uaddr2, privado, j1, j2) entonces devolver EFAULT fin
+        f := toca(p, uaddr, falso)
+        si f = nob nat64(0) entonces devolver EFAULT fin
+        c := cubo_de(k1, k2)
+        c2 := cubo_de(j1, j2)
+        ; los dos cerrojos, por orden (que dos REQUEUE a la vez no se crucen)
+        b := sin_ints()
+        si c <= c2 entonces
+            toma_sin(dirección(cubos[c].cerrojo))
+            si c2 <> c entonces toma_sin(dirección(cubos[c2].cerrojo)) fin
+        sino
+            toma_sin(dirección(cubos[c2].cerrojo))
+            toma_sin(dirección(cubos[c].cerrojo))
+        fin
+        si con_cmp y l32(virt(f)) <> val3 entonces
+            si c2 <> c entonces suelta_sin(dirección(cubos[c2].cerrojo)) fin
+            suelta_sin(dirección(cubos[c].cerrojo))
+            restaura(b)
+            devolver EAGAIN
+        fin
+        movidos := 0
+        hechos := 0
+        d := listas[c]
+        mientras d <> 0 hacer
+            x := es(d)
+            sig := x.sig
+            si x.clave1 = k1 y x.clave2 = k2 entonces
+                si hechos < n1 entonces
+                    quita(c, x)
+                    x.despierto := 1
+                    quita_de_espera(dirección(cubos[c]), puntero(x.hilo))
+                    ; (despierta con el cerrojo: encola sin cambiar de hilo hasta soltarlo)
+                    despierta(puntero(x.hilo))
+                    hechos := hechos + 1
+                sino si movidos < n2 entonces
+                    quita(c, x)
+                    x.clave1 := j1
+                    x.clave2 := j2
+                    si c2 <> c entonces
+                        ; (de la cola de los dormidos del cubo viejo a la del nuevo)
+                        quita_de_espera(dirección(cubos[c]), puntero(x.hilo))
+                        mete(c2, x)
+                        despierta(puntero(x.hilo))
+                    sino
+                        mete(c, x)
+                    fin
+                    movidos := movidos + 1
+                fin
+            fin
+            d := sig
+        fin
+        si c2 <> c entonces suelta_sin(dirección(cubos[c2].cerrojo)) fin
+        suelta_sin(dirección(cubos[c].cerrojo))
+        restaura(b)
+        devolver ent64(hechos + movidos)
+    fin
+
+    ; futex(uaddr, op, val, plazo, uaddr2, val3): la llamada 202
+    público función futex_(p: puntero a Proceso, uaddr: nat64, op: nat64, val: nat64, v_plazo: nat64, uaddr2: nat64, val3: nat64): ent64
+        variable cmd: nat64
+        variable privado: bool
+        variable ts: arreglo [2] de nat64
+        variable límite, ahora: nat64
+        cmd := op yb 127
+        privado := op yb 128 <> 0
+        según cmd
+            caso 0, 9:
+                ; FUTEX_WAIT (plazo relativo) y FUTEX_WAIT_BITSET (absoluto)
+                límite := nob nat64(0)
+                si v_plazo <> 0 entonces
+                    si no copia_de(p, nat64(dirección(ts[0])), v_plazo, 16) entonces devolver EFAULT fin
+                    si ent64(ts[0]) < 0 o ts[1] >= 1000000000 entonces devolver EINVAL fin
+                    si ts[0] > 1000000 entonces ts[0] := 1000000 fin
+                    si cmd = 0 entonces
+                        límite := ahora_ns() + ts[0] * 1000000000 + ts[1]
+                    sino si op yb 256 <> 0 entonces
+                        ; (FUTEX_CLOCK_REALTIME: de CLOCK_REALTIME a ahora_ns)
+                        ahora := reloj_real_ns()
+                        si ts[0] * 1000000000 + ts[1] <= ahora entonces límite := ahora_ns() sino límite := ahora_ns() + (ts[0] * 1000000000 + ts[1] - ahora) fin
+                    sino
+                        límite := ts[0] * 1000000000 + ts[1]
+                    fin
+                fin
+                si cmd = 0 entonces devolver espera(p, uaddr, nat32(val), límite, privado, nob nat64(0)) fin
+                devolver espera(p, uaddr, nat32(val), límite, privado, val3 yb 0xFFFFFFFF)
+            caso 1: devolver despierta_(p, uaddr, val yb 0x7FFFFFFF, privado, nob nat64(0))
+            caso 10: devolver despierta_(p, uaddr, val yb 0x7FFFFFFF, privado, val3 yb 0xFFFFFFFF)
+            caso 3: devolver repone(p, uaddr, val yb 0x7FFFFFFF, v_plazo yb 0x7FFFFFFF, uaddr2, falso, 0, privado)
+            caso 4: devolver repone(p, uaddr, val yb 0x7FFFFFFF, v_plazo yb 0x7FFFFFFF, uaddr2, cierto, nat32(val3), privado)
+            si no: devolver ENOSYS
+        fin
+        devolver ENOSYS
+    fin
+
+    ; CLOCK_REALTIME en ns (con la hora del CMOS: al segundo)
+    función reloj_real_ns(): nat64
+        devolver segundos_unix() * 1000000000
+    fin
+
+    público función prepara_futex()
+        al_futex := nat64(dirección(despierta_hilo))
+    fin
+
+fin Futex64.

@@ -12,7 +12,7 @@ módulo Unidad64
 
     importar Fisica64
 
-    público constante MAX_ARCHIVOS = 16
+    público constante MAX_ARCHIVOS = 64             ; (16 hasta la etapa 6)
     público constante LARGO_NOMBRE = 32
 
     público variable n_archivos: nat32

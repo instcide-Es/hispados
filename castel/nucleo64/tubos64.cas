@@ -1,0 +1,266 @@
+; =============================================================================
+;  tubos64.cas - Hispa-64, etapa 7: las tuberías (pipe y pipe2; docs/64/
+;  HISPA-64.md, sección 13): lo que escribe uno por un extremo lo lee otro
+;  por el otro, de 64 KB en 64 KB, como en Linux:
+;
+;   - leer espera a que haya algo (o da 0 si ya no hay quien escriba);
+;     escribir espera a que haya sitio, y si ya no hay quien lea, da -EPIPE
+;     y SIGPIPE; hasta 4096 octetos (PIPE_BUF) van de una vez, sin
+;     mezclarse con lo de otro; con O_NONBLOCK, -EAGAIN en vez de esperar;
+;   - las esperas se interrumpen con una señal (Procesos.interrumpido);
+;   - cada descriptor de un extremo cuenta (dup, fork): la tubería se suelta
+;     cuando ya no la tiene nadie (ni la está usando nadie).
+;  El cerrojo de cada tubería es el de su Espera (los que leen y los que
+;  escriben duermen en ella; se despierta a todos al cambiar algo).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Tubos64
+
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Procesos
+
+    público constante F_TUBO_L = 3              ; las clases de archivo abierto (las de Procesos: 1 consola, 2 archivo)
+    público constante F_TUBO_E = 4
+    constante LARGO = 65536
+    constante PIPE_BUF = 4096
+    constante EAGAIN = -11
+    constante EPIPE = -32
+    constante EFAULT = -14
+    constante ENOMEM = -12
+
+    público tipo Tubo = estructura
+        cerrojo, primero, último: nat64        ; (la forma de Espera)
+        datos: nat64
+        ini, n: nat64
+        lectores, escritores: nat64            ; los descriptores de cada extremo
+        usos: nat64                            ; los que están leyendo o escribiendo ahora
+    fin
+
+    público variable tubos, tubos_hechos: nat64
+
+    función tb(d: nat64): puntero a Tubo
+        devolver puntero(d)
+    fin
+
+    función esp(t: puntero a Tubo): puntero a Espera
+        devolver puntero(nat64(t))
+    fin
+
+    ; una tubería nueva (con un lector y un escritor), o 0
+    público función nuevo_tubo(): nat64
+        variable t: puntero a Tubo
+        t := puntero(nat64(reserva(tamaño(Tubo))))
+        si t = nulo entonces devolver 0 fin
+        ceros_mem(nat64(t), tamaño(Tubo))
+        t.datos := nat64(reserva(LARGO))
+        si t.datos = 0 entonces
+            libera(puntero(nat64(t)))
+            devolver 0
+        fin
+        t.lectores := 1
+        t.escritores := 1
+        suma_atómica(dirección(tubos), 1)
+        suma_atómica(dirección(tubos_hechos), 1)
+        devolver nat64(t)
+    fin
+
+    ; (con el cerrojo) ¿se puede soltar ya?
+    función suelta_si(t: puntero a Tubo, b: nat64)
+        variable libre: bool
+        libre := t.lectores = 0 y t.escritores = 0 y t.usos = 0
+        suelta(dirección(t.cerrojo), b)
+        si libre entonces
+            libera(puntero(t.datos))
+            libera(puntero(nat64(t)))
+            suma_atómica(dirección(tubos), nob nat64(0))
+        fin
+    fin
+
+    ; un descriptor más de ese extremo (dup, fork)
+    función otro_(clase: nat64, d: nat64)
+        variable t: puntero a Tubo
+        variable b: nat64
+        t := tb(d)
+        b := toma(dirección(t.cerrojo))
+        si clase = F_TUBO_L entonces t.lectores := t.lectores + 1 sino t.escritores := t.escritores + 1 fin
+        suelta(dirección(t.cerrojo), b)
+    fin
+
+    ; uno menos (close, exit, execve con O_CLOEXEC)
+    función cierra_(clase: nat64, d: nat64)
+        variable t: puntero a Tubo
+        variable b: nat64
+        t := tb(d)
+        b := toma(dirección(t.cerrojo))
+        si clase = F_TUBO_L entonces
+            si t.lectores > 0 entonces t.lectores := t.lectores - 1 fin
+        sino
+            si t.escritores > 0 entonces t.escritores := t.escritores - 1 fin
+        fin
+        suelta(dirección(t.cerrojo), b)
+        despierta_todos(esp(t))
+        b := toma(dirección(t.cerrojo))
+        suelta_si(t, b)
+    fin
+
+    ; read de una tubería: hasta n octetos a v (del programa)
+    público función tubo_lee(p: puntero a Proceso, d: nat64, v: nat64, n: nat64, sin_esperar: bool): ent64
+        variable t: puntero a Tubo
+        variable k: puntero a byte
+        variable b, i, m: nat64
+        variable r: ent64
+        si n = 0 entonces devolver 0 fin
+        si n > LARGO entonces n := LARGO fin
+        k := reserva(n)
+        si k = nulo entonces devolver ENOMEM fin
+        t := tb(d)
+        b := toma(dirección(t.cerrojo))
+        t.usos := t.usos + 1
+        r := 0
+        mientras cierto hacer
+            si t.n > 0 entonces
+                m := t.n
+                si m > n entonces m := n fin
+                i := 0
+                mientras i < m hacer
+                    k[i] := valor(puntero_b(t.datos + ((t.ini + i) yb (LARGO - 1))))
+                    i := i + 1
+                fin
+                t.ini := (t.ini + m) yb (LARGO - 1)
+                t.n := t.n - m
+                r := ent64(m)
+                romper
+            fin
+            si t.escritores = 0 entonces romper fin                  ; (fin de archivo)
+            si sin_esperar entonces
+                r := EAGAIN
+                romper
+            fin
+            si interrumpido(p) entonces
+                r := ERESTARTSYS
+                romper
+            fin
+            espera_interrumpible(esp(t))
+            duerme_en(esp(t))
+            toma_sin(dirección(t.cerrojo))
+            fin_interrumpible()
+            sal_de(esp(t))
+        fin
+        si r > 0 entonces
+            suelta_sin(dirección(t.cerrojo))
+            despierta_todos(esp(t))
+            toma_sin(dirección(t.cerrojo))
+        fin
+        t.usos := t.usos - 1
+        suelta_si(t, b)
+        si r > 0 entonces
+            si no copia_a(p, v, nat64(k), nat64(r)) entonces r := EFAULT fin
+        fin
+        libera(k)
+        devolver r
+    fin
+
+    función puntero_b(d: nat64): puntero a byte
+        devolver puntero(d)
+    fin
+
+    ; write a una tubería: n octetos de v (del programa); lo escrito, o el error
+    público función tubo_escribe(p: puntero a Proceso, d: nat64, v: nat64, n: nat64, sin_esperar: bool): ent64
+        variable t: puntero a Tubo
+        variable k: puntero a byte
+        variable b, i, m, hecho, trozo, sitio: nat64
+        variable r: ent64
+        si n = 0 entonces devolver 0 fin
+        t := tb(d)
+        trozo := n
+        si trozo > LARGO entonces trozo := LARGO fin
+        k := reserva(trozo)
+        si k = nulo entonces devolver ENOMEM fin
+        hecho := 0
+        r := 0
+        b := toma(dirección(t.cerrojo))
+        t.usos := t.usos + 1
+        suelta(dirección(t.cerrojo), b)
+        mientras hecho < n y r = 0 hacer
+            trozo := n - hecho
+            si trozo > LARGO entonces trozo := LARGO fin
+            si no copia_de(p, nat64(k), v + hecho, trozo) entonces
+                r := EFAULT
+                romper
+            fin
+            i := 0
+            b := toma(dirección(t.cerrojo))
+            mientras i < trozo hacer
+                si t.lectores = 0 entonces
+                    r := EPIPE
+                    romper
+                fin
+                sitio := LARGO - t.n
+                ; (lo de PIPE_BUF o menos, de una vez)
+                si sitio > 0 y (trozo - i > PIPE_BUF o sitio >= trozo - i) entonces
+                    m := trozo - i
+                    si m > sitio entonces m := sitio fin
+                    mientras m > 0 hacer
+                        valor(puntero_b(t.datos + ((t.ini + t.n) yb (LARGO - 1)))) := k[i]
+                        t.n := t.n + 1
+                        i := i + 1
+                        m := m - 1
+                    fin
+                    suelta_sin(dirección(t.cerrojo))
+                    despierta_todos(esp(t))
+                    toma_sin(dirección(t.cerrojo))
+                sino
+                    si sin_esperar entonces
+                        r := EAGAIN
+                        romper
+                    fin
+                    si interrumpido(p) entonces
+                        r := ERESTARTSYS
+                        romper
+                    fin
+                    espera_interrumpible(esp(t))
+                    duerme_en(esp(t))
+                    toma_sin(dirección(t.cerrojo))
+                    fin_interrumpible()
+                    sal_de(esp(t))
+                fin
+            fin
+            suelta(dirección(t.cerrojo), b)
+            hecho := hecho + i
+        fin
+        despierta_todos(esp(t))
+        b := toma(dirección(t.cerrojo))
+        t.usos := t.usos - 1
+        suelta_si(t, b)
+        libera(k)
+        si r = EPIPE entonces señala_me(SIGPIPE) fin
+        si hecho > 0 entonces devolver ent64(hecho) fin
+        devolver r
+    fin
+
+    ; (poll y select) lo que está listo: 1 leer, 4 escribir, 8 error, 0x10 colgada
+    público función tubo_listo(clase: nat32, d: nat64): nat32
+        variable t: puntero a Tubo
+        variable r: nat32
+        t := tb(d)
+        r := 0
+        si clase = F_TUBO_L entonces
+            si t.n > 0 entonces r := r ob 0x41 fin
+            si t.escritores = 0 entonces r := r ob 0x10 fin
+        sino
+            si t.n < LARGO entonces r := r ob 0x104 fin
+            si t.lectores = 0 entonces r := r ob 0x8 fin
+        fin
+        devolver r
+    fin
+
+    ; FIONREAD
+    público función tubo_cuánto(d: nat64): nat64
+        devolver tb(d).n
+    fin
+
+    público función prepara_tubos()
+        al_otro_fd := nat64(dirección(otro_))
+        al_cierra_fd := nat64(dirección(cierra_))
+    fin
+
+fin Tubos64.

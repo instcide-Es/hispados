@@ -27,6 +27,19 @@
 ;  Las páginas de los programas son de 4 KB. Las tablas de los espacios se
 ;  cuentan aparte (tablas_usuario) y se devuelven todas al deshacer el espacio
 ;  (destruye), cuando ya no lo tiene puesto ningún procesador.
+;
+;  [etapa 7] Copiar al escribir (fork): copia_espacio ya no copia las
+;  páginas: las comparte, de solo leer y con la marca COPIAR (el bit 9 de la
+;  entrada, libre para el sistema), en el padre y en el hijo, y cuenta en
+;  «compartidos» (uno por marco de la RAM) cuántos más las tienen. Al
+;  escribir en una (el fallo de página, o el núcleo al escribir en la memoria
+;  del programa: Procesos.toca), rompe_copia: si nadie más la tiene, se queda
+;  con ella (de escribir); si no, una copia para él. Soltar una página de un
+;  programa (quita_rango, destruye) solo devuelve el marco cuando ya no la
+;  tiene nadie más (suelta_marco_u). Las páginas de MAP_SHARED (la marca
+;  COMPARTIDA, el bit 10) se comparten de verdad, de escribir, en el padre y
+;  en el hijo. Cambiar los permisos (remarca) nunca da permiso de escribir a
+;  una página con COPIAR: se rompe la copia al escribir.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Espacios
@@ -34,6 +47,8 @@ módulo Espacios
     importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Smp64, Entradas
 
     público constante TOPE = 0x00007FFFFFFFF000         ; lo más alto de un programa (la última página, nunca)
+    público constante COPIAR = 0x200                    ; [etapa 7] la página se comparte: copiarla al escribir
+    público constante COMPARTIDA = 0x400                ; [etapa 7] de MAP_SHARED: se comparte también al bifurcar
     constante N_PCID = 64
     constante MÁSCARA = 0x000FFFFFFFFFF000
 
@@ -55,6 +70,11 @@ módulo Espacios
     público variable tablas_usuario: nat64              ; sus tablas, de todos
     público variable altas: nat32                       ; las PDPT de la mitad alta hechas al arrancar
     público variable cargas_cr3, cargas_sin_vaciar: nat64
+    ; [etapa 7] copiar al escribir: cuántos más tienen cada marco (nat32 por marco)
+    variable compartidos: nat64                         ; (virtual, en el mapa directo)
+    variable n_compartidos: nat64                       ; los marcos que cubre
+    variable comp_cerrojo: nat64
+    público variable copias_rotas, copias_propias, páginas_compartidas: nat64
 
     función tabla(f: nat64): puntero a nat64
         devolver puntero(virt(f))
@@ -184,6 +204,24 @@ módulo Espacios
         devolver bien
     fin
 
+    ; [etapa 7] pone la entrada x tal cual (con sus marcas: también una sin la
+    ; de usuario, la de PROT_NONE) en la página v; falso si ya había otra
+    público función mapea_u_tal(e: puntero a Espacio, v: nat64, x: nat64): bool
+        variable p: puntero a nat64
+        variable b: nat64
+        variable bien: bool
+        b := toma(dirección(e.cerrojo))
+        p := entrada_u(e, v, cierto)
+        bien := p <> nulo
+        si bien entonces bien := valor(p) yb PRESENTE = 0 fin
+        si bien entonces
+            valor(p) := x
+            e.páginas := e.páginas + 1
+        fin
+        suelta(dirección(e.cerrojo), b)
+        devolver bien
+    fin
+
     ; la entrada de la página de v (con su marco y sus marcas), o 0
     público función pte(e: puntero a Espacio, v: nat64): nat64
         variable p: puntero a nat64
@@ -250,7 +288,10 @@ módulo Espacios
         x := 0
         si p <> nulo entonces
             x := valor(p)
-            si x yb PRESENTE <> 0 entonces valor(p) := (x yb MÁSCARA) ob fl ob PRESENTE ob USUARIO fin
+            si x yb PRESENTE <> 0 entonces
+                si x yb COPIAR <> 0 entonces fl := (fl yb (nob nat64(ESCRIBIR))) ob COPIAR fin
+                valor(p) := (x yb MÁSCARA) ob fl ob PRESENTE ob USUARIO ob (x yb COMPARTIDA)
+            fin
         fin
         suelta(dirección(e.cerrojo), b)
         si x yb PRESENTE = 0 entonces devolver falso fin
@@ -308,7 +349,7 @@ módulo Espacios
                 derriba_u(e, ini, (v - ini) >> 12)
                 i := 0
                 mientras i < n hacer
-                    devuelve(lista[i])
+                    suelta_marco_u(lista[i])
                     i := i + 1
                 fin
                 total := total + n
@@ -321,7 +362,7 @@ módulo Espacios
 
     ; las páginas puestas en [a, b), con las marcas fl (más PRESENTE y USUARIO); con aviso
     público función remarca_rango(e: puntero a Espacio, a: nat64, b: nat64, fl: nat64, ninguna: bool)
-        variable v, salta, bl: nat64
+        variable v, salta, bl, x: nat64
         variable p: puntero a nat64
         variable hubo: bool
         hubo := falso
@@ -332,10 +373,14 @@ módulo Espacios
             si p <> nulo entonces
                 si valor(p) yb PRESENTE <> 0 entonces
                     ; (sin ningún permiso, la página se queda, pero sin la marca de usuario)
+                    ; ([etapa 7] lo de COPIAR y COMPARTIDA se queda; con COPIAR, sin escribir)
+                    x := valor(p) yb (COPIAR ob COMPARTIDA)
                     si ninguna entonces
-                        valor(p) := (valor(p) yb MÁSCARA) ob bit_nx() ob PRESENTE
+                        valor(p) := (valor(p) yb MÁSCARA) ob bit_nx() ob PRESENTE ob x
+                    sino si x yb COPIAR <> 0 entonces
+                        valor(p) := (valor(p) yb MÁSCARA) ob (fl yb (nob nat64(ESCRIBIR))) ob PRESENTE ob USUARIO ob x
                     sino
-                        valor(p) := (valor(p) yb MÁSCARA) ob fl ob PRESENTE ob USUARIO
+                        valor(p) := (valor(p) yb MÁSCARA) ob fl ob PRESENTE ob USUARIO ob x
                     fin
                     hubo := cierto
                 fin
@@ -398,7 +443,7 @@ módulo Espacios
             x := t[i]
             si x yb PRESENTE <> 0 entonces
                 si nivel = 1 entonces
-                    devuelve(x yb MÁSCARA)
+                    suelta_marco_u(x yb MÁSCARA)
                     pág := pág + 1
                 sino
                     suelta_nivel(x yb MÁSCARA, nivel - 1, pág, tab)
@@ -410,9 +455,65 @@ módulo Espacios
         tab := tab + 1
     fin
 
-    ; [etapa 6] fork: las páginas puestas de «de», copiadas a marcos nuevos de
-    ; «a» (con las mismas marcas). Copiar al escribir (compartirlas de solo leer
-    ; hasta que uno escriba) es de la etapa 7.
+    ; ---- [etapa 7] copiar al escribir ----
+    función cuenta_de(f: nat64): puntero a nat32
+        devolver puntero(compartidos + (f >> 12) * 4)
+    fin
+
+    ; (al preparar los procesos) la tabla de «compartidos»: 4 octetos por marco
+    público función prepara_compartidos(): bool
+        variable n, f: nat64
+        n := (marcos * 4 + 4095) >> 12
+        f := pide_seguidos(n, 1)
+        si f = 0 entonces devolver falso fin
+        compartidos := virt(f)
+        n_compartidos := marcos
+        ceros_k(compartidos, n << 12)
+        devolver cierto
+    fin
+
+    función ceros_k(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    ; uno más tiene el marco f
+    función comparte_marco(f: nat64)
+        variable c: puntero a nat32
+        variable b: nat64
+        si f >> 12 >= n_compartidos entonces devolver fin
+        b := toma(dirección(comp_cerrojo))
+        c := cuenta_de(f)
+        valor(c) := valor(c) + 1
+        suelta(dirección(comp_cerrojo), b)
+    fin
+
+    ; un programa suelta su página del marco f: el marco, libre solo si ya no
+    ; lo tiene nadie más
+    público función suelta_marco_u(f: nat64)
+        variable c: puntero a nat32
+        variable b: nat64
+        variable libre: bool
+        si compartidos = 0 o f >> 12 >= n_compartidos entonces
+            devuelve(f)
+            devolver
+        fin
+        c := cuenta_de(f)
+        si valor(c) = 0 entonces
+            devuelve(f)
+            devolver
+        fin
+        b := toma(dirección(comp_cerrojo))
+        libre := valor(c) = 0
+        si no libre entonces valor(c) := valor(c) - 1 fin
+        suelta(dirección(comp_cerrojo), b)
+        si libre entonces devuelve(f) fin
+    fin
+
     función copia_página(a: nat64, de: nat64)
         ensamblador
             mov rdi, {a}
@@ -422,10 +523,72 @@ módulo Espacios
         fin
     fin
 
-    función copia_nivel(f: nat64, nivel: nat32, base: nat64, a: puntero a Espacio): bool
+    ; (con el mutex de la memoria del proceso) la página de v, con COPIAR,
+    ; pasa a ser suya y de escribir (fl: sus marcas de ahora, sin COPIAR):
+    ; si nadie más la tiene, la misma; si no, una copia. Falso si no hay memoria.
+    público función rompe_copia(e: puntero a Espacio, v: nat64, fl: nat64): bool
+        variable p: puntero a nat64
+        variable c: puntero a nat32
+        variable x, f, nuevo, b, bc: nat64
+        variable sola: bool
+        nuevo := 0
+        mientras cierto hacer
+            b := toma(dirección(e.cerrojo))
+            p := entrada_u(e, v, falso)
+            si p = nulo entonces
+                suelta(dirección(e.cerrojo), b)
+                si nuevo <> 0 entonces devuelve(nuevo) fin
+                devolver falso
+            fin
+            x := valor(p)
+            si x yb PRESENTE = 0 o x yb COPIAR = 0 entonces
+                ; (ya la ha roto otro hilo)
+                suelta(dirección(e.cerrojo), b)
+                si nuevo <> 0 entonces devuelve(nuevo) fin
+                devolver cierto
+            fin
+            f := x yb MÁSCARA
+            bc := toma(dirección(comp_cerrojo))
+            sola := f >> 12 >= n_compartidos
+            si no sola entonces
+                c := cuenta_de(f)
+                sola := valor(c) = 0
+            fin
+            si sola entonces
+                suelta(dirección(comp_cerrojo), bc)
+                valor(p) := f ob fl ob ESCRIBIR ob PRESENTE ob USUARIO
+                suelta(dirección(e.cerrojo), b)
+                si nuevo <> 0 entonces devuelve(nuevo) fin
+                copias_propias := copias_propias + 1
+                derriba_u(e, abajo(v), 1)
+                devolver cierto
+            fin
+            si nuevo <> 0 entonces
+                ; (la copia ya está hecha: el marco viejo, uno menos)
+                valor(c) := valor(c) - 1
+                suelta(dirección(comp_cerrojo), bc)
+                valor(p) := nuevo ob fl ob ESCRIBIR ob PRESENTE ob USUARIO
+                suelta(dirección(e.cerrojo), b)
+                copias_rotas := copias_rotas + 1
+                derriba_u(e, abajo(v), 1)
+                devolver cierto
+            fin
+            suelta(dirección(comp_cerrojo), bc)
+            suelta(dirección(e.cerrojo), b)
+            ; la copia, sin cerrojos (y otra vuelta, por si ha cambiado algo)
+            nuevo := pide()
+            si nuevo = 0 entonces devolver falso fin
+            copia_página(virt(nuevo), virt(f))
+        fin
+        devolver falso
+    fin
+
+    ; fork: las páginas puestas de «de», en «a» también: las de MAP_SHARED
+    ; (COMPARTIDA), iguales; las demás, con COPIAR y sin escribir en los dos
+    función copia_nivel(de: puntero a Espacio, f: nat64, nivel: nat32, base: nat64, a: puntero a Espacio): bool
         variable t: puntero a nat64
         variable i: nat32
-        variable x, nuevo, v: nat64
+        variable x, fy, v, b: nat64
         t := tabla(f)
         i := 0
         mientras i < 512 hacer
@@ -433,15 +596,23 @@ módulo Espacios
             si x yb PRESENTE <> 0 entonces
                 v := base + (nat64(i) << (12 + 9 * (nivel - 1)))
                 si nivel = 1 entonces
-                    nuevo := pide()
-                    si nuevo = 0 entonces devolver falso fin
-                    copia_página(virt(nuevo), virt(x yb MÁSCARA))
-                    si no mapea_u(a, v, nuevo, x yb (nob MÁSCARA) yb (nob nat64(0x60))) entonces
-                        devuelve(nuevo)
+                    x := x yb (nob nat64(0x60))
+                    si x yb COMPARTIDA = 0 entonces
+                        si x yb ESCRIBIR <> 0 entonces x := (x yb (nob nat64(ESCRIBIR))) fin
+                        x := x ob COPIAR
+                        b := toma(dirección(de.cerrojo))
+                        t[i] := x
+                        suelta(dirección(de.cerrojo), b)
+                    fin
+                    fy := x yb MÁSCARA
+                    comparte_marco(fy)
+                    si no mapea_u_tal(a, v, x) entonces
+                        suelta_marco_u(fy)
                         devolver falso
                     fin
+                    páginas_compartidas := páginas_compartidas + 1
                 sino
-                    si no copia_nivel(x yb MÁSCARA, nivel - 1, v, a) entonces devolver falso fin
+                    si no copia_nivel(de, x yb MÁSCARA, nivel - 1, v, a) entonces devolver falso fin
                 fin
             fin
             i := i + 1
@@ -449,19 +620,24 @@ módulo Espacios
         devolver cierto
     fin
 
-    ; falso si no hay memoria (lo copiado se queda en «a»: se deshace con él)
+    ; falso si no hay memoria (lo hecho se queda en «a»: se deshace con él).
+    ; Las de «de» ya no se pueden escribir: su TLB, vaciada (aquí y en los
+    ; demás que lo tienen puesto)
     público función copia_espacio(de: puntero a Espacio, a: puntero a Espacio): bool
         variable r: puntero a nat64
         variable i: nat32
+        variable bien: bool
         r := tabla(de.raíz)
+        bien := cierto
         i := 0
-        mientras i < 256 hacer
+        mientras i < 256 y bien hacer
             si r[i] yb PRESENTE <> 0 entonces
-                si no copia_nivel(r[i] yb MÁSCARA, 3, nat64(i) << 39, a) entonces devolver falso fin
+                si no copia_nivel(de, r[i] yb MÁSCARA, 3, nat64(i) << 39, a) entonces bien := falso fin
             fin
             i := i + 1
         fin
-        devolver cierto
+        derriba_u(de, 0, 1 << 20)
+        devolver bien
     fin
 
     ; deshace el espacio: sus páginas, sus tablas y él. Ningún procesador debe

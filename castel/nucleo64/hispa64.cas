@@ -1,8 +1,10 @@
 ; =============================================================================
-;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 6 (el USB:
+;  hispa64.cas - Hispa-64 (docs/64/HISPA-64.md): el núcleo, etapa 7 (musl y
+;  POSIX: hilos, señales, futex, fork con copiar al escribir, tuberías, mmap
+;  de archivos, ELF dinámicos y PIE, AVX), sobre la 6 (el USB:
 ;  xHCI, concentradores, HID y memorias; el teclado con el mapa español, el
 ;  touchpad I2C-HID, la consola como terminal y el intérprete de órdenes en
-;  el anillo 3), sobre la 5 (los discos y los archivos).
+;  el anillo 3) y la 5 (los discos y los archivos).
 ;  Lo carga GRUB por multiboot2 (con UEFI de 64 bits: \EFI\BOOT\BOOTX64.EFI; o
 ;  con la BIOS) o QEMU con -kernel (multiboot), en 1 MB; corre en la mitad alta
 ;  (0xFFFFFFFF80100000: «modelo hispa64», que también pasa al modo largo con
@@ -70,11 +72,12 @@ módulo Hispa64
     importar Raton64, Usbvigia, Usbhid64
     importar Tty64, Teclas64
     importar I2chid64
+    importar PrMusl64
 
-    constante VERSIÓN = "0.6.0"
+    constante VERSIÓN = "0.7.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
-    constante MAX_MÓDULOS = 16
+    constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
 
     variable magia, info: nat32
     variable info_largo: nat64
@@ -1344,9 +1347,11 @@ módulo Hispa64
         provoca()
         pruebas2()
         etapa6()
-        si fallos + fallos_proc + fallos_disco + fallos6 > 0 entonces
+        ; [etapa 7] musl: los programas de C de hoy
+        si no tiene("sinpruebas") y tic_va entonces pruebas_musl() fin
+        si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 > 0 entonces
             pon_color(12, 0)
-            escribir("Hispa-64 etapa 6: con fallos (los «MAL» de arriba).\n")
+            escribir("Hispa-64 etapa 7: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             si apagar_al_fallar entonces
                 al_apagar()
@@ -1354,7 +1359,7 @@ módulo Hispa64
             fin
         sino
             pon_color(10, 0)
-            escribir("Hispa-64 etapa 6: todo en orden.\n")
+            escribir("Hispa-64 etapa 7: todo en orden.\n")
             pon_color(7, 0)
         fin
         al_apagar()

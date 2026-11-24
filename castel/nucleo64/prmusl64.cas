@@ -1,0 +1,120 @@
+; =============================================================================
+;  prmusl64.cas - Hispa-64, etapa 7: las pruebas de cada arranque con los
+;  programas hechos con musl (docs/64/HISPA-64.md, sección 13; los hace
+;  programas/hazlos.sh con el musl-gcc del árbol de construcción):
+;
+;    MHOLA, MHOLAD, MHOLAP    printf, malloc, el entorno, los archivos, la
+;                             hora, qsort...: estático, dinámico (con
+;                             ld-musl y libsaludo.so, que carga con mmap) y
+;                             estático de posición libre (static-pie)
+;    MHILOS, MHILOSD          8 hilos con un mutex y una condición, TLS,
+;                             pthread_join, un semáforo, AVX entre hilos
+;    MSENALES, MSENALESD      sigaction, la máscara, kill, raise, tgkill, los
+;                             fallos (SIGSEGV, SIGFPE, SIGILL) atendidos, la
+;                             pila de las señales, SA_RESTART, SIGCHLD, y un
+;                             hijo que no llama al sistema cerrado con kill
+;    MPROCESOS, MPROCESOSD    fork (copiar al escribir), execve, wait,
+;                             tuberías, dup2, posix_spawn, popen
+;    MMAPA, MMAPAD            mmap de un archivo (privado y compartido de
+;                             solo leer), MAP_SHARED anónima entre procesos
+;    LUA PRUEBA.LUA           Lua 5.5, sin cambiar nada
+;
+;  Cada uno dice lo suyo y acaba con 0; después, nada de más (procesos,
+;  espacios, memoria, montón, tuberías).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PrMusl64
+
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64
+
+    público variable fallos7: nat32
+
+    función mal(qué: puntero a byte)
+        fallos7 := fallos7 + 1
+        pon_color(12, 0)
+        escribir("  MAL: ", qué, "\n")
+        pon_color(7, 0)
+    fin
+
+    función memoria_ahora(): nat64
+        devolver libres + páginas + nat64(tablas)
+    fin
+
+    ; arranca la línea, espera a que acabe y mira su código
+    función corre(línea: puntero a byte, esperado: nat64)
+        variable p: puntero a Proceso
+        variable r, t0: nat64
+        t0 := ahora_ns()
+        p := lanza(línea)
+        si p = nulo entonces
+            escribir("Programa «", línea, "»: no se ha podido arrancar: ", motivo, "\n")
+            mal("no arranca")
+            devolver
+        fin
+        r := espera_proceso(p)
+        escribir("Programa «", línea, "»: acaba con el código ", r)
+        si r = esperado entonces
+            escribir(", como debe (en ", (ahora_ns() - t0) div 1000000, " ms)\n")
+        sino
+            escribir("\n")
+            mal("no acaba con el código que debe")
+        fin
+    fin
+
+    público función pruebas_musl()
+        variable mem0, montón0, pilas0, t0: nat64
+        pon_color(14, 0)
+        escribir("musl: los programas de C de hoy, con la biblioteca de C de musl (estáticos, dinámicos con ld-musl y PIE)")
+        pon_color(7, 0)
+        escribir("\n  AVX: ")
+        si con_xsave entonces escribir("sí (xsave, XCR0 = ", xcr0, ", ", tam_fpu, " octetos por hilo)") sino escribir("no (fxsave, 512 octetos por hilo)") fin
+        escribir("; RDRAND: ")
+        si con_rdrand entonces escribir("sí") sino escribir("no") fin
+        escribir("; RDSEED: ")
+        si con_rdseed entonces escribir("sí") sino escribir("no") fin
+        escribir("\n")
+        si busca_archivo("MHOLA") < 0 entonces
+            escribir("(Sin los programas de musl en la unidad: sin sus pruebas.)\n")
+            devolver
+        fin
+        mem0 := memoria_ahora()
+        montón0 := en_uso
+        pilas0 := nat64(n_pilas)
+        corre("MHOLA uno dos", 0)
+        si busca_archivo("MHOLAD") >= 0 entonces corre("MHOLAD uno dos", 0) fin
+        si busca_archivo("MHOLAP") >= 0 entonces corre("MHOLAP uno dos", 0) fin
+        si busca_archivo("MHILOS") >= 0 entonces corre("MHILOS", 0) fin
+        si busca_archivo("MHILOSD") >= 0 entonces corre("MHILOSD", 0) fin
+        si busca_archivo("MSENALES") >= 0 entonces corre("MSENALES", 0) fin
+        si busca_archivo("MSENALESD") >= 0 entonces corre("MSENALESD", 0) fin
+        si busca_archivo("MPROCESOS") >= 0 entonces corre("MPROCESOS", 0) fin
+        si busca_archivo("MPROCESOSD") >= 0 entonces corre("MPROCESOSD", 0) fin
+        si busca_archivo("MMAPA") >= 0 entonces corre("MMAPA", 0) fin
+        si busca_archivo("MMAPAD") >= 0 entonces corre("MMAPAD", 0) fin
+        si busca_archivo("LUA") >= 0 y busca_archivo("PRUEBA.LUA") >= 0 entonces corre("LUA /PRUEBA.LUA uno dos", 0) fin
+        ; (los que quedasen sueltos acaban solos)
+        t0 := ahora_ns()
+        mientras (vivos > 0 o en_tabla > 0) y ahora_ns() - t0 < 3000000000 hacer duerme_ms(10) fin
+        ; (los hilos acabados los suelta la tarea ociosa en cuanto dejan su procesador)
+        t0 := ahora_ns()
+        mientras (memoria_ahora() <> mem0 o en_uso <> montón0 o nat64(n_pilas) <> pilas0) y ahora_ns() - t0 < 1000000000 hacer
+            recoge()
+            duerme_ms(10)
+        fin
+        escribir("Después de musl: ", vivos, " procesos, ", en_tabla, " en la tabla, ", n_espacios, " espacios, ", tablas_usuario, " tablas de programas, ", Tubos64.tubos, " tuberías; ")
+        escribir(hilos_creados, " hilos creados, ", señales_entregadas, " señales entregadas, ", Futex64.esperas, " esperas de futex, ")
+        escribir(páginas_compartidas, " páginas compartidas al bifurcar (", copias_rotas, " copiadas al escribir, ", copias_propias, " sin copiar)\n")
+        escribir("  la memoria: ")
+        si memoria_ahora() = mem0 entonces escribir("la de antes") sino escribir("¡distinta! (", mem0, " -> ", memoria_ahora(), " marcos)") fin
+        escribir("; el montón: ", en_uso, " bloques")
+        si en_uso = montón0 entonces escribir(" (los de antes)") sino escribir(" (antes, ", montón0, ")") fin
+        escribir("; las pilas: ", n_pilas)
+        si nat64(n_pilas) = pilas0 entonces escribir(" (las de antes)") sino escribir(" (antes, ", pilas0, ")") fin
+        escribir("\n")
+        si vivos <> 0 o en_tabla <> 0 o n_espacios <> 0 o tablas_usuario <> 0 o Tubos64.tubos <> 0 entonces mal("quedan procesos, espacios o tuberías") fin
+        si memoria_ahora() <> mem0 entonces mal("se ha perdido memoria") fin
+        si en_uso <> montón0 entonces mal("se han perdido bloques del montón") fin
+        si nat64(n_pilas) <> pilas0 entonces mal("se han perdido pilas") fin
+    fin
+
+fin PrMusl64.

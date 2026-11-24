@@ -777,8 +777,8 @@ módulo Tty64
                 r := 0
                 romper
             fin
-            si p.matar <> 0 entonces
-                r := EINTR
+            si interrumpido(p) entonces
+                r := ERESTARTSYS            ; [etapa 7] (EINTR, o se repite con SA_RESTART)
                 romper
             fin
             si gen_intr <> gen y la_atiende(p, SIGINT) entonces
@@ -796,12 +796,14 @@ módulo Tty64
                 r := 0
                 romper
             fin
+            espera_interrumpible(dirección(espera_))
             si límite <> 0 y tic_va entonces
                 duerme_en_hasta(dirección(espera_), límite)
             sino
                 duerme_en(dirección(espera_))
             fin
             toma_sin(dirección(espera_.cerrojo))
+            fin_interrumpible()
         fin
         sal_de(dirección(espera_))
         suelta(dirección(espera_.cerrojo), b)
@@ -817,13 +819,15 @@ módulo Tty64
         variable b: nat64
         si no tic_va entonces
             ; (sin el tic nadie despertaría a tiempo: se cede el procesador)
-            mientras no hay_datos() y p.matar = 0 y ahora_ns() < límite hacer cede() fin
+            mientras no hay_datos() y no interrumpido(p) y ahora_ns() < límite hacer cede() fin
             devolver
         fin
         b := toma(dirección(espera_.cerrojo))
-        mientras listo_n = 0 y no fin_archivo y p.matar = 0 y ahora_ns() < límite hacer
+        mientras listo_n = 0 y no fin_archivo y no interrumpido(p) y ahora_ns() < límite hacer
+            espera_interrumpible(dirección(espera_))
             si límite <> nob nat64(0) entonces duerme_en_hasta(dirección(espera_), límite) sino duerme_en(dirección(espera_)) fin
             toma_sin(dirección(espera_.cerrojo))
+            fin_interrumpible()
         fin
         sal_de(dirección(espera_))
         suelta(dirección(espera_.cerrojo), b)

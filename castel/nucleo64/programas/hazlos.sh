@@ -11,6 +11,8 @@
 #   SALUDO.TXT                    un texto, para leerlo con open y read
 #   HIJOS, ORDENES                [etapa 6] fork, execve, wait4, la consola y
 #                                 los plazos; y el intérprete de órdenes
+#   MHOLA ... LUA, PRUEBA.LUA     [etapa 7] los de musl (hazmusl.sh: musl y Lua
+#                                 se compilan en build/ la primera vez)
 # Uso: hazlos.sh SALIDA   (dice en la última línea los que ha hecho)
 set -e
 AQUI=$(cd "$(dirname "$0")" && pwd)
@@ -30,4 +32,7 @@ python3 -I "$C/ccastel.py" "$AQUI/holacas.cas" -o "$S/holacas.asm" -I "$C/biblio
 nasm -f bin "$S/holacas.asm" -o "$S/HOLACAS"
 rm -f "$S/holacas.asm"
 cp "$AQUI/saludo.txt" "$S/SALUDO.TXT"
-echo "hechos:$HECHOS HOLACAS SALUDO.TXT"
+# [etapa 7] los de musl (si no se quieren: SIN_MUSL=1)
+MUSL=""
+if [ "${SIN_MUSL:-0}" != 1 ]; then MUSL=" $("$AQUI/hazmusl.sh" "$S" | tail -1 | cut -d: -f2)"; fi
+echo "hechos:$HECHOS HOLACAS SALUDO.TXT$MUSL"
