@@ -41,6 +41,8 @@ módulo Usbhid
         largo: nat32                            ; los octetos que se piden cada vez
         anterior: arreglo [8] de byte           ; (teclado) el informe de antes
         cambiada: bool                          ; (teclado de Apple europeo) dos teclas van cambiadas
+        interfaz: nat32                         ; (0.8.10) su número (para las luces)
+        luces: nat32                            ; (0.8.10) las puestas con SET_REPORT (FFh: aún ninguna)
         dis: Diseño                             ; (ratón) dónde va cada cosa en el informe (hiddesc.cas)
     fin
 
@@ -180,6 +182,7 @@ módulo Usbhid
         variable i, e, interfaz, n: nat32
         variable r: ent32
         variable arranque: bool
+        variable d: arreglo [4] de nat32
         ; un sitio libre
         n := 0
         mientras n < MAX_HID y hids[n].usado hacer n := n + 1 fin
@@ -212,6 +215,18 @@ módulo Usbhid
             ; más detrás de los ocho de siempre)
             si hids[n].largo < 8 entonces hids[n].largo := 8 fin
             teclados := teclados + 1
+            ; (0.8.10) las luces, las del núcleo (Bloq Num apagado al
+            ; arrancar): el firmware puede dejar Bloq Num encendido y los
+            ; teclados sin teclado numérico aparte dan números en U I O...
+            hids[n].interfaz := interfaz
+            hids[n].luces := 0xFF
+            pon_luces(hids[n])
+            d[0] := a
+            d[1] := hids[n].luces yb 1
+            si d[1] = 0 entonces d[1] := nat32("apagado") sino d[1] := nat32("encendido") fin
+            d[2] := nat32("bien")
+            si hids[n].luces = 0xFF entonces d[2] := nat32("no lo acepta") fin
+            apunta("usb: teclado (aparato %u): Bloq Num %s (SET_REPORT de las luces: %s)\n", d)
         sino
             ; un ratón de arranque: botones, X e Y, un octeto cada uno
             hids[n].dis.ratón := cierto
@@ -262,6 +277,20 @@ módulo Usbhid
         fin
     fin
 
+    ; (0.8.10) las luces del teclado, como las tiene el núcleo (SET_REPORT
+    ; del informe de salida 0); si no lo acepta, luces se queda en FFh
+    función pon_luces(ref h: Hid)
+        variable l: arreglo [4] de byte
+        variable v: nat32
+        v := luces_usb()
+        l[0] := byte(v)
+        si control(h.aparato, 0x21, 0x09, 0x0200, h.interfaz, l, 1) >= 0 entonces
+            h.luces := v
+        sino
+            h.luces := 0xFF
+        fin
+    fin
+
     ; la tarea que recoge los informes: cada centésima mira las tuberías
     función atiende(nada: nat32)
         variable i: nat32
@@ -285,6 +314,10 @@ módulo Usbhid
                         tubo_pide(hids[i].tubo, hids[i].largo)
                     fin
                 fin
+            fin
+            ; (0.8.10) las luces, si han cambiado (Bloq Num, Bloq Mayús)
+            para i desde 0 hasta MAX_HID - 1 hacer
+                si hids[i].usado y hids[i].teclado y hids[i].luces <> 0xFF y hids[i].luces <> luces_usb() entonces pon_luces(hids[i]) fin
             fin
             ; la tecla que sigue pulsada se repite
             si repite <> 0 y tics >= repite_cuándo entonces

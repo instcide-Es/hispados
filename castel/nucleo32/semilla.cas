@@ -767,6 +767,30 @@ módulo Semilla
     ; batería. Si no está en la unidad del sistema, no pasa nada: se apaga
     ; como antes. Se le da la línea del cargador: con «registro», el suyo va
     ; a \ACPI.TXT; «acpicada=N», una lectura cada N segundos (10 si no).
+    ; (0.8.10, el Acer One 10) Bloq Num empieza apagado, como en Windows: el
+    ; firmware lo deja encendido y los teclados sin teclado numérico aparte
+    ; (el del dock, USB 06CB:2968) dan 4 5 6 1 2 3 0 en U I O J K L M. Lo
+    ; que dejó la BIOS (el bit 5 de 0x417) se recuerda para «como lo dejó el
+    ; firmware» del Panel de control (Teclado); por UEFI no se sabe. Al 8042,
+    ; la orden EDh (salvo «sin8042»); los USB, al ponerse en marcha
+    ; (usbhid.cas: SET_REPORT de las luces)
+    función bloq_num_al_arrancar()
+        variable p: puntero a byte
+        Consola.sin_8042 := buscar(línea_del_cargador(), "sin8042") <> nulo
+        si no arrancado_por_uefi() entonces
+            p := puntero(0x417)
+            Consola.num_firmware := p[0] yb 0x20 <> 0
+            si Consola.num_firmware entonces
+                apunta0("teclado: la BIOS deja Bloq Num encendido: se apaga (Panel de control > Teclado)\n")
+            sino
+                apunta0("teclado: la BIOS deja Bloq Num apagado\n")
+            fin
+        sino
+            apunta0("teclado: por UEFI no se sabe cómo deja el firmware Bloq Num: se apaga (Panel de control > Teclado)\n")
+        fin
+        pon_bloq_num(falso)
+    fin
+
     ; (UEFI) la primera línea del registro del arranque: por dónde ha
     ; arrancado (UEFI de 64 o 32 bits, o la BIOS/CSM), con qué pantalla, y la
     ; línea del cargador (que dice qué entrada del menú de GRUB se eligió)
@@ -1170,6 +1194,7 @@ módulo Semilla
         prepara_usuario()
         prepara_escritorio()
         permitir_interrupciones()
+        bloq_num_al_arrancar()                  ; (0.8.10) Bloq Num, apagado
         pinta_ahora()                           ; (UEFI) lo dicho hasta aquí, ya en la pantalla
         mira_reloj()                            ; (UEFI) ¿cuenta el 8254? Si no, el HPET (relojhpet.cas)
         mira_reposo()                           ; (MWAIT) «hlt» o «mwait» en la tarea ociosa

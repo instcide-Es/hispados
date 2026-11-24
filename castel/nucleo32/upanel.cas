@@ -91,6 +91,7 @@ módulo UPanel
     constante RUEDAS = "3 renglones (como siempre)|6 renglones|9 renglones|12 renglones|15 renglones"
     constante DISTRIBUCIONES = "Espa\xA4ol (Espa\xA4a)|Latinoamericano|Ingl\x82s (EE. UU.)"
     constante RETARDOS = "Corto (0,25 s)|Normal (0,5 s)|Largo (0,75 s)|Muy largo (1 s)"
+    constante BLOQ_NUMS = "Apagado|Encendido|Como lo dej\xA2 el firmware"     ; (0.8.10)
     constante RITMOS = "Lenta (5 por segundo)|Media (10 por segundo)|R\xA0pida (15 por segundo)|Normal (25 por segundo)|La m\xA0s r\xA0pida (30 por segundo)"
     constante PANTALLAS = "Nunca|Al minuto|A los 5 minutos|A los 10 minutos|A los 15 minutos|A la media hora|A la hora"
     constante BATERÍAS = "No apagarlo|Al 3 %|Al 5 % (lo de siempre)|Al 10 %|Al 15 %"
@@ -200,6 +201,7 @@ módulo UPanel
             caso ID_DISTRIBUCIÓN: devolver AJ_TECLADO
             caso ID_RETARDO: devolver AJ_TECLADO_RETARDO
             caso ID_RITMO: devolver AJ_TECLADO_RITMO
+            caso ID_BLOQ_NUM: devolver AJ_BLOQ_NUM          ; (0.8.10)
             caso ID_PANTALLA: devolver AJ_PANTALLA_APAGAR
             caso ID_BATERÍA: devolver AJ_BATERÍA_APAGAR
             caso ID_BOTÓN: devolver AJ_BOTÓN
@@ -217,6 +219,7 @@ módulo UPanel
             caso ID_DISTRIBUCIÓN: devolver DISTRIBUCIONES
             caso ID_RETARDO: devolver RETARDOS
             caso ID_RITMO: devolver RITMOS
+            caso ID_BLOQ_NUM: devolver BLOQ_NUMS            ; (0.8.10)
             caso ID_PANTALLA: devolver PANTALLAS
             caso ID_BATERÍA: devolver BATERÍAS
             caso ID_BOTÓN: devolver BOTONES
@@ -662,8 +665,8 @@ módulo UPanel
         yy := yy + desplegable(ID_DISTRIBUCIÓN, sx, yy, an * 2 div 3, "Distribuci\xA2n del teclado", DISTRIBUCIONES, elegida(ID_DISTRIBUCIÓN), falso) + 3 * E
         yy := yy + desplegable(ID_RETARDO, sx, yy, an * 2 div 3, "Al dejar una tecla pulsada, empieza a repetirse", RETARDOS, elegida(ID_RETARDO), falso) + 3 * E
         yy := yy + desplegable(ID_RITMO, sx, yy, an * 2 div 3, "Y se repite", RITMOS, elegida(ID_RITMO), falso) + 3 * E
-        casilla(ID_BLOQ_NUM, sx, yy, "Bloq Num encendido al arrancar", ajuste(AJ_BLOQ_NUM) = 1)
-        yy := yy + LT + 4 * E
+        ; (0.8.10) apagado (por omisión: como Windows), encendido o como lo dejó el firmware
+        yy := yy + desplegable(ID_BLOQ_NUM, sx, yy, an * 2 div 3, "Bloq Num al arrancar", BLOQ_NUMS, elegida(ID_BLOQ_NUM), falso) + 3 * E
         campo(ID_ESCRIBE, sx, yy, an, "Pruebe aqu\xA1 el teclado", escrito, falso)
     fin
 
@@ -930,7 +933,6 @@ módulo UPanel
             caso ID_TP_DOS: pon(AJ_TP_DOS_DEDOS, 1 - ajuste(AJ_TP_DOS_DEDOS))
             caso ID_TP_ESCRIBIR:
                 si ajuste(AJ_TP_ESCRIBIR) = 0 entonces pon(AJ_TP_ESCRIBIR, 50) sino pon(AJ_TP_ESCRIBIR, 0) fin
-            caso ID_BLOQ_NUM: pon(AJ_BLOQ_NUM, 1 - ajuste(AJ_BLOQ_NUM))
             caso ID_RED_AUTO, ID_RED_AUTO + 1, ID_RED_AUTO + 2: pon(AJ_RED, id - ID_RED_AUTO)
             caso ID_WIFI:
                 r := lanzar_suelto("\\REDWIFI.BIN", "")

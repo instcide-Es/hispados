@@ -75,7 +75,13 @@ módulo Consola
     variable alt: bool                          ; el Alt de la izquierda (para el escritorio: Alt+letra)
     variable alt_tab: bool                      ; (MENÚ) se ha pulsado Alt+Tab y aún no se ha soltado Alt
     variable logo_abajo, logo_usado: bool       ; (MENÚ) la tecla del logo está pulsada; y con ella, otra (Logo+E...)
-    variable bloq_num: bool = cierto             ; Bloq Num: el teclado numérico da números (encendido, como deja la BIOS)
+    ; (0.8.10, el Acer One 10: el firmware lo deja encendido y el teclado del
+    ; dock, sin teclado numérico aparte, da 4 5 6 1 2 3 0 en U I O J K L M)
+    ; Bloq Num empieza APAGADO, como en Windows; el Panel de control decide
+    ; luego (Teclado: apagado, encendido o como lo dejó el firmware)
+    variable bloq_num: bool = falso              ; Bloq Num: el teclado numérico da números
+    público variable num_firmware: bool          ; (0.8.10) cómo lo dejó la BIOS (por UEFI no se sabe: falso)
+    público variable sin_8042: bool              ; (0.8.10) «sin8042»: ni la orden EDh
     variable pausa: nat32                       ; los códigos que quedan de la tecla Pausa (E1 1D 45 E1 9D C5)
     variable muerta: nat32                      ; la tecla muerta que espera su vocal (0: ninguna)
     variable español: bool = cierto
@@ -468,14 +474,29 @@ módulo Consola
         sacar_puerto(TECLADO, dato)
     fin
 
-    ; (PANEL) Bloq Num, encendido o apagado (y su luz, en el teclado PS/2)
+    ; (PANEL) Bloq Num, encendido o apagado (y su luz, en el teclado PS/2; los
+    ; USB la cogen de luces_usb(): usbhid.cas)
     público función pon_bloq_num(encendido: bool)
         variable l: nat32
         bloq_num := encendido
         l := 0
         si bloq_num entonces l := l ob 2 fin
         si bloqueo entonces l := l ob 4 fin
-        al_teclado(0xED, l)
+        si no sin_8042 entonces al_teclado(0xED, l) fin
+    fin
+
+    público función bloq_num_puesto(): bool
+        devolver bloq_num
+    fin
+
+    ; (0.8.10) las luces de un teclado USB (el informe de salida del
+    ; protocolo de arranque: bit 0 Bloq Num, bit 1 Bloq Mayús)
+    público función luces_usb(): nat32
+        variable l: nat32
+        l := 0
+        si bloq_num entonces l := l ob 1 fin
+        si bloqueo entonces l := l ob 2 fin
+        devolver l
     fin
 
     ; (PANEL) la repetición del teclado PS/2: el retardo (0 a 3: 250, 500,

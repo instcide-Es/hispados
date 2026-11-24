@@ -21,7 +21,7 @@ módulo Panelaj
     público constante AJ_TECLADO = 5            ; 0 EE. UU., 1 español, 2 latinoamericano
     público constante AJ_TECLADO_RETARDO = 6    ; 0 a 3: 250, 500, 750 o 1.000 ms
     público constante AJ_TECLADO_RITMO = 7      ; las letras por segundo al repetir (2 a 30)
-    público constante AJ_BLOQ_NUM = 8           ; Bloq Num al arrancar
+    público constante AJ_BLOQ_NUM = 8           ; Bloq Num al arrancar (0.8.10: 0 apagado; 1 encendido; 2 como lo dejó el firmware)
     público constante AJ_PANTALLA_APAGAR = 9    ; minutos sin tocar nada para apagar la pantalla (0: nunca)
     público constante AJ_BATERÍA_APAGAR = 10    ; % de batería (sin cable) al que se apaga el equipo (0: nunca)
     público constante AJ_BOTÓN = 11             ; el botón de encendido: 0 apagar, 1 preguntar, 2 nada

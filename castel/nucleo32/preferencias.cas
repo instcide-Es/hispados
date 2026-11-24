@@ -36,7 +36,7 @@ módulo Preferencias
     público constante AJ_TECLADO = 5            ; 0 EE. UU., 1 español, 2 latinoamericano
     público constante AJ_TECLADO_RETARDO = 6    ; 0 a 3: 250, 500, 750 o 1.000 ms
     público constante AJ_TECLADO_RITMO = 7      ; las letras por segundo al repetir (2 a 30)
-    público constante AJ_BLOQ_NUM = 8           ; Bloq Num al arrancar (1, encendido)
+    público constante AJ_BLOQ_NUM = 8           ; Bloq Num al arrancar (0.8.10: 0 apagado, el de siempre; 1 encendido; 2 como lo dejó el firmware)
     público constante AJ_PANTALLA_APAGAR = 9    ; los minutos sin tocar nada para apagar la pantalla (0: nunca)
     público constante AJ_BATERÍA_APAGAR = 10    ; con la batería a este % (o menos) y sin cable, se apaga el equipo (0: nunca)
     público constante AJ_BOTÓN = 11             ; el botón de encendido: 0 apagar, 1 preguntar, 2 nada
@@ -116,7 +116,7 @@ módulo Preferencias
         clave(AJ_TECLADO, "teclado", 0, 2, 1)
         clave(AJ_TECLADO_RETARDO, "teclado_retardo", 0, 3, 1)
         clave(AJ_TECLADO_RITMO, "teclado_ritmo", 2, 30, 25)
-        clave(AJ_BLOQ_NUM, "bloq_num", 0, 1, 1)
+        clave(AJ_BLOQ_NUM, "bloq_num", 0, 2, 0)          ; (0.8.10) apagado, como Windows (el Acer One 10)
         clave(AJ_PANTALLA_APAGAR, "pantalla_apagar", 0, 240, 0)
         clave(AJ_BATERÍA_APAGAR, "bateria_apagar", 0, 30, 5)
         clave(AJ_BOTÓN, "boton_encendido", 0, 2, 0)
@@ -220,7 +220,15 @@ módulo Preferencias
                 repite_tras := (valores[AJ_TECLADO_RETARDO] + 1) * 25
                 repite_cada := 100 div valores[AJ_TECLADO_RITMO]
                 si repite_cada < 1 entonces repite_cada := 1 fin
-            caso AJ_BLOQ_NUM: pon_bloq_num(v = 1)
+            caso AJ_BLOQ_NUM:
+                si v = 2 entonces pon_bloq_num(Consola.num_firmware) sino pon_bloq_num(v = 1) fin
+                si v = 0 entonces
+                    apunta0("teclado: Bloq Num apagado (Panel de control > Teclado)\n")
+                sino si v = 1 entonces
+                    apunta0("teclado: Bloq Num encendido (Panel de control > Teclado)\n")
+                sino
+                    apunta0("teclado: Bloq Num como lo dejó el firmware (Panel de control > Teclado)\n")
+                fin
             caso AJ_TEMA:
                 pon_tema(v)
                 cambios := cambios + 1
