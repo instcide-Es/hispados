@@ -119,6 +119,8 @@ static int tx_r0;
 /* lo que ha pasado con las órdenes */
 static int vio_bt, vio_nvm, vio_dqa, vio_aux, vio_mcc, vio_scan, vio_phydb, vio_phydb_mal, vio_phycfg_rt, vio_power;
 static int orden_mal, cabecera_mal, wptr_mal;
+static int clave_n, clave_sta, clave_pos, clave_fl;	/* el último ADD_STA_KEY */
+static o8 clave_k[16];
 static d32 escaneo_canales;
 
 static d32 *prph_ref(d32 a)
@@ -287,6 +289,12 @@ static void orden(const o8 *c, int total)
 		vio_aux++;
 		if (d[0x10] != 1 || le32(d + 4) != 4 || le32(d + 0x28) != 2 || n != 44)
 			queja("ADD_STA de la auxiliar mal", n);
+		r[0] = 1;			/* ADD_STA_SUCCESS */
+		break;
+	case 0x17:			/* ADD_STA_KEY (v1, 64, o v2, 76) */
+		clave_n = n;
+		clave_sta = d[0]; clave_pos = d[1]; clave_fl = le16(d + 2);
+		memcpy(clave_k, d + 4, 16);
 		r[0] = 1;			/* ADD_STA_SUCCESS */
 		break;
 	case 0x08: break;
@@ -590,6 +598,22 @@ static int una_vez(const struct iwl_fw *fw, const char *que)
 	mira(vista_v && vista_h, "las redes en la lista, cada una en su canal, con su señal (la mejor antena) y su seguridad");
 	mira(vista_o || n == 2, "la oculta: en la lista sin nombre, o fuera");
 	mira(cabecera_mal == 0 && wptr_mal == 0, "cabeceras anchas bien y el puntero de recepción de 8 en 8, sin ranuras con el mismo búfer");
+	/* (etapa 2, WPA2) las claves a la tarjeta, como las pide w80211 al
+	 * conectar y al renovar: la de pares en la posición 0/1 alternando, la
+	 * de grupo en la 2 + KeyID, y quitar la vieja */
+	{
+		o8 tk[16], rsc[6] = { 0 };
+		int k;
+		for (k = 0; k < 16; k++)
+			tk[k] = 0xA0 + k;
+		mira(r->clave && r->clave(1, 0, 1, tk, NULL) == 0 && (clave_n == 64 || clave_n == 76) && clave_sta == 0 &&
+		     clave_pos == 1 && clave_fl == 0x0002 && memcmp(clave_k, tk, 16) == 0,
+		     "ADD_STA_KEY: la clave por pares (CCM, KeyID 0) en la posición 1, del punto de acceso");
+		mira(r->clave(0, 2, 0, tk, rsc) == 0 && clave_pos == 4 && clave_fl == (0x4000 | 0x0200 | 0x0002),
+		     "ADD_STA_KEY: la de grupo con el KeyID 2, de multidifusión, en la posición 4");
+		mira(r->clave(1, 0, 0, NULL, NULL) == 0 && clave_pos == 0 && clave_fl == (0x0800 | 0x0008),
+		     "ADD_STA_KEY: quitar la de pares vieja (posición 0, NOT_VALID)");
+	}
 	mira(fallos_modelo == 0, "nada raro para el modelo");
 	r->parar();
 	return 0;

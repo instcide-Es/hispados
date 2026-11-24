@@ -4,8 +4,9 @@
  * PRF, AES, envoltorio de claves, CCMP) y la gestión 802.11 con WPA2 contra
  * el punto de acceso de mentira de wifi/nucleo/sim.c (búsqueda, asociación,
  * acuerdo de 4 pasos, DHCP por la clave de grupo, ARP, eco, renovación de la
- * clave de grupo, contraseña equivocada, tramas perdidas, expulsión, pérdida
- * de la red y reconexión).
+ * clave de grupo y de la de pares, contraseña equivocada, tramas perdidas,
+ * expulsión, pérdida de la red y reconexión) y una descarga larga (25 MB)
+ * con las claves renovándose cada pocos segundos y una expulsión a mitad.
  *
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
  */
@@ -19,6 +20,12 @@ static int fallos, hechas, charla;
 static o8 ultima[1600];
 static int ultima_n, entregadas;
 extern int sim_renovar_grupo, sim_echar, sim_silencio;
+extern int sim_renovar_pares, sim_vieja_tras_4, sim_snonce_repetido, sim_renov_ptk, sim_renov_gtk;
+extern long sim_chorro_sig, sim_chorro_fin;
+extern int sim_pierde_4;
+static char marcas[16];		/* las tramas de prueba 0x88b5 que llegan */
+static int nmarcas;
+static long esperado, saltos, repes, rotos;	/* el chorro */
 
 void hl_log(int nivel, const char *f, ...)
 {
@@ -33,7 +40,31 @@ void hl_log(int nivel, const char *f, ...)
 }
 unsigned long hl_jiffies(void) { return reloj; }
 d32 hl_azar(void) { return rand(); }
-void w_entrega_eth(const o8 *t, int n) { memcpy(ultima, t, n); ultima_n = n; entregadas++; }
+void w_entrega_eth(const o8 *t, int n)
+{
+	if (n >= 14 + 16 && t[12] == 0x88 && t[13] == 0xb5) {
+		if (nmarcas < (int)sizeof marcas - 1)
+			marcas[nmarcas++] = t[14];
+		return;
+	}
+	if (n >= 18 && t[12] == 0x88 && t[13] == 0xb6) {
+		long k = t[14] | (t[15] << 8) | (t[16] << 16) | ((long)t[17] << 24);
+		int i;
+		for (i = 4; i < n - 14; i++)
+			if (t[14 + i] != (o8)(k * 31 + i))
+				break;
+		if (n != 14 + 1400 || i != n - 14)
+			rotos++;
+		else if (k == esperado)
+			esperado++;
+		else if (k < esperado)
+			repes++;
+		else
+			saltos++;
+		return;
+	}
+	memcpy(ultima, t, n); ultima_n = n; entregadas++;
+}
 
 static void comprueba(int c, const char *que)
 {
@@ -290,6 +321,59 @@ static void gestion(void)
 	corre(50);
 	comprueba(entregadas == 1, "y lo dirigido");
 
+	/* renovación de la clave por pares (un acuerdo de 4 pasos nuevo, ya
+	 * conectados): sin cortar, y con la nueva */
+	sim_renovar_pares = 1;
+	corre(200);
+	w80211_estado(&i);
+	comprueba(sim_renov_ptk == 1 && i.estado == W_CONECTADO && i.renov_ptk == 1 && i.reconexiones == 0,
+		  "el punto de acceso renueva la clave por pares: se hace (n.º 1) sin desconectar");
+	entregadas = 0;
+	manda_arp();
+	corre(50);
+	comprueba(entregadas == 1, "tras renovarla, lo dirigido sigue (con la clave nueva y los contadores a cero)");
+	entregadas = 0;
+	manda_dhcp();
+	corre(50);
+	comprueba(entregadas == 1, "y lo de todos");
+	/* una trama con la clave vieja justo detrás del paso 4 (ya iba de
+	 * camino): se acepta; una con la nueva, también; y otra con la vieja
+	 * después de esa, ya no (la vieja se suelta al llegar la nueva) */
+	nmarcas = 0;
+	memset(marcas, 0, sizeof marcas);
+	w80211_estado(&i);
+	k = i.rx_desc;
+	sim_vieja_tras_4 = 1;
+	sim_renovar_pares = 1;
+	corre(200);
+	w80211_estado(&i);
+	comprueba(sim_renov_ptk == 2 && i.renov_ptk == 2, "otra renovación de la clave por pares (n.º 2)");
+	comprueba(marcas[0] == 'A', "una trama con la clave VIEJA que llega justo tras el paso 4 se acepta");
+	comprueba(marcas[1] == 'B', "una con la nueva, también");
+	comprueba(nmarcas == 2 && i.rx_desc == (d32)k + 1, "y una con la vieja DESPUÉS de una con la nueva, no");
+	comprueba(sim_snonce_repetido == 0, "cada acuerdo, con un SNonce nuevo");
+	entregadas = 0;
+	manda_arp();
+	corre(50);
+	comprueba(entregadas == 1, "y la red sigue");
+	w80211_estado(&i);
+	comprueba(i.renov_gtk == 1, "la renovación de la clave de grupo se cuenta (n.º 1)");
+	/* el paso 4 de una renovación se pierde: el punto de acceso repite el 3
+	 * (cifrado aún con la vieja, que se ha guardado) y se le repite el 4
+	 * (también con la vieja), sin volver a poner la clave */
+	sim_pierde_4 = 1;
+	sim_renovar_pares = 1;
+	corre(300);
+	comprueba(sim_renov_ptk == 2, "el paso 4 perdido: el punto de acceso aún no tiene la clave nueva");
+	corre(1200);
+	w80211_estado(&i);
+	comprueba(sim_renov_ptk == 3 && i.renov_ptk == 3 && i.estado == W_CONECTADO && i.reconexiones == 0,
+		  "repite el 3 con la clave vieja, se le contesta con ella y la renovación acaba (n.º 3) sin cortar");
+	entregadas = 0;
+	manda_arp();
+	corre(50);
+	comprueba(entregadas == 1, "y la red sigue, con la clave nueva");
+
 	/* búsqueda estando conectado: vuelve a su canal y sigue */
 	w80211_barrer();
 	corre(13 * 130 + 100);
@@ -402,10 +486,12 @@ static void suplicante(void)
 {
 	static const o8 aa[6] = { 2, 0, 0, 0, 0, 1 }, spa[6] = { 2, 0, 0, 0, 0, 2 };
 	struct wpa w;
-	o8 pmk[32], e[300], r[300], g1[16], g2[16];
+	o8 pmk[32], e[300], r[300], g1[16], g2[16], g3[16];
 	int n, k;
 
+	memset(&w, 0, sizeof w);
 	memset(pmk, 7, 32);
+	memset(g3, 0x33, 16);
 	memset(g1, 0x11, 16);
 	memset(g2, 0x22, 16);
 	/* paso 1 y, luego, un «paso 3» con el MIC mal */
@@ -422,15 +508,86 @@ static void suplicante(void)
 	comprueba(n == 0 && w.fallos_mic == 1 && w.paso == 1 && !w.ptk_puesta,
 		  "un mensaje con el MIC mal se ignora (no corta ni culpa a la contraseña) y se cuenta");
 	/* con las claves puestas: la misma clave de grupo, otra vez */
+	memcpy(w.ptk, w.tptk, 48);
 	w.paso = 2; w.ptk_puesta = 1; w.hay_rep = 1; memset(w.repeticion, 0, 8); w.repeticion[7] = 2;
-	memcpy(w.gtk, g1, 16); w.gtk_id = 1; w.gtk_puesta = 1; aes_clave(&w.gk, g1);
-	memset(w.pn_rx_g, 0, 6); w.pn_rx_g[0] = 5;
+	memcpy(w.g[1].clave, g1, 16); w.gtk_id = 1; w.gtk_puesta = 1; w.g[1].puesta = 1; aes_clave(&w.g[1].a, g1);
+	memset(w.g[1].pn, 0, 6); w.g[1].pn[0] = 5;
 	n = eapol_firmado(&w, e, 0x1382, 3, g1, 1, 1, 0);
-	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.pn_rx_g[0] == 5,
+	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.g[1].pn[0] == 5,
 		  "la misma clave de grupo otra vez: no se vuelve a poner y su contador no vuelve a cero (KRACK)");
 	n = eapol_firmado(&w, e, 0x1382, 4, g2, 2, 1, 9);
-	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.gtk_id == 2 && memcmp(w.gtk, g2, 16) == 0 && w.pn_rx_g[0] == 9,
+	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.gtk_id == 2 && memcmp(w.g[2].clave, g2, 16) == 0 && w.g[2].pn[0] == 9,
 		  "una clave de grupo nueva sí, con el contador que dice el mensaje (Key RSC)");
+	comprueba(w.g[1].puesta && w.g[1].pn[0] == 5 && w.renov_gtk == 1,
+		  "con el KeyID 2 puesto, la del 1 se guarda (para las tramas que ya venían con ella)");
+	n = eapol_firmado(&w, e, 0x1382, 5, g3, 1, 1, 0);
+	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.gtk_id == 1 && memcmp(w.g[1].clave, g3, 16) == 0 && w.g[2].puesta,
+		  "la siguiente, otra vez con el 1: la sustituye y la del 2 queda como la de antes");
+	n = eapol_firmado(&w, e, 0x1382, 6, g2, 3, 1, 0);
+	comprueba(wpa_eapol(&w, e, n, r) > 0 && w.gtk_id == 3 && w.g[3].puesta && w.g[1].puesta && !w.g[2].puesta,
+		  "con un tercer KeyID, solo quedan la nueva y la de antes");
+	n = eapol_firmado(&w, e, 0x1382, 7, g1, 0, 1, 0);
+	comprueba(wpa_eapol(&w, e, n, r) == 0 && w.gtk_id == 3, "una clave de grupo con el KeyID 0 no se pone");
+}
+
+/* una descarga larga (25 MB, en trozos de 1.400 octetos numerados) con el
+ * punto de acceso renovando la clave por pares cada 2 s y la de grupo cada
+ * 3 s (las tramas que ya venían con la de antes, de las dos, tienen que
+ * valer) y una expulsión a mitad: se vuelve a conectar sola, enseguida, y se
+ * sigue desde donde se quedó (como DESCARGA con «Range»). Tiene que llegar
+ * entera, en orden, sin repetidos ni rotos */
+static void descarga_larga(void)
+{
+	extern int sim_renovar_pares_cada, sim_renovar_grupo_cada;
+	struct w_info i;
+	o8 pmk[32];
+	long total = (25L * 1024 * 1024 + 1399) / 1400, t0;
+	int echado = 0, conectado = 1, vuelto = 0;
+	unsigned long t_echa = 0, t_vuelta = 0;
+
+	sim_configura("Biblioteca", "clave de la prueba", 6);
+	w80211_inicia(sim_radio());
+	pmk_de("clave de la prueba", "Biblioteca", pmk);
+	w80211_conectar((const o8 *)"Biblioteca", 10, pmk);
+	comprueba(espera_estado(W_CONECTADO, 6000), "descarga larga: conecta");
+	sim_renov_ptk = sim_renov_gtk = sim_snonce_repetido = 0;
+	sim_renovar_pares_cada = 2000;
+	sim_renovar_grupo_cada = 3000;
+	esperado = saltos = repes = rotos = 0;
+	sim_chorro_sig = 0;
+	sim_chorro_fin = total;
+	t0 = reloj;
+	while (esperado < total && reloj - t0 < 300000) {
+		corre(10);
+		if (!echado && esperado >= total / 2) {
+			echado = 1;
+			sim_echar = 1;
+			t_echa = reloj;
+		}
+		w80211_estado(&i);
+		if (i.estado != W_CONECTADO)
+			conectado = 0;
+		else if (!conectado) {
+			conectado = 1;
+			vuelto = 1;
+			t_vuelta = reloj;
+			sim_chorro_sig = esperado;	/* sigue desde donde se quedó */
+		}
+	}
+	w80211_estado(&i);
+	if (charla)
+		printf("    descarga: %ld de %ld trozos en %lu ms; %d y %d renovaciones; saltos %ld, repetidos %ld, rotos %ld; vuelta en %lu ms\n",
+		       esperado, total, reloj - t0, sim_renov_ptk, sim_renov_gtk, saltos, repes, rotos, t_vuelta - t_echa);
+	comprueba(esperado == total && saltos == 0 && repes == 0 && rotos == 0,
+		  "descarga de 25 MB con las claves renovándose: llega entera, en orden y sin repetidos");
+	comprueba(sim_renov_ptk >= 10 && i.renov_ptk == (d32)sim_renov_ptk, "con 10 renovaciones o más de la clave por pares, todas hechas");
+	comprueba(sim_renov_gtk >= 5 && i.renov_gtk >= (d32)sim_renov_gtk, "y 5 o más de la de grupo (KeyID 1 y 2 alternando)");
+	comprueba(sim_snonce_repetido == 0, "cada acuerdo, con un SNonce nuevo");
+	comprueba(vuelto && i.reconexiones == 1 && t_vuelta - t_echa < 1500,
+		  "la expulsión a mitad: se vuelve a conectar sola en menos de 1,5 s (sin buscar) y la descarga sigue");
+	sim_renovar_pares_cada = sim_renovar_grupo_cada = 0;
+	sim_chorro_sig = sim_chorro_fin = 0;
+	w80211_desconectar();
 }
 
 /* (seguridad) una red ABIERTA con el mismo nombre que la WPA2 (una falsa):
@@ -459,6 +616,7 @@ int main(int argc, char **argv)
 	gestion();
 	suplicante();
 	gemela();
+	descarga_larga();
 	printf("Wi-Fi (anfitrión): %d comprobaciones, %d fallos\n", hechas, fallos);
 	return fallos != 0;
 }

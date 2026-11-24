@@ -30,7 +30,7 @@ int brcm_busca(void);
 int brcm_monta(struct radio **r);
 int brcm_enciende(void);
 void brcm_cuentas(d32 *bien, d32 *mal, int *vel);
-extern int sim_renovar_grupo;
+extern int sim_renovar_grupo, sim_renovar_pares, sim_renov_ptk, sim_renov_gtk;
 
 /* ------------------------------------------------ lo mínimo de Linux */
 static long llamada(long n, long a, long b, long c)
@@ -246,6 +246,26 @@ static void prueba(void)
 	manda_arp();
 	corre(60);
 	comprueba(entregadas == 1, "tras renovar la clave de grupo, sigue");
+	/* la clave por pares renovada (un acuerdo de 4 pasos nuevo, por el
+	 * controlador de verdad); y ecos de 1400 con las dos renovándose cada poco */
+	sim_renov_ptk = sim_renov_gtk = 0;
+	sim_renovar_pares = 1;
+	corre(200);
+	entregadas = 0;
+	manda_arp();
+	corre(60);
+	comprueba(entregadas == 1 && sim_renov_ptk == 1, "tras renovar la clave por pares, sigue");
+	sim_renovar_pares_cada = 400;
+	sim_renovar_grupo_cada = 700;
+	entregadas = 0;
+	for (k = 0; k < 300; k++) {
+		manda_eco(1400);
+		corre(10);
+	}
+	corre(60);
+	sim_renovar_pares_cada = sim_renovar_grupo_cada = 0;
+	comprueba(entregadas == 300 && sim_renov_ptk >= 5 && sim_renov_gtk >= 3,
+		  "300 ecos de 1400 con las claves renovándose cada poco: no se pierde ninguno");
 	corre(3000);
 	comprueba(hl_skb_vivos() < 80, "no se quedan paquetes sin soltar");
 	comprueba(hl_monton_repasa() == 0, "el montón está entero (nadie escribe fuera de lo suyo)");

@@ -17,6 +17,7 @@
 #define T_PERDIDA 8000		/* sin oír al punto de acceso: se ha ido */
 #define T_REINTENTO 5000	/* entre intentos de reconexión */
 #define T_VIVO 20000		/* trama vacía si no se envía nada */
+#define T_VUELTA 300		/* tras una expulsión estando conectados: otra vez enseguida */
 #define INTENTOS 4
 
 static struct {
@@ -44,6 +45,7 @@ static struct {
 	int hay_seq;
 	struct wpa wpa;
 	int busca_y_conecta;
+	int deprisa;		/* reconectar al mismo punto de acceso sin buscar antes */
 	d32 tx, rx, tx_err, rx_desc, reconexiones;
 	int senal;
 } w;
@@ -344,7 +346,14 @@ static void suelta(void)
 {
 	if (w.estado >= W_AUTENTICANDO)
 		w.r->bss(NULL, 0, 0, 0, NULL, 0);
-	memset(&w.wpa, 0, sizeof(w.wpa));
+	{
+		/* las claves, fuera; las cuentas de renovaciones, no (son de toda
+		 * la sesión: así WIFI.LOG las numera seguidas tras reconectar) */
+		d32 rp = w.wpa.renov_ptk, rg = w.wpa.renov_gtk;
+		memset(&w.wpa, 0, sizeof(w.wpa));
+		w.wpa.renov_ptk = rp;
+		w.wpa.renov_gtk = rg;
+	}
 	w.hay_seq = 0;
 }
 
@@ -456,6 +465,7 @@ void w80211_conectar(const o8 *ssid, int n, const o8 *pmk)
 	if (pmk)
 		memcpy(w.pmk, pmk, 32);
 	w.quiere = 1;
+	w.deprisa = 0;
 	w.fallo = W_F_NADA;
 	w.t_reintento = hl_jiffies();
 	hl_log(2, "802.11: se pide conectar con «%s»%s\n", w.ssid, pmk ? " (WPA2)" : " (abierta)");
@@ -471,6 +481,7 @@ void w80211_desconectar(void)
 	}
 	suelta();
 	w.quiere = 0;
+	w.deprisa = 0;
 	estado(W_PARADO);
 }
 
@@ -478,6 +489,7 @@ static void conectado(void)
 {
 	estado(W_CONECTADO);
 	w.fallo = W_F_NADA;
+	w.deprisa = 0;
 	w.t_oido = w.t_enviado = hl_jiffies();
 	hl_log(2, "802.11: CONECTADO a «%s»\n", w.ap.ssid);
 }
@@ -535,10 +547,20 @@ static void gestion(const o8 *t, int n, int senal)
 		int motivo = t[24] | (t[25] << 8);
 		hl_log(1, "802.11: el punto de acceso nos echa (%s, motivo %d)\n",
 		       sub == 0xc0 ? "desautenticación" : "desasociación", motivo);
-		if (w.estado == W_CLAVES && (motivo == 15 || motivo == 2 || motivo == 14))
+		if (w.estado == W_CLAVES && (motivo == 15 || motivo == 2 || motivo == 14) && !w.deprisa) {
 			falla(W_F_CLAVE, "la contraseña no es la de esta red");
-		else
+		} else {
+			int estaba = w.estado == W_CONECTADO;
 			falla(W_F_EXPULSADO, "conexión cortada por el punto de acceso");
+			if (estaba) {
+				/* ya íbamos (la contraseña es buena): otra vez enseguida, al
+				 * mismo punto de acceso y sin buscar (unos 2 s menos), para que
+				 * lo que se esté bajando siga; si no sale, como siempre */
+				w.deprisa = 1;
+				w.t_reintento = hl_jiffies() + T_VUELTA;
+				hl_log(2, "802.11: se vuelve a conectar enseguida\n");
+			}
+		}
 		w.reconexiones++;
 	}
 }
@@ -560,10 +582,13 @@ static int manda_datos(const o8 *destino, const o8 *origen, p16 tipo, const o8 *
 	t[l++] = tipo >> 8; t[l++] = tipo;
 	memcpy(t + l, carga, n); l += n;
 	if (cifrar) {
+		/* 1: con la clave por pares puesta; 2: con la de antes de renovarla
+		 * (el paso 4: el punto de acceso no pone la nueva hasta recibirlo) */
+		o8 *pn = cifrar == 2 && w.wpa.hay_vieja ? w.wpa.pn_tx_vieja : w.wpa.pn_tx;
 		int i;
-		for (i = 0; i < 6 && ++w.wpa.pn_tx[i] == 0; i++)
+		for (i = 0; i < 6 && ++pn[i] == 0; i++)
 			;
-		l = ccmp_cifra(&w.wpa.tk, t, l, 24, w.wpa.pn_tx, 0);
+		l = ccmp_cifra(cifrar == 2 && w.wpa.hay_vieja ? &w.wpa.tk_vieja : &w.wpa.tk, t, l, 24, pn, 0);
 	}
 	w.t_enviado = hl_jiffies();
 	if (w.r->enviar(t, l, tipo == 0x888e ? vel_baja(&w.ap) : 0) < 0) {
@@ -587,6 +612,41 @@ void w80211_tx_hecho(int acuse)
 {
 	if (!acuse)
 		w.tx_err++;
+}
+
+/* (INTEL) las claves nuevas, a la tarjeta que cifra ella (después de mandar
+ * la respuesta: el 4 tiene que salir aún con la de antes) */
+static void claves_a_la_radio(void)
+{
+	struct wpa *k = &w.wpa;
+
+	if (k->nueva_ptk) {
+		k->nueva_ptk = 0;
+		if (w.r->clave)
+			w.r->clave(1, 0, k->ranura, k->ptk + 32, NULL);
+	}
+	if (k->quita_gtk) {
+		if (w.r->clave)
+			w.r->clave(0, k->quita_gtk, 0, NULL, NULL);
+		k->quita_gtk = 0;
+	}
+	if (k->nueva_gtk) {
+		if (w.r->clave)
+			w.r->clave(0, k->nueva_gtk, 0, k->g[k->nueva_gtk].clave, k->g[k->nueva_gtk].pn);
+		k->nueva_gtk = 0;
+	}
+}
+
+/* la clave por pares de antes de renovarla ya no hace falta */
+static void suelta_vieja(const char *por)
+{
+	if (!w.wpa.hay_vieja)
+		return;
+	memset(&w.wpa.tk_vieja, 0, sizeof w.wpa.tk_vieja);
+	w.wpa.hay_vieja = 0;
+	hl_log(3, "WPA2: la clave por pares de antes se suelta (%s)\n", por);
+	if (w.r->clave)
+		w.r->clave(1, 0, w.wpa.ranura ^ 1, NULL, NULL);
 }
 
 static void datos(o8 *t, int n)
@@ -623,15 +683,34 @@ static void datos(o8 *t, int n)
 		}
 		id = t[cab + 3] >> 6;
 		if (grupo) {
-			if (!w.wpa.gtk_puesta || id != w.wpa.gtk_id) {
+			/* la de grupo de ese KeyID: la de ahora o la de antes */
+			if (!w.wpa.g[id].puesta) {
 				w.rx_desc++;
 				return;
 			}
-			k = &w.wpa.gk; ult = w.wpa.pn_rx_g;
+			k = &w.wpa.g[id].a; ult = w.wpa.g[id].pn;
 		} else {
 			k = &w.wpa.tk; ult = w.wpa.pn_rx;
 		}
-		n = ccmp_descifra(k, t, n, cab, pn);
+		if (!grupo && w.wpa.hay_vieja) {
+			/* recién renovada la clave por pares: puede venir aún con la
+			 * de antes (las que ya estaban en camino, o el paso 3 repetido
+			 * si no le llegó nuestro 4); las dos llevan el KeyID 0, así que
+			 * se prueba la nueva y, si no cuadra, la vieja (con su contador) */
+			static o8 copia[2400];
+			int m = n;
+			memcpy(copia, t, n);
+			n = ccmp_descifra(k, t, m, cab, pn);
+			if (n >= 0) {
+				suelta_vieja("ya llegan tramas con la nueva");
+			} else {
+				memcpy(t, copia, m);
+				k = &w.wpa.tk_vieja; ult = w.wpa.pn_rx_vieja;
+				n = ccmp_descifra(k, t, m, cab, pn);
+			}
+		} else {
+			n = ccmp_descifra(k, t, n, cab, pn);
+		}
 		if (n < 0) {
 			w.rx_desc++;
 			hl_log(3, "802.11: trama con el MIC mal\n");
@@ -690,11 +769,14 @@ static void datos(o8 *t, int n)
 			falla(W_F_ACUERDO, "el acuerdo de claves con el punto de acceso no sale bien");
 			return;
 		}
-		/* las respuestas del acuerdo de 4 pasos van en claro (el punto
-		 * de acceso aún no ha puesto la clave); la de grupo, cifrada */
-		cifrar = w.wpa.ptk_puesta && !(nr > 6 && (r[6] & 0x08));
+		/* las respuestas del primer acuerdo de 4 pasos van en claro (el
+		 * punto de acceso aún no ha puesto la clave); las de la renovación,
+		 * cifradas (el 4, con la clave de antes); la de grupo, cifrada.
+		 * Lo dice wpa_eapol */
+		cifrar = w.wpa.resp_cifra;
 		if (nr > 0)
 			manda_datos(w.ap.bssid, w.r->mac, 0x888e, r, nr, cifrar);
+		claves_a_la_radio();
 		if (w.estado == W_CLAVES && w.wpa.paso == 2)
 			conectado();
 		return;
@@ -747,6 +829,12 @@ void w80211_tic(void)
 	case W_PARADO:
 		if (w.quiere && (int)(ya - w.t_reintento) >= 0) {
 			estado(W_BUSCANDO);
+			if (w.deprisa == 1) {
+				w.deprisa = 2;		/* una vez; si falla, buscando */
+				empieza_conexion();
+				break;
+			}
+			w.deprisa = 0;
 			w.busca_y_conecta = 1;
 			w80211_barrer();
 		}
@@ -778,6 +866,8 @@ void w80211_tic(void)
 			      "el punto de acceso no empieza el acuerdo de claves");
 		break;
 	case W_CONECTADO:
+		if (w.wpa.hay_vieja && (int)(ya - w.wpa.t_vieja) > W_T_VIEJA)
+			suelta_vieja("ha pasado el tiempo");
 		if ((int)(ya - w.t_oido) > T_PERDIDA) {
 			w.reconexiones++;
 			falla(W_F_PERDIDA, "se ha perdido la red (no se oye al punto de acceso)");
@@ -799,6 +889,8 @@ void w80211_estado(struct w_info *i)
 	memcpy(i->mac, w.r->mac, 6);
 	i->tx = w.tx; i->rx = w.rx; i->tx_err = w.tx_err; i->rx_desc = w.rx_desc;
 	i->reconexiones = w.reconexiones;
+	i->renov_ptk = w.wpa.renov_ptk;
+	i->renov_gtk = w.wpa.renov_gtk;
 	if (w.quiere) {
 		memcpy(i->ssid, w.ssid, 33);
 		i->ssid_n = w.ssid_n;

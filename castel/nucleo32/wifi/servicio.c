@@ -667,6 +667,7 @@ static void conecta_sola(void)
 static void sigue_conexion(void)
 {
 	static int visto = -1, fallo_visto = -1;
+	static u32 renov_visto;
 	struct w_info i;
 
 	if (calculando) {
@@ -681,6 +682,12 @@ static void sigue_conexion(void)
 	if (!listo)
 		return;
 	w80211_estado(&i);
+	if (i.renov_ptk + i.renov_gtk != renov_visto) {
+		/* una renovación de las claves: su línea, a WIFI.LOG ya (si luego
+		 * se corta, que se vea hasta dónde llegó) */
+		renov_visto = i.renov_ptk + i.renov_gtk;
+		vuelca_registro();
+	}
 	if (i.estado == visto && i.fallo == fallo_visto)
 		return;
 	visto = i.estado;
@@ -1325,6 +1332,12 @@ static int arranca(void)
 	if (simulada) {
 		hl_log(2, "RADIO SIMULADA: red «%s», canal 6 (para probar sin la tarjeta)\n", "HispaPrueba");
 		sim_configura("HispaPrueba", "clave de prueba", 6);
+		/* el punto de acceso de mentira renueva las claves cada pocos
+		 * segundos (los de verdad, cada hora o cada día): así todas las
+		 * pruebas con él pasan por las renovaciones */
+		sim_renovar_pares_cada = 6000;
+		sim_renovar_grupo_cada = 9000;
+		hl_log(2, "RADIO SIMULADA: renueva la clave por pares cada 6 s y la de grupo cada 9 s\n");
 		la_radio = sim_radio();
 		strcpy(nombre_tarjeta, "Wi-Fi simulada (pruebas)");
 		w80211_inicia(la_radio);
@@ -1334,6 +1347,8 @@ static int arranca(void)
 #ifdef CHIP_SIMULADO
 	hl_log(2, "NÚCLEO DE PRUEBAS: tarjeta BCM43224 simulada, red «HispaPrueba» en el canal 6\n");
 	sim_configura("HispaPrueba", "clave de prueba", 6);
+	sim_renovar_pares_cada = 6000;	/* (como la radio simulada) */
+	sim_renovar_grupo_cada = 9000;
 	ap_sim = sim_radio();
 	tarjeta_sim_monta(ap_sim);
 #endif

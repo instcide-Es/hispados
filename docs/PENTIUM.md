@@ -4854,9 +4854,8 @@ Last-Modified) y la próxima vez que se pide la misma dirección sigue desde
 ahí (Range con If-Range); 5 intentos, con «Reintentando (2 de 5)» en la barra;
 los 30 s sin datos, por el reloj. PAQUETES dice en corto por qué no hay lista
 de paquetes (la red, la firma, otro servidor) y **Escudo 0.2.2** lo intenta
-otra vez a los 10 s y lo dice en una línea que cabe. WPA dice una vez si el
-punto de acceso pide renovar la clave por pares (aún no se hace: es lo
-primero que mirar si se corta el Wi-Fi en una descarga larga). Paquetes: red
+otra vez a los 10 s y lo dice en una línea que cabe. WPA renueva la clave por pares y
+la de grupo (rama `wpa-renueva`: «Las claves se renuevan», en el Wi-Fi). Paquetes: red
 0.8.10 lleva el DESCARGA nuevo; paquetes 1.7, el mensaje; escudo **0.2.2**.
 
 **Las pruebas de la 0.8.10** (24/11). En el PC de Albinyana (sin KVM: WSL sin
@@ -6379,6 +6378,37 @@ hacían el residente (`drivers/hspwifi.asm`) y `wifi/nucleo/nucleo.c`:
   otra vez no se vuelve a poner** ni vuelve su contador a cero (la variante
   de «KRACK» contra la clave de grupo); la nueva se pone con el contador que
   trae el mensaje (Key RSC).
+- **Las claves se renuevan** (24/11, rama `wpa-renueva`; las descargas largas
+  del HP Mini se cortaban a mitad: el punto de acceso pedía renovar la clave
+  por pares, no se le contestaba y a los pocos segundos nos echaba). En
+  `wpa.c`: un **paso 1 con las claves ya puestas** es una renovación: SNonce
+  nuevo (el mismo solo si el punto de acceso repite el mismo paso 1), la PTK
+  nueva aparte (la «TPTK») y lo de ahora sigue valiendo; el 2 va cifrado con
+  la clave de ahora; el paso 3 se comprueba con la TPTK y, al ponerla, la de
+  antes **se guarda** con sus contadores: el paso 4 sale cifrado con ella (el
+  punto de acceso no pone la nueva hasta recibirlo) y las tramas que ya venían
+  con ella se siguen aceptando (se prueba la nueva y, si no cuadra, la vieja:
+  las dos llevan el KeyID 0) hasta que llega una con la nueva o pasan 10 s
+  (`W_T_VIEJA`); la nueva empieza con los **números de paquete a cero** (los
+  de envío y la ventana de repetidas), como manda 802.11i. Si se pierde
+  nuestro 4, el punto de acceso repite el 3 (aún con la vieja) y se le
+  repite el 4 sin volver a poner nada (KRACK). **La de grupo**, por KeyID: se
+  guardan la de ahora y la de antes (el punto de acceso pasa del 1 al 2 y
+  sigue con la de antes hasta que contestamos), con su contador cada una; un
+  tercer KeyID quita la más vieja; el KeyID 0 no vale. En `w80211.c`: si el
+  punto de acceso **nos echa estando conectados**, se vuelve a conectar a los
+  0,3 s al mismo punto de acceso sin buscar antes (unos 2 s menos; si no sale,
+  como siempre), para que `DESCARGA` siga con su «Range». En `WIFI.LOG`, una
+  línea por renovación, sin claves ni nonces («WPA2: clave por pares renovada
+  (n.º 3)», «WPA2: clave de grupo renovada (n.º 2, KeyID 1)»), escrita en el
+  momento; las cuentas siguen tras reconectar. Las tarjetas que cifran ellas
+  (la Intel 7265: `ADD_STA_KEY`) reciben las claves por `radio->clave`, después
+  de mandar el 4: la de pares alternando las posiciones 0 y 1 del firmware
+  (la vieja se quita después, como mac80211), las de grupo en la 2 + KeyID;
+  la Broadcom y la Atheros no lo necesitan (CCMP va por programa). La radio
+  simulada (`WifiSimulada=SI`, `CHIP` y `GEMELA`) renueva la de pares cada
+  6 s y la de grupo cada 9 s, así que todas las pruebas con ella pasan por
+  ahí.
 - Le dice al núcleo con la **96** cómo está (sin tarjeta, sin conectar,
   conectando, conectada), **las barras** (de 1 a 4: -55, -67 y -75 dBm, las de
   `WIFI REDES` de Hispa-486) y su tarjeta PCI: si el servicio se acaba (o lo
@@ -6449,7 +6479,11 @@ MEMORIA=64 DISCO=/tmp/d.img ARRANQUE=ordenes castel/nucleo32/probar.sh "" "redwi
 gestión de Hispa-486 (`build/prueba_wifi`: SHA-1, HMAC, PBKDF2, la PMK, PRF,
 AES, el envoltorio de claves y CCMP con el vector de IEEE 802.11; y lo de la
 revisión de seguridad: el MIC falso ignorado, la clave de grupo repetida sin
-reinstalar, la WPA2 elegida con una abierta falsa al lado) y brcmsmac contra
+reinstalar, la WPA2 elegida con una abierta falsa al lado; y las renovaciones:
+la de pares con una trama con la vieja justo tras el paso 4, que se acepta, y
+otra después de una con la nueva, que no; el paso 4 perdido; los KeyID de la
+de grupo; y una descarga de 25 MB con la de pares renovándose cada 2 s, la de
+grupo cada 3 s y una expulsión a mitad, que llega entera y en orden) y brcmsmac contra
 el modelo (`build/chip_sim`); con la radio de mentira y sin cable: buscar, la
 contraseña preguntada con asteriscos (y en ningún sitio escrita), la
 equivocada, conectar, DHCP, IPCONFIG y PING por `RED.BIN`, `WIFI.INI` sin la

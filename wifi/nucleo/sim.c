@@ -2,8 +2,12 @@
  * sim.c - Una radio de mentira con su punto de acceso, para probar sin la
  * tarjeta (HSPWIFI /SIMULA en QEMU y las pruebas del anfitrión): contesta a
  * los sondeos, autentica, asocia, hace de autenticador de WPA2 (acuerdo de 4
- * pasos y clave de grupo), cifra y descifra con CCMP y, detrás, hay una red
- * mínima: un servidor DHCP, ARP y eco de ICMP en 192.168.77.1.
+ * pasos y clave de grupo, y sus renovaciones: la de pares con un acuerdo de 4
+ * pasos nuevo cifrado con la de antes, la de grupo con el KeyID alternando 1
+ * y 2 y usándola solo cuando la estación contesta, como hostapd), cifra y
+ * descifra con CCMP y, detrás, hay una red mínima: un servidor DHCP, ARP y
+ * eco de ICMP en 192.168.77.1; y, para las pruebas, un «chorro» de datos
+ * numerados (una descarga larga) que se puede seguir desde donde se quedó.
  *
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
  */
@@ -11,6 +15,7 @@
 
 #define COLA 12
 #define TRAMA 1700
+#define SIM_TROZO 1400
 
 static struct {
 	char ssid[33];
@@ -30,6 +35,15 @@ static struct {
 	struct aes tk, gk;
 	o8 pn_tx[6], pn_g[6], pn_rx[6];
 	d32 t_baliza, t_renueva;
+	/* la renovación de la de pares: 1 mandado el 1; 3 mandado el 3 */
+	int rk, rk_intentos;
+	o8 tptk[48];
+	d32 t_ptk, t_rk;
+	o8 snonce[32];
+	/* la de grupo nueva, mandada y aún sin usar (hasta el 2 de grupo) */
+	o8 gtk_nueva[16];
+	int id_nueva, grupo_pend, grupo_intentos;
+	d32 t_gtk, t_grupo;
 	p16 seq;
 	/* cola hacia la estación */
 	o8 cola[COLA][TRAMA];
@@ -43,6 +57,13 @@ int sim_fallos;
  * lo desvía al anillo de recepción de la tarjeta de mentira) */
 void (*sim_entrega)(const o8 *trama, int n, int senal, int canal) = w80211_rx;
 int sim_renovar_grupo;		/* las pruebas lo ponen a 1 */
+int sim_renovar_pares;		/* las pruebas: renovar la clave por pares ya */
+int sim_renovar_pares_cada, sim_renovar_grupo_cada;	/* ms; 0 nunca */
+int sim_vieja_tras_4;		/* las pruebas: al renovar, una trama con la clave vieja tras el paso 4 */
+int sim_pierde_4;		/* las pruebas: el próximo paso 4 de una renovación «se pierde» */
+int sim_snonce_repetido;	/* las pruebas: SNonces iguales en acuerdos distintos */
+int sim_renov_ptk, sim_renov_gtk;	/* las pruebas: renovaciones acabadas */
+long sim_chorro_sig, sim_chorro_fin;	/* las pruebas: el chorro (trozos de SIM_TROZO) */
 int sim_echar;			/* las pruebas: mandar una desautenticación */
 int sim_silencio;		/* las pruebas: el punto de acceso desaparece */
 int sim_gemela;			/* las pruebas: otra red, ABIERTA, con el mismo nombre (una falsa), en el canal 1 */
@@ -55,6 +76,7 @@ static const o8 gemela_mac[6] = { 0x02, 0x48, 0x53, 0xaa, 0x00, 0x04 };
 static const o8 ip_ap[4] = { 192, 168, 77, 1 };
 static const o8 todos[6] = { 255, 255, 255, 255, 255, 255 };
 static struct radio sim;
+static void chorro(void);
 
 static void encola(const o8 *t, int n)
 {
@@ -143,7 +165,7 @@ static void ap_datos(const o8 *destino, const o8 *origen, p16 tipo, const o8 *ca
 	encola(t, l);
 }
 
-static int eapol(o8 *e, int info, const o8 *nonce, const o8 *datos, int nd, int mic)
+static int eapol_k(const o8 *kck, o8 *e, int info, const o8 *nonce, const o8 *datos, int nd, int mic)
 {
 	int n = 99 + nd, i;
 	o8 m[20];
@@ -161,15 +183,19 @@ static int eapol(o8 *e, int info, const o8 *nonce, const o8 *datos, int nd, int 
 	if (nd)
 		memcpy(e + 99, datos, nd);
 	if (mic) {
-		hmac_sha1(s.ptk, 16, e, n, m);
+		hmac_sha1(kck, 16, e, n, m);
 		memcpy(e + 81, m, 16);
 	}
 	return n;
 }
 
-static void manda_paso1(void)
+static int eapol(o8 *e, int info, const o8 *nonce, const o8 *datos, int nd, int mic)
 {
-	o8 e[120];
+	return eapol_k(s.ptk, e, info, nonce, datos, nd, mic);
+}
+
+static void nuevo_anonce(void)
+{
 	int i;
 	d32 r;
 
@@ -177,12 +203,34 @@ static void manda_paso1(void)
 		r = hl_azar() ^ (hl_jiffies() * 2654435761u);
 		memcpy(s.anonce + i, &r, 4);
 	}
+}
+
+static void manda_paso1(void)
+{
+	o8 e[120];
+
+	nuevo_anonce();
 	s.paso = 1;
 	ap_datos(s.sta, ap_mac, 0x888e, e, eapol(e, 0x008a, s.anonce, NULL, 0, 0), 0);
 }
 
+/* renovar la clave por pares: un paso 1 nuevo, cifrado con la de ahora (que
+ * sigue valiendo hasta el paso 4) */
+static void renueva_pares(int otra_vez)
+{
+	o8 e[120];
+
+	if (!otra_vez) {
+		nuevo_anonce();
+		s.rk_intentos = 0;
+	}
+	s.rk = 1;
+	s.t_rk = hl_jiffies();
+	ap_datos(s.sta, ap_mac, 0x888e, e, eapol(e, 0x008a, s.anonce, NULL, 0, 0), 1);
+}
+
 /* la clave de grupo en su KDE, envuelta con la KEK */
-static int kde_grupo(o8 *sal, int con_rsn)
+static int kde_grupo_k(o8 *sal, int con_rsn, const o8 *kek, const o8 *gtk, int id)
 {
 	static const o8 rsn[] = { 48, 20, 1, 0, 0x00, 0x0f, 0xac, 4, 1, 0, 0x00, 0x0f, 0xac, 4,
 				  1, 0, 0x00, 0x0f, 0xac, 2, 0, 0 };
@@ -194,15 +242,20 @@ static int kde_grupo(o8 *sal, int con_rsn)
 		n = sizeof(rsn);
 	}
 	d[n++] = 0xdd; d[n++] = 22; d[n++] = 0x00; d[n++] = 0x0f; d[n++] = 0xac; d[n++] = 1;
-	d[n++] = s.gtk_id; d[n++] = 0;
-	memcpy(d + n, s.gtk, 16); n += 16;
+	d[n++] = id; d[n++] = 0;
+	memcpy(d + n, gtk, 16); n += 16;
 	if (n & 7) {
 		d[n++] = 0xdd;
 		while (n & 7)
 			d[n++] = 0;
 	}
-	aes_envuelve(s.ptk + 16, d, n, sal);
+	aes_envuelve(kek, d, n, sal);
 	return n + 8;
+}
+
+static int kde_grupo(o8 *sal, int con_rsn)
+{
+	return kde_grupo_k(sal, con_rsn, s.ptk + 16, s.gtk, s.gtk_id);
 }
 
 static void nueva_gtk(void)
@@ -219,6 +272,40 @@ static void nueva_gtk(void)
 	memset(s.pn_g, 0, 6);
 }
 
+/* renovar la de grupo: se manda la nueva (con el otro KeyID), y se sigue
+ * cifrando con la de antes hasta que la estación contesta (como hostapd) */
+static void renueva_grupo(int otra_vez)
+{
+	o8 k[80], r[200];
+	int i, nd;
+	d32 x;
+
+	if (!otra_vez) {
+		for (i = 0; i < 16; i += 4) {
+			x = hl_azar() ^ 0x5a5a1234;
+			memcpy(s.gtk_nueva + i, &x, 4);
+		}
+		s.id_nueva = s.gtk_id == 1 ? 2 : 1;
+		s.grupo_intentos = 0;
+	}
+	s.grupo_pend = 1;
+	s.t_grupo = hl_jiffies();
+	nd = kde_grupo_k(k, 0, s.ptk + 16, s.gtk_nueva, s.id_nueva);
+	ap_datos(s.sta, ap_mac, 0x888e, r, eapol(r, 0x1382, NULL, k, nd, 1), 1);
+	chorro();		/* detrás, más con la de grupo de antes */
+}
+
+static void grupo_puesta(void)
+{
+	memcpy(s.gtk, s.gtk_nueva, 16);
+	s.gtk_id = s.id_nueva;
+	aes_clave(&s.gk, s.gtk);
+	memset(s.pn_g, 0, 6);
+	s.grupo_pend = 0;
+	s.t_gtk = hl_jiffies();
+	sim_renov_gtk++;
+}
+
 static void echar(int motivo)
 {
 	o8 t[30];
@@ -228,6 +315,42 @@ static void echar(int motivo)
 	encola(t, l);
 	s.autenticada = s.asociada = 0;
 	s.paso = 0;
+	s.rk = 0;
+	s.grupo_pend = 0;
+}
+
+/* una trama de prueba (tipo 0x88b5) cifrada con la clave y el contador dados */
+static void manda_marca(const struct aes *k, o8 *pn, o8 marca)
+{
+	static o8 t[80];
+	static const o8 snap[8] = { 0xaa, 0xaa, 3, 0, 0, 0, 0x88, 0xb5 };
+	int l = 24, i;
+
+	memset(t, 0, 24);
+	t[0] = 0x08; t[1] = 0x02;
+	memcpy(t + 4, s.sta, 6);
+	memcpy(t + 10, ap_mac, 6);
+	memcpy(t + 16, ap_mac, 6);
+	s.seq++;
+	t[22] = s.seq << 4; t[23] = s.seq >> 4;
+	memcpy(t + l, snap, 8); l += 8;
+	memset(t + l, marca, 16); l += 16;
+	for (i = 0; i < 6 && ++pn[i] == 0; i++)
+		;
+	l = ccmp_cifra(k, t, l, 24, pn, 0);
+	encola(t, l);
+}
+
+/* renovación, paso 3: firmado con la PTK nueva y cifrado con la de antes */
+static void manda_paso3_renov(void)
+{
+	o8 k[80], r[200];
+	int nd = kde_grupo_k(k, 1, s.tptk + 16, s.gtk, s.gtk_id);
+
+	s.rk = 3;
+	s.t_rk = hl_jiffies();
+	ap_datos(s.sta, ap_mac, 0x888e, r, eapol_k(s.tptk, r, 0x13ca, s.anonce, k, nd, 1), 1);
+	chorro();		/* detrás, más datos con la de antes: llegarán tras el paso 4 */
 }
 
 static void ap_eapol(const o8 *e, int n)
@@ -239,9 +362,61 @@ static void ap_eapol(const o8 *e, int n)
 		return;
 	info = (e[5] << 8) | e[6];
 	nd = (e[97] << 8) | e[98];
-	if (s.paso == 1 && (info & 0x0108) == 0x0108) {
+	if (s.rk == 1 && (info & 0x0308) == 0x0108) {
+		/* renovación, paso 2 (cifrado con la de ahora): la PTK nueva */
+		wpa_ptk(s.pmk, ap_mac, s.sta, s.anonce, e + 17, s.tptk);
+		memcpy(copia, e, n);
+		memset(copia + 81, 0, 16);
+		hmac_sha1(s.tptk, 16, copia, 99 + nd, mic);
+		if (memcmp(mic, e + 81, 16) != 0)
+			return;
+		if (memcmp(s.snonce, e + 17, 32) == 0)
+			sim_snonce_repetido++;
+		memcpy(s.snonce, e + 17, 32);
+		s.rk_intentos = 0;
+		manda_paso3_renov();
+	} else if (s.rk == 3 && (info & 0x0308) == 0x0308) {
+		/* renovación, paso 4 (cifrado aún con la de antes): la nueva vale */
+		struct aes vieja = s.tk;
+		o8 pn_vieja[6];
+		memcpy(copia, e, n);
+		memset(copia + 81, 0, 16);
+		hmac_sha1(s.tptk, 16, copia, 99 + nd, mic);
+		if (memcmp(mic, e + 81, 16) != 0)
+			return;
+		if (sim_pierde_4) {
+			sim_pierde_4 = 0;	/* no ha llegado: en 1 s se repite el 3 */
+			return;
+		}
+		if (sim_vieja_tras_4)
+			manda_marca(&s.tk, s.pn_tx, 'A');	/* ya iba de camino */
+		memcpy(pn_vieja, s.pn_tx, 6);
+		memcpy(s.ptk, s.tptk, 48);
+		aes_clave(&s.tk, s.ptk + 32);
+		memset(s.pn_tx, 0, 6);
+		memset(s.pn_rx, 0, 6);
+		s.rk = 0;
+		s.t_ptk = hl_jiffies();
+		sim_renov_ptk++;
+		if (sim_vieja_tras_4) {
+			sim_vieja_tras_4 = 0;
+			manda_marca(&s.tk, s.pn_tx, 'B');	/* con la nueva */
+			manda_marca(&vieja, pn_vieja, 'C');	/* con la vieja, ya tarde: no vale */
+		}
+	} else if (s.grupo_pend && (info & 0x0308) == 0x0300) {
+		/* el 2 de grupo: desde ahora, la de grupo nueva */
+		memcpy(copia, e, n);
+		memset(copia + 81, 0, 16);
+		hmac_sha1(s.ptk, 16, copia, 99 + nd, mic);
+		if (memcmp(mic, e + 81, 16) != 0)
+			return;
+		grupo_puesta();
+	} else if (s.paso == 1 && (info & 0x0108) == 0x0108) {
 		/* paso 2: sacar la PTK y comprobar el MIC */
 		wpa_ptk(s.pmk, ap_mac, s.sta, s.anonce, e + 17, s.ptk);
+		if (memcmp(s.snonce, e + 17, 32) == 0)
+			sim_snonce_repetido++;
+		memcpy(s.snonce, e + 17, 32);
 		memcpy(copia, e, n);
 		memset(copia + 81, 0, 16);
 		hmac_sha1(s.ptk, 16, copia, 99 + nd, mic);
@@ -264,6 +439,9 @@ static void ap_eapol(const o8 *e, int n)
 		memset(s.pn_tx, 0, 6);
 		memset(s.pn_rx, 0, 6);
 		s.paso = 4;
+		s.rk = 0;
+		s.grupo_pend = 0;
+		s.t_ptk = s.t_gtk = hl_jiffies();
 	}
 }
 
@@ -445,6 +623,26 @@ static int sim_canal(int c)
 	return 0;
 }
 
+/* el chorro de las pruebas: trozos numerados (tipo 0x88b6: el número en 4
+ * octetos y SIM_TROZO - 4 octetos que salen de él), uno de cada 16 a todos
+ * (con la clave de grupo); los que quepan en la cola, hasta 6 cada vez */
+static void chorro(void)
+{
+	static o8 d[SIM_TROZO];
+	int k, i;
+
+	for (k = 0; k < 6 && sim_chorro_sig < sim_chorro_fin; k++) {
+		long n = sim_chorro_sig;
+		if ((s.fin - s.cab + COLA) % COLA >= COLA - 5)
+			break;		/* sitio para lo demás (el acuerdo, ARP...) */
+		d[0] = n; d[1] = n >> 8; d[2] = n >> 16; d[3] = n >> 24;
+		for (i = 4; i < SIM_TROZO; i++)
+			d[i] = (o8)(n * 31 + i);
+		ap_datos(n % 16 == 15 ? todos : s.sta, ap_mac, 0x88b6, d, SIM_TROZO, 1);
+		sim_chorro_sig++;
+	}
+}
+
 static void sim_sondear(void)
 {
 	d32 ya = hl_jiffies();
@@ -459,13 +657,37 @@ static void sim_sondear(void)
 		s.paso = 0;
 		return;
 	}
-	if (sim_renovar_grupo && s.paso == 4) {
-		o8 k[80], r[200];
-		int nd;
-		sim_renovar_grupo = 0;
-		nueva_gtk();
-		nd = kde_grupo(k, 0);
-		ap_datos(s.sta, ap_mac, 0x888e, r, eapol(r, 0x1382, NULL, k, nd, 1), 1);
+	if (s.paso == 4 && s.asociada) {
+		/* las renovaciones: a petición de la prueba o cada tanto; si la
+		 * estación no contesta en 1 s, otra vez, y a la cuarta se la echa
+		 * (como hostapd: «4-way handshake timeout», motivo 15; «group key
+		 * handshake timeout», motivo 16) */
+		if (s.rk == 0 && !s.grupo_pend && (sim_renovar_pares ||
+		    (sim_renovar_pares_cada && (int)(ya - s.t_ptk) >= sim_renovar_pares_cada))) {
+			sim_renovar_pares = 0;
+			renueva_pares(0);
+		} else if (s.rk && (int)(ya - s.t_rk) >= 1000) {
+			if (++s.rk_intentos >= 4) {
+				echar(15);
+				return;
+			}
+			if (s.rk == 1)
+				renueva_pares(1);
+			else
+				manda_paso3_renov();	/* no le ha llegado el 3, o a nosotros su 4 */
+		}
+		if (s.rk == 0 && !s.grupo_pend && (sim_renovar_grupo ||
+		    (sim_renovar_grupo_cada && (int)(ya - s.t_gtk) >= sim_renovar_grupo_cada))) {
+			sim_renovar_grupo = 0;
+			renueva_grupo(0);
+		} else if (s.grupo_pend && (int)(ya - s.t_grupo) >= 1000) {
+			if (++s.grupo_intentos >= 4) {
+				echar(16);
+				return;
+			}
+			renueva_grupo(1);
+		}
+		chorro();
 	}
 	if (sim_echar && s.asociada) {
 		sim_echar = 0;

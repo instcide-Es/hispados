@@ -46,6 +46,13 @@ struct radio {
 	/* (INTEL) 1: la tarjeta escanea ella sola (el firmware de las Intel):
 	 * las balizas llegan con su canal de verdad, no el del barrido */
 	int barre_sola;
+	/* (INTEL) las claves de WPA2, para la tarjeta que cifra ella (CCMP en
+	 * el firmware: ADD_STA_KEY); NULL en las que no (Broadcom, Atheros, la
+	 * simulada: CCMP lo hace wpa.c). par 1: la de pares (KeyID 0), en la
+	 * ranura 0 o 1 (la nueva va en la otra; la vieja se quita cuando ya
+	 * llegan tramas con la nueva); par 0: la de grupo «id» (1 a 3), con su
+	 * contador (rsc, 6 octetos, el bajo primero). tk NULL: quitarla */
+	int (*clave)(int par, int id, int ranura, const o8 *tk, const o8 *rsc);
 };
 extern struct radio *radio;
 
@@ -96,6 +103,7 @@ struct w_info {
 	o8 barriendo;
 	o8 mac[6];
 	d32 tx, rx, tx_err, rx_desc, reconexiones;
+	d32 renov_ptk, renov_gtk;	/* renovaciones de las claves de WPA2 (por pares y de grupo) */
 } __attribute__((packed));
 
 void w80211_inicia(struct radio *r);
@@ -133,25 +141,49 @@ void aes_envuelve(const o8 *kek, const o8 *e, int n, o8 *s);
 int ccmp_cifra(const struct aes *a, o8 *trama, int n, int cab, const o8 *pn, int id_clave);
 int ccmp_descifra(const struct aes *a, o8 *trama, int n, int cab, o8 *pn_sal);
 
-/* el suplicante: acuerdo de 4 pasos y clave de grupo */
+/* el suplicante: acuerdo de 4 pasos, su renovación y la clave de grupo */
+struct wpa_gk {			/* una clave de grupo (por su KeyID, 1 a 3) */
+	o8 clave[16];
+	struct aes a;
+	o8 pn[6];			/* el último número de paquete aceptado */
+	o8 puesta;
+};
 struct wpa {
 	o8 pmk[32];
 	o8 aa[6], spa[6];		/* punto de acceso y nosotros */
 	o8 anonce[32], snonce[32];
-	o8 ptk[48];			/* KCK 16, KEK 16, TK 16 */
-	o8 gtk[16];
-	o8 gtk_id;
+	o8 ptk[48];			/* la puesta: KCK 16, KEK 16, TK 16 */
+	o8 tptk[48];			/* la del acuerdo en curso (no se usa hasta el paso 3) */
+	struct wpa_gk g[4];		/* las de grupo, por KeyID: la de ahora y la anterior */
+	o8 gtk_id;			/* la última de grupo puesta */
 	o8 repeticion[8];
 	o8 hay_rep;
 	o8 rsn[40]; o8 rsn_n;		/* nuestro elemento RSN */
 	o8 rsn_ap[64]; o8 rsn_ap_n;	/* el de la baliza */
 	o8 paso;			/* 0 nada, 1 mandado el 2, 2 hecho (claves puestas) */
+	o8 renovando;			/* con las claves puestas, mandado el 2 de un acuerdo nuevo */
 	o8 ptk_puesta, gtk_puesta;
-	struct aes tk, gk;
+	struct aes tk;
 	o8 pn_tx[6];
-	o8 pn_rx[6], pn_rx_g[6];
+	o8 pn_rx[6];
+	/* la clave por pares de antes de renovarla: las tramas que ya venían
+	 * con ella se siguen aceptando hasta que llega una con la nueva (o
+	 * pasan W_T_VIEJA ms); el paso 4 va cifrado con ella (el punto de acceso
+	 * no pone la nueva hasta recibirlo) */
+	struct aes tk_vieja;
+	o8 pn_tx_vieja[6], pn_rx_vieja[6];
+	o8 hay_vieja;
+	d32 t_vieja;
+	/* lo que dice wpa_eapol a w80211 con cada respuesta */
+	o8 resp_cifra;			/* 0 en claro, 1 con la clave puesta, 2 con la vieja */
+	o8 nueva_ptk;			/* 1: se acaba de poner una por pares (para la tarjeta) */
+	o8 nueva_gtk;			/* el KeyID de la de grupo que se acaba de poner (0 ninguna) */
+	o8 quita_gtk;			/* el KeyID de la de grupo que ya no vale (0 ninguna) */
+	o8 ranura;			/* (INTEL) la ranura de la tarjeta de la de pares puesta */
 	int fallos_mic;
+	d32 renov_ptk, renov_gtk;	/* cuántas veces se han renovado */
 };
+#define W_T_VIEJA 10000		/* lo más que se guarda la clave por pares vieja */
 void wpa_empieza(struct wpa *w, const o8 *pmk, const o8 *aa, const o8 *spa, const o8 *rsn, int rsn_n);
 /* un EAPOL recibido (desde la versión); devuelve la respuesta en sal (su
  * longitud; 0 nada, -1 fallo: clave equivocada) */
@@ -164,5 +196,8 @@ void sim_configura(const char *ssid, const char *clave, int canal);
 extern void (*sim_entrega)(const o8 *trama, int n, int senal, int canal);
 extern int sim_fallos;		/* para las pruebas: tramas que se «pierden» */
 extern int sim_gemela;		/* para las pruebas: una red abierta falsa con el mismo nombre */
+/* para las pruebas: cada cuántos ms renueva el punto de acceso de mentira la
+ * clave por pares (un acuerdo de 4 pasos nuevo) y la de grupo; 0 nunca */
+extern int sim_renovar_pares_cada, sim_renovar_grupo_cada;
 
 #endif

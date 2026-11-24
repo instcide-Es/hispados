@@ -375,7 +375,11 @@ desconectar, estado, registro, preparar la clave por trozos.
   tarjeta; en un Atom, menos de 1 ms por trama) y el suplicante: acuerdo de 4
   pasos, clave de grupo y su renovación, contadores de repetición, números de
   paquete (un paso 3 repetido no vuelve a poner las claves: sin el fallo
-  «KRACK»).
+  «KRACK»). Y la **renovación de la clave por pares** (un acuerdo de 4 pasos
+  nuevo estando conectados: la PTK nueva aparte hasta el paso 3, la vieja
+  guardada para las tramas que ya venían con ella y para mandar el 4, los
+  números de paquete a cero) y las de grupo por KeyID (la de ahora y la de
+  antes); ver docs/PENTIUM.md, «Las claves se renuevan».
 - `wifi/nucleo/radio_brcm.c`: une brcmsmac con lo anterior: el arranque del
   bus bcma (lo de `drivers/bcma/main.c`), las funciones de mac80211 que el
   controlador llama (alta, tramas recibidas, estado de las enviadas, colas) y
@@ -465,7 +469,9 @@ tiene).
    el vector de prueba 1 de IEEE 802.11-2007 (H.8.3.1)**, octeto a octeto.
 2. **La gestión** contra el punto de acceso de mentira (mismo programa):
    búsqueda, acuerdo de 4 pasos, ARP (clave de pareja), DHCP (clave de
-   grupo), renovación de la clave de grupo, buscar estando conectado,
+   grupo), renovación de la clave de grupo y de la de pares (con la trama
+   vieja tras el paso 4 y el paso 4 perdido), una descarga de 25 MB con las
+   dos renovándose cada pocos segundos, buscar estando conectado,
    expulsión y reconexión, pérdida de la red y vuelta, tramas perdidas,
    contraseña equivocada, red que no existe, red WPA (TKIP), red abierta.
 3. **El controlador de la Broadcom contra un modelo de la tarjeta**
@@ -473,7 +479,8 @@ tiene).
    PCI (la despierta de D3, apaga la interrupción), el bus bcma con su EROM y
    una SPROM de revisión 8, el núcleo 802.11 con el **microcódigo de verdad**,
    los anillos de DMA. Montaje, encendido, búsqueda, WPA2, 300 ecos de ida y
-   vuelta, acuses y subida de velocidad, renovación de clave, parada, sin
+   vuelta, acuses y subida de velocidad, renovación de las claves (la de
+   grupo y la de pares, y 300 ecos de 1400 con las dos renovándose), parada, sin
    pérdidas de memoria. El modelo dice lo que el controlador *espera* de la
    tarjeta: prueba nuestro código, no la tarjeta.
 4. **En QEMU, con la radio simulada** (`HSPWIFI /SIMULA`): el residente, el

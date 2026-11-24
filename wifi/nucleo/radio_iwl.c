@@ -114,6 +114,7 @@
 #define N_ERROR			0x02
 #define N_INIT_COMPLETE		0x04
 #define C_PHY_CONTEXT		0x08
+#define C_ADD_STA_KEY		0x17
 #define C_ADD_STA		0x18
 #define C_SCD_QUEUE_CFG		0x1D
 #define C_SCAN_LMAC		0x51
@@ -919,6 +920,57 @@ static void r_barrido(int empieza) { if (vivo && empieza) escaneo_pedido = 1; }
 static void r_bss(const o8 *b, int a, int i, int c, const o8 *v, int nv) { (void)b; (void)a; (void)i; (void)c; (void)v; (void)nv; }
 static void r_parar(void) { if (vivo) para_hw(); }
 
+/* (etapa 2) las claves de WPA2, a la tarjeta: ADD_STA_KEY (mvm/sta.c,
+ * iwl_mvm_send_sta_key e __iwl_mvm_remove_sta_key). Todas de la estación 0
+ * (el punto de acceso, la del ADD_STA de la etapa 2). La de pares va en la
+ * posición 0 o 1 de la tabla de claves del firmware, alternando: al
+ * renovarla, la nueva se pone en la otra y la vieja se quita después (cuando
+ * w80211 ve llegar tramas con la nueva, o a los W_T_VIEJA ms), como hace
+ * mac80211 (primero la nueva, luego quitar la vieja). Las de grupo, en la
+ * 2 + KeyID, con el bit de multidifusión. El CCMP lo hace el firmware; el
+ * número de paquete (PN) lo pone y lo comprueba el controlador, así que el
+ * contador de recepción no se le da. La orden es de 64 octetos (la v1) o de
+ * 76 si el firmware tiene la API TKIP_MIC_KEYS (la v2: las claves MIC de TKIP
+ * y el contador de envío, a cero). Ni la clave ni nada de ella va al registro */
+#define STA_KEY_FLG_CCM		0x0002
+#define STA_KEY_FLG_WEP_KEY_MAP	0x0008
+#define STA_KEY_NOT_VALID	0x0800
+#define STA_KEY_MULTICAST	0x4000
+static int r_clave(int par, int id, int ranura, const o8 *tk, const o8 *rsc)
+{
+	o8 c[76];
+	int n = iwl_fw_api(FW, IWL_API_TKIP_MIC_KEYS) ? 76 : 64;
+	p16 fl = ((par ? 0 : id) & 3) << 8;
+	int k;
+
+	(void)rsc;
+	if (!vivo)
+		return -1;
+	memset(c, 0, sizeof c);
+	c[0] = 0;				/* sta_id: el punto de acceso */
+	c[1] = par ? (ranura & 1) : 2 + (id & 3);	/* key_offset */
+	if (tk) {
+		fl |= STA_KEY_FLG_CCM;
+		memcpy(c + 4, tk, 16);		/* key[32]: los 16 de CCMP */
+	} else {
+		fl |= STA_KEY_FLG_WEP_KEY_MAP | STA_KEY_NOT_VALID;	/* NO_ENC: quitarla */
+	}
+	if (!par)
+		fl |= STA_KEY_MULTICAST;
+	pon16(c + 2, fl);
+	k = orden(1, C_ADD_STA_KEY, c, n, 2000);
+	memset(cmd + 8, 0, n);			/* (la copia de la orden, sin la clave) */
+	if (k < 0 || (estado_resp() & 0xFF) != 1) {
+		memset(c, 0, sizeof c);
+		hl_log(0, "iwl: la tarjeta no acepta la clave %s (%08X)\n", par ? "por pares" : "de grupo", estado_resp());
+		return -1;
+	}
+	memset(c, 0, sizeof c);
+	hl_log(3, "iwl: clave %s %s (posición %d)\n", par ? "por pares" : "de grupo", tk ? "puesta" : "quitada",
+	       par ? (ranura & 1) : 2 + (id & 3));
+	return 0;
+}
+
 /* ------------------------------------------------------------ la entrada */
 int iwl_reconoce(d32 id, const char **m)
 {
@@ -1020,6 +1072,7 @@ int iwl_arranca(const struct iwl_plat *p, d32 id, const struct iwl_fw *fw, struc
 	iwlr.barrido = r_barrido;
 	iwlr.bss = r_bss;
 	iwlr.parar = r_parar;
+	iwlr.clave = r_clave;
 	iwlr.barre_sola = 1;
 	*r = &iwlr;
 	return 0;

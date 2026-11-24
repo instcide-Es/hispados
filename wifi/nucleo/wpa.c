@@ -508,7 +508,11 @@ void wpa_ptk(const o8 *pmk, const o8 *aa, const o8 *spa, const o8 *an, const o8 
 
 void wpa_empieza(struct wpa *w, const o8 *pmk, const o8 *aa, const o8 *spa, const o8 *rsn, int rsn_n)
 {
+	d32 rp = w->renov_ptk, rg = w->renov_gtk;	/* las cuentas son de toda la sesión */
+
 	memset(w, 0, sizeof(*w));
+	w->renov_ptk = rp;
+	w->renov_gtk = rg;
 	memcpy(w->pmk, pmk, 32);
 	memcpy(w->aa, aa, 6);
 	memcpy(w->spa, spa, 6);
@@ -518,8 +522,8 @@ void wpa_empieza(struct wpa *w, const o8 *pmk, const o8 *aa, const o8 *spa, cons
 	w->rsn_n = rsn_n;
 }
 
-/* monta un EAPOL-Key de respuesta y le pone el MIC */
-static int wpa_responde(struct wpa *w, o8 *s, int info, const o8 *rep, const o8 *nonce,
+/* monta un EAPOL-Key de respuesta y le pone el MIC (con la KCK de «kck») */
+static int wpa_responde(const o8 *kck, o8 *s, int info, const o8 *rep, const o8 *nonce,
 			const o8 *datos, int nd)
 {
 	o8 mic[20];
@@ -537,7 +541,7 @@ static int wpa_responde(struct wpa *w, o8 *s, int info, const o8 *rep, const o8 
 	s[97] = nd >> 8; s[98] = nd;
 	if (nd)
 		memcpy(s + 99, datos, nd);
-	hmac_sha1(w->ptk, 16, s, n, mic);
+	hmac_sha1(kck, 16, s, n, mic);
 	memcpy(s + 81, mic, 16);
 	return n;
 }
@@ -546,8 +550,12 @@ static int wpa_responde(struct wpa *w, o8 *s, int info, const o8 *rep, const o8 
  * el contador de repetición de esa clave (los 6 octetos bajos del «Key RSC»
  * del mensaje). La MISMA clave que ya está puesta no se vuelve a poner: así su
  * contador no vuelve a cero y no se aceptan otra vez tramas ya recibidas
- * (la variante del ataque «KRACK» contra la clave de grupo) */
-static int wpa_busca_gtk(struct wpa *w, const o8 *d, int n, const o8 *rsc)
+ * (la variante del ataque «KRACK» contra la clave de grupo). Cada KeyID
+ * (1 a 3) tiene su sitio: al renovarla, el punto de acceso pasa del 1 al 2
+ * (o al revés) y las tramas de grupo que ya venían con la anterior se siguen
+ * aceptando; las de un tercer KeyID, no (solo valen la de ahora y la de antes).
+ * Devuelve 1 si se ha puesto una nueva, 0 si era la misma, -1 si falta */
+static int wpa_busca_gtk(struct wpa *w, const o8 *d, int n, const o8 *rsc, int dilo)
 {
 	int i = 0;
 
@@ -559,20 +567,38 @@ static int wpa_busca_gtk(struct wpa *w, const o8 *d, int n, const o8 *rsc)
 			break;
 		if (tipo == 0xdd && l >= 6 + 16 && d[i + 2] == 0x00 && d[i + 3] == 0x0f &&
 		    d[i + 4] == 0xac && d[i + 5] == 1) {
+			int id = d[i + 6] & 3, k, antes = w->gtk_puesta ? w->gtk_id : 0;
+			struct wpa_gk *g = &w->g[id];
+
 			if (l - 6 != 16) {
 				hl_log(0, "WPA: la clave de grupo no es de CCMP (%d octetos)\n", l - 6);
 				return -1;
 			}
-			if (w->gtk_puesta && (d[i + 6] & 3) == w->gtk_id && memcmp(w->gtk, d + i + 8, 16) == 0) {
-				hl_log(1, "WPA: la misma clave de grupo otra vez: no se vuelve a poner (ni su contador)\n");
+			if (id == 0) {
+				hl_log(0, "WPA: la clave de grupo viene con el KeyID 0 (es el de las de pares)\n");
+				return -1;
+			}
+			if (g->puesta && memcmp(g->clave, d + i + 8, 16) == 0) {
+				if (dilo)
+					hl_log(1, "WPA: la misma clave de grupo otra vez: no se vuelve a poner (ni su contador)\n");
+				w->gtk_id = id;
 				return 0;
 			}
-			w->gtk_id = d[i + 6] & 3;
-			memcpy(w->gtk, d + i + 8, 16);
-			aes_clave(&w->gk, w->gtk);
-			memcpy(w->pn_rx_g, rsc, 6);
+			/* solo quedan la nueva y la de antes */
+			w->quita_gtk = 0;
+			for (k = 1; k < 4; k++)
+				if (k != id && k != antes && w->g[k].puesta) {
+					memset(&w->g[k], 0, sizeof w->g[k]);
+					w->quita_gtk = k;
+				}
+			memcpy(g->clave, d + i + 8, 16);
+			aes_clave(&g->a, g->clave);
+			memcpy(g->pn, rsc, 6);
+			g->puesta = 1;
+			w->gtk_id = id;
 			w->gtk_puesta = 1;
-			return 0;
+			w->nueva_gtk = id;
+			return 1;
 		}
 		i += 2 + l;
 	}
@@ -580,11 +606,31 @@ static int wpa_busca_gtk(struct wpa *w, const o8 *d, int n, const o8 *rsc)
 	return -1;
 }
 
+/* el SNonce: 32 octetos al azar (la PRF de 802.11i con el azar del equipo) */
+static void wpa_snonce(struct wpa *w)
+{
+	o8 semilla[32 + 6 + 8];
+	d32 r;
+	int i;
+
+	for (i = 0; i < 32; i += 4) {
+		r = hl_azar();
+		memcpy(semilla + i, &r, 4);
+	}
+	memcpy(semilla + 32, w->spa, 6);
+	r = hl_jiffies(); memcpy(semilla + 38, &r, 4);
+	r = hl_azar(); memcpy(semilla + 42, &r, 4);
+	prf_sha1(w->pmk, 32, "Init Counter", semilla, sizeof(semilla), w->snonce, 32);
+	memset(semilla, 0, sizeof semilla);
+}
+
 int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 {
 	o8 mic[20], copia[512], datos[256];
-	int info, nd, i;
+	const o8 *kck;
+	int info, nd, i, r;
 
+	w->resp_cifra = w->ptk_puesta;
 	if (n < 99 || e[1] != 3)
 		return 0;
 	if (e[4] != 2) {
@@ -607,43 +653,42 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 		return 0;
 	}
 
-	if ((info & KI_PAR) && !(info & KI_MIC) && w->paso == 2) {
-		/* un paso 1 sin firmar con las claves ya puestas: no (aún no se
-		 * renueva la clave por pares: haría falta una PTK nueva aparte, sin
-		 * dejar la de ahora hasta el paso 3). (0.8.10, el HP Mini: una
-		 * descarga larga por el Wi-Fi se cortaba) Se dice, una vez: si el
-		 * punto de acceso la renueva cada tanto, desasocia al no tenerla */
-		static int dicho;
-
-		if (!dicho++)
-			hl_log(0, "WPA: el punto de acceso pide renovar la clave por pares (un paso 1 con las claves ya puestas): aún no se hace; si luego se corta la conexión, es esto\n");
-		return 0;
-	}
 	if ((info & KI_PAR) && !(info & KI_MIC)) {
-		/* mensaje 1: el ANonce. Sacamos el SNonce y la PTK. */
-		o8 semilla[32 + 6 + 8];
-		d32 r;
-		memcpy(w->anonce, e + 17, 32);
-		for (i = 0; i < 32; i += 4) {
-			r = hl_azar();
-			memcpy(semilla + i, &r, 4);
+		/* mensaje 1: el ANonce. Sale un SNonce nuevo y la PTK del acuerdo
+		 * (la TPTK), que no se usa hasta que el paso 3 venga firmado con
+		 * ella. Si las claves ya están puestas es una RENOVACIÓN (el punto
+		 * de acceso la pide cada tanto, o por número de paquetes): lo de
+		 * ahora sigue valiendo mientras tanto. El mismo paso 1 repetido
+		 * (no le ha llegado nuestro 2) se contesta con el mismo SNonce */
+		int mismo = (w->paso == 1 || w->renovando) && memcmp(w->anonce, e + 17, 32) == 0;
+
+		if (!mismo) {
+			memcpy(w->anonce, e + 17, 32);
+			wpa_snonce(w);
+			wpa_ptk(w->pmk, w->aa, w->spa, w->anonce, w->snonce, w->tptk);
 		}
-		memcpy(semilla + 32, w->spa, 6);
-		r = hl_jiffies(); memcpy(semilla + 38, &r, 4);
-		r = hl_azar(); memcpy(semilla + 42, &r, 4);
-		prf_sha1(w->pmk, 32, "Init Counter", semilla, sizeof(semilla), w->snonce, 32);
-		wpa_ptk(w->pmk, w->aa, w->spa, w->anonce, w->snonce, w->ptk);
-		w->paso = 1;
-		hl_log(2, "WPA: paso 1 de 4 recibido; se manda el 2\n");
-		return wpa_responde(w, sal, 2 | KI_PAR | KI_MIC, e + 9, w->snonce, w->rsn, w->rsn_n);
+		if (w->paso == 2) {
+			if (!w->renovando)
+				hl_log(2, "WPA2: el punto de acceso renueva la clave por pares; se manda el paso 2\n");
+			w->renovando = 1;
+		} else {
+			w->paso = 1;
+			hl_log(2, "WPA: paso 1 de 4 recibido; se manda el 2\n");
+		}
+		/* el 2 va como esté la conexión: en claro al principio; al
+		 * renovar, cifrado con la clave de ahora */
+		w->resp_cifra = w->ptk_puesta;
+		return wpa_responde(w->tptk, sal, 2 | KI_PAR | KI_MIC, e + 9, w->snonce, w->rsn, w->rsn_n);
 	}
 
-	/* los demás llevan MIC: comprobarlo con la KCK */
+	/* los demás llevan MIC: el paso 3 de un acuerdo en curso, con la KCK de
+	 * la TPTK; lo demás (el 3 repetido, la clave de grupo), con la puesta */
 	if (!w->paso || n > (int)sizeof(copia))
 		return 0;
+	kck = (info & KI_PAR) && (w->paso == 1 || w->renovando) ? w->tptk : w->ptk;
 	memcpy(copia, e, n);
 	memset(copia + 81, 0, 16);
-	hmac_sha1(w->ptk, 16, copia, 99 + nd, mic);
+	hmac_sha1(kck, 16, copia, 99 + nd, mic);
 	if (memcmp(mic, e + 81, 16) != 0) {
 		/* no se corta: puede no venir del punto de acceso (cualquiera puede
 		 * mandar un mensaje así). Se cuenta, y si el acuerdo no acaba, se dice */
@@ -656,6 +701,8 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 
 	if (info & KI_PAR) {
 		/* mensaje 3: la clave de grupo, cifrada con la KEK */
+		int renueva = w->renovando;
+
 		if (memcmp(e + 17, w->anonce, 32) != 0) {
 			hl_log(0, "WPA: el paso 3 trae otro ANonce\n");
 			return -1;
@@ -664,27 +711,59 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 			hl_log(0, "WPA: el paso 3 no trae los datos cifrados\n");
 			return -1;
 		}
-		if (aes_desenvuelve(w->ptk + 16, e + 99, nd - 8, datos) < 0) {
+		if (aes_desenvuelve(kck + 16, e + 99, nd - 8, datos) < 0) {
 			hl_log(0, "WPA: no se pueden descifrar los datos del paso 3\n");
 			return -1;
 		}
-		if (w->paso == 2) {
+		if (w->paso == 2 && !renueva) {
 			/* el paso 3 repetido (no llegó nuestro 4): se contesta otra
 			 * vez, pero las claves y los contadores NO se vuelven a
-			 * poner (si no, se repetirían números de paquete) */
+			 * poner (si no, se repetirían números de paquete: KRACK).
+			 * Va como el 4 de antes: tras una renovación, con la clave
+			 * vieja mientras se guarde (el punto de acceso aún no tiene
+			 * la nueva) */
+			memset(datos, 0, sizeof datos);
 			hl_log(1, "WPA: paso 3 repetido; se repite el 4\n");
-			return wpa_responde(w, sal, 2 | KI_PAR | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);
+			w->resp_cifra = w->hay_vieja ? 2 : w->renov_ptk ? 1 : 0;
+			return wpa_responde(w->ptk, sal, 2 | KI_PAR | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);
 		}
-		if (wpa_busca_gtk(w, datos, nd - 8, e + 65) < 0)
+		memcpy(w->ptk, w->tptk, 48);	/* la KEK de la clave de grupo de abajo */
+		r = wpa_busca_gtk(w, datos, nd - 8, e + 65, !renueva);
+		memset(datos, 0, sizeof datos);
+		if (r < 0)
 			return -1;
+		if (r == 0)
+			w->nueva_gtk = 0;
+		if (renueva) {
+			/* la de ahora pasa a vieja (con sus contadores), y el 4 se
+			 * manda con ella */
+			w->tk_vieja = w->tk;
+			memcpy(w->pn_tx_vieja, w->pn_tx, 6);
+			memcpy(w->pn_rx_vieja, w->pn_rx, 6);
+			w->hay_vieja = 1;
+			w->t_vieja = hl_jiffies();
+			w->resp_cifra = 2;
+		} else {
+			w->resp_cifra = 0;	/* el 4 se manda sin cifrar */
+		}
+		/* la nueva, con los contadores a cero (802.11i: cada clave nueva
+		 * empieza su número de paquete y su ventana de repetidas) */
 		aes_clave(&w->tk, w->ptk + 32);
 		memset(w->pn_tx, 0, 6);
 		memset(w->pn_rx, 0, 6);
-		/* el 4 se manda sin cifrar; las claves valen desde ahora */
-		i = wpa_responde(w, sal, 2 | KI_PAR | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);
+		i = wpa_responde(w->ptk, sal, 2 | KI_PAR | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);
 		w->ptk_puesta = 1;
 		w->paso = 2;
-		hl_log(2, "WPA: paso 3 de 4 correcto; se manda el 4. Claves puestas (grupo: clave %d)\n", w->gtk_id);
+		w->renovando = 0;
+		w->nueva_ptk = 1;
+		w->ranura ^= 1;
+		memset(w->tptk, 0, sizeof w->tptk);
+		if (renueva) {
+			w->renov_ptk++;
+			hl_log(2, "WPA2: clave por pares renovada (n.º %u)\n", (unsigned)w->renov_ptk);
+		} else {
+			hl_log(2, "WPA: paso 3 de 4 correcto; se manda el 4. Claves puestas (grupo: clave %d)\n", w->gtk_id);
+		}
 		return i;
 	}
 
@@ -693,8 +772,14 @@ int wpa_eapol(struct wpa *w, const o8 *e, int n, o8 *sal)
 		return 0;
 	if (aes_desenvuelve(w->ptk + 16, e + 99, nd - 8, datos) < 0)
 		return 0;
-	if (wpa_busca_gtk(w, datos, nd - 8, e + 65) < 0)
+	r = wpa_busca_gtk(w, datos, nd - 8, e + 65, 1);
+	memset(datos, 0, sizeof datos);
+	if (r < 0)
 		return 0;
-	hl_log(2, "WPA: clave de grupo renovada (clave %d)\n", w->gtk_id);
-	return wpa_responde(w, sal, 2 | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);
+	if (r > 0) {
+		w->renov_gtk++;
+		hl_log(2, "WPA2: clave de grupo renovada (n.º %u, KeyID %d)\n", (unsigned)w->renov_gtk, w->gtk_id);
+	}
+	w->resp_cifra = 1;		/* el 2 de grupo, cifrado */
+	return wpa_responde(w->ptk, sal, 2 | KI_MIC | KI_SEGURA, e + 9, NULL, NULL, 0);
 }

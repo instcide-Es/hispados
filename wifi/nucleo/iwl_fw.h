@@ -53,6 +53,7 @@
 /* y de API (enum iwl_ucode_tlv_api) */
 #define IWL_API_WIFI_MCC_UPDATE	9
 #define IWL_API_NEW_VERSION	20
+#define IWL_API_TKIP_MIC_KEYS	29	/* ADD_STA_KEY de 76 octetos (la v2) */
 #define IWL_API_ADAPTIVE_DWELL	32
 #define IWL_API_ADAPTIVE_DWELL_V2 42
 #define IWL_API_SCAN_EXT_CHAN_VER 58
