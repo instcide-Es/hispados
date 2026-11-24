@@ -4822,6 +4822,19 @@ se juntaban). Lo que se tocó al juntar:
   registros van en los informes).
 - **USB**: el aparato que no se deja enumerar, hasta dos reintentos (el
   segundo, tras medio segundo y con más tiempo tras el reinicio del puerto).
+- **Las cuatro ramas del Termómetro** de la tarde (`termo-disco` 044968f,
+  `termo-nvidia` ab32de3, `termo-potencia` be01d39 y `termo-ram` 5023692,
+  sección 14 quatervicies): los discos de dentro (SMART, NVMe, la prueba de
+  lectura: la llamada 238), las NVIDIA (225), la potencia (RAPL y los MSR de
+  la lista) y la prueba de la memoria RAM (226). En `termo.c`, los cuatro
+  veredictos y el INFORME con un búfer de 48000 (la RAM sola lleva hasta
+  17000); la línea «Falta, para otra vez» solo dice la RAM si no se ha
+  probado (lo de los discos va en DISCOS); en LEEME.TXT, la 10 los discos y
+  la 11 la RAM. **La seguridad** (decisión del coordinador): la 226 (la
+  ventana sobre la RAM alta deja leer restos de memoria) y la 238, solo con
+  «termo» en la línea del cargador (la memoria del Termómetro) o en el modo
+  administrador; de la 220 y la 225, leer sigue siendo de cualquiera, pero
+  lo que escriben (borrar las marcas de freno, encender la gráfica), no.
 - **Las pruebas que cambian**: la 06 con lo de `termometro` (el traspaso de
   la BIOS en la línea del EHCI; ARRANQUE.TXT está en la 437: con LC_ALL=C);
   la 52 y la 53 con el singular («1 teclado, 1 ratón») y el SCR que dé
