@@ -35,4 +35,6 @@ cp "$AQUI/saludo.txt" "$S/SALUDO.TXT"
 # [etapa 7] los de musl (si no se quieren: SIN_MUSL=1)
 MUSL=""
 if [ "${SIN_MUSL:-0}" != 1 ]; then MUSL=" $("$AQUI/hazmusl.sh" "$S" | tail -1 | cut -d: -f2)"; fi
+# [etapa 8] los programas gráficos (VENTANAS, NOTAS, PLUMA, CUENTAS: hazventanas.sh)
+if [ "${SIN_MUSL:-0}" != 1 ] && [ "${SIN_VENTANAS:-0}" != 1 ]; then MUSL="$MUSL $("$AQUI/hazventanas.sh" "$S" | tail -1 | cut -d: -f2)"; fi
 echo "hechos:$HECHOS HOLACAS SALUDO.TXT$MUSL"

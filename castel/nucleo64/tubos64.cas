@@ -96,9 +96,21 @@ módulo Tubos64
         sino
             si t.escritores > 0 entonces t.escritores := t.escritores - 1 fin
         fin
+        ; [etapa 8] si era el último, se suelta ya (con el cerrojo tomado todo el
+        ; rato: antes se soltaba y se volvía a tomar para despertar, y dos que
+        ; cerraban a la vez —execve con O_CLOEXEC en el hijo de posix_spawn y
+        ; close en el padre— podían soltarla dos veces); si no, se despierta a
+        ; quien espere (si queda alguno, usos > 0: no se ha soltado)
+        si t.lectores = 0 y t.escritores = 0 y t.usos = 0 entonces
+            suelta_si(t, b)
+            devolver
+        fin
+        ; (mientras se despierta, uno más la «usa»: nadie la suelta entre medias)
+        t.usos := t.usos + 1
         suelta(dirección(t.cerrojo), b)
         despierta_todos(esp(t))
         b := toma(dirección(t.cerrojo))
+        t.usos := t.usos - 1
         suelta_si(t, b)
     fin
 

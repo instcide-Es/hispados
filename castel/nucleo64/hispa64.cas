@@ -1152,6 +1152,17 @@ módulo Hispa64
     función intérprete(): bool
         variable p: puntero a Proceso
         variable r: nat64
+        ; [etapa 8] con «escritorio» en la línea: antes, el escritorio (VENTANAS);
+        ; al salir de él, el intérprete
+        si tiene("escritorio") y busca_archivo("VENTANAS") >= 0 entonces
+            p := lanza("VENTANAS")
+            si p <> nulo entonces
+                mientras no ha_acabado(p) y no botón hacer duerme_ms(20) fin
+                si botón entonces devolver cierto fin
+                r := espera_proceso(p)
+                escribir("El escritorio ha acabado (código ", r, ").\n")
+            fin
+        fin
         si busca_archivo("ORDENES") < 0 entonces
             escribir("(No está el intérprete de órdenes, ORDENES, en la unidad.)\n")
             devolver falso

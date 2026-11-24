@@ -7,7 +7,8 @@
 # tecla muerta (´ ` ¨ ^) y luego la vocal, la ñ y la ç en su sitio.
 # Las teclas especiales, entre llaves: {intro} {retro} {supr} {izq} {der}
 # {arriba} {abajo} {inicio} {fin} {tab} {esc} {ctrl-c} {ctrl-d} {ctrl-u}
-# {bloqmayus} {bloqnum} {f1}... {pausa} (medio segundo sin teclas). Va igual para el teclado PS/2
+# {bloqmayus} {bloqnum} {f1}... {pausa} (medio segundo sin teclas); [etapa 8] {ctrl-LETRA}, {alt-f4},
+# {logo}, {ctrl-esc}. Va igual para el teclado PS/2
 # y para uno USB (QEMU manda sendkey al teclado que haya).
 #   teclas.py MONITOR.sock TEXTO...    (los textos, seguidos)
 #   teclas.py -n TEXTO...              dice las teclas, sin mandarlas
@@ -36,6 +37,12 @@ ESPECIALES = {'intro': 'ret', 'retro': 'backspace', 'supr': 'delete', 'izq': 'le
               'bloqnum': 'num_lock', 'pausa': None}
 for i in range(1, 13):
     ESPECIALES[f'f{i}'] = f'f{i}'
+# [etapa 8] Control con cualquier letra ({ctrl-g}, {ctrl-s}...), Alt+F4, la tecla del logo
+for c in 'abefghijklmnopqrstvwxyz':
+    ESPECIALES[f'ctrl-{c}'] = f'ctrl-{c}'
+ESPECIALES['alt-f4'] = 'alt-f4'
+ESPECIALES['logo'] = 'meta_l'
+ESPECIALES['ctrl-esc'] = 'ctrl-esc'
 
 
 def una(c):
