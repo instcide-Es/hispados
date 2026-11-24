@@ -12,7 +12,7 @@
 ;     la retransmisión rápida (tres ACK repetidos); la ventana a cero, con la
 ;     pregunta de un octeto (persist);
 ;   - el cierre bien hecho: FIN en las dos direcciones, FIN_WAIT_1 y 2,
-;     CLOSING, CLOSE_WAIT, LAST_ACK y TIME_WAIT (5 s aquí); RST a lo que no
+;     CLOSING, CLOSE_WAIT, LAST_ACK y TIME_WAIT (2 s aquí); RST a lo que no
 ;     tiene conexión, y si se cierra con algo sin leer (como Linux);
 ;   - la ventana que se anuncia, al día cuando el programa lee.
 ;  Sin escala de ventana ni SACK (quedan para la etapa 10, como IPv6).
@@ -31,7 +31,7 @@ módulo Tcp64
     constante RTO_INI = 1000000000              ; 1 s
     constante RTO_MÍN = 200000000
     constante RTO_MÁX = 60000000000
-    constante TIME_WAIT_NS = 5000000000
+    constante TIME_WAIT_NS = 2000000000
     constante FIN2_NS = 30000000000
     constante MAX_RETX = 8
     constante MAX_RETX_SYN = 5

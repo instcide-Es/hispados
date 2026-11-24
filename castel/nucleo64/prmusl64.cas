@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo PrMusl64
 
-    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redbase64
 
     público variable fallos7: nat32
 
@@ -97,6 +97,9 @@ módulo PrMusl64
         ; (los que quedasen sueltos acaban solos)
         t0 := ahora_ns()
         mientras (vivos > 0 o en_tabla > 0) y ahora_ns() - t0 < 3000000000 hacer duerme_ms(10) fin
+        ; ([etapa 9] y los sockets de MRED que se quedan un rato en TIME_WAIT: 2 s)
+        t0 := ahora_ns()
+        mientras socks_vivos > 0 y ahora_ns() - t0 < 4000000000 hacer duerme_ms(10) fin
         ; (los hilos acabados los suelta la tarea ociosa en cuanto dejan su procesador)
         t0 := ahora_ns()
         mientras (memoria_ahora() <> mem0 o en_uso <> montón0 o nat64(n_pilas) <> pilas0) y ahora_ns() - t0 < 1000000000 hacer

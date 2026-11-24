@@ -2424,7 +2424,7 @@ para 40 s, saca los registros por el monitor (los procesadores, todos en
 - **TCP sin escala de ventana ni SACK** (64 KB de búfer para cada lado): con
   la red de casa sobra; la escala, SACK e IPv6 quedan para la etapa 10 (el
   navegador). Lo desordenado se tira (la otra punta lo repite). El TIME_WAIT
-  dura 5 s.
+  dura 2 s (y las pruebas de musl esperan a que acabe: sin perder memoria).
 - **El azar, con ChaCha20** (`azar64.cas`, RFC 8439, la clave borrada en cada
   pedido): getrandom, `/dev/urandom` y `/dev/random` (que nunca esperan, como
   en Linux desde la 5.6), los números de secuencia de TCP, los puertos, los
