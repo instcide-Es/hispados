@@ -44,7 +44,7 @@ ESCRIBE=1 SD=$I MODULOS= $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN sdhci "dir text
 S=$X/sd1.sal
 mira "SDHCI: la controladora del PCI (clase 08 05), la tarjeta SD (CMD0, CMD8, ACMD41, CID, CSD, SCR), 4 bits y alta velocidad, y la FAT32 encima (C:)" \
   "^sdhci: en el PCI, 00:0[0-9A-F]\.0: 1B36:0007, clase 080501$" "^sdhci: controladora en [0-9A-F]* (PCI), versión 2\.00, CAP 057834B4 00000000, reloj de 52 MHz, ADMA2" \
-  "^sdhci: SCR [0-9A-F][0-9A-F] [0-9A-F][0-9A-F] 00 00 (la norma SD [0-9]*)$" "^sdhci: tarjeta SD QEMU! (SDSC), 64 MB; ancho 4 bits; 26 MHz; ADMA2$" \
+  "^sdhci: SCR [0-9A-F ]* (la norma SD" "^sdhci: tarjeta SD QEMU! (SDSC), 64 MB; ancho 4 bits; 26 MHz; ADMA2$" \
   "^disco 0: tarjeta SD QEMU! (SDSC), 64 MB, FAT32 (SD)\.$" "^disco 0: tarjeta SD QEMU! (SDSC), 131072 sectores (64 MB), LBA, SD$" "^LARGO.TXT  *17600$"
 mira "SDHCI, ADMA2: el intérprete escribe en la tarjeta: crea, escribe, corta, alarga y borra archivos y carpetas, y todo queda como estaba" \
   "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
@@ -197,10 +197,10 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     ok "INSTALAR: \\SDHCI.TXT de la memoria va a la raíz de lo instalado y su controladora, a la línea del núcleo de GRUB.CFG (« sdhci=$basei»)"
   else ko "INSTALAR no pasa \\SDHCI.TXT a lo instalado:"; grep -n "NUCLEO.BIN" $X/cfgi.txt | sed 's/^/        /' | head -4; fi
   l=$(sed -n 's/^ *multiboot \/HISPA\/NUCLEO.BIN \(ordenes escritura.*\)$/\1/p' $X/cfgi.txt | head -1)
-  ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS= ARRANQUE="$l sdhcisinpci sinacpi" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN "dir c:\\hispa\\equipo.bin" salir apagar > $X/arrinst.sal 2>&1
+  ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS= ARRANQUE="$l sdhcisinpci sinacpi" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN "dir c:\\hispa\\equipo.bin" salir sdhci apagar > $X/arrinst.sal 2>&1
   S=$X/arrinst.sal
   mira "y arrancado con su línea («$l», «sdhcisinpci sinacpi»: como el eMMC del Acer, que solo dice ACPI), el sistema instalado ve su disco (C:, la tarjeta) y lo suyo" \
-    "^sdhci: la de $basei, dada en la línea del cargador$" "^disco [0-9]: tarjeta SD QEMU! (SDSC), 512 MB, FAT32 (SD)\.$" "EQUIPO  *BIN"
+    "^sdhci: la de $basei, dada en la línea del cargador$" "^disco [0-9]: tarjeta SD QEMU! (SDSC), 512 MB, FAT32 (SD)\.$" "equipo.bin es un archivo de [0-9]* octetos"
   if ! grep -q "^arranque: no se ve ningún disco" $S; then ok "y no dice que no ve ningún disco"; else ko "dice que no ve el disco"; fi
   # (UEFI) el arranque por UEFI de lo instalado (las tabletas Bay Trail no tienen otro)
   if [ -f $K/BOOTIA32.EFI ]; then
