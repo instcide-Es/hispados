@@ -171,13 +171,13 @@ MODULOS=$X/ACPI.BIN ARRANQUE="registro pci=cero" QEMU_MAS="-device qemu-xhci,id=
 S=$X/q3.sal
 mira "QEMU con las zonas del xHCI (64 bits) y del EHCI (32) sin poner («pci=cero»): pci_memoria les da dirección debajo de los 4 GB, lo apunta (con lo que decía el registro), y van los teclados y el ratón" \
   "^pci: la zona del 00:0.\.0 (registro 10h: 0000000[04]h, alta 0h) estaba sin poner: puesta en [0-9A-F]*h ([0-9]* K); puestas, 2$" \
-  "^usb: controladora xHCI 1B36:000D" "^usb: controladora EHCI 8086:24CD" "^usb: 2 teclados, 1 ratones, 0 memorias\.$"
+  "^usb: controladora xHCI 1B36:000D" "^usb: controladora EHCI 8086:24CD" "^usb: 2 teclados, 1 ratón, 0 memorias\.$"
 if ! grep -q "excepción\|\*\*\*\|no se ha podido\|no se le ha podido" $S; then ok "sin una excepción ni una zona sin poner"; else ko "hay quejas: $(grep -m2 'excepción\|\*\*\*\|no se ha podido\|no se le ha podido' $S)"; fi
 MODULOS=$X/ACPI.BIN ARRANQUE="registro pci=arriba" QEMU_MAS="-device qemu-xhci,id=u -device usb-kbd,bus=u.0 -device usb-mouse,bus=u.0" \
   $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" > $X/q4.sal 2>&1
 S=$X/q4.sal
 mira "QEMU por la BIOS con la zona del xHCI por encima de los 4 GB («pci=arriba»): la mueve debajo y va el USB" \
-  "^pci: la zona de memoria del 00:0.\.0 estaba por encima de los 4 GB (1[0-9A-F]*h): movida a [0-9A-F]*h (16 K); movidas, 1$" "^usb: 1 teclados, 1 ratones, 0 memorias\.$"
+  "^pci: la zona de memoria del 00:0.\.0 estaba por encima de los 4 GB (1[0-9A-F]*h): movida a [0-9A-F]*h (16 K); movidas, 1$" "^usb: 1 teclado, 1 ratón, 0 memorias\.$"
 MODULOS=$X/ACPI.BIN ARRANQUE="registro" QEMU_MAS="-acpitable file=$X/i2cnull.aml" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" > $X/q5.sal 2>&1
 S=$X/q5.sal
 mira "QEMU con la SSDT como la del ThinkPad E14 («NULL»): ACPI.BIN da la controladora del padre (00:15.0) y el núcleo dice que no está en marcha" \

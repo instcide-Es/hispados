@@ -206,10 +206,7 @@ módulo Sdacpi
         ; en la unidad del sistema (o, si no es FAT, en la X: de la memoria USB)
         u := del_sistema
         si u = NINGUNA o unidades[u].clase <> U_FAT entonces u := por_letra('X') fin
-        si u = NINGUNA o unidades[u].clase <> U_FAT entonces
-            apunta0("sdhci: \\SDHCI.TXT: no hay unidad FAT en la que buscarlo (ni la del sistema ni X:)\n")
-            devolver 0
-        fin
+        si u = NINGUNA o unidades[u].clase <> U_FAT entonces devolver 0 fin     ; (sin disco: nada que decir)
         m := abrir_archivo(u, "\\SDHCI.TXT", PARA_LEER)
         si m >= PRIMER_ERROR entonces
             apunta1("sdhci: \\SDHCI.TXT no está en %c: (lo aprende un arranque con ACPI.BIN)\n", unidades[u].letra)

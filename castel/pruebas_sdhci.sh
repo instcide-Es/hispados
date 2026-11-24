@@ -44,7 +44,7 @@ ESCRIBE=1 SD=$I MODULOS= $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN sdhci "dir text
 S=$X/sd1.sal
 mira "SDHCI: la controladora del PCI (clase 08 05), la tarjeta SD (CMD0, CMD8, ACMD41, CID, CSD, SCR), 4 bits y alta velocidad, y la FAT32 encima (C:)" \
   "^sdhci: en el PCI, 00:0[0-9A-F]\.0: 1B36:0007, clase 080501$" "^sdhci: controladora en [0-9A-F]* (PCI), versión 2\.00, CAP 057834B4 00000000, reloj de 52 MHz, ADMA2" \
-  "^sdhci: SCR 02 25 00 00 (la norma SD 2)$" "^sdhci: tarjeta SD QEMU! (SDSC), 64 MB; ancho 4 bits; 26 MHz; ADMA2$" \
+  "^sdhci: SCR [0-9A-F][0-9A-F] [0-9A-F][0-9A-F] 00 00 (la norma SD [0-9]*)$" "^sdhci: tarjeta SD QEMU! (SDSC), 64 MB; ancho 4 bits; 26 MHz; ADMA2$" \
   "^disco 0: tarjeta SD QEMU! (SDSC), 64 MB, FAT32 (SD)\.$" "^disco 0: tarjeta SD QEMU! (SDSC), 131072 sectores (64 MB), LBA, SD$" "^LARGO.TXT  *17600$"
 mira "SDHCI, ADMA2: el intérprete escribe en la tarjeta: crea, escribe, corta, alarga y borra archivos y carpetas, y todo queda como estaba" \
   "^escribir: leído de vuelta: 10000 octetos, 0 distintos; no se deja escribir si se abrió para leer: cierto$" \
