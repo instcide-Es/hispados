@@ -747,6 +747,11 @@ módulo Semilla
         si unidad_en_memoria() entonces
             imprimir1("sin disco: los %u archivos que ha traído el cargador hacen de unidad M: (en memoria, de solo lectura).\n", módulos())
         fin
+        ; (0.8.10, el Acer One 10 instalado en el eMMC) arrancado de un disco
+        ; que luego no se ve: lo más fácil es un eMMC o una SD de «modo ACPI»
+        si unidad_en_memoria() y arrancado_por_uefi() y buscar(línea_del_cargador(), "sindisco") = nulo entonces
+            escribir("arranque: no se ve ningún disco. Si el sistema está en el eMMC o en una tarjeta SD de una tableta (Bay Trail), el núcleo solo los ve por ACPI: arranque una vez con ACPI, o desde la memoria USB con \\SDHCI.TXT, o ponga «sdhci=...» en la línea del cargador (la dice \\SDHCI.TXT).\n")
+        fin
         n := 0
         para u desde 0 hasta MAX_UNIDADES - 1 hacer
             si unidades[u].hay entonces n := n + 1 fin

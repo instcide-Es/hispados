@@ -168,6 +168,13 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
   python3 -I $AQUI/ccastel.py $AQUI/nucleo32/uinstala.cas -o $X/x.asm > /dev/null && nasm -f bin $X/x.asm -o $K/INSTALAR.BIN
   I=$X/inst.img; rm -f $I; truncate -s 512M $I
   truncate -s 300M $X/sata.img
+  # (0.8.10, el Acer One 10 instalado en el eMMC: el sistema no veía su
+  # disco) lo aprendido, \SDHCI.TXT, en el medio de instalación: dónde pone
+  # SeaBIOS la controladora con estos mismos aparatos
+  SD=$I SATA=$X/sata.img MODULOS= ARRANQUE=sinacpi $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN sdhci apagar > $X/dondei.sal 2>&1
+  basei=$(sed -n 's/^sdhci: controladora en \([0-9A-F]*\) (PCI).*/\1/p' $X/dondei.sal | head -1)
+  printf '; Hispa-Pentium: las controladoras SD/eMMC que ha dicho ACPI en este equipo (sdacpi.cas)\r\nequipo=12378086 11001AF4\r\n%s 46 sd\r\n' "${basei:-FEBF1000}" > $K/SDHCI.TXT
+  INST=$INST,$K/SDHCI.TXT
   CAPTURAS=$X ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS=$INST ARRANQUE="instalar unidad=M" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 1" \
     ":tecla ret" ":texto s1" ":tecla ret" ":texto s2" ":tecla ret" ":pausa 6" ":texto s3" ":tecla ret" > $X/inst.sal 2>&1
   S=$X/inst.sal
@@ -181,6 +188,20 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     && cmp -s <(mcopy -n -i $X/vol.img ::HISPA/ORDENES.BIN - 2> /dev/null) $K/ORDENES.BIN && cmp -s <(head -c 1M $X/sata.img) <(head -c 1M /dev/zero); then
     ok "INSTALAR en la tarjeta SD: la FAT32 sana (fsck.fat), el sistema en \\HISPA y GRUB en el MBR; el disco SATA, sin tocar"
   else ko "lo instalado en la tarjeta SD no está bien:"; sed 's/^/        /' $X/fsck.txt | head -6; fi
+  # (0.8.10) \SDHCI.TXT, a la raíz de lo instalado, y la controladora en la
+  # línea del núcleo de GRUB.CFG (« sdhci=...»): sin ACPI ni el PCI
+  # («sdhcisinpci»), el sistema instalado ve su disco con esa línea
+  rm -f $X/cfgi.txt $X/sdhcii.txt; mcopy -n -i $X/vol.img ::HISPA/GRUB.CFG $X/cfgi.txt > /dev/null 2>&1; mcopy -n -i $X/vol.img ::SDHCI.TXT $X/sdhcii.txt > /dev/null 2>&1
+  if grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura sdhci=$basei$" $X/cfgi.txt && grep -q "multiboot /HISPA/NUCLEO.BIN ordenes escritura sdhci=$basei$" $X/cfgi.txt \
+    && grep -q "^$basei 46 sd" $X/sdhcii.txt && ! grep -q "sindisco.*sdhci=" $X/cfgi.txt && grep -q "^instalar: las controladoras SD/eMMC de .SDHCI.TXT, en el GRUB.CFG: sdhci=$basei$" $S; then
+    ok "INSTALAR: \\SDHCI.TXT de la memoria va a la raíz de lo instalado y su controladora, a la línea del núcleo de GRUB.CFG (« sdhci=$basei»)"
+  else ko "INSTALAR no pasa \\SDHCI.TXT a lo instalado:"; grep -n "NUCLEO.BIN" $X/cfgi.txt | sed 's/^/        /' | head -4; fi
+  l=$(sed -n 's/^ *multiboot \/HISPA\/NUCLEO.BIN \(ordenes escritura.*\)$/\1/p' $X/cfgi.txt | head -1)
+  ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS= ARRANQUE="$l sdhcisinpci sinacpi" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN "dir c:\\hispa\\equipo.bin" salir apagar > $X/arrinst.sal 2>&1
+  S=$X/arrinst.sal
+  mira "y arrancado con su línea («$l», «sdhcisinpci sinacpi»: como el eMMC del Acer, que solo dice ACPI), el sistema instalado ve su disco (C:, la tarjeta) y lo suyo" \
+    "^sdhci: la de $basei, dada en la línea del cargador$" "^disco [0-9]: tarjeta SD QEMU! (SDSC), 512 MB, FAT32 (SD)\.$" "EQUIPO  *BIN"
+  if ! grep -q "^arranque: no se ve ningún disco" $S; then ok "y no dice que no ve ningún disco"; else ko "dice que no ve el disco"; fi
   # (UEFI) el arranque por UEFI de lo instalado (las tabletas Bay Trail no tienen otro)
   if [ -f $K/BOOTIA32.EFI ]; then
     rm -f $X/cfg.txt; mcopy -n -i $X/vol.img ::HISPA/GRUB.CFG $X/cfg.txt > /dev/null 2>&1

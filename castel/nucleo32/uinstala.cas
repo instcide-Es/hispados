@@ -103,6 +103,13 @@ módulo Instala
     variable otras_cluster: arreglo [MAX_OTRAS] de nat32
     variable n_otras: nat32
     variable mapa: arreglo [4097] de byte       ; CARPETAS.TXT (0.8.5: eran 1024 octetos y ya mide más)
+    ; (0.8.10, el Acer One 10: instalado en el eMMC, el sistema no veía su
+    ; disco) las controladoras SD/eMMC de «modo ACPI» aprendidas en este
+    ; equipo (\SDHCI.TXT de la memoria): « sdhci=9094F000:e,9094D000» en la
+    ; línea del núcleo del GRUB.CFG, para que el sistema instalado vea su
+    ; disco aunque arranque sin ACPI; y \SDHCI.TXT, también a la raíz
+    variable sdhci_op: arreglo [160] de byte
+    variable sdhci_txt: arreglo [601] de byte
 
     ; ---- la FAT32 que se escribe ----
     variable por_cluster: nat32                 ; sectores por cluster
@@ -1147,16 +1154,28 @@ módulo Instala
             ; núcleo, por multiboot2, y la pantalla del firmware (GOP)
             cfg_más("# (UEFI) arrancado por UEFI (\\EFI\\BOOT): multiboot2 y la pantalla del firmware (GOP)\n")
             cfg_más("if [ \"$grub_platform\" = efi ]; then\n  insmod efi_gop\n  insmod efi_uga\nfi\n")
-            cfg_más("menuentry \"Hispa-Pentium\" {\n  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN escritorio escritura\n  else\n    multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  fi\n  set gfxpayload=$modo\n  boot\n}\n")
-            cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN ordenes escritura\n    set gfxpayload=auto\n  else\n    multiboot /HISPA/NUCLEO.BIN ordenes escritura\n    set gfxpayload=text\n  fi\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium\" {\n  if [ \"$grub_platform\" = efi ]; then\n")
+            cfg_núcleo("    multiboot2", "escritorio escritura")
+            cfg_más("  else\n")
+            cfg_núcleo("    multiboot", "escritorio escritura")
+            cfg_más("  fi\n  set gfxpayload=$modo\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  if [ \"$grub_platform\" = efi ]; then\n")
+            cfg_núcleo("    multiboot2", "ordenes escritura")
+            cfg_más("    set gfxpayload=auto\n  else\n")
+            cfg_núcleo("    multiboot", "ordenes escritura")
+            cfg_más("    set gfxpayload=text\n  fi\n  boot\n}\n")
             cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
             cfg_módulos("    module2")
             cfg_más("    set gfxpayload=auto\n  else\n    multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
             cfg_módulos("    module")
             cfg_más("  fi\n  boot\n}\n")
         sino
-            cfg_más("menuentry \"Hispa-Pentium\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio escritura\n  set gfxpayload=$modo\n  boot\n}\n")
-            cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  multiboot /HISPA/NUCLEO.BIN ordenes escritura\n  set gfxpayload=text\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium\" {\n")
+            cfg_núcleo("  multiboot", "escritorio escritura")
+            cfg_más("  set gfxpayload=$modo\n  boot\n}\n")
+            cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n")
+            cfg_núcleo("  multiboot", "ordenes escritura")
+            cfg_más("  set gfxpayload=text\n  boot\n}\n")
             cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
             cfg_módulos("  module")
             cfg_más("  boot\n}\n")
@@ -1281,9 +1300,57 @@ módulo Instala
         para i desde 1 hasta n_archivos hacer destinos[i - 1] := destino_de(nombres[i - 1]) fin
         dd[0] := n_archivos
         registra("instalar: %u archivos que instalar\n")
+        sdhci_op[0] := 0
+        para i desde 1 hasta n_archivos hacer
+            si iguales(nombres[i - 1], "SDHCI.TXT") entonces lee_sdhci() fin
+        fin
         si no hay_núcleo o no hay_boot o no hay_core o no hay_órdenes o sectores_core = 0 o sectores_core > 2000 entonces
             fallo("Faltan los archivos del sistema que hay que instalar (NUCLEO.BIN,", "ORDENES.BIN, BOOT.IMG y CORE.IMG). Arranque de la memoria USB.")
         fin
+    fin
+
+    ; (0.8.10) \SDHCI.TXT: sus líneas «DIRECCIÓN IRQ sd|emmc», a sdhci_op
+    función lee_sdhci()
+        variable n, i, k, b, c: nat32
+        variable t: arreglo [16] de byte
+        n := lee_entero("SDHCI.TXT", sdhci_txt, 600)
+        sdhci_txt[n] := 0
+        i := 0
+        mientras i < n hacer
+            ; el principio de una línea: ocho cifras hexadecimales y un espacio
+            k := 0
+            b := 0
+            mientras k < 8 y es_hex(sdhci_txt[i + k]) hacer k := k + 1 fin
+            si k = 8 y sdhci_txt[i + 8] = ' ' entonces
+                c := i + 9
+                mientras c < n y sdhci_txt[c] >= '0' y sdhci_txt[c] <= '9' hacer c := c + 1 fin
+                si longitud(sdhci_op) = 0 entonces concatenar(sdhci_op, " sdhci=") sino concatenar(sdhci_op, ",") fin
+                copiar_memoria(dirección(t[0]), dirección(sdhci_txt[i]), 8)
+                t[8] := 0
+                si sdhci_txt[c] = ' ' y sdhci_txt[c + 1] = 'e' entonces concatenar(t, ":e") fin
+                si longitud(sdhci_op) + longitud(t) < 150 entonces concatenar(sdhci_op, t) fin
+            fin
+            ; a la línea siguiente
+            mientras i < n y sdhci_txt[i] <> '\n' hacer i := i + 1 fin
+            i := i + 1
+        fin
+        si sdhci_op[0] <> 0 entonces
+            dd[0] := nat32(dirección(sdhci_op[1]))
+            registra("instalar: las controladoras SD/eMMC de \\SDHCI.TXT, en el GRUB.CFG: %s\n")
+        fin
+    fin
+
+    función es_hex(c: nat32): bool
+        devolver (c >= '0' y c <= '9') o (c >= 'A' y c <= 'F') o (c >= 'a' y c <= 'f')
+    fin
+
+    ; la línea del núcleo de una entrada: «orden /HISPA/NUCLEO.BIN args» y lo de \SDHCI.TXT
+    función cfg_núcleo(orden: puntero a byte, args: puntero a byte)
+        cfg_más(orden)
+        cfg_más(" /HISPA/NUCLEO.BIN ")
+        cfg_más(args)
+        cfg_más(sdhci_op)
+        cfg_más("\n")
     fin
 
     ; lee un archivo corto de la unidad del sistema entero, a p. Da lo leído.
@@ -1421,6 +1488,7 @@ módulo Instala
             pon(10, 12, AZUL, nombres[i - 1])
             copia_archivo(i - 1, destinos[i - 1])
             si iguales(nombres[i - 1], "LEEME.TXT") entonces copia_archivo(i - 1, A_RAÍZ) fin
+            si iguales(nombres[i - 1], "SDHCI.TXT") y destinos[i - 1] <> A_RAÍZ entonces copia_archivo(i - 1, A_RAÍZ) fin    ; (0.8.10)
         fin
         letras_en(10, 12, AZUL, ' ', 60)
         haz_cfg()

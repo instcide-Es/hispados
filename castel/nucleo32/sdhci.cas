@@ -855,6 +855,7 @@ módulo Sdhci
     público función identificar(): nat32
         variable a, n, id, ranuras, primero, k, b, listas, pm: nat32
         variable p: puntero a byte
+        variable em: bool
         informe_largo := 0
         informe[0] := 0
         listas := 0
@@ -909,9 +910,16 @@ módulo Sdhci
                     b := (b << 4) ob valor_hex(p[0])
                     p := p + 1
                 fin
+                ; (0.8.10) «:e» detrás: es un eMMC (se prueba antes como eMMC; lo
+                ; pone INSTALAR en el GRUB.CFG con lo de \SDHCI.TXT)
+                em := falso
+                si p[0] = ':' y (p[1] = 'e' o p[1] = 'E') entonces
+                    em := cierto
+                    p := p + 2
+                fin
                 si b <> 0 entonces
                     di("sdhci: la de %08X, dada en la línea del cargador\n", b, 0, 0, 0, 0)
-                    si apunta_ranura(b, 2, NO_HAY_PCI, 0, falso) <> 0xFFFFFFFF entonces listas := listas + 1 fin
+                    si apunta_ranura(b, 2, NO_HAY_PCI, 0, em) <> 0xFFFFFFFF entonces listas := listas + 1 fin
                 fin
                 si p[0] <> ',' entonces romper fin
                 p := p + 1

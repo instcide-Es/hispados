@@ -2017,7 +2017,7 @@ ESCRIBE=1 MODULOS= MAQUINA=pc,i8042=off ARRANQUE="ordenes escritura" QEMU_MAS="-
   $AQUI/nucleo32/probar.sh "" "copy textos\\largo.txt copia.txt" "echo El pingüino de la señora > a.txt" "type a.txt" prueba :espera salir disco apagar > $N/comp.sal 2>&1
 S=$N/comp.sal
 mira "un EHCI con dos UHCI compañeras: lo que no es de alta velocidad (el teclado y el ratón) se cede a ellas y se enumera allí; la memoria, por el EHCI" \
-  "^usb: controladora EHCI 8086:293A, 6 puertos (2 cedidos a las compañeras: aparatos de USB 1.x)$" "^usb: controladora UHCI 8086:2934, 2 puertos$" \
+  "^usb: controladora EHCI 8086:293A, 6 puertos (2 cedidos a las compañeras: aparatos de USB 1.x)\(; traspaso de la BIOS.*\)\?$" "^usb: controladora UHCI 8086:2934, 2 puertos$" \
   "velocidad alta, en el puerto 2 (EHCI); almacenamiento$" "velocidad plena, en el puerto 1 (UHCI); teclado$" "velocidad plena, en el puerto 1 (UHCI); ratón$" \
   "^usb: 1 teclado, 1 ratón, 1 memoria\.$"
 mira "UHCI: el teclado USB (se teclea por él, sin teclado PS/2), con sus letras" "^X:.>echo El pingüino de la señora > a.txt$" "^El pingüino de la señora$" \
