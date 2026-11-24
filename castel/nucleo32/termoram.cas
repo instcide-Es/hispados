@@ -1,0 +1,1038 @@
+; =============================================================================
+;  termoram.cas - (TERMO, RAM) lo que el núcleo de Hispa-Pentium le da al
+;  Termómetro (TERMO.BIN /RAM, nucleo32/termo/ram.c) para probar la memoria
+;  RAM entera, como memtest86+ pero escrito aquí (ni una línea suya).
+;
+;  El núcleo solo ve (y usa) la memoria de abajo, hasta Marcos.límite (1 GB
+;  como mucho: la identidad de paginas.cas). De ahí, el Termómetro prueba lo
+;  que le dan con la llamada 17 (sus propias páginas). Lo de encima (de 1 GB
+;  a lo que tenga el equipo, también por encima de los 4 GB) el núcleo no lo
+;  toca nunca: se le deja ver al Termómetro en una «ventana» de su espacio de
+;  direcciones (VENTANA, 768 MB) con páginas de 4 MB (PSE; por encima de los
+;  4 GB, PSE-36: la dirección física hasta 40 bits, como la pantalla alta de
+;  video.cas), y se va moviendo. Solo lo que el mapa de memoria (E820 o el de
+;  UEFI) dice LIBRE, entero, por encima de límite y sin nada del cargador.
+;  Para meter calor (y ver los fallos del controlador de memoria o de la
+;  temperatura) los demás procesadores prueban a la vez, cada uno su trozo:
+;  se les despierta (INIT, SIPI, SIPI) en un trampolín propio de dos páginas
+;  de la memoria baja (como el de la carga de termo.cas, pero en otras
+;  páginas; lo que había se guarda y se repone), pasan al modo protegido con
+;  la memoria plana, encienden la paginación con el directorio del núcleo y
+;  esperan trabajo. Cada trabajo, con el directorio del Termómetro (que está
+;  dentro de la llamada esperando, así que no se puede soltar mientras) y,
+;  al acabar, otra vez con el del núcleo. Nunca tocan nada del núcleo; con
+;  las interrupciones cerradas; cualquier excepción: «hlt».
+;
+;  La llamada 226 (usuario.cas), EBX:
+;   0  lo que hay: a ECX, 4096 octetos (Info_ram, abajo) -> 1
+;   1  la ventana: ECX la primera página de 4 MB (la dirección física >> 22),
+;      EDX cuántas (hasta VENTANA_PÁGINAS) -> cuántas se han puesto, desde
+;      VENTANA (las que no valen, no: se para en la primera que no vale)
+;   2  quitar la ventana -> 1
+;   3  la dirección física de una virtual del que llama (ECX), a EDX (8
+;      octetos: lo bajo y lo alto) -> 1, o 0 si no está
+;   4  el SMBIOS: a ECX, hasta EDX octetos: 32 del punto de entrada y luego
+;      la tabla -> los octetos puestos (0: no hay SMBIOS)
+;   5  un trabajo en los demás procesadores: ECX un Trabajo_ram (abajo), en
+;      la memoria del que llama; vuelve al acabarlo (o a los 60 s) -> cuántos
+;      procesadores han trabajado; 0 si no hay otros (Trabajo_ram.motivo)
+;   6  se acabó: los demás procesadores, dormidos otra vez (INIT) y la
+;      memoria baja como estaba; la ventana, quitada -> 1
+;   7  la línea del cargador, a ECX (hasta EDX octetos, sin el 0) -> su largo
+;  Una sola tarea a la vez (la primera que pide la 1 o la 5, hasta la 6 o
+;  hasta que se acaba); las demás reciben NO_VALE.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Termoram
+
+    importar Cpu, Tareas, Paginas, Marcos, Mem32, Multiboot, Formato, Termo
+
+    constante NO_VALE = 0xFFFFFFF9              ; (el de usuario.cas)
+    público constante VENTANA = 0x80000000      ; donde se ve la memoria alta (en el espacio del Termómetro)
+    constante VENTANA_PÁGINAS = 192             ; 768 MB, de 4 MB en 4 MB
+    constante PS = 0x80                         ; la entrada del directorio es una página de 4 MB
+    constante AP_MAX = 16
+    constante FICHA = 128                       ; octetos de la ficha de cada procesador
+    constante MAX_REG = 128
+
+    ; lo que da la 0 (en nat32): versión, límite, marcos libres, marcos
+    ; totales, banderas (1 PSE, 2 PSE-36, 4 PAE, 8 por UEFI), los bits de la
+    ; dirección física, la ventana, sus páginas, cuántas regiones, cuántos
+    ; procesadores contestaron la última vez, por qué no (motivo), 5 libres;
+    ; y desde el octeto 64, las regiones del mapa: base (baja, alta), largo
+    ; (bajo, alto), clase, 0
+    público tipo Trabajo_ram = estructura
+        orden: nat32                            ; 1 llenar con «patrón»; 2 comprobar «patrón» y poner su contrario; 3 comprobar el contrario;
+                                                ; 4 llenar al azar (desde «semilla»); 5 comprobar el azar y poner su contrario; 6 comprobar el contrario del azar;
+                                                ; 7 cada palabra, su dirección; 8 comprobar la dirección
+        patrón, semilla: nat32
+        inicio, largo: nat32                    ; (en el espacio del que llama; múltiplos de 64)
+        errores: nat32                          ; (vuelta) los que han salido, en todos
+        procesadores: nat32                     ; (vuelta) cuántos han trabajado
+        motivo: nat32                           ; (vuelta) 0; 1 sin APIC, 2 APIC apagado, 3 sin ver el APIC, 4 sin memoria baja, 5 el trampolín no cabe, 6 nadie contesta, 7 la carga de termo.cas está en marcha, 8 alguno no ha acabado a tiempo
+        guardados: nat32                        ; (vuelta) cuántos de los de abajo valen
+        sin_acabar: nat32                       ; (vuelta) cuántos procesadores no han acabado a tiempo
+        reservado: arreglo [6] de nat32
+        err: arreglo [48] de nat32              ; (vuelta) hasta 16: la dirección virtual, lo esperado y lo leído
+    fin
+
+    variable dueño, dueño_cr3: nat32            ; quién tiene la ventana y los procesadores
+    variable bandera_pse_hecha: bool
+    ; el SMBIOS, ya buscado
+    variable sm_buscado: bool
+    variable sm_ep, sm_tabla, sm_largo, sm_ep_largo: nat32
+
+    ; ---- los otros procesadores ----
+    variable rp_base, rp_activos, rp_motivo, rp_lapic: nat32
+    variable rp_x2: bool
+    variable rp_guardado: arreglo [8192] de byte
+    ; lo que leen los procesadores (en la memoria del núcleo: la ven con su
+    ; directorio y con el del Termómetro). ram_orden 1: esperar trabajo; 0: parar
+    variable ram_orden, ram_ronda, ram_op, ram_patrón, ram_cr3, ram_dir: nat32
+    variable ram_fichas: arreglo [2048] de byte  ; 16 x 128: +0 APIC, +4 estado (1 espera, 2 parado, 3 trabajando), +8 la ronda hecha,
+                                                ; +12 inicio, +16 largo, +20 errores, +24 guardados, +28 semilla, +32 8 x (dirección, esperado, leído)
+    variable r_cpu: arreglo [4] de nat32
+
+    función cpuid(hoja: nat32)
+        ensamblador
+            push ebx
+            mov eax, {hoja}
+            xor ecx, ecx
+            db 0x0F, 0xA2               ; cpuid
+            mov {r_cpu}, eax
+            mov {r_cpu+4}, ebx
+            mov {r_cpu+8}, ecx
+            mov {r_cpu+12}, edx
+            pop ebx
+        fin
+    fin
+
+    ; 1 PSE, 2 PSE-36, 4 PAE
+    función banderas_cpu(): nat32
+        variable b: nat32
+        cpuid(1)
+        b := 0
+        si r_cpu[3] yb 0x8 <> 0 entonces b := b ob 1 fin
+        si r_cpu[3] yb 0x20000 <> 0 entonces b := b ob 2 fin
+        si r_cpu[3] yb 0x40 <> 0 entonces b := b ob 4 fin
+        devolver b
+    fin
+
+    ; los bits de la dirección física (36 si no lo dice; 40 como mucho: PSE-36)
+    función bits_físicos(): nat32
+        variable n: nat32
+        cpuid(0x80000000)
+        n := 36
+        si r_cpu[0] >= 0x80000008 entonces
+            cpuid(0x80000008)
+            n := r_cpu[0] yb 0xFF
+            si n < 32 entonces n := 36 fin
+        fin
+        si n > 40 entonces n := 40 fin
+        devolver n
+    fin
+
+    ; ¿sigue viva la tarea que tenía la ventana?
+    función dueño_vivo(): bool
+        variable t: puntero a Tarea
+        si dueño = 0 entonces devolver falso fin
+        t := tarea_de(dueño)
+        si t = nulo entonces devolver falso fin
+        devolver t.cr3 = dueño_cr3
+    fin
+
+    ; la ventana y los procesadores, para el que llama (falso si los tiene otro)
+    función toma(): bool
+        si dueño = actual.id y dueño_cr3 = actual.cr3 entonces devolver cierto fin
+        si dueño_vivo() entonces devolver falso fin
+        si rp_base <> 0 entonces duerme_ap() fin       ; (los dejó uno que ya no está)
+        dueño := actual.id
+        dueño_cr3 := actual.cr3
+        devolver cierto
+    fin
+
+    ; [a, a + n) se solapa con [b, b + m)? (de 32 bits; n, m > 0)
+    función pisa(a: nat32, n: nat32, b: nat32, m: nat32): bool
+        si n = 0 o m = 0 entonces devolver falso fin
+        devolver a < b + m y b < a + n
+    fin
+
+    ; ¿la página de 4 MB número p (la dirección física p << 22) se puede dar?
+    ; Entera dentro de una región LIBRE, por encima de lo que ve el núcleo, al
+    ; alcance de PSE-36 y sin nada del cargador
+    ; a <= b, de 64 bits (alto:bajo)
+    función menor_igual(ah: nat32, al: nat32, bh: nat32, bl: nat32): bool
+        devolver ah < bh o (ah = bh y al <= bl)
+    fin
+
+    ; ¿la página de 4 MB número p (la dirección física p << 22) se puede dar?
+    ; Entera dentro de una región LIBRE, por encima de lo que ve el núcleo, al
+    ; alcance de PSE-36 y sin nada del cargador
+    función página_vale(p: nat32, bits: nat32, fis: nat32): bool
+        variable i, n, lo, hi, lo2, hi2, fl, fh: nat32
+        variable r: puntero a Región
+        variable dentro: bool
+        lo := p << 22
+        hi := p >> 10
+        lo2 := lo + 0x400000
+        hi2 := hi
+        si lo2 = 0 entonces hi2 := hi + 1 fin
+        si bits yb 1 = 0 entonces devolver falso fin
+        si hi <> 0 y bits yb 2 = 0 entonces devolver falso fin
+        si hi2 > (nat32(1) << (fis - 32)) o (hi2 = (nat32(1) << (fis - 32)) y lo2 <> 0) entonces devolver falso fin
+        si hi = 0 y lo < Marcos.límite entonces devolver falso fin
+        n := regiones()
+        dentro := falso
+        si n = 0 entonces devolver falso fin
+        para i desde 0 hasta n - 1 hacer
+            r := región(i)
+            si r <> nulo y r.clase = Multiboot.LIBRE entonces
+                ; el final de la región (base + largo, de 64 bits)
+                fl := r.base + r.largo
+                fh := r.base_alta + r.largo_alto
+                si fl < r.base entonces fh := fh + 1 fin
+                si menor_igual(r.base_alta, r.base, hi, lo) y menor_igual(hi2, lo2, fh, fl) entonces dentro := cierto fin
+            fin
+        fin
+        si no dentro entonces devolver falso fin
+        si hi <> 0 entonces devolver cierto fin
+        ; nada de lo del cargador (está por debajo de los 4 GB)
+        si pisa(lo, 0x400000, dirección_info(), largo_info()) o pisa(lo, 0x400000, dirección_mapa(), largo_mapa()) entonces devolver falso fin
+        si módulos() > 0 entonces
+            si pisa(lo, 0x400000, dirección_módulos(), 16 * módulos()) entonces devolver falso fin
+            para i desde 0 hasta módulos() - 1 hacer
+                si pisa(lo, 0x400000, módulo_inicio(i), módulo_final(i) - módulo_inicio(i)) entonces devolver falso fin
+            fin
+        fin
+        devolver cierto
+    fin
+
+    función pon_pse()
+        si bandera_pse_hecha entonces devolver fin
+        ensamblador
+            mov eax, cr4
+            or eax, 0x10                        ; PSE: las páginas de 4 MB
+            mov cr4, eax
+        fin
+        bandera_pse_hecha := cierto
+    fin
+
+    ; quita la ventana del directorio d (solo lo que es suyo: páginas de 4 MB ajenas)
+    función quita_ventana(d: nat32)
+        variable de: puntero a nat32
+        variable i: nat32
+        de := puntero(d)
+        para i desde 0 hasta VENTANA_PÁGINAS - 1 hacer
+            si de[(VENTANA >> 22) + i] yb (PS ob AJENO) = PS ob AJENO entonces de[(VENTANA >> 22) + i] := 0 fin
+        fin
+        si leer_cr3() = d entonces poner_cr3(d) fin
+    fin
+
+    ; la 1: n páginas de 4 MB desde la física p << 22
+    función pon_ventana(p: nat32, n: nat32): nat32
+        variable de: puntero a nat32
+        variable i, bits, fis, q: nat32
+        si n > VENTANA_PÁGINAS entonces n := VENTANA_PÁGINAS fin
+        de := puntero(actual.cr3)
+        ; (si la zona ya tiene tablas normales, es del programa: no se pisa)
+        para i desde 0 hasta VENTANA_PÁGINAS - 1 hacer
+            si de[(VENTANA >> 22) + i] yb PRESENTE <> 0 y de[(VENTANA >> 22) + i] yb PS = 0 entonces devolver NO_VALE fin
+        fin
+        quita_ventana(actual.cr3)
+        bits := banderas_cpu()
+        fis := bits_físicos()
+        si bits yb 1 = 0 entonces devolver 0 fin
+        pon_pse()
+        i := 0
+        mientras i < n hacer
+            q := p + i
+            si no página_vale(q, bits, fis) entonces romper fin
+            ; (PS, usuario, escribir, presente, ajena; los bits 32-39 de la dirección, en 13-20)
+            de[(VENTANA >> 22) + i] := (q << 22) ob (((q >> 10) yb 0xFF) << 13) ob PS ob AJENO ob USUARIO ob ESCRIBIR ob PRESENTE
+            i := i + 1
+        fin
+        poner_cr3(leer_cr3())
+        devolver i
+    fin
+
+    ; la 3: la física de una virtual del que llama
+    función física(v: nat32, p: puntero a nat32): nat32
+        variable de, t: puntero a nat32
+        variable e: nat32
+        de := puntero(actual.cr3)
+        e := de[v >> 22]
+        si e yb PRESENTE = 0 entonces devolver 0 fin
+        si e yb PS <> 0 entonces
+            p[0] := (e yb 0xFFC00000) ob (v yb 0x3FFFFF)
+            p[1] := (e >> 13) yb 0xFF
+            devolver 1
+        fin
+        si v < USUARIO_INICIO o v >= USUARIO_FINAL entonces devolver 0 fin
+        t := puntero(e yb 0xFFFFF000)
+        e := t[(v >> 12) yb 1023]
+        si e yb PRESENTE = 0 entonces devolver 0 fin
+        p[0] := (e yb 0xFFFFF000) ob (v yb 0xFFF)
+        p[1] := 0
+        devolver 1
+    fin
+
+    ; ---- el SMBIOS ----
+    ; ¿hay un punto de entrada en la física f (vista en v)? 1 «_SM_», 3 «_SM3_»
+    función es_ep(v: puntero a byte): nat32
+        si v[0] = 0x5F y v[1] = 0x53 y v[2] = 0x4D y v[3] = 0x33 y v[4] = 0x5F entonces devolver 3 fin
+        si v[0] = 0x5F y v[1] = 0x53 y v[2] = 0x4D y v[3] = 0x5F entonces devolver 1 fin
+        devolver 0
+    fin
+
+    ; (UEFI) el punto de entrada, por la tabla de configuración de EFI (como
+    ; smbios_uefi de semilla.cas)
+    función ep_uefi(): nat32
+        variable st, n, ct, salto, i, d3, d2: nat32
+        variable de64: bool
+        variable v, g: puntero a nat32
+        st := tabla_efi(de64)
+        si st = 0 entonces devolver 0 fin
+        v := puntero(mapear_aparato(st, 128))
+        si v = nulo entonces devolver 0 fin
+        si de64 entonces
+            n := v[26]
+            si v[27] <> 0 o v[29] <> 0 entonces devolver 0 fin
+            ct := v[28]
+            salto := 24
+        sino
+            n := v[16]
+            ct := v[17]
+            salto := 20
+        fin
+        si n = 0 o n > 64 o ct = 0 entonces devolver 0 fin
+        g := puntero(mapear_aparato(ct, n * salto))
+        si g = nulo entonces devolver 0 fin
+        d3 := 0
+        d2 := 0
+        para i desde 0 hasta n - 1 hacer
+            v := puntero(nat32(g) + i * salto)
+            si no de64 o v[5] = 0 entonces
+                si v[0] = 0xF2FD1544 y v[1] = 0x4A2C9794 y v[2] = 0xBBE52E99 y v[3] = 0x94E320CF entonces d3 := v[4] fin
+                si v[0] = 0xEB9D2D31 y v[1] = 0x11D32D88 y v[2] = 0x9000169A y v[3] = 0x4DC13F27 entonces d2 := v[4] fin
+            fin
+        fin
+        si d3 <> 0 y d2 <> 0 entonces
+            v := puntero(mapear_aparato(d3, 32))
+            si v <> nulo y v[5] <> 0 entonces devolver d2 fin
+        fin
+        si d3 <> 0 entonces devolver d3 fin
+        devolver d2
+    fin
+
+    función busca_smbios()
+        variable f, ep, k, dir, alto, largo: nat32
+        variable v: puntero a byte
+        variable w: puntero a nat32
+        sm_buscado := cierto
+        ep := 0
+        si arrancado_por_uefi() entonces
+            f := ep_uefi()
+            si f <> 0 entonces
+                v := puntero(mapear_aparato(f, 32))
+                si v <> nulo y es_ep(v) <> 0 entonces ep := nat32(v) fin
+            fin
+        sino
+            f := 0xF0000
+            mientras f < 0x100000 y ep = 0 hacer
+                si es_ep(puntero(f)) = 3 entonces ep := f fin
+                f := f + 16
+            fin
+            f := 0xF0000
+            mientras f < 0x100000 y ep = 0 hacer
+                si es_ep(puntero(f)) = 1 entonces ep := f fin
+                f := f + 16
+            fin
+        fin
+        si ep = 0 entonces devolver fin
+        v := puntero(ep)
+        k := es_ep(v)
+        si k = 3 entonces
+            w := puntero(ep + 0x0C)
+            largo := w[0]
+            w := puntero(ep + 0x10)
+            dir := w[0]
+            alto := w[1]
+            sm_ep_largo := v[6]
+        sino
+            largo := nat32(v[0x16]) ob (nat32(v[0x17]) << 8)
+            w := puntero(ep + 0x18)
+            dir := w[0]
+            alto := 0
+            sm_ep_largo := v[5]
+        fin
+        si alto <> 0 o largo = 0 o dir = 0 entonces devolver fin
+        si largo > 0x40000 entonces largo := 0x40000 fin
+        si sm_ep_largo > 32 o sm_ep_largo < 16 entonces sm_ep_largo := 32 fin
+        sm_ep := ep
+        si dir + largo <= Marcos.límite y dir + largo > dir entonces
+            sm_tabla := dir                         ; (en la identidad)
+        sino
+            sm_tabla := mapear_aparato(dir, largo)
+        fin
+        si sm_tabla <> 0 entonces sm_largo := largo fin
+    fin
+
+    ; ---- los otros procesadores ----
+    ; esperar n microsegundos (de 10 ms en 10 ms, por los tics; con tope)
+    función espera_us(n: nat32)
+        variable t0, ticks, i: nat32
+        ticks := (n + 9999) div 10000 + 1
+        t0 := tics
+        i := 0
+        mientras tics - t0 < ticks y i < 200000000 hacer
+            i := i + 1
+        fin
+    fin
+
+    función wrmsr(m: nat32, lo: nat32, hi: nat32)
+        ensamblador
+            mov ecx, {m}
+            mov eax, {lo}
+            mov edx, {hi}
+            db 0x0F, 0x30               ; wrmsr
+        fin
+    fin
+
+    función ipi_todos(v: nat32)
+        variable p: puntero a nat32
+        variable n: nat32
+        si rp_x2 entonces
+            wrmsr(0x830, v, 0)
+            devolver
+        fin
+        p := puntero(rp_lapic + 0x310)
+        p[0] := 0
+        p := puntero(rp_lapic + 0x300)
+        p[0] := v
+        n := 0
+        mientras p[0] yb 0x1000 <> 0 y n < 100000 hacer
+            n := n + 1
+        fin
+    fin
+
+    función solapa(b: nat32, a: nat32, n: nat32): bool
+        si a = 0 entonces devolver falso fin
+        devolver a < b + 0x2000 y a + n > b
+    fin
+
+    ; dos páginas libres por debajo de 512 K (las de termo.cas van desde
+    ; 8F000h hacia abajo: aquí, desde 7E000h), sin nada del cargador
+    función elige_páginas(): nat32
+        variable b, i, k, n: nat32
+        variable r: puntero a Región
+        variable dentro: bool
+        n := regiones()
+        si n = 0 entonces devolver 0 fin
+        b := 0x7E000
+        mientras b >= 0x2000 hacer
+            dentro := falso
+            para i desde 0 hasta n - 1 hacer
+                r := región(i)
+                si r <> nulo y r.clase = Multiboot.LIBRE y r.base_alta = 0 y r.base <= b y r.base + r.largo >= b + 0x2000 entonces dentro := cierto fin
+            fin
+            si dentro y (solapa(b, dirección_info(), 0x100) o solapa(b, dirección_mapa(), largo_mapa())) entonces dentro := falso fin
+            si dentro y (solapa(b, nat32(línea_del_cargador()), 0x400) o solapa(b, dirección_módulos(), módulos() * 16)) entonces dentro := falso fin
+            si dentro entonces
+                k := 0
+                mientras k < módulos() y no solapa(b, nat32(módulo_texto(k)), 0x100) hacer
+                    k := k + 1
+                fin
+                si k = módulos() entonces devolver b fin
+            fin
+            b := b - 0x1000
+        fin
+        devolver 0
+    fin
+
+    función descriptor(p: puntero a nat32, base: nat32, clase: nat32)
+        p[0] := 0x0000FFFF ob ((base yb 0xFFFF) << 16)
+        p[1] := ((base >> 16) yb 0xFF) ob (clase << 8) ob 0x00CF0000 ob (base yb 0xFF000000)
+    fin
+
+    ; el código: el trampolín (que se copia a la memoria baja: 16 bits y el
+    ; paso a 32 con la base del trampolín) y lo que corre luego con la memoria
+    ; plana (aquí, en el núcleo). Da dónde empieza y acaba el trampolín, su
+    ; «hlt» y la entrada plana
+    función código(ref ini: nat32, ref fin_: nat32, ref alto: nat32, ref plano: nat32)
+        variable a, b, c, d: nat32
+        ensamblador
+            lea eax, [ram_ap_inicio]
+            mov {a}, eax
+            lea eax, [ram_ap_fin]
+            mov {b}, eax
+            lea eax, [ram_ap_alto]
+            mov {c}, eax
+            lea eax, [ram_ap_plano]
+            mov {d}, eax
+            jmp ram_ap_sigue
+        ram_ap_inicio:
+            ; (16 bits, a mano, lo mismo que termo.cas) cli; mov ax, cs;
+            ; mov ds, ax; o32 lgdt [0x420]; mov eax, cr0; or al, 1;
+            ; mov cr0, eax; jmp dword 0x08:1Bh
+            db 0xFA, 0x8C, 0xC8, 0x8E, 0xD8, 0x66, 0x0F, 0x01, 0x16, 0x20, 0x04
+            db 0x0F, 0x20, 0xC0, 0x0C, 0x01, 0x0F, 0x22, 0xC0
+            db 0x66, 0xEA, 0x1B, 0x00, 0x00, 0x00, 0x08, 0x00
+            ; (32 bits, con la base del trampolín en CS y DS)
+            mov ax, 0x10
+            mov ds, ax
+            db 0x0F, 0x01, 0x1D, 0x30, 0x04, 0x00, 0x00     ; lidt [0x430]
+            mov eax, 1
+            db 0xF0, 0x0F, 0xC1, 0x05, 0x44, 0x04, 0x00, 0x00   ; lock xadd [0x444], eax
+            cmp eax, 16
+            jae ram_ap_alto
+            mov edi, eax
+            mov ecx, eax
+            shl ecx, 8
+            add ecx, 0x1100
+            add ecx, [0x450]            ; la pila (plana): la base + 1100h + 256 por cada uno
+            mov ebx, [0x454]            ; la entrada plana
+            mov ax, 0x20
+            mov ss, ax
+            mov esp, ecx
+            mov ds, ax
+            mov es, ax
+            mov fs, ax
+            mov gs, ax
+            push 0x18
+            push ebx
+            db 0xCB                     ; retf: a la entrada plana, con CS 18h
+        ram_ap_alto:
+            cli
+            hlt
+            jmp ram_ap_alto
+        ram_ap_fin:
+
+        ram_ap_plano:
+            ; (memoria plana; EDI, el número de este procesador) la caché
+            ; encendida (tras el INIT, CD y NW están puestos), PSE y la
+            ; paginación con el directorio del núcleo
+            mov eax, cr4
+            or eax, 0x10
+            mov cr4, eax
+            mov eax, {ram_dir}
+            mov cr3, eax
+            mov eax, cr0
+            and eax, 0x9FFFFFFF
+            or eax, 0x80000000
+            mov cr0, eax
+            jmp ram_ap_pag
+        ram_ap_pag:
+            cld
+            mov esi, edi
+            shl esi, 7
+            lea eax, {ram_fichas}
+            add esi, eax                ; ESI: la ficha
+            mov eax, 1
+            db 0x0F, 0xA2               ; cpuid: el APIC ID, arriba de EBX
+            shr ebx, 24
+            mov [esi], ebx
+            mov dword [esi+4], 1
+            db 0x0F, 0x31               ; rdtsc
+            mov ebp, edx                ; (la última vez que hubo algo)
+        ram_ap_espera:
+            cmp dword {ram_orden}, 1
+            jne ram_ap_para
+            mov eax, {ram_ronda}
+            cmp eax, [esi+8]
+            jne ram_ap_trabajo
+            db 0xF3, 0x90               ; pause
+            db 0x0F, 0x31
+            sub edx, ebp
+            cmp edx, 8                  ; (unos 34.000 millones de ciclos sin trabajo: se para)
+            jb ram_ap_espera
+            jmp ram_ap_para
+        ram_ap_trabajo:
+            push eax
+            mov dword [esi+4], 3
+            mov eax, {ram_cr3}
+            mov cr3, eax
+            mov edi, [esi+12]
+            mov ecx, [esi+16]
+            shr ecx, 2
+            test ecx, ecx
+            jz ram_ap_hecho
+            mov eax, {ram_op}
+            cmp eax, 1
+            je ram_op1
+            cmp eax, 2
+            je ram_op2
+            cmp eax, 3
+            je ram_op3
+            cmp eax, 4
+            je ram_op4
+            cmp eax, 5
+            je ram_op5
+            cmp eax, 6
+            je ram_op6
+            cmp eax, 7
+            je ram_op7
+            cmp eax, 8
+            je ram_op8
+            jmp ram_ap_hecho
+        ram_op1:                        ; llenar con el patrón
+            mov eax, {ram_patrón}
+            rep stosd
+            jmp ram_ap_hecho
+        ram_op2:                        ; comprobar el patrón y poner su contrario
+            mov edx, {ram_patrón}
+        ram_op2_v:
+            mov eax, [edi]
+            mov ebx, edx
+            cmp eax, ebx
+            je ram_op2_b
+            call ram_ap_error
+        ram_op2_b:
+            not ebx
+            mov [edi], ebx
+            add edi, 4
+            dec ecx
+            jnz ram_op2_v
+            jmp ram_ap_hecho
+        ram_op3:                        ; comprobar el contrario del patrón
+            mov ebx, {ram_patrón}
+            not ebx
+        ram_op3_v:
+            mov eax, [edi]
+            cmp eax, ebx
+            je ram_op3_b
+            call ram_ap_error
+        ram_op3_b:
+            add edi, 4
+            dec ecx
+            jnz ram_op3_v
+            jmp ram_ap_hecho
+        ram_op4:                        ; llenar al azar (congruencial: x * 1664525 + 1013904223)
+            mov edx, [esi+28]
+        ram_op4_v:
+            mov [edi], edx
+            imul edx, edx, 1664525
+            add edx, 1013904223
+            add edi, 4
+            dec ecx
+            jnz ram_op4_v
+            jmp ram_ap_hecho
+        ram_op5:                        ; comprobar el azar y poner su contrario
+            mov edx, [esi+28]
+        ram_op5_v:
+            mov eax, [edi]
+            mov ebx, edx
+            cmp eax, ebx
+            je ram_op5_b
+            call ram_ap_error
+        ram_op5_b:
+            not ebx
+            mov [edi], ebx
+            imul edx, edx, 1664525
+            add edx, 1013904223
+            add edi, 4
+            dec ecx
+            jnz ram_op5_v
+            jmp ram_ap_hecho
+        ram_op6:                        ; comprobar el contrario del azar
+            mov edx, [esi+28]
+        ram_op6_v:
+            mov eax, [edi]
+            mov ebx, edx
+            not ebx
+            cmp eax, ebx
+            je ram_op6_b
+            call ram_ap_error
+        ram_op6_b:
+            imul edx, edx, 1664525
+            add edx, 1013904223
+            add edi, 4
+            dec ecx
+            jnz ram_op6_v
+            jmp ram_ap_hecho
+        ram_op7:                        ; cada palabra, su dirección
+            mov [edi], edi
+            add edi, 4
+            dec ecx
+            jnz ram_op7
+            jmp ram_ap_hecho
+        ram_op8:                        ; comprobar la dirección
+            mov eax, [edi]
+            mov ebx, edi
+            cmp eax, ebx
+            je ram_op8_b
+            call ram_ap_error
+        ram_op8_b:
+            add edi, 4
+            dec ecx
+            jnz ram_op8
+            jmp ram_ap_hecho
+        ram_ap_error:                   ; EAX lo leído, EBX lo esperado, EDI dónde
+            push ecx
+            inc dword [esi+20]
+            mov ecx, [esi+24]
+            cmp ecx, 8
+            jae ram_ap_error_fin
+            inc dword [esi+24]
+            imul ecx, ecx, 12
+            add ecx, esi
+            mov [ecx+32], edi
+            mov [ecx+36], ebx
+            mov [ecx+40], eax
+        ram_ap_error_fin:
+            pop ecx
+            ret
+        ram_ap_hecho:
+            mov eax, {ram_dir}
+            mov cr3, eax
+            pop eax
+            mov dword [esi+4], 1
+            mov [esi+8], eax
+            db 0x0F, 0x31
+            mov ebp, edx
+            jmp ram_ap_espera
+        ram_ap_para:
+            mov eax, {ram_dir}
+            mov cr3, eax
+            mov dword [esi+4], 2
+        ram_ap_parado:
+            cli
+            hlt
+            jmp ram_ap_parado
+        ram_ap_sigue:
+        fin
+        ini := a
+        fin_ := b
+        alto := c
+        plano := d
+    fin
+
+    ; los duerme (INIT) y repone la memoria baja
+    función duerme_ap()
+        variable p: puntero a nat32
+        variable i, n, parados, b, x: nat32
+        x := sin_interrupciones()
+        b := rp_base
+        rp_base := 0
+        reponer(x)
+        si b = 0 entonces devolver fin
+        ram_orden := 0
+        n := 0
+        mientras n < 30 hacer
+            parados := 0
+            para i desde 0 hasta AP_MAX - 1 hacer
+                p := puntero(dirección(ram_fichas) + i * FICHA + 4)
+                si p[0] <> 1 y p[0] <> 3 entonces parados := parados + 1 fin
+            fin
+            si parados = AP_MAX entonces n := 30 sino espera_us(5000) fin
+            n := n + 1
+        fin
+        ipi_todos(0x000C4500)                   ; INIT: esperando otra vez, como los deja la BIOS
+        espera_us(10000)
+        copiar_memoria(puntero(b), puntero(dirección(rp_guardado)), 8192)
+        imprimir1("termoram: los demás procesadores, dormidos otra vez (%u)\n", rp_activos)
+        rp_activos := 0
+    fin
+
+    ; los despierta: cuántos han llegado (0: nadie; rp_motivo dice por qué)
+    función despierta_ap(): nat32
+        variable ini, fin_, alto, plano, b, i, n: nat32
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        si rp_base <> 0 entonces devolver rp_activos fin
+        rp_activos := 0
+        si Termo.ap_base <> 0 entonces
+            rp_motivo := 7                      ; los tiene la carga de termo.cas
+            devolver 0
+        fin
+        cpuid(1)
+        si r_cpu[3] yb 0x200 = 0 o r_cpu[3] yb 0x20 = 0 entonces
+            rp_motivo := 1
+            devolver 0
+        fin
+        si no rdmsr_seguro(0x1B) o msr_lo yb 0x800 = 0 entonces
+            rp_motivo := 2
+            devolver 0
+        fin
+        rp_x2 := msr_lo yb 0x400 <> 0
+        si rp_x2 entonces
+            si no rdmsr_seguro(0x80F) o msr_lo yb 0x100 = 0 entonces
+                rp_motivo := 2
+                devolver 0
+            fin
+        sino
+            si rp_lapic = 0 entonces rp_lapic := mapear_aparato(msr_lo yb 0xFFFFF000, 4096) fin
+            si rp_lapic = 0 entonces
+                rp_motivo := 3
+                devolver 0
+            fin
+            p := puntero(rp_lapic + 0xF0)
+            si p[0] yb 0x100 = 0 entonces
+                rp_motivo := 2
+                devolver 0
+            fin
+        fin
+        b := elige_páginas()
+        si b = 0 entonces
+            rp_motivo := 4
+            devolver 0
+        fin
+        código(ini, fin_, alto, plano)
+        si fin_ - ini > 0x3E0 entonces
+            rp_motivo := 5
+            devolver 0
+        fin
+        copiar_memoria(puntero(dirección(rp_guardado)), puntero(b), 8192)
+        llenar(puntero(b), 8192, 0)
+        copiar_memoria(puntero(b), puntero(ini), fin_ - ini)
+        ; la GDT, en 3E0h-407h (el paso de 16 bits lee el GDTR de 420h, como
+        ; el de termo.cas): nula, 08h el código y 10h los datos con la base
+        ; del trampolín, 18h el código y 20h los datos planos
+        descriptor(puntero(b + 0x3E8), b, 0x9A)         ; 08h
+        descriptor(puntero(b + 0x3F0), b, 0x92)         ; 10h
+        descriptor(puntero(b + 0x3F8), 0, 0x9A)         ; 18h, plano
+        descriptor(puntero(b + 0x400), 0, 0x92)         ; 20h, plano
+        q := puntero(b + 0x420)
+        q[0] := 39
+        q[1] := 0
+        p := puntero(b + 0x422)
+        p[0] := b + 0x3E0
+        q := puntero(b + 0x430)
+        q[0] := 255
+        q[1] := 0
+        p := puntero(b + 0x432)
+        p[0] := b + 0x500
+        para i desde 0 hasta 31 hacer
+            p := puntero(b + 0x500 + i * 8)
+            p[0] := 0x00080000 ob ((alto - ini) yb 0xFFFF)
+            p[1] := 0x00008E00
+        fin
+        p := puntero(b + 0x444)
+        p[0] := 0                               ; cuántos han llegado
+        p := puntero(b + 0x450)
+        p[0] := b
+        p[1] := plano
+        llenar(puntero(dirección(ram_fichas)), AP_MAX * FICHA, 0)
+        ram_dir := directorio_núcleo
+        ram_ronda := 0
+        ram_orden := 1
+        rp_base := b
+        ipi_todos(0x000C4500)
+        espera_us(10000)
+        ipi_todos(0x000C4600 ob (b >> 12))
+        espera_us(300)
+        ipi_todos(0x000C4600 ob (b >> 12))
+        n := 0
+        mientras n < 20 hacer
+            espera_us(10000)
+            n := n + 1
+        fin
+        p := puntero(b + 0x444)
+        rp_activos := p[0]
+        si rp_activos > AP_MAX entonces rp_activos := AP_MAX fin
+        ; (los que han llegado de verdad: los que esperan trabajo)
+        n := 0
+        si rp_activos > 0 entonces              ; (con uno solo, nadie: «hasta 0 - 1» daría la vuelta)
+            para i desde 0 hasta rp_activos - 1 hacer
+                p := puntero(dirección(ram_fichas) + i * FICHA + 4)
+                si p[0] = 1 entonces n := n + 1 fin
+            fin
+        fin
+        si rp_activos = 0 o n = 0 entonces
+            rp_motivo := 6
+            duerme_ap()
+            devolver 0
+        fin
+        rp_activos := n
+        rp_motivo := 0
+        imprimir2("termoram: el trampolín en %xh; esperan trabajo %u procesadores más\n", b, rp_activos)
+        devolver rp_activos
+    fin
+
+    ; ¿están todos esperando (o parados del todo)?
+    función parados_solos(): nat32
+        variable i, k: nat32
+        variable p: puntero a nat32
+        k := 0
+        si rp_activos = 0 entonces devolver 0 fin
+        para i desde 0 hasta rp_activos - 1 hacer
+            p := puntero(dirección(ram_fichas) + i * FICHA + 4)
+            si p[0] = 2 entonces k := k + 1 fin
+        fin
+        devolver k
+    fin
+
+    ; ¿está [v, v + n) entero en la memoria del que llama (sus páginas, o la ventana)?
+    función rango_vale(v: nat32, n: nat32): bool
+        variable de: puntero a nat32
+        variable d: nat32
+        si n = 0 o v + n < v entonces devolver falso fin
+        si v >= VENTANA y v + n <= VENTANA + VENTANA_PÁGINAS * 0x400000 entonces
+            de := puntero(actual.cr3)
+            d := v yb 0xFFC00000
+            mientras d < v + n hacer
+                si de[d >> 22] yb (PS ob AJENO ob USUARIO ob ESCRIBIR ob PRESENTE) <> PS ob AJENO ob USUARIO ob ESCRIBIR ob PRESENTE entonces devolver falso fin
+                d := d + 0x400000
+                si d = 0 entonces devolver falso fin
+            fin
+            devolver cierto
+        fin
+        si v + n > VENTANA entonces devolver falso fin
+        devolver usuario_puede(actual.cr3, v, n, cierto)
+    fin
+
+    ; la 5: un trabajo en los demás procesadores
+    función trabajo(t: puntero a Trabajo_ram): nat32
+        variable i, n, trozo, ini, fin_, k, espera, g, j: nat32
+        variable p, e: puntero a nat32
+        t.errores := 0
+        t.procesadores := 0
+        t.guardados := 0
+        t.sin_acabar := 0
+        t.motivo := 0
+        si t.orden < 1 o t.orden > 8 o t.inicio yb 63 <> 0 o t.largo yb 63 <> 0 entonces devolver NO_VALE fin
+        si no rango_vale(t.inicio, t.largo) entonces devolver NO_VALE fin
+        ; (los que se han parado solos por esperar mucho, otra vez)
+        si rp_base <> 0 y parados_solos() > 0 entonces duerme_ap() fin
+        n := despierta_ap()
+        si n = 0 entonces
+            t.motivo := rp_motivo
+            devolver 0
+        fin
+        trozo := (t.largo div n) yb 0xFFFFFFC0
+        ini := t.inicio
+        para i desde 0 hasta n - 1 hacer
+            p := puntero(dirección(ram_fichas) + i * FICHA)
+            fin_ := ini + trozo
+            si i = n - 1 entonces fin_ := t.inicio + t.largo fin
+            p[3] := ini
+            p[4] := fin_ - ini
+            p[5] := 0
+            p[6] := 0
+            p[7] := t.semilla + (i + 1) * 0x9E3779B9      ; (la semilla de cada trozo: la del azar, distinta)
+            ini := fin_
+        fin
+        ram_op := t.orden
+        ram_patrón := t.patrón
+        ram_cr3 := actual.cr3
+        ram_ronda := ram_ronda + 1                       ; ¡a trabajar!
+        ; esperar, durmiendo (el Termómetro sigue): hasta 60 s
+        espera := 0
+        mientras espera < 60 * HZ hacer
+            k := 0
+            para i desde 0 hasta n - 1 hacer
+                p := puntero(dirección(ram_fichas) + i * FICHA)
+                si p[2] = ram_ronda entonces k := k + 1 fin
+            fin
+            si k = n entonces romper fin
+            dormir(1)
+            espera := espera + 1
+        fin
+        g := 0
+        para i desde 0 hasta n - 1 hacer
+            p := puntero(dirección(ram_fichas) + i * FICHA)
+            si p[2] = ram_ronda entonces
+                t.procesadores := t.procesadores + 1
+            sino
+                t.sin_acabar := t.sin_acabar + 1
+            fin
+            t.errores := t.errores + p[5]
+            j := 0
+            mientras j < p[6] y j < 8 y g < 16 hacer
+                e := puntero(dirección(ram_fichas) + i * FICHA + 32 + j * 12)
+                t.err[g * 3] := e[0]
+                t.err[g * 3 + 1] := e[1]
+                t.err[g * 3 + 2] := e[2]
+                g := g + 1
+                j := j + 1
+            fin
+        fin
+        t.guardados := g
+        si t.sin_acabar > 0 entonces
+            t.motivo := 8
+            imprimir2("termoram: %u procesadores no han acabado el trabajo a tiempo (de %u)\n", t.sin_acabar, n)
+        fin
+        devolver t.procesadores
+    fin
+
+    ; la llamada 226 (usuario.cas)
+    público función atender_ram(a: nat32, b: nat32, c: nat32): nat32
+        variable p: puntero a nat32
+        variable i, n, k: nat32
+        variable r: puntero a Región
+        variable q: puntero a byte
+        según a
+            caso 0:
+                si no usuario_puede(actual.cr3, b, 4096, cierto) entonces devolver NO_VALE fin
+                llenar(puntero(b), 4096, 0)
+                p := puntero(b)
+                p[0] := 1
+                p[1] := Marcos.límite
+                p[2] := marcos_libres()
+                p[3] := marcos_totales()
+                p[4] := banderas_cpu()
+                si arrancado_por_uefi() entonces p[4] := p[4] ob 8 fin
+                p[5] := bits_físicos()
+                p[6] := VENTANA
+                p[7] := VENTANA_PÁGINAS
+                n := regiones()
+                si n > MAX_REG entonces n := MAX_REG fin
+                p[8] := n
+                p[9] := rp_activos
+                p[10] := rp_motivo
+                si n = 0 entonces devolver 1 fin
+                para i desde 0 hasta n - 1 hacer
+                    r := región(i)
+                    p := puntero(b + 64 + i * 24)
+                    p[0] := r.base
+                    p[1] := r.base_alta
+                    p[2] := r.largo
+                    p[3] := r.largo_alto
+                    p[4] := r.clase
+                fin
+                devolver 1
+            caso 1:
+                si no toma() entonces devolver NO_VALE fin
+                devolver pon_ventana(b, c)
+            caso 2:
+                si dueño <> actual.id entonces devolver NO_VALE fin
+                quita_ventana(actual.cr3)
+                devolver 1
+            caso 3:
+                si no usuario_puede(actual.cr3, c, 8, cierto) entonces devolver NO_VALE fin
+                devolver física(b, puntero(c))
+            caso 4:
+                si c < 64 o no usuario_puede(actual.cr3, b, c, cierto) entonces devolver NO_VALE fin
+                si no sm_buscado entonces busca_smbios() fin
+                si sm_ep = 0 o sm_tabla = 0 entonces devolver 0 fin
+                llenar(puntero(b), 32, 0)
+                copiar_memoria(puntero(b), puntero(sm_ep), sm_ep_largo)
+                k := sm_largo
+                si k > c - 32 entonces k := c - 32 fin
+                copiar_memoria(puntero(b + 32), puntero(sm_tabla), k)
+                devolver 32 + k
+            caso 5:
+                si no usuario_puede(actual.cr3, b, tamaño(Trabajo_ram), cierto) entonces devolver NO_VALE fin
+                si no toma() entonces devolver NO_VALE fin
+                devolver trabajo(puntero(b))
+            caso 7:
+                ; (la línea del cargador: «ramcompleta», la prueba completa al abrirse)
+                si c = 0 o no usuario_puede(actual.cr3, b, c, cierto) entonces devolver NO_VALE fin
+                k := 0
+                si línea_del_cargador() <> nulo entonces
+                    q := línea_del_cargador()
+                    mientras k < c y q[k] <> 0 hacer k := k + 1 fin
+                    copiar_memoria(puntero(b), q, k)
+                fin
+                devolver k
+            caso 6:
+                si dueño <> actual.id entonces devolver NO_VALE fin
+                duerme_ap()
+                quita_ventana(actual.cr3)
+                dueño := 0
+                dueño_cr3 := 0
+                devolver 1
+        fin
+        devolver NO_VALE
+    fin
+
+fin Termoram.

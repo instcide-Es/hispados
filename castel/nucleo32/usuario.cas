@@ -161,7 +161,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, I2chid, Termo, Apuntero, Sdacpi, Tdisco
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, I2chid, Termo, Termoram, Apuntero, Sdacpi, Tdisco
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -996,6 +996,8 @@ módulo Usuario
                 devolver atender_termo(n, a, b, c)     ; (TERMO) las temperaturas, solo leer (termo.cas)
             caso 238:
                 devolver atender_tdisco(a, b, c)       ; (TERMO) los discos de dentro: salud y prueba de lectura, solo leer (tdisco.cas)
+            caso 226:
+                devolver atender_ram(a, b, c)          ; (RAM) la prueba de la memoria RAM del Termómetro (termoram.cas)
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
             caso 190..199:

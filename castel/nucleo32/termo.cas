@@ -259,7 +259,8 @@ módulo Termo
     ;    tabla (16 x 32 octetos: el APIC ID, el estado (1 cargando, 2 parado),
     ;    las vueltas, el último 19Ch y cuántas lecturas), +1000h las pilas
     constante AP_MAX = 16
-    variable ap_base, ap_activos, ap_motivo, ap_lapic: nat32
+    público variable ap_base: nat32              ; (RAM) público: termoram.cas no despierta a nadie mientras la carga los tiene
+    variable ap_activos, ap_motivo, ap_lapic: nat32
     variable ap_x2: bool
     variable ap_guardado: arreglo [8192] de byte
 

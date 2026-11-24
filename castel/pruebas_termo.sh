@@ -42,6 +42,14 @@
 #  8. «Rendimiento» (R): las medidas en RENDIMIE.TXT, y que Esc la para.
 # 10. (DISCOS) los discos de dentro: IDE, SATA y NVMe en QEMU, solo leer
 #     (pruebas_termo_disco.sh; y en la 0, disco.c con datos simulados).
+# 11. (RAM) «Memoria RAM» (M; termo/ram.c y termoram.cas): en el anfitrión, los
+#     patrones con un fallo metido (pruebas/ram_prueba.c: un bit pegado, una
+#     celda que es otra, un chip, dispersos, solo con calor) y el SMBIOS; en
+#     QEMU con 512 MB y -smp 4, la rápida con los demás procesadores, BIEN, en
+#     RAM.TXT y en INFORME.TXT; con 3 GB en q35 (1 GB por encima de los 4 GB:
+#     la ventana con PSE-36), con un fallo de mentira («ramsimula»): MAL, el
+#     mismo bit, en menos de 2 min; el apagón a mitad (el aviso al volver);
+#     con un procesador; y Esc, con «Calentar» parado mientras.
 # Necesita ser root (usb.sh), qemu-system-x86_64, socat, mtools y fsck.fat;
 # para la 0, gcc; para la 4, php y openssl; para la 5, sshd (OpenSSH).
 
@@ -51,7 +59,7 @@ termo_qemu() {
   local img=$1 n=$2 seg=$3 cpu=$4 t=0 o w q; shift 4
   rm -f $Y/$n.mon
   # shellcheck disable=SC2086
-  ${TQ_QEMU:-qemu-system-x86_64} $cpu ${TQ_FIRM:-} ${TQ_RED:--nic none} -m 512 -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
+  ${TQ_QEMU:-qemu-system-x86_64} $cpu ${TQ_FIRM:-} ${TQ_RED:--nic none} -m ${TQ_MEM:-512} -display none -monitor unix:$Y/$n.mon,server,nowait -serial file:$Y/$n.sal -no-reboot \
     -acpitable file=$Y/termo.aml ${TQ_ACPI:-} -device qemu-xhci -drive file=$img,format=raw,if=none,id=u${TQ_USB_OPC:-} -device usb-storage,drive=u,bootindex=1 > /dev/null 2>&1 &
   q=$!
   QPID=$q
@@ -387,6 +395,7 @@ if [ -w /dev/kvm ]; then
     "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]"
 fi
 termo_parones
+termo_ram
 termo_qemu $Y/termo.img t6 70 "-cpu Haswell" "44:sendkey 1" "46:sendkey c" "56:$C" "56:o /b 0x71 91"
 mira "con un solo procesador: lo dice y carga solo este" "termo: suceso: la carga, en este procesador solo: los demás no (ningún otro procesador ha contestado"
 mira "(NVIDIA) sin gráficas NVIDIA (QEMU): lo dice, sin colgarse" "termo: suceso: gráficas NVIDIA: no hay gráficas NVIDIA (ninguna en el PCI"
@@ -598,4 +607,59 @@ termo_uefi() {
     termo_qemu $Y/termo.img t15 90 "-cpu Haswell"
   mira "por UEFI con el xHCI por encima de los 4 GB (OVMF con su ventana de 64 bits): el núcleo lo mueve debajo, va el USB y el Termómetro guarda" \
     "pci: la zona de memoria del 00:..\.. estaba por encima de los 4 GB" "unidades: .*X: (disco 0, USB" "termo: prueba de escritura en X:.TERMO: bien"
+}
+
+# (RAM) 10. la prueba de la memoria RAM (termo/ram.c, termoram.cas)
+termo_ram_img() {	# copia de la memoria con estas palabras de más en la línea del cargador ($2: «ramrapida ramsimula»...)
+  cp $Y/termo.img $1
+  mtype -i $1@@1M ::boot/grub/grub.cfg > $Y/ram-grub.cfg
+  if [ -n "$2" ]; then sed "s/ termo\$/ termo $2/" $Y/ram-grub.cfg > $Y/ram-grub2.cfg; else cp $Y/ram-grub.cfg $Y/ram-grub2.cfg; fi
+  mcopy -o -i $1@@1M $Y/ram-grub2.cfg ::boot/grub/grub.cfg
+}
+termo_ram() {
+  local T=$AQUI/nucleo32/termo B=$Y/anf R kvm="-cpu Haswell" seg
+  mkdir -p $B
+  if gcc -O1 -Wall -Wextra -DRA_SIMULA -I$T $T/pruebas/ram_prueba.c $T/ram_alg.c -o $B/ram_prueba 2> $B/gccram.txt && $B/ram_prueba > $B/ram_prueba.txt; then
+    ok "(RAM) en el anfitrión, con fallos metidos: el bit pegado (D5, a 1) lo ven todas las pruebas y se agrupa como un chip; la celda que es otra, las líneas de dirección; un octeto, un chip; dispersos; solo con todos los núcleos; el SMBIOS (sin números de serie) y la ranura por el tipo 20"
+  else ko "(RAM) ram_prueba: $(grep -m 3 'MAL\|error' $B/gccram.txt $B/ram_prueba.txt | tr '\n' ' ')"; fi
+  [ -w /dev/kvm ] && kvm="-enable-kvm -cpu host"
+  # a. 512 MB, 4 procesadores: la rápida, BIEN
+  R=$Y/ram1.img; termo_ram_img $R ""
+  termo_qemu $R ram1 170 "$kvm -smp 4" "46:sendkey m"
+  mira "(RAM) 512 MB, -smp 4: la tecla M, los demás 3 procesadores con su trozo y luego uno; BIEN" \
+    "termo: suceso: EMPIEZA la prueba de la memoria RAM" "termoram: el trampolín en 7e000h; esperan trabajo 3 procesadores más" "con TODOS los núcleos a la vez" \
+    "termoram: los demás procesadores, dormidos otra vez (3)" "termo: suceso: memoria RAM: Hecho: BIEN · ni un fallo en [0-9]* MB probados (de 51[01] MB libres), también con todos los núcleos"
+  if mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | grep -q '^MEMORIA RAM: BIEN' && mtype -i $R@@1M ::TERMO/RAM.TXT | grep -q 'todos los núcleos a la vez (calor): 3 procesadores' \
+     && mtype -i $R@@1M ::TERMO/RAM.TXT | grep -q 'No se prueban [0-9]* MB de abajo' && mtype -i $R@@1M ::TERMO/INFORME.TXT | grep -q '^MEMORIA RAM: BIEN'; then
+    ok "(RAM) RAM.TXT: BIEN, cuánta se prueba y por qué no el resto, los 3 procesadores; y la sección MEMORIA RAM en INFORME.TXT"
+  else ko "(RAM) RAM.TXT / INFORME.TXT: $(mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | head -n 8 | tr '\n' ' ')"; fi
+  # b. 3 GB en q35 (2 GB abajo y 1 GB por encima de los 4 GB) y un fallo de mentira: MAL, el mismo bit
+  R=$Y/ram2.img; termo_ram_img $R "ramrapida ramsimula"
+  TQ_MEM=3G termo_qemu $R ram2 175 "$kvm -smp 4 -M q35"
+  mira "(RAM) 3 GB en q35: la ventana por encima de 1 GB y de los 4 GB (PSE-36); con el fallo de mentira, MAL" \
+    "termo: ram: [0-9]* trozos: propia [0-9]* MB, ventana 20[0-9][0-9] MB" "con TODOS los núcleos a la vez · 4 GB a " "con un núcleo · 4 GB a " \
+    "termo: ram: FALLO en " "termo: suceso: memoria RAM: Hecho: MAL · [0-9]* fallos en 2,[0-9] GB probados (de 3 GB libres)"
+  seg=$(grep -a -o 'Hecho: MAL · .* · [0-9]* s ·' $S | head -n 1 | sed 's/.* · \([0-9]*\) s ·$/\1/')
+  if [ -n "$seg" ] && [ "$seg" -le 115 ] && mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | grep -q '^MEMORIA RAM: MAL' && mtype -i $R@@1M ::TERMO/RAM.TXT | grep -q 'MISMO BIT de datos (el D9 ' \
+     && mtype -i $R@@1M ::TERMO/RAM.TXT | grep -q 'PSE-36' && mtype -i $R@@1M ::TERMO/INFORME.TXT | grep -q 'La memoria RAM ha FALLADO\|^MEMORIA RAM: MAL'; then
+    ok "(RAM) la rápida en $seg s (menos de 2 min): MAL, «el MISMO BIT de datos (el D9)», con PSE-36 por encima de los 4 GB; y en INFORME.TXT"
+  else ko "(RAM) 3 GB: ${seg:-?} s; $(mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | head -n 6 | tr '\n' ' ')"; fi
+  # c. el equipo se apaga a mitad de la prueba: al volver, lo dice
+  R=$Y/ram3.img; termo_ram_img $R "ramrapida"
+  TQ_MEM=3G termo_qemu $R ram3 55 "$kvm -smp 2 -M q35"	# (con 3 GB tarda más de 1 min: a los 55 s está a medias)
+  mcopy -o -i $R@@1M $Y/ram-grub.cfg ::boot/grub/grub.cfg
+  termo_qemu $R ram3b 55 "$kvm -smp 2"
+  mira "(RAM) apagado a mitad de la prueba: al volver, «la prueba de la memoria RAM NO llegó a acabar» y dónde se quedó" \
+    "termo: suceso: AVISO: La última vez, la prueba de la memoria RAM NO llegó a acabar: se quedó en «"
+  # d. un procesador solo: lo dice y prueba con este; e. Esc, y «Calentar» no va mientras
+  R=$Y/ram4.img; termo_ram_img $R ""
+  termo_qemu $R ram4 180 "$kvm" "46:sendkey m"
+  mira "(RAM) con un solo procesador: sin los demás (lo dice), todo con este; BIEN" "termo: suceso: memoria RAM: Hecho: BIEN · ni un fallo en "
+  if mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | grep -q 'todos los núcleos a la vez (calor): no: ningún otro procesador ha contestado'; then ok "(RAM) RAM.TXT: «todos los núcleos a la vez: no: ningún otro procesador ha contestado»"
+  else ko "(RAM) un procesador: $(mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | grep calor)"; fi
+  # (Intro antes: si sale el aviso de que la vez anterior no se cerró, el primer Esc solo lo cerraría)
+  R=$Y/ram5.img; termo_ram_img $R ""
+  termo_qemu $R ram5 70 "$kvm -smp 2" "44:sendkey ret" "46:sendkey m" "48:sendkey c" "50:sendkey esc"
+  mira "(RAM) Esc la para; «Calentar» espera a que acabe" "termo: suceso: Calentar: espere a que acabe la prueba de la memoria RAM" "termo: suceso: memoria RAM: Cancelada (Esc)"
+  ! grep -q 'termo: calentar ' $S || ko "(RAM) se ha puesto a calentar con la prueba de la RAM en marcha"
 }

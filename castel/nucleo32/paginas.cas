@@ -65,6 +65,7 @@ módulo Paginas
         variable t: nat32
         variable tabla: puntero a nat32
         de := entrada_dir(dir, virtual)
+        si valor(de) yb 0x80 <> 0 entonces devolver nulo fin     ; (RAM) una página de 4 MB (la ventana de termoram.cas): no tiene tabla
         si valor(de) yb PRESENTE = 0 entonces
             si no crear entonces devolver nulo fin
             t := reservar_marco()
@@ -228,7 +229,9 @@ módulo Paginas
         de := puntero(d)
         n := 0
         para i desde USUARIO_INICIO >> 22 hasta (USUARIO_FINAL >> 22) - 1 hacer
-            si de[i] yb PRESENTE <> 0 entonces
+            si de[i] yb 0x80 <> 0 entonces
+                de[i] := 0                      ; (RAM) una página de 4 MB ajena (la ventana de termoram.cas): ni tabla ni marcos que soltar
+            sino si de[i] yb PRESENTE <> 0 entonces
                 tabla := puntero(de[i] yb DIRECCIÓN)
                 para j desde 0 hasta 1023 hacer
                     si tabla[j] yb PRESENTE <> 0 y tabla[j] yb AJENO = 0 entonces
@@ -252,7 +255,7 @@ módulo Paginas
         n := 0
         tablas := 0
         para i desde primera hasta última hacer
-            si de[i] yb PRESENTE <> 0 entonces
+            si de[i] yb PRESENTE <> 0 y de[i] yb 0x80 = 0 entonces       ; (RAM) sin las páginas de 4 MB
                 tablas := tablas + 1
                 tabla := puntero(de[i] yb DIRECCIÓN)
                 para j desde 0 hasta 1023 hacer
