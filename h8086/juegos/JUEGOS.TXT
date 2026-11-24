@@ -1,0 +1,31 @@
+Hispa-8086: el disquete de juegos
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+
+DERRIBO   pala, pelota y ladrillos
+
+  Con la pala se devuelve la pelota y se derriban los ladrillos de diez
+  muros. Según dónde dé la pelota en la pala, sale más tendida o más
+  derecha. Cada ladrillo enseña cuántos golpes le quedan, por su forma:
+
+    lleno ................ 1 golpe
+    hueco, con un 2 ...... 2 golpes
+    lleno, con un 3 ...... 3 golpes
+    a cuadros ............ no se rompe
+
+  De algunos cae un premio, con su letra: A, pala ancha; L, pelota
+  lenta; T, tres pelotas; V, una vida más.
+
+  Teclas: flechas o Z y X, mover la pala; Espacio, lanzar; P, pausa;
+  S, sonido; Esc, acabar la partida (y, en la portada, salir). En la
+  portada, M cambia a monocromo. También vale el ratón (si hay
+  controlador) y la palanca de juegos.
+
+    DERRIBO      en color con CGA, EGA o VGA; con MDA o Hercules, en texto
+    DERRIBO /M   monocromo: todo de un color (para monitores de fósforo
+                 verde o ámbar, o la salida compuesta de la CGA)
+    DERRIBO /T   en modo de texto
+    DERRIBO /P   prueba del motor, sin pantalla
+
+  Va igual de deprisa en cualquier máquina, de un PC de 4,77 MHz a uno de
+  hoy. La mejor puntuación se guarda en DERRIBO.REC, en el directorio en
+  que se esté al jugar (si el disquete está protegido, no se guarda).

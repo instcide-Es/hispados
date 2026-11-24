@@ -15,4 +15,7 @@ make            # en build/: los disquetes del sistema (hispa8086-NNN.img) y los
 make prueba     # los arranca en QEMU y comprueba lo que sale
 ```
 
+Juegos, en su propio disquete (`build/juegos8086-360.img`): DERRIBO, de pala
+y ladrillos ([docs/8086/JUEGO-DERRIBO.md](../docs/8086/JUEGO-DERRIBO.md)).
+
 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

@@ -883,6 +883,18 @@ formato (.CTA), en .CSV con «;» y en .DIF, según la extensión. Con `/G` o
 `/I` convierte o imprime sin pantalla. Ocupa 16,4 K (16.790 octetos). La historia de las hojas
 de cálculo de entonces, lo que tomamos de ellas y lo que hacemos mejor están
 en [CUENTAS.md](CUENTAS.md).
+## Juegos: DERRIBO
+
+El primer juego de Hispa-8086 va en su propio disquete de 360 K
+(`build/juegos8086-360.img`, con unas instrucciones en `JUEGOS.TXT`):
+**DERRIBO**, un juego nuestro de pala, pelota y ladrillos, con diez muros
+propios. CGA de 320×200 a cuatro colores (y EGA y VGA), o texto con MDA y
+Hercules; un modo monocromo (`DERRIBO /M`) para los monitores de fósforo;
+la misma velocidad en cualquier máquina (el 8254 a 72,8 tics por segundo);
+ladrillos y premios que se distinguen por la forma y por una letra, no por
+el color; teclado, ratón y palanca; la mejor puntuación en `DERRIBO.REC`.
+Ocupa 6 K. Cómo se hacían estos juegos en el PC de 1981 a 1986, qué hace
+DERRIBO y cómo se prueba: [JUEGO-DERRIBO.md](JUEGO-DERRIBO.md).
 
 ## Cómo se construye y se prueba
 
@@ -926,6 +938,8 @@ partes (veinticuatro, con las tres de PLUMA) y tarda unos TIEMPO minutos;
 | `h8086/prueba/cuenta.asm`, `saludo.asm` | la cuenta de sectores leídos y un controlador de carácter, para la prueba |
 | `h8086/prueba/partes_09.sh`, `partes_10.sh` | las partes de la prueba que llegaron con la 0.9 y con la 0.10 |
 | `h8086/prueba/partes_11.sh`, `v86_flechas.js` | las teclas de cursor: en la línea de órdenes, BASIC, INKEY$ y EDITAR, con las teclas grises y las del teclado numérico, sin TECLADO y con él; y lo mismo en el emulador v86 |
+| `h8086/juegos/derribo.asm`, `JUEGOS.TXT` | DERRIBO, el juego de pala y ladrillos, y las instrucciones del disquete de juegos |
+| `h8086/prueba/partes_juegos.sh` | la parte de la prueba de los juegos (DERRIBO, con su prueba del motor) |
 | `h8086/prueba/xms.asm` | XMS.COM: prueba del gestor de memoria extendida, de A20 y de la HMA |
 | `h8086/prueba/v86_teclado.js`, `v86_discos.js` | TECLADO y dos disqueteras en el emulador v86 de la web (opcional) |
 | `h8086/programas/cuentas.asm`, `programas/cuentas/*.inc` | CUENTAS, la hoja de cálculo (ver [CUENTAS.md](CUENTAS.md)) |
