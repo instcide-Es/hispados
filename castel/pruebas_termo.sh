@@ -627,8 +627,9 @@ termo_ram() {
   mira "(RAM) con un solo procesador: sin los demás (lo dice), todo con este; BIEN" "termo: suceso: memoria RAM: Hecho: BIEN · ni un fallo en "
   if mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | grep -q 'todos los núcleos a la vez (calor): no: ningún otro procesador ha contestado'; then ok "(RAM) RAM.TXT: «todos los núcleos a la vez: no: ningún otro procesador ha contestado»"
   else ko "(RAM) un procesador: $(mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | grep calor)"; fi
-  R=$Y/ram5.img; termo_ram_img $R ""	# (nueva: con la de antes, el primer Esc cierra el aviso de que no se cerró)
-  termo_qemu $R ram5 70 "$kvm -smp 2" "46:sendkey m" "48:sendkey c" "50:sendkey esc"
+  # (Intro antes: si sale el aviso de que la vez anterior no se cerró, el primer Esc solo lo cerraría)
+  R=$Y/ram5.img; termo_ram_img $R ""
+  termo_qemu $R ram5 70 "$kvm -smp 2" "44:sendkey ret" "46:sendkey m" "48:sendkey c" "50:sendkey esc"
   mira "(RAM) Esc la para; «Calentar» espera a que acabe" "termo: suceso: Calentar: espere a que acabe la prueba de la memoria RAM" "termo: suceso: memoria RAM: Cancelada (Esc)"
   ! grep -q 'termo: calentar ' $S || ko "(RAM) se ha puesto a calentar con la prueba de la RAM en marcha"
 }
