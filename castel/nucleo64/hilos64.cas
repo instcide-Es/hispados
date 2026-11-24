@@ -542,7 +542,13 @@ módulo Hilos64
 
     ; [etapa 4] el hilo de un programa: como crea, pero con su proceso y su
     ; espacio de direcciones puestos antes de que corra
-    público función crea_de_programa(f: nat64, arg: nat64, nombre: puntero a byte, proceso: nat64, espacio: nat64, fpu: nat64): puntero a Hilo
+    ; [etapa 8] «dónde» (si no es 0): ahí se apunta el hilo ANTES de encolarlo
+    ; (el primero de un proceso: p.hilo). Puede correr y acabar en otro
+    ; procesador en cuanto está en la cola; si p.hilo se ponía después, el que
+    ; fallaba al momento (MALO) se veía como un hilo más, se soltaba solo, y
+    ; espera_proceso hacía une de un hilo ya soltado (se quedaba esperando
+    ; para siempre, o lo liberaba dos veces)
+    público función crea_de_programa(f: nat64, arg: nat64, nombre: puntero a byte, proceso: nat64, espacio: nat64, fpu: nat64, dónde: nat64): puntero a Hilo
         variable h: puntero a Hilo
         recoge()
         h := nuevo(nombre, NORMAL, cierto)
@@ -557,6 +563,7 @@ módulo Hilos64
         prepara_pila(h, nat64(dirección(arranque_hilo)))
         h.estado := LISTO
         suma_atómica(dirección(creados), 1)
+        si dónde <> 0 entonces p64(dónde, nat64(h)) fin
         encola(h)
         devolver h
     fin

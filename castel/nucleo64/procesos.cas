@@ -2146,15 +2146,16 @@ módulo Procesos
             suelta_proceso(p)
             devolver nulo
         fin
-        h := crea_de_programa(nat64(dirección(arranca_hilo)), nat64(p), dirección(p.nombre[0]), nat64(p), p.espacio, fpu)
+        ; (p.hilo y vivos, antes de que el hilo pueda correr: crea_de_programa)
+        suma_atómica(dirección(vivos), 1)
+        h := crea_de_programa(nat64(dirección(arranca_hilo)), nat64(p), dirección(p.nombre[0]), nat64(p), p.espacio, fpu, nat64(dirección(p.hilo)))
         si h = nulo entonces
+            suma_atómica(dirección(vivos), nob nat64(0))
             motivo := "no queda memoria para su hilo"
             desregistra(p)
             suelta_proceso(p)
             devolver nulo
         fin
-        p.hilo := nat64(h)
-        suma_atómica(dirección(vivos), 1)
         suma_atómica(dirección(arrancados), 1)
         devolver p
     fin
@@ -2253,16 +2254,16 @@ módulo Procesos
             q.vfork_padre := nat64(p)
             p.esperando_vfork := id
         fin
-        h := crea_de_programa(nat64(dirección(arranca_hilo)), nat64(q), dirección(q.nombre[0]), nat64(q), q.espacio, fpu)
+        suma_atómica(dirección(vivos), 1)
+        h := crea_de_programa(nat64(dirección(arranca_hilo)), nat64(q), dirección(q.nombre[0]), nat64(q), q.espacio, fpu, nat64(dirección(q.hilo)))
         si h = nulo entonces
+            suma_atómica(dirección(vivos), nob nat64(0))
             p.esperando_vfork := 0
             desregistra(q)
             cierra_todos(q)
             suelta_proceso(q)
             devolver -12
         fin
-        q.hilo := nat64(h)
-        suma_atómica(dirección(vivos), 1)
         suma_atómica(dirección(arrancados), 1)
         suma_atómica(dirección(forks), 1)
         ; (CLONE_VFORK: hasta que el hijo haga execve o acabe; q ya no se toca)
@@ -2357,7 +2358,7 @@ módulo Procesos
         x := nat32(tid)
         si marcas_ yb 0x100000 <> 0 entonces copia_a(p, v_ptid, nat64(dirección(x)), 4) fin      ; CLONE_PARENT_SETTID
         si marcas_ yb 0x01000000 <> 0 entonces copia_a(p, v_ctid, nat64(dirección(x)), 4) fin    ; CLONE_CHILD_SETTID
-        h := crea_de_programa(nat64(dirección(arranca_clon)), nat64(a), dirección(p.nombre[0]), nat64(p), p.espacio, a.fpu)
+        h := crea_de_programa(nat64(dirección(arranca_clon)), nat64(a), dirección(p.nombre[0]), nat64(p), p.espacio, a.fpu, 0)
         si h = nulo entonces
             b := toma(dirección(p.h_cerrojo))
             p.n_hilos := p.n_hilos - 1
