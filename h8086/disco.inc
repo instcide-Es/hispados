@@ -977,10 +977,8 @@ disco_fresco:
 fat_trae:
         cmp ax, [fat_lba]
         je .x
-        push ax                     ; (fat_vuelca gasta AX: sin guardarlo, tras
-        call fat_vuelca             ; escribir una FAT cambiada se traía otro
-        jc .x2                      ; sector, y con el número de este)
-        pop ax
+        call fat_vuelca             ; (conserva AX, el sector que se pide)
+        jc .x1
         push bx
         mov bx, fat
         call lee_sector
@@ -989,19 +987,17 @@ fat_trae:
         mov [fat_lba], ax
 .x:
         clc
-        ret
-.x2:
-        add sp, 2                   ; no se ha podido escribir: AX=el error
-        stc
+.x1:
         ret
 .mal:
         mov word [fat_lba], 0xFFFF
         stc
         ret
 ; escribe el sector de la FAT que hay en el búfer (si ha cambiado) en todas
-; las copias de la FAT. CF=1, AX=error; si va bien, conserva AX (fat_trae
-; lleva en AX el sector que viene después: antes se perdía, y al pasar de un
-; sector de la FAT a otro con el primero cambiado se leía otro sector)
+; las copias de la FAT. CF=1, AX=error; si va bien, conserva AX: fat_trae
+; lleva en AX el sector que viene después (cuando se perdía, al pasar de un
+; sector de la FAT a otro con el primero cambiado se leía otro, y se apuntaba
+; con el número del pedido)
 fat_vuelca:
         cmp byte [fat_sucia], 0
         je .x
@@ -1026,7 +1022,8 @@ fat_vuelca:
 .mal:
         pop cx
         pop bx
-        add sp, 2                   ; (AX, el error)
+        inc sp                      ; (el AX guardado: se devuelve el error;
+        inc sp                      ; INC no toca CF, ADD SP,2 lo borraría)
         ret
 ; (interna) BX = un octeto de la FAT, contado desde su principio -> SI = su
 ; sitio en el búfer. CF=1 si falla el disco. Conserva lo demás
