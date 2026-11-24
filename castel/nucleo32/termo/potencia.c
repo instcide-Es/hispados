@@ -36,6 +36,7 @@
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 #include "potencia.h"
 
 typedef uint32_t u32;
@@ -47,7 +48,6 @@ static int p_intel, p_amd, p_fam, p_modelo, empezado;
 
 static void dice(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void suceso(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-#include <stdarg.h>
 static void dice(const char *fmt, ...)
 {
 	char t[400];
