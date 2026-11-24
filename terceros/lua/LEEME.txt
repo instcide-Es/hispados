@@ -1,0 +1,18 @@
+Lua 5.5.1 (Roberto Ierusalimschy, Luiz Henrique de Figueiredo, Waldemar
+Celes; PUC-Rio): licencia MIT (ver el final de src/lua.h y doc/readme.html;
+compatible con la GPL-2.0 o posterior de Hispa).
+https://www.lua.org/  -  https://www.lua.org/ftp/lua-5.5.1.tar.gz
+SHA-256: 1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce
+(el que publica https://www.lua.org/ftp/, comprobado el 24/11/2026)
+
+Está entero, sin cambiar nada. Es la herramienta de verdad de la etapa 7 de
+Hispa-64 (docs/64/HISPA-64.md, sección 13): se compila tal cual con el
+musl-gcc del árbol de construcción (build/musl, de terceros/musl), en una
+copia de src/ en build/lua-obj:
+
+  make -C build/lua-obj linux CC="build/musl/bin/musl-gcc -std=gnu99" MYLDFLAGS=-static
+
+y el «lua» que sale corre en Hispa-64 desde el intérprete ORDENES (LUA).
+Lo hace castel/nucleo64/programas/hazmusl.sh.
+
+Quien reparta el binario lo acompaña del aviso de la licencia (src/lua.h).

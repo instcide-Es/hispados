@@ -1,0 +1,35 @@
+musl 1.2.6 (Rich Felker y otros), la biblioteca de C de Hispa-64: licencia MIT
+(ver COPYRIGHT; compatible con la GPL-2.0 o posterior de Hispa).
+https://musl.libc.org/  -  https://musl.libc.org/releases/musl-1.2.6.tar.gz
+SHA-256: d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a
+Firma (musl-1.2.6.tar.gz.asc): buena, de la llave de musl
+(8364 8929 0BB6 B70F 99FF DA05 56BC DB59 3020 450F), comprobada con gpg el
+24/11/2026.
+
+Está entero, como sale del tar.gz, con los tres parches de seguridad que
+musl.libc.org manda poner a la 1.2.6 (aplicados aquí; los originales, en
+parches-seguridad/):
+  CVE-2026-107891  regcomp con expresiones de fuera (Szabolcs Nagy)
+                   https://www.openwall.com/lists/musl/2026/10/21/1
+  CVE-2026-40200   qsort (lo de 32 bits; también se pone en 64)
+                   https://www.openwall.com/lists/musl/2026/04/10/3
+  CVE-2026-6042    iconv, el decodificador de GB18030
+                   https://www.openwall.com/lists/musl/2026/04/03/2
+
+No se instala en el sistema: se compila con el gcc del sistema, para
+x86-64, en el árbol de construcción del proyecto (build/, que no va a git):
+
+  W=$(pwd)          # la raíz del repositorio
+  mkdir -p build/musl-obj && cd build/musl-obj
+  $W/terceros/musl/configure --prefix=$W/build/musl --syslibdir=$W/build/musl/lib CC=gcc --enable-wrapper=gcc
+  make -j1 && make -j1 install
+
+Eso deja build/musl/{include,lib} (libc.a, libc.so, que es también el
+cargador dinámico ld-musl-x86_64.so.1, crt1.o, rcrt1.o...) y el guion de
+musl build/musl/bin/musl-gcc, que llama al gcc del sistema con las
+cabeceras y las bibliotecas de ese árbol. Los programas dinámicos para
+Hispa-64 se enlazan con -Wl,-dynamic-linker,/lib/ld-musl-x86_64.so.1 (en
+Hispa-64, /lib es la unidad en memoria). Lo hace todo
+castel/nucleo64/programas/hazmusl.sh (docs/64/HISPA-64.md, sección 13).
+
+Quien reparta binarios hechos con musl los acompaña del aviso de COPYRIGHT.
