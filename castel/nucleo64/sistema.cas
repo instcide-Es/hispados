@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64
 
     constante EPERM = -1
     constante ENOENT = -2
@@ -88,6 +88,11 @@ módulo Sistema
         variable p: puntero a nat64
         p := puntero(d)
         valor(p) := v
+    fin
+
+    ; [etapa 8] ¿es de una tubería? (las clases 3 y 4)
+    función es_tubo(c: nat32): bool
+        devolver c = F_TUBO_L o c = F_TUBO_E
     fin
 
     ; ¿es fd un archivo abierto del programa?
@@ -189,6 +194,8 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver tubo_lee(p, p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0)
         fin
+        ; [etapa 8] los dispositivos (Disp64)
+        si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver lee_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
         si n = 0 entonces devolver 0 fin
         k := nat64(reserva(TROZO))
         si k = 0 entonces devolver ENOMEM fin
@@ -229,6 +236,7 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver tubo_escribe(p, p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0)
         fin
+        si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver escribe_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n) fin
         si n = 0 entonces devolver 0 fin
         k := nat64(reserva(TROZO))
         si k = 0 entonces devolver ENOMEM fin
@@ -293,6 +301,8 @@ módulo Sistema
         variable t, base: puntero a byte
         variable err: ent64
         variable fd: ent32
+        variable dc: nat32
+        variable dob: nat64
         variable a: puntero a Abierto
         t := ruta_de(p, ruta, err)
         si t = nulo entonces devolver err fin
@@ -304,6 +314,23 @@ módulo Sistema
             p.fd_clase[nat32(fd)] := F_CONSOLA
             p.fd_obj[nat32(fd)] := 0
             si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
+            devolver ent64(fd)
+        fin
+        ; [etapa 8] los dispositivos: /dev/fb0, /dev/input/event0, /dev/shm/..., /dev/null, /dev/zero
+        dc := es_disp(t)
+        si dc <> 0 entonces
+            fd := fd_libre(p, 0)
+            si fd < 0 entonces
+                libera(t)
+                devolver EMFILE
+            fin
+            err := abre_disp(p, t, dc, marcas_, dob)
+            libera(t)
+            si err < 0 entonces devolver err fin
+            p.fd_clase[nat32(fd)] := dc
+            p.fd_obj[nat32(fd)] := dob
+            si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
+            si marcas_ yb O_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 sino p.fd_nobloq[nat32(fd)] := 0 fin
             devolver ent64(fd)
         fin
         base := nulo
@@ -381,7 +408,7 @@ módulo Sistema
             devolver 0
         fin
         si orden = 4 entonces                                                            ; F_SETFL
-            si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces p.fd_nobloq[nat32(fd)] := nat32((arg >> 11) yb 1) fin
+            si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) entonces p.fd_nobloq[nat32(fd)] := nat32((arg >> 11) yb 1) fin
             devolver 0
         fin
         si orden = 3 entonces                                                            ; F_GETFL
@@ -389,6 +416,7 @@ módulo Sistema
             si p.fd_clase[nat32(fd)] = F_TUBO_L entonces devolver ent64(nat64(p.fd_nobloq[nat32(fd)]) << 11) fin
             si p.fd_clase[nat32(fd)] = F_TUBO_E entonces devolver ent64(1 ob (nat64(p.fd_nobloq[nat32(fd)]) << 11)) fin
             si p.fd_clase[nat32(fd)] = F_EPOLL entonces devolver 2 fin
+            si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver ent64(2 ob (nat64(p.fd_nobloq[nat32(fd)]) << 11)) fin
             devolver ent64(abierto(p, fd).marcas yb 0x403)
         fin
         devolver EINVAL
@@ -427,7 +455,12 @@ módulo Sistema
             pon_m32(nat64(dirección(st[0])) + 24, 0x8000 ob 0x180)
             pon_m64(nat64(dirección(st[0])) + 40, 0)
             r := 0
-        sino si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces
+        sino si es_de_disp(p.fd_clase[nat32(fd)]) entonces
+            ; [etapa 8] un dispositivo (Disp64)
+            ceros_mem(nat64(dirección(st[0])), 144)
+            stat_disp(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], nat64(dirección(st[0])))
+            r := 0
+        sino si es_tubo(p.fd_clase[nat32(fd)]) entonces
             ; [etapa 7] una tubería: S_IFIFO, 0600
             stat_consola(nat64(dirección(st[0])))
             pon_m32(nat64(dirección(st[0])) + 24, 0x1000 ob 0x180)
@@ -453,6 +486,14 @@ módulo Sistema
         si es_consola(t) entonces
             libera(t)
             stat_consola(nat64(dirección(st[0])))
+            si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        ; [etapa 8] /dev/fb0, /dev/input/event0, /dev/null y /dev/zero (los de /dev/shm, por su descriptor)
+        si es_disp(t) <> 0 y es_disp(t) <> F_SHM entonces
+            ceros_mem(nat64(dirección(st[0])), 144)
+            stat_disp(es_disp(t), 0, nat64(dirección(st[0])))
+            libera(t)
             si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
             devolver 0
         fin
@@ -514,6 +555,12 @@ módulo Sistema
             libera(t)
             devolver ENOENT
         fin
+        ; [etapa 8] shm_unlink: /dev/shm/NOMBRE
+        si qué = 1 y es_disp(t) = F_SHM entonces
+            err := borra_shm(t)
+            libera(t)
+            devolver err
+        fin
         base := nulo
         si t[0] <> '/' entonces
             base := base_de(p, dirfd, err)
@@ -555,6 +602,7 @@ módulo Sistema
     función trunca_(p: puntero a Proceso, fd: nat64, t: ent64): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
         si t < 0 entonces devolver EINVAL fin
+        si p.fd_clase[nat32(fd)] = F_SHM entonces devolver trunca_shm(p.fd_obj[nat32(fd)], nat64(t)) fin
         si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver EINVAL fin
         devolver vfs_trunca(abierto(p, fd), nat64(t))
     fin
@@ -629,9 +677,12 @@ módulo Sistema
     función mapea_(p: puntero a Proceso, dir_: nat64, largo: nat64, prot: nat64, marcas_: nat64, fd: ent64, desp: nat64): ent64
         variable a, l: nat64
         variable ab: puntero a Abierto
-        variable ext: nat32
+        variable ext, dc: nat32
+        variable dob: nat64
         variable r: ent64
         variable anónima, compartida: bool
+        dc := 0
+        dob := 0
         si largo = 0 o prot yb (nob nat64(7)) <> 0 entonces devolver EINVAL fin
         si marcas_ yb 3 = 0 entonces devolver EINVAL fin
         compartida := marcas_ yb 3 <> 2                 ; MAP_SHARED (y MAP_SHARED_VALIDATE)
@@ -644,16 +695,24 @@ módulo Sistema
         si no anónima entonces
             si fd < 0 entonces devolver EBADF fin
             si no fd_bien(p, nat64(fd)) entonces devolver EBADF fin
-            si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ENODEV fin
-            ab := abierto(p, nat64(fd))
-            si vfs_es_carpeta(ab) entonces devolver ENODEV fin
-            si ab.marcas yb O_ACCESO = O_WRONLY entonces devolver EACCES fin
-            si desp yb 4095 <> 0 entonces devolver EINVAL fin
-            si compartida y prot yb 2 <> 0 entonces
-                si ab.marcas yb O_ACCESO <> O_RDWR entonces devolver EACCES fin
-                devolver ENODEV
+            ; [etapa 8] la pantalla y la memoria compartida (Disp64): siempre compartidas
+            si p.fd_clase[nat32(fd)] = F_FB o p.fd_clase[nat32(fd)] = F_SHM entonces
+                si desp yb 4095 <> 0 entonces devolver EINVAL fin
+                dc := p.fd_clase[nat32(fd)]
+                dob := p.fd_obj[nat32(fd)]
+                ext := R_DISP
+            sino si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ENODEV fin
+            si dc = 0 entonces
+                ab := abierto(p, nat64(fd))
+                si vfs_es_carpeta(ab) entonces devolver ENODEV fin
+                si ab.marcas yb O_ACCESO = O_WRONLY entonces devolver EACCES fin
+                si desp yb 4095 <> 0 entonces devolver EINVAL fin
+                si compartida y prot yb 2 <> 0 entonces
+                    si ab.marcas yb O_ACCESO <> O_RDWR entonces devolver EACCES fin
+                    devolver ENODEV
+                fin
+                ext := R_ARCHIVO
             fin
-            ext := R_ARCHIVO
         fin
         l := arriba(largo)
         si l < largo o l > nat64(1) << 40 entonces devolver ENOMEM fin
@@ -692,6 +751,14 @@ módulo Sistema
             devolver ENOMEM
         fin
         si marcas_ yb 0x50 = 0 entonces p.mmap_próx := a + l fin
+        si dc <> 0 entonces
+            r := mapea_dispo(p, dc, dob, a, l, desp, nat32(prot))
+            si r < 0 entonces
+                quita_de(p, a, a + l)
+                abre_mem(p)
+                devolver r
+            fin
+        fin
         si ab <> nulo entonces
             r := llena_de_archivo(p, a, l, ab, desp, nat32(prot))
             si r < 0 entonces
@@ -908,8 +975,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.7.0")
-        pon_texto(dirección(t[0]), 195, "etapa 7 (musl y POSIX)")
+        pon_texto(dirección(t[0]), 130, "0.8.0")
+        pon_texto(dirección(t[0]), 195, "etapa 8 (gráficos y ventanas)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -954,9 +1021,11 @@ módulo Sistema
             devolver ev yb 0x104
         fin
         ; [etapa 7] las tuberías (POLLHUP y POLLERR, aunque no se pidan)
-        si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces
+        si es_tubo(p.fd_clase[nat32(fd)]) entonces
             devolver tubo_listo(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)]) yb (ev ob 0x18)
         fin
+        ; [etapa 8] los dispositivos (los sucesos: si hay en su cola)
+        si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver listo_disp(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], ev) fin
         ; (los archivos, siempre listos)
         devolver ev yb 0x145
     fin
@@ -1023,7 +1092,7 @@ módulo Sistema
                 rev := listo_de(p, fd, ev)
                 si fd >= 0 y rev = 0 y fd_bien(p, nat64(fd)) entonces
                     si p.fd_clase[nat32(fd)] = F_CONSOLA y ev yb 0x41 <> 0 entonces consola := cierto fin
-                    si p.fd_clase[nat32(fd)] >= F_TUBO_L entonces tubos_ := cierto fin
+                    si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) entonces tubos_ := cierto fin
                 fin
                 fds[i] := (fds[i] yb 0xFFFFFFFF) ob ((nat64(ev) yb 0xFFFF) << 32) ob (nat64(rev) << 48)
                 si rev <> 0 entonces listos := listos + 1 fin
@@ -1098,7 +1167,7 @@ módulo Sistema
                         listos := listos + 1
                     fin
                 fin
-                si (r ob w) yb (nat64(1) << i) <> 0 y p.fd_clase[i] >= F_TUBO_L entonces tubos_ := cierto fin
+                si (r ob w) yb (nat64(1) << i) <> 0 y (es_tubo(p.fd_clase[i]) o es_de_disp(p.fd_clase[i])) entonces tubos_ := cierto fin
                 i := i + 1
             fin
             si listos > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
@@ -1466,6 +1535,8 @@ módulo Sistema
                     r := EBADF
                 sino si p.fd_clase[nat32(a1)] = F_CONSOLA entonces
                     r := tty_ioctl(p, a2 yb 0xFFFFFFFF, a3)
+                sino si es_de_disp(p.fd_clase[nat32(a1)]) entonces
+                    r := ioctl_disp(p, p.fd_clase[nat32(a1)], p.fd_obj[nat32(a1)], a2, a3)
                 sino si p.fd_clase[nat32(a1)] = F_TUBO_L y a2 yb 0xFFFFFFFF = 0x541B entonces
                     ; FIONREAD
                     lím := tubo_cuánto(p.fd_obj[nat32(a1)])
@@ -1648,6 +1719,8 @@ módulo Sistema
         si clase = F_EPOLL entonces
             e := ep_(d)
             suma_atómica(dirección(e.refs), 1)
+        sino si es_de_disp(nat32(clase)) entonces
+            otro_disp(clase, d)
         sino
             otro_(clase, d)
         fin
@@ -1658,6 +1731,8 @@ módulo Sistema
         si clase = F_EPOLL entonces
             e := ep_(d)
             si suma_atómica(dirección(e.refs), nob nat64(0)) = 1 entonces libera(puntero(d)) fin
+        sino si es_de_disp(nat32(clase)) entonces
+            cierra_disp(clase, d)
         sino
             cierra_(clase, d)
         fin
@@ -1779,7 +1854,7 @@ módulo Sistema
                         si ev yb 0x40000000 <> 0 entonces e.ev[i] := ev yb 0xFFFF0000 fin
                     sino
                         si p.fd_clase[nat32(fd)] = F_CONSOLA entonces consola := cierto fin
-                        si p.fd_clase[nat32(fd)] = F_TUBO_L o p.fd_clase[nat32(fd)] = F_TUBO_E entonces tubos_ := cierto fin
+                        si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) entonces tubos_ := cierto fin
                     fin
                 fin
                 i := i + 1

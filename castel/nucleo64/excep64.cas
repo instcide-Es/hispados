@@ -53,7 +53,7 @@ módulo Excep64
     público variable al_parar: nat64        ; la función que para a los demás procesadores (Smp64)
     público variable parados: nat32         ; cuántos se han parado (lo dice al_parar)
     público variable otros: nat32           ; a cuántos se ha mandado parar
-    variable parada_de: nat64               ; 0, o el número + 1 del procesador que se está parando
+    público variable parada_de: nat64       ; 0, o el número + 1 del procesador que se está parando
     ; [etapa 4] lo que se hace con una excepción de un programa (Procesos):
     ; al_fallo_usuario(n, marco, error, cr2) devuelve cierto si se ha
     ; arreglado (una página que se pone al tocarla) y, si no, cierra el

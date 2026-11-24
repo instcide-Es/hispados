@@ -49,6 +49,11 @@ módulo Espacios
     público constante TOPE = 0x00007FFFFFFFF000         ; lo más alto de un programa (la última página, nunca)
     público constante COPIAR = 0x200                    ; [etapa 7] la página se comparte: copiarla al escribir
     público constante COMPARTIDA = 0x400                ; [etapa 7] de MAP_SHARED: se comparte también al bifurcar
+    ; [etapa 8] la página no es de la RAM que se da (la pantalla: /dev/fb0):
+    ; al quitarla no se suelta el marco, y al bifurcar no se cuenta; lleva
+    ; también COMPARTIDA, y sus marcas de caché (la PAT) se respetan
+    público constante DISPOSITIVO = 0x800
+    constante GUARDA = 0xE98                            ; lo que se guarda al cambiar los permisos: COPIAR, COMPARTIDA, DISPOSITIVO, PWT, PCD y PAT
     constante N_PCID = 64
     constante MÁSCARA = 0x000FFFFFFFFFF000
 
@@ -290,7 +295,7 @@ módulo Espacios
             x := valor(p)
             si x yb PRESENTE <> 0 entonces
                 si x yb COPIAR <> 0 entonces fl := (fl yb (nob nat64(ESCRIBIR))) ob COPIAR fin
-                valor(p) := (x yb MÁSCARA) ob fl ob PRESENTE ob USUARIO ob (x yb COMPARTIDA)
+                valor(p) := (x yb MÁSCARA) ob fl ob PRESENTE ob USUARIO ob (x yb GUARDA)
             fin
         fin
         suelta(dirección(e.cerrojo), b)
@@ -336,7 +341,7 @@ módulo Espacios
             p := entrada_o_salto(e, v, salta)
             si p <> nulo entonces
                 si valor(p) yb PRESENTE <> 0 entonces
-                    lista[n] := valor(p) yb MÁSCARA
+                    lista[n] := valor(p)            ; ([etapa 8] con las marcas: DISPOSITIVO)
                     n := n + 1
                     valor(p) := 0
                     e.páginas := e.páginas - 1
@@ -349,7 +354,7 @@ módulo Espacios
                 derriba_u(e, ini, (v - ini) >> 12)
                 i := 0
                 mientras i < n hacer
-                    suelta_marco_u(lista[i])
+                    si lista[i] yb DISPOSITIVO = 0 entonces suelta_marco_u(lista[i] yb MÁSCARA) fin
                     i := i + 1
                 fin
                 total := total + n
@@ -374,7 +379,7 @@ módulo Espacios
                 si valor(p) yb PRESENTE <> 0 entonces
                     ; (sin ningún permiso, la página se queda, pero sin la marca de usuario)
                     ; ([etapa 7] lo de COPIAR y COMPARTIDA se queda; con COPIAR, sin escribir)
-                    x := valor(p) yb (COPIAR ob COMPARTIDA)
+                    x := valor(p) yb GUARDA
                     si ninguna entonces
                         valor(p) := (valor(p) yb MÁSCARA) ob bit_nx() ob PRESENTE ob x
                     sino si x yb COPIAR <> 0 entonces
@@ -443,7 +448,7 @@ módulo Espacios
             x := t[i]
             si x yb PRESENTE <> 0 entonces
                 si nivel = 1 entonces
-                    suelta_marco_u(x yb MÁSCARA)
+                    si x yb DISPOSITIVO = 0 entonces suelta_marco_u(x yb MÁSCARA) fin
                     pág := pág + 1
                 sino
                     suelta_nivel(x yb MÁSCARA, nivel - 1, pág, tab)
@@ -481,8 +486,8 @@ módulo Espacios
         fin
     fin
 
-    ; uno más tiene el marco f
-    función comparte_marco(f: nat64)
+    ; uno más tiene el marco f ([etapa 8] público: /dev/shm y /dev/fb0, Disp64)
+    público función comparte_marco(f: nat64)
         variable c: puntero a nat32
         variable b: nat64
         si f >> 12 >= n_compartidos entonces devolver fin
@@ -605,9 +610,9 @@ módulo Espacios
                         suelta(dirección(de.cerrojo), b)
                     fin
                     fy := x yb MÁSCARA
-                    comparte_marco(fy)
+                    si x yb DISPOSITIVO = 0 entonces comparte_marco(fy) fin
                     si no mapea_u_tal(a, v, x) entonces
-                        suelta_marco_u(fy)
+                        si x yb DISPOSITIVO = 0 entonces suelta_marco_u(fy) fin
                         devolver falso
                     fin
                     páginas_compartidas := páginas_compartidas + 1

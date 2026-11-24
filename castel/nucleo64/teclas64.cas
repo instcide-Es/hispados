@@ -28,7 +28,7 @@
 ; =============================================================================
 módulo Teclas64
 
-    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Apic64, Hilos64, Sinc64, Tty64
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Apic64, Hilos64, Sinc64, Tty64, Disp64
 
     constante LARGO_COLA = 256
     constante DE_HID = 0x80000000               ; (en la cola) un uso de HID; si no, un código de PS/2
@@ -87,12 +87,24 @@ módulo Teclas64
     fin
 
     ; ---- lo que sale ----
+    ; [etapa 8] con /dev/input/event0 agarrado (EVIOCGRAB: el servidor de
+    ; ventanas), lo que sale no va a la consola: las letras y los controles
+    ; de un octeto, como EV_LETRA (Disp64); las secuencias de escape, nada
+    ; (el programa tiene las teclas con EV_KEY)
     función sale(t: puntero a byte, n: nat32)
+        si agarrado() entonces
+            si n = 1 y t[0] <> 27 entonces suceso_letra(t[0]) fin
+            devolver
+        fin
         entra(t, n)
     fin
 
     función sale_texto(t: puntero a byte)
         variable n: nat32
+        si agarrado() entonces
+            si t[0] <> 0 y t[1] = 0 entonces suceso_letra(t[0]) fin
+            devolver
+        fin
         n := 0
         mientras t[n] <> 0 hacer n := n + 1 fin
         entra(t, n)
@@ -102,6 +114,10 @@ módulo Teclas64
     función sale_u(u: nat32, con_alt: bool)
         variable t: arreglo [5] de byte
         variable n: nat32
+        si agarrado() entonces
+            suceso_letra(u)
+            devolver
+        fin
         n := 0
         si con_alt entonces
             t[0] := 27
@@ -427,6 +443,8 @@ módulo Teclas64
 
     ; una tecla pulsada o soltada (de las dos entradas)
     función una_tecla(uso: nat32, pulsada: bool, de_usb: bool)
+        ; [etapa 8] a los programas que leen /dev/input/event0
+        si pulsada entonces suceso_tecla(uso, 1) sino suceso_tecla(uso, 0) fin
         si uso >= 0xE0 y uso <= 0xE7 entonces
             si pulsada entonces mods := mods ob (1 << (uso - 0xE0)) sino mods := mods yb (nob (1 << (uso - 0xE0))) fin
             devolver
@@ -526,6 +544,7 @@ módulo Teclas64
             si rep_uso <> 0 entonces
                 ahora := ahora_ns()
                 si ahora >= rep_cuándo entonces
+                    suceso_tecla(rep_uso, 2)
                     pulsa(rep_uso)
                     rep_cuándo := ahora + REPITE_CADA
                 sino

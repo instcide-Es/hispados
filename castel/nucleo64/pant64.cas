@@ -2,19 +2,33 @@
 ;  pant64.cas - Hispa-64: la consola en la pantalla gráfica (la del GOP de
 ;  UEFI, que GRUB pasa por multiboot2), con la letra propia de Hispa (la «Hispa
 ;  8x16» de nucleo32/letra.cas, en la página 437). Guarda el texto y el color
-;  de cada casilla: al llegar abajo sube el texto y vuelve a pintar, sin leer
-;  nunca de la pantalla (en los equipos de verdad leer del marco de la
-;  pantalla es muy lento). En pantallas altas (1400 puntos o más) cada punto
-;  de la letra son 2x2, para que se lea. De 32 bits por punto (lo que dan
-;  todos los GOP) o de 24 (algún modo VBE con la BIOS); si no, no hay consola
-;  (queda el puerto serie).
+;  de cada casilla y nunca lee de la pantalla (en los equipos de verdad leer
+;  del marco de la pantalla es muy lento). En pantallas altas (1400 puntos o
+;  más) cada punto de la letra son 2x2, para que se lea. De 32 bits por punto
+;  (lo que dan todos los GOP) o de 24 (algún modo VBE con la BIOS); si no, no
+;  hay consola (queda el puerto serie).
+;
+;  [etapa 8] Escribir ya no dibuja: solo cambia el texto (en un anillo de
+;  filas: subir es mover el principio, sin copiar nada) y apunta qué casillas
+;  de cada fila han cambiado. Las dibuja el hilo «pantalla» (cada 20 ms, si
+;  hay algo), con las interrupciones puestas y sin ningún cerrojo de espera
+;  activa: quien escribe en la consola (con el cerrojo de la consola, sin
+;  interrupciones) tarda microsegundos, y ningún procesador se queda sin
+;  atender los avisos de los demás (el de vaciar la TLB) mientras se dibuja.
+;  Antes de que haya hilos, y cuando Hispa-64 se para (Excep64), se dibuja al
+;  momento, como antes. El cursor se ve (una raya debajo de la casilla, de la
+;  tinta: se ve por la forma, no por el color), y se puede quitar
+;  (ESC [ ? 25 l). Borrar la pantalla (ESC [ 2 J) la borra de verdad.
+;  Mientras un programa tiene la pantalla (/dev/fb0, Disp64: modo gráfico),
+;  la consola guarda lo escrito y no dibuja; al soltarla, la pinta entera.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Pant64
 
-    importar Letra
+    importar Letra, Cerrojo, Excep64, Hilos64, Sinc64
 
     constante CASILLAS = 65000
+    constante MAX_FILAS = 2048
 
     variable base: nat64                ; dónde se ve la pantalla (su dirección virtual)
     variable ancho, alto, salto: nat32   ; puntos de ancho y de alto; octetos por línea
@@ -27,6 +41,23 @@ módulo Pant64
     variable texto: arreglo [CASILLAS] de byte
     variable colores: arreglo [CASILLAS] de byte
     variable abierta: bool
+    ; [etapa 8] el anillo de filas: la fila y de la pantalla es la (primera + y) mod filas del texto
+    variable primera: nat32
+    ; lo que falta por dibujar de cada fila de la pantalla: desde la casilla
+    ; de los 32 bits de abajo hasta la de los de arriba (NADA: nada); el hilo
+    ; lo toma y lo deja en NADA de una vez (xchg)
+    constante NADA = 0xFFFFFFFFFFFFFFFF
+    variable pend: arreglo [MAX_FILAS] de nat64
+    variable todo_: bool                ; toda la pantalla (al subir, borrar o volver del modo gráfico)
+    variable limpia: bool               ; y también lo de fuera de las casillas, a negro
+    variable hay_algo: bool
+    variable con_hilo: bool             ; el hilo «pantalla» dibuja
+    variable pintor: Mutex
+    variable dib_x, dib_y: nat32        ; dónde está dibujado el cursor
+    variable dib_hay: bool
+    público variable cursor_visible: bool
+    público variable modo_gráfico: bool ; [etapa 8] un programa tiene la pantalla
+    público variable pant_vueltas, pant_filas: nat64   ; las veces que ha dibujado el hilo, y las filas
     ; la «─» (0xC4 en la página 437), que la letra de Hispa no trae: una raya en medio
     variable raya: arreglo [16] de byte = (0, 0, 0, 0, 0, 0, 0, 0xFF, 0, 0, 0, 0, 0, 0, 0, 0)
     ; los 16 colores de siempre (los del PC), en rojo, verde y azul
@@ -50,13 +81,37 @@ módulo Pant64
         devolver escala
     fin
 
+    ; [etapa 8] lo de la pantalla, para /dev/fb0 (Disp64)
+    público función pant_base(): nat64
+        devolver base
+    fin
+
+    público función pant_salto(): nat32
+        devolver salto
+    fin
+
+    público función pant_octetos(): nat32
+        devolver octetos
+    fin
+
+    público función pant_rojo(): byte
+        devolver rp
+    fin
+
+    público función pant_verde(): byte
+        devolver vp
+    fin
+
+    público función pant_azul(): byte
+        devolver ap
+    fin
+
     función punto(c: byte): nat32
         variable i: byte
         i := c yb 15
         devolver (nat32(rojo[i]) << rp) ob (nat32(verde[i]) << vp) ob (nat32(azul[i]) << ap)
     fin
 
-    ; la casilla (xc, yc), pintada con su letra y su color
     ; dónde están las 16 filas de la letra c (la dibujo_letra de letra.cas, que
     ; es de 32 bits, en 64: el núcleo está en la mitad alta)
     función dibujo(c: nat32): puntero a byte
@@ -68,16 +123,52 @@ módulo Pant64
         fin
     fin
 
+    ; la casilla del texto de la fila y de la pantalla
+    función casilla(xc: nat32, yc: nat32): nat32
+        variable f: nat32
+        f := primera + yc
+        si f >= filas entonces f := f - filas fin
+        devolver f * columnas + xc
+    fin
+
+    ; un rectángulo de puntos de un color (para el cursor y lo de fuera)
+    función rellena(px: nat32, py: nat32, an: nat32, al: nat32, c: nat32)
+        variable fy, fx: nat32
+        variable p: puntero a nat32
+        variable q: puntero a byte
+        fy := 0
+        mientras fy < al hacer
+            p := puntero(base + nat64(py + fy) * salto + nat64(px) * octetos)
+            q := puntero(p)
+            fx := 0
+            mientras fx < an hacer
+                si octetos = 4 entonces
+                    valor(p) := c
+                    p := p + 1
+                sino
+                    q[0] := byte(c)
+                    q[1] := byte(c >> 8)
+                    q[2] := byte(c >> 16)
+                    q := q + 3
+                fin
+                fx := fx + 1
+            fin
+            fy := fy + 1
+        fin
+    fin
+
+    ; la casilla (xc, yc) de la pantalla, pintada con su letra y su color
     función pinta(xc: nat32, yc: nat32)
         variable dib: puntero a byte
-        variable fila, sy, col, sx, px, py, t, f, c: nat32
+        variable fila, sy, col, sx, px, py, t, f, c, k: nat32
         variable bits: byte
         variable p: puntero a nat32
         variable q: puntero a byte
-        dib := dibujo(texto[yc * columnas + xc])
-        si texto[yc * columnas + xc] = 0xC4 entonces dib := dirección(raya[0]) fin
-        t := punto(colores[yc * columnas + xc])
-        f := punto(colores[yc * columnas + xc] >> 4)
+        k := casilla(xc, yc)
+        dib := dibujo(texto[k])
+        si texto[k] = 0xC4 entonces dib := dirección(raya[0]) fin
+        t := punto(colores[k])
+        f := punto(colores[k] >> 4)
         px := xc * 8 * escala
         py := yc * 16 * escala
         fila := 0
@@ -111,6 +202,92 @@ módulo Pant64
         fin
     fin
 
+    ; el cursor: una raya de dos filas (de la letra) debajo de la casilla
+    función pinta_cursor(xc: nat32, yc: nat32)
+        variable t, f: byte
+        si xc >= columnas o yc >= filas entonces devolver fin
+        ; (la tinta con la que se escribe ahora; si es la del fondo de la casilla, otra)
+        t := color yb 15
+        f := colores[casilla(xc, yc)] >> 4
+        si t = f entonces
+            si f = 7 entonces t := 0 sino t := 7 fin
+        fin
+        rellena(xc * 8 * escala, (yc * 16 + 14) * escala, 8 * escala, 2 * escala, punto(t))
+    fin
+
+    ; ¿se dibuja al momento? (antes del hilo, o al pararse Hispa-64)
+    función directo(): bool
+        devolver no con_hilo o parada_de <> 0
+    fin
+
+    ; la casilla (xc, yc) ha cambiado
+    función marca(xc: nat32, yc: nat32)
+        si directo() entonces
+            si no modo_gráfico entonces
+                pinta(xc, yc)
+                si cursor_visible y xc = cx y yc = cy entonces pinta_cursor(xc, yc) fin
+            fin
+            devolver
+        fin
+        apunta(yc, xc, xc)
+        hay_algo := cierto
+    fin
+
+    ; de la fila yc, de d a h (que no es directo)
+    función apunta(yc: nat32, d: nat32, h: nat32)
+        variable x, i, f: nat64
+        x := pend[yc]
+        si x = NADA entonces
+            i := d
+            f := h
+        sino
+            i := x yb 0xFFFFFFFF
+            f := x >> 32
+            si d < i entonces i := d fin
+            si h > f entonces f := h fin
+        fin
+        pend[yc] := i ob (f << 32)
+    fin
+
+    ; lo de la fila, y la deja en NADA, de una vez
+    función toma_pend(d: puntero a nat64): nat64
+        ensamblador
+            mov rdi, {d}
+            mov rax, 0xFFFFFFFFFFFFFFFF
+            db 0x48, 0x87, 0x07         ; xchg rax, [rdi]
+        fin
+    fin
+
+    función nada_pendiente()
+        variable fy: nat32
+        fy := 0
+        mientras fy < MAX_FILAS hacer
+            pend[fy] := NADA
+            fy := fy + 1
+        fin
+    fin
+
+    ; todo lo de la pantalla, otra vez (al momento si es directo)
+    función marca_todo()
+        variable xc, yc: nat32
+        si directo() entonces
+            si modo_gráfico entonces devolver fin
+            yc := 0
+            mientras yc < filas hacer
+                xc := 0
+                mientras xc < columnas hacer
+                    pinta(xc, yc)
+                    xc := xc + 1
+                fin
+                yc := yc + 1
+            fin
+            si cursor_visible y cx < columnas entonces pinta_cursor(cx, cy) fin
+            devolver
+        fin
+        todo_ := cierto
+        hay_algo := cierto
+    fin
+
     ; abre la consola en esa pantalla (32 o 24 bits por punto); dice si se puede
     público función abre(b: nat64, an: nat32, al: nat32, pa: nat32, bpp: byte, r: byte, v: byte, a: byte): bool
         variable i, j: nat32
@@ -127,16 +304,18 @@ módulo Pant64
         ap := a
         escala := 1
         si al >= 1400 entonces escala := 2 fin
-        mientras (an div (8 * escala)) * (al div (16 * escala)) > CASILLAS hacer escala := escala + 1 fin
+        mientras (an div (8 * escala)) * (al div (16 * escala)) > CASILLAS o al div (16 * escala) > MAX_FILAS hacer escala := escala + 1 fin
         columnas := an div (8 * escala)
         filas := al div (16 * escala)
         color := 0x07
+        primera := 0
         i := 0
         mientras i < columnas * filas hacer
             texto[i] := ' '
             colores[i] := color
             i := i + 1
         fin
+        nada_pendiente()
         ; la pantalla entera, de negro (también lo que sobra a la derecha y abajo)
         i := 0
         mientras i < al hacer
@@ -150,6 +329,7 @@ módulo Pant64
         fin
         cx := 0
         cy := 0
+        cursor_visible := cierto
         abierta := cierto
         devolver cierto
     fin
@@ -158,59 +338,236 @@ módulo Pant64
         color := (fondo << 4) ob (tinta yb 15)
     fin
 
-    función sube()
-        variable i, n: nat32
-        variable xc, yc: nat32
-        n := columnas * (filas - 1)
+    ; la fila y del texto (de la pantalla), en blanco con el fondo de ahora
+    función en_blanco(yc: nat32)
+        variable i, k: nat32
+        k := casilla(0, yc)
         i := 0
-        mientras i < n hacer
-            texto[i] := texto[i + columnas]
-            colores[i] := colores[i + columnas]
+        mientras i < columnas hacer
+            texto[k + i] := ' '
+            colores[k + i] := color yb 0xF0
             i := i + 1
-        fin
-        mientras i < columnas * filas hacer
-            texto[i] := ' '
-            colores[i] := color yb 0xF0
-            i := i + 1
-        fin
-        yc := 0
-        mientras yc < filas hacer
-            xc := 0
-            mientras xc < columnas hacer
-                pinta(xc, yc)
-                xc := xc + 1
-            fin
-            yc := yc + 1
         fin
     fin
 
+    función sube()
+        primera := primera + 1
+        si primera >= filas entonces primera := 0 fin
+        en_blanco(filas - 1)
+        marca_todo()
+    fin
+
     función nueva_línea()
+        variable vx, vy: nat32
+        vx := cx
+        vy := cy
         cx := 0
         cy := cy + 1
         si cy >= filas entonces
             sube()
             cy := filas - 1
+        sino si vx < columnas entonces
+            marca(vx, vy)                   ; (donde estaba el cursor)
         fin
     fin
 
     ; una letra (de la página 437) en el cursor
     público función letra(c: byte)
+        variable k, vx: nat32
         si no abierta entonces devolver fin
         si c = 10 entonces
             nueva_línea()
         sino si c = 13 entonces
+            vx := cx
             cx := 0
+            si vx < columnas entonces marca(vx, cy) fin
         sino si c = 9 entonces
             letra(' ')
             mientras cx yb 7 <> 0 hacer letra(' ') fin
         sino si c = 8 entonces
-            si cx > 0 entonces cx := cx - 1 fin
+            si cx > 0 entonces
+                vx := cx
+                cx := cx - 1
+                si vx < columnas entonces marca(vx, cy) fin
+            fin
         sino
-            texto[cy * columnas + cx] := c
-            colores[cy * columnas + cx] := color
-            pinta(cx, cy)
+            k := casilla(cx, cy)
+            texto[k] := c
+            colores[k] := color
+            vx := cx
             cx := cx + 1
+            marca(vx, cy)
             si cx >= columnas entonces nueva_línea() fin
+        fin
+    fin
+
+    ; [etapa 8] borrar (ESC [ J y ESC [ K, como VT100): qué 0 desde el
+    ; cursor, 1 hasta el cursor, 2 todo; de la pantalla (línea = falso) o de
+    ; la línea del cursor
+    público función borra(qué: nat32, línea_: bool)
+        variable fx, fy, k, d, h: nat32
+        si no abierta entonces devolver fin
+        fy := 0
+        mientras fy < filas hacer
+            si (no línea_ o fy = cy) y (qué = 2 o (qué = 0 y fy >= cy) o (qué = 1 y fy <= cy)) entonces
+                d := 0
+                h := columnas
+                si fy = cy y qué = 0 entonces d := cx fin
+                si fy = cy y qué = 1 entonces
+                    h := cx + 1
+                    si h > columnas entonces h := columnas fin
+                fin
+                fx := d
+                k := casilla(0, fy)
+                mientras fx < h hacer
+                    texto[k + fx] := ' '
+                    colores[k + fx] := color yb 0xF0
+                    fx := fx + 1
+                fin
+                si d < h entonces
+                    si directo() entonces
+                        fx := d
+                        mientras fx < h hacer
+                            marca(fx, fy)
+                            fx := fx + 1
+                        fin
+                    sino
+                        apunta(fy, d, h - 1)
+                        hay_algo := cierto
+                    fin
+                fin
+            fin
+            fy := fy + 1
+        fin
+    fin
+
+    ; [etapa 8] el cursor a (x, y) (desde 0; ESC [ fila ; col H)
+    público función pon_cursor(nx: nat32, ny: nat32)
+        si no abierta entonces devolver fin
+        si cx < columnas entonces marca(cx, cy) fin
+        si nx >= columnas entonces nx := columnas - 1 fin
+        si ny >= filas entonces ny := filas - 1 fin
+        cx := nx
+        cy := ny
+        marca(cx, cy)
+    fin
+
+    público función cursor_x(): nat32
+        devolver cx
+    fin
+
+    público función cursor_y(): nat32
+        devolver cy
+    fin
+
+    público función muestra_cursor(sí_: bool)
+        cursor_visible := sí_
+        si abierta y cx < columnas entonces marca(cx, cy) fin
+    fin
+
+    ; ---- [etapa 8] el hilo «pantalla» ----
+    ; dibuja lo que falta (con el mutex del pintor, o al momento si es directo)
+    función vuelca()
+        variable fy, d, h, fx, n: nat32
+        variable pe: nat64
+        variable todo__: bool
+        si modo_gráfico entonces devolver fin
+        si limpia entonces
+            limpia := falso
+            rellena(0, 0, ancho, alto, 0)
+            todo_ := cierto
+        fin
+        hay_algo := falso
+        todo__ := todo_
+        todo_ := falso
+        n := 0
+        ; (el cursor de antes, fuera: su casilla se dibuja otra vez)
+        si dib_hay y (dib_x <> cx o dib_y <> cy o no cursor_visible) y dib_x < columnas y dib_y < filas entonces
+            pinta(dib_x, dib_y)
+            dib_hay := falso
+        fin
+        fy := 0
+        mientras fy < filas hacer
+            ; (se toma y se deja en NADA antes de dibujar: lo que se escriba
+            ; mientras tanto se apunta otra vez)
+            pe := toma_pend(dirección(pend[fy]))
+            si todo__ entonces
+                d := 0
+                h := columnas - 1
+            sino si pe = NADA entonces
+                d := 1
+                h := 0
+            sino
+                d := nat32(pe yb 0xFFFFFFFF)
+                h := nat32(pe >> 32)
+            fin
+            si d <= h entonces
+                si h >= columnas entonces h := columnas - 1 fin
+                fx := d
+                mientras fx <= h hacer
+                    pinta(fx, fy)
+                    fx := fx + 1
+                fin
+                si dib_hay y dib_y = fy y dib_x >= d y dib_x <= h entonces dib_hay := falso fin
+                n := n + 1
+            fin
+            fy := fy + 1
+        fin
+        si cursor_visible y cx < columnas y cy < filas y no dib_hay entonces
+            pinta_cursor(cx, cy)
+            dib_x := cx
+            dib_y := cy
+            dib_hay := cierto
+        fin
+        pant_filas := pant_filas + n
+    fin
+
+    función hilo_pantalla(arg: nat64)
+        mientras cierto hacer
+            duerme_ms(20)
+            si hay_algo y no modo_gráfico entonces
+                cierra_mutex(dirección(pintor))
+                vuelca()
+                abre_mutex(dirección(pintor))
+                pant_vueltas := pant_vueltas + 1
+            fin
+        fin
+    fin
+
+    ; en marcha el hilo (después del planificador); si no se puede, se sigue dibujando al momento
+    público función prepara_pantalla()
+        si no abierta o con_hilo entonces devolver fin
+        dib_hay := falso
+        si crea(nat64(dirección(hilo_pantalla)), 0, "pantalla", NORMAL, CUALQUIERA) <> nulo entonces con_hilo := cierto fin
+    fin
+
+    ; todo lo escrito, ya en la pantalla (al apagar, antes de un pantallazo)
+    público función pant_al_día()
+        si no abierta o modo_gráfico entonces devolver fin
+        si directo() entonces devolver fin
+        cierra_mutex(dirección(pintor))
+        vuelca()
+        abre_mutex(dirección(pintor))
+    fin
+
+    ; [etapa 8] un programa toma la pantalla (cierto) o la suelta (falso: se
+    ; pinta entera otra vez, con lo de fuera de las casillas a negro)
+    público función pon_modo_gráfico(sí_: bool)
+        si no abierta entonces devolver fin
+        si sí_ entonces
+            modo_gráfico := cierto
+            devolver
+        fin
+        si no modo_gráfico entonces devolver fin
+        modo_gráfico := falso
+        dib_hay := falso
+        si directo() entonces
+            rellena(0, 0, ancho, alto, 0)
+            marca_todo()
+        sino
+            limpia := cierto
+            todo_ := cierto
+            hay_algo := cierto
         fin
     fin
 
@@ -222,6 +579,12 @@ módulo Pant64
 
     ; la que llama el arranque (C_consola) con cada letra que se escribe
     público función consola_letra(c: nat64)
+        ; (Hispa-64 se para con un programa en la pantalla: se ve la consola)
+        si parada_de <> 0 y modo_gráfico entonces
+            modo_gráfico := falso
+            rellena(0, 0, ancho, alto, 0)
+            marca_todo()
+        fin
         letra(byte(c))
     fin
 

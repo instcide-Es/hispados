@@ -1,0 +1,899 @@
+; =============================================================================
+;  disp64.cas - Hispa-64, etapa 8: los dispositivos para los programas
+;  (docs/64/HISPA-64.md, sección 14), al estilo de Linux, para que los
+;  programas gráficos (el servidor de ventanas) no necesiten nada propio:
+;
+;   - /dev/fb0: la pantalla (la del GOP) con los ioctl de fbdev de Linux
+;     (FBIOGET_VSCREENINFO, FBIOGET_FSCREENINFO, FBIOPUT_VSCREENINFO sin
+;     cambiar de modo, FBIOPAN_DISPLAY) y mmap, con **doble búfer**: la
+;     pantalla «virtual» mide el doble de alto; la mitad de arriba es la
+;     pantalla de verdad (escritura combinada) y la de abajo, un búfer en la
+;     RAM del mismo tamaño. FBIOPAN_DISPLAY con yoffset = yres copia el de
+;     abajo a la pantalla (la GOP no sabe cambiar de búfer: se copia), y el
+;     ioctl propio FBIO_HISPA_COPIA (0x46E0) copia solo un rectángulo (x, y,
+;     ancho, alto: cuatro nat32), lo que cambia. El primer programa que pone la
+;     pantalla en su memoria la tiene (la consola deja de dibujar, Pant64)
+;     hasta que acaba.
+;   - /dev/input/event0: el teclado y el puntero, con la «struct input_event»
+;     de Linux (24 octetos: el tiempo, tipo, código y valor): EV_KEY con los
+;     códigos de Linux (KEY_A, BTN_LEFT...; 1 pulsada, 0 soltada, 2 repetida),
+;     EV_ABS con ABS_X y ABS_Y (la posición del puntero en puntos de la
+;     pantalla, venga de un ratón, una tableta o el touchpad), EV_REL con
+;     REL_WHEEL (la rueda), EV_SYN; y uno propio, **EV_LETRA (0x1E)**, con la
+;     letra ya hecha con el mapa español (los acentos muertos, AltGr, las
+;     mayúsculas): valor = el número de Unicode, o el control (13 Intro, 127
+;     Retroceso, 9 Tab, 27 Esc, Ctrl+A..Z = 1..26). Cada descriptor abierto
+;     tiene su cola (1024 sucesos). Con EVIOCGRAB, las teclas ya no van a la
+;     consola. EVIOCGVERSION, EVIOCGID y EVIOCGNAME, como Linux.
+;   - /dev/shm/NOMBRE: memoria compartida con nombre (lo que usa shm_open de
+;     musl: open, ftruncate, mmap con MAP_SHARED, de leer y escribir, entre
+;     procesos que no son padre e hijo; unlink la borra cuando ya nadie la
+;     tiene abierta; las páginas, cuando ya nadie las tiene puestas).
+;   - /dev/null y /dev/zero.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Disp64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Sinc64, Espacios, Procesos, Pant64
+
+    público constante F_FB = 6                  ; las clases de archivo abierto (1 consola, 2 archivo, 3 y 4 tuberías, 5 epoll)
+    público constante F_SUCESOS = 7
+    público constante F_SHM = 8
+    público constante F_NULO = 9
+    público constante F_CERO = 10
+    público constante R_DISP = 3                ; (reg_ext) lo de un dispositivo puesto con mmap
+    constante EV_SYN = 0
+    constante EV_KEY = 1
+    constante EV_REL = 2
+    constante EV_ABS = 3
+    constante EV_LETRA = 0x1E
+    constante LARGO_EV = 1024
+    constante MAX_LECTORES = 8
+    constante MAX_SHM = 64
+    constante MÁX_SHM_PÁG = 32768               ; 128 MB por objeto
+    constante ENOENT = -2
+    constante ENXIO = -6
+    constante EAGAIN = -11
+    constante ENOMEM = -12
+    constante EFAULT = -14
+    constante EBUSY = -16
+    constante EEXIST = -17
+    constante ENODEV = -19
+    constante EINVAL = -22
+    constante ENFILE = -23
+    constante ENOTTY = -25
+    constante ENAMETOOLONG = -36
+    constante O_CREAT = 0x40
+    constante O_EXCL = 0x80
+    constante O_TRUNC = 0x200
+    constante O_ACCESO = 3
+
+    ; ---- la pantalla ----
+    público variable fb_física: nat64           ; dónde está (física): lo pone el arranque
+    variable fb_l: nat64                        ; lo que mide (salto x alto), en páginas enteras
+    variable atrás: puntero a nat64             ; los marcos del búfer de atrás (fb_l / 4096)
+    variable atrás_n: nat64
+    variable dueño: nat64                       ; el proceso que tiene la pantalla (0: la consola)
+    variable fb_mutex: Mutex
+    público variable fb_mapas, fb_copias, fb_cambios: nat64
+
+    ; ---- los sucesos ----
+    tipo Lector = estructura
+        refs: nat64
+        agarra: nat64
+        ini, n: nat64
+        perdidos: nat64
+        ev: arreglo [3072] de nat64             ; LARGO_EV sucesos de 24 octetos
+    fin
+    variable lectores: arreglo [MAX_LECTORES] de nat64
+    variable n_lectores: nat64
+    variable ev_cerrojo: nat64
+    variable agarran: nat64
+    público variable sucesos_dados, sucesos_leídos: nat64
+    variable botones_antes: nat32
+
+    ; del uso de HID (página 7) al código de tecla de Linux (KEY_*), de 0 a 0x65
+    variable hid_linux: arreglo [102] de byte = (
+        0, 0, 0, 0, 30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38,
+        50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44, 2, 3,
+        4, 5, 6, 7, 8, 9, 10, 11, 28, 1, 14, 15, 57, 12, 13, 26,
+        27, 43, 43, 39, 40, 41, 51, 52, 53, 58, 59, 60, 61, 62, 63, 64,
+        65, 66, 67, 68, 87, 88, 99, 70, 119, 110, 102, 104, 111, 107, 109, 106,
+        105, 108, 103, 69, 98, 55, 74, 78, 96, 79, 80, 81, 75, 76, 77, 71,
+        72, 73, 82, 83, 86, 127)
+    ; los modificadores (0xE0-0xE7): Ctrl, Mayús, Alt, Win izquierdos y derechos
+    variable mod_linux: arreglo [8] de byte = (29, 42, 56, 125, 97, 54, 100, 126)
+
+    ; ---- la memoria compartida ----
+    tipo Shm = estructura
+        refs: nat64                             ; los descriptores abiertos
+        borrado: nat64                          ; ya sin nombre (unlink)
+        tamaño: nat64
+        n: nat64                                ; sus páginas
+        marcos: nat64                           ; (del montón) MÁX_SHM_PÁG nat64 como mucho; se agranda
+        cabe: nat64
+        nombre: arreglo [64] de byte
+    fin
+    variable shms: arreglo [MAX_SHM] de nat64
+    variable shm_mutex: Mutex
+    público variable shm_hechos, shm_vivos, shm_páginas: nat64
+
+    función lee8(d: nat64): byte
+        variable p: puntero a byte
+        p := puntero(d)
+        devolver p[0]
+    fin
+
+    función copia_k(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    ; ¿empieza t por «pre»? (devuelve lo que sigue, o nulo)
+    función tras(t: puntero a byte, pre: puntero a byte): puntero a byte
+        variable i: nat32
+        i := 0
+        mientras pre[i] <> 0 hacer
+            si t[i] <> pre[i] entonces devolver nulo fin
+            i := i + 1
+        fin
+        devolver puntero(nat64(t) + i)
+    fin
+
+    función igual(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y a[i] = b[i] hacer i := i + 1 fin
+        devolver a[i] = b[i]
+    fin
+
+    ; ¿es la ruta de un dispositivo de aquí? su clase, o 0
+    público función es_disp(t: puntero a byte): nat32
+        si igual(t, "/dev/fb0") o igual(t, "/dev/fb") entonces devolver F_FB fin
+        si igual(t, "/dev/input/event0") entonces devolver F_SUCESOS fin
+        si igual(t, "/dev/null") entonces devolver F_NULO fin
+        si igual(t, "/dev/zero") entonces devolver F_CERO fin
+        si tras(t, "/dev/shm/") <> nulo entonces devolver F_SHM fin
+        devolver 0
+    fin
+
+    público función es_de_disp(clase: nat32): bool
+        devolver clase >= F_FB y clase <= F_CERO
+    fin
+
+    ; ---- abrir y cerrar ----
+    ; abre la ruta t (de la clase c, de es_disp); el objeto en «obj», o el error
+    público función abre_disp(p: puntero a Proceso, t: puntero a byte, c: nat32, marcas_: nat64, ref obj: nat64): ent64
+        variable l: puntero a Lector
+        variable i: nat32
+        variable b: nat64
+        obj := 0
+        si c = F_FB entonces
+            si no hay() o fb_física = 0 entonces devolver ENXIO fin
+            devolver 0
+        fin
+        si c = F_NULO o c = F_CERO entonces devolver 0 fin
+        si c = F_SHM entonces devolver abre_shm(tras(t, "/dev/shm/"), marcas_, obj) fin
+        ; F_SUCESOS: una cola para este descriptor
+        l := puntero(nat64(reserva(tamaño(Lector))))
+        si l = nulo entonces devolver ENOMEM fin
+        l.refs := 1
+        l.agarra := 0
+        l.ini := 0
+        l.n := 0
+        l.perdidos := 0
+        b := toma(dirección(ev_cerrojo))
+        i := 0
+        mientras i < MAX_LECTORES y lectores[i] <> 0 hacer i := i + 1 fin
+        si i < MAX_LECTORES entonces
+            lectores[i] := nat64(l)
+            n_lectores := n_lectores + 1
+        fin
+        suelta(dirección(ev_cerrojo), b)
+        si i >= MAX_LECTORES entonces
+            libera(puntero(nat64(l)))
+            devolver EBUSY
+        fin
+        obj := nat64(l)
+        devolver 0
+    fin
+
+    ; una referencia más (dup, fork)
+    público función otro_disp(clase: nat64, d: nat64)
+        variable l: puntero a Lector
+        variable s: puntero a Shm
+        si clase = F_SUCESOS y d <> 0 entonces
+            l := puntero(d)
+            suma_atómica(dirección(l.refs), 1)
+        sino si clase = F_SHM y d <> 0 entonces
+            s := puntero(d)
+            suma_atómica(dirección(s.refs), 1)
+        fin
+    fin
+
+    ; una menos (close, al acabar)
+    público función cierra_disp(clase: nat64, d: nat64)
+        variable l: puntero a Lector
+        variable i: nat32
+        variable b: nat64
+        si clase = F_SUCESOS y d <> 0 entonces
+            l := puntero(d)
+            si suma_atómica(dirección(l.refs), nob nat64(0)) = 1 entonces
+                b := toma(dirección(ev_cerrojo))
+                i := 0
+                mientras i < MAX_LECTORES hacer
+                    si lectores[i] = d entonces
+                        lectores[i] := 0
+                        n_lectores := n_lectores - 1
+                    fin
+                    i := i + 1
+                fin
+                si l.agarra <> 0 entonces agarran := agarran - 1 fin
+                suelta(dirección(ev_cerrojo), b)
+                libera(puntero(d))
+            fin
+        sino si clase = F_SHM y d <> 0 entonces
+            cierra_shm(puntero(d))
+        fin
+    fin
+
+    ; (Procesos.cierra_todos, al acabar un proceso) si tenía la pantalla, a la consola
+    público función acaba_proc(pid: nat64, nada: nat64)
+        variable i: nat64
+        si dueño = 0 o dueño <> pid entonces devolver fin
+        cierra_mutex(dirección(fb_mutex))
+        si dueño = pid entonces
+            dueño := 0
+            ; (el búfer de atrás: los marcos, cuando ya no los tenga nadie puestos)
+            i := 0
+            mientras i < atrás_n hacer
+                suelta_marco_u(atrás[i])
+                i := i + 1
+            fin
+            si atrás <> nulo entonces libera(puntero(nat64(atrás))) fin
+            atrás := nulo
+            atrás_n := 0
+            pon_modo_gráfico(falso)
+            fb_cambios := fb_cambios + 1
+        fin
+        abre_mutex(dirección(fb_mutex))
+    fin
+
+    ; ---- leer y escribir ----
+    función ceros_a(p: puntero a Proceso, v: nat64, n: nat64): ent64
+        variable z: arreglo [64] de nat64
+        variable hecho, k: nat64
+        ceros_mem(nat64(dirección(z[0])), 512)
+        hecho := 0
+        mientras hecho < n hacer
+            k := n - hecho
+            si k > 512 entonces k := 512 fin
+            si no copia_a(p, v + hecho, nat64(dirección(z[0])), k) entonces
+                si hecho = 0 entonces devolver EFAULT fin
+                devolver ent64(hecho)
+            fin
+            hecho := hecho + k
+        fin
+        devolver ent64(n)
+    fin
+
+    público función lee_disp(p: puntero a Proceso, clase: nat32, d: nat64, v: nat64, n: nat64, sin_esperar: bool): ent64
+        si clase = F_NULO entonces devolver 0 fin
+        si clase = F_CERO entonces devolver ceros_a(p, v, n) fin
+        si clase = F_SUCESOS entonces devolver lee_sucesos(p, puntero(d), v, n, sin_esperar) fin
+        devolver EINVAL
+    fin
+
+    público función escribe_disp(p: puntero a Proceso, clase: nat32, d: nat64, v: nat64, n: nat64): ent64
+        si clase = F_NULO o clase = F_CERO entonces devolver ent64(n) fin
+        devolver EINVAL
+    fin
+
+    ; (poll) lo listo: POLLIN 1, POLLOUT 4, POLLRDNORM 0x40, POLLWRNORM 0x100
+    público función listo_disp(clase: nat32, d: nat64, ev: nat32): nat32
+        variable l: puntero a Lector
+        si clase = F_SUCESOS entonces
+            l := puntero(d)
+            si l.n > 0 entonces devolver ev yb 0x41 fin
+            devolver 0
+        fin
+        devolver ev yb 0x145
+    fin
+
+    ; la «struct stat» (en k, ya a cero) de un dispositivo
+    público función stat_disp(clase: nat32, d: nat64, k: nat64)
+        variable s: puntero a Shm
+        pon_m64(k + 16, 1)
+        pon_m64(k + 56, 4096)
+        según clase
+            caso F_FB:
+                pon_m32(k + 24, 0x2000 ob 0x1B6)
+                pon_m64(k + 40, 29 << 8)
+            caso F_SUCESOS:
+                pon_m32(k + 24, 0x2000 ob 0x1B0)
+                pon_m64(k + 40, (13 << 8) ob 64)
+            caso F_NULO:
+                pon_m32(k + 24, 0x2000 ob 0x1B6)
+                pon_m64(k + 40, (1 << 8) ob 3)
+            caso F_CERO:
+                pon_m32(k + 24, 0x2000 ob 0x1B6)
+                pon_m64(k + 40, (1 << 8) ob 5)
+            caso F_SHM:
+                s := puntero(d)
+                pon_m32(k + 24, 0x8000 ob 0x180)
+                pon_m64(k + 8, d >> 4)
+                pon_m64(k + 48, s.tamaño)
+                pon_m64(k + 64, s.n * 8)
+        fin
+    fin
+
+    ; ---- los sucesos (teclado y puntero) ----
+    ; un suceso a todas las colas (desde el hilo del teclado, o con el
+    ; cerrojo del ratón: aquí, otro, corto)
+    función mete(tipo_: nat32, código: nat32, valor_: ent32)
+        variable b, t, us: nat64
+        variable i: nat32
+        variable l: puntero a Lector
+        variable k: nat64
+        si n_lectores = 0 entonces devolver fin
+        t := ahora_ns()
+        us := (t div 1000) mod 1000000
+        b := toma(dirección(ev_cerrojo))
+        i := 0
+        mientras i < MAX_LECTORES hacer
+            si lectores[i] <> 0 entonces
+                l := puntero(lectores[i])
+                si l.n < LARGO_EV entonces
+                    k := ((l.ini + l.n) mod LARGO_EV) * 3
+                    l.ev[k] := t div 1000000000
+                    l.ev[k + 1] := us
+                    l.ev[k + 2] := nat64(tipo_ yb 0xFFFF) ob (nat64(código yb 0xFFFF) << 16) ob (nat64(nat32(valor_)) << 32)
+                    l.n := l.n + 1
+                    sucesos_dados := sucesos_dados + 1
+                sino
+                    l.perdidos := l.perdidos + 1
+                fin
+            fin
+            i := i + 1
+        fin
+        suelta(dirección(ev_cerrojo), b)
+    fin
+
+    función sin()
+        mete(EV_SYN, 0, 0)
+    fin
+
+    ; ¿hay quien lea los sucesos? (Teclas64: para no hacer el trabajo en balde)
+    público función hay_lectores(): bool
+        devolver n_lectores > 0
+    fin
+
+    ; ¿se los ha quedado un programa (EVIOCGRAB)? las teclas ya no van a la consola
+    público función agarrado(): bool
+        devolver agarran > 0
+    fin
+
+    ; (Teclas64) una tecla (uso de HID): 1 pulsada, 0 soltada, 2 repetida
+    público función suceso_tecla(uso: nat32, valor_: ent32)
+        variable c: nat32
+        si n_lectores = 0 entonces devolver fin
+        c := 0
+        si uso < 102 entonces c := hid_linux[uso]
+        sino si uso >= 0xE0 y uso <= 0xE7 entonces c := mod_linux[uso - 0xE0]
+        fin
+        si c = 0 entonces devolver fin
+        mete(EV_KEY, c, valor_)
+        sin()
+    fin
+
+    ; (Teclas64) la letra hecha (Unicode, o un control)
+    público función suceso_letra(u: nat32)
+        si n_lectores = 0 entonces devolver fin
+        mete(EV_LETRA, 0, ent32(u))
+        sin()
+    fin
+
+    ; (Raton64) el puntero: dónde está, sus botones y lo que ha girado la rueda
+    público función suceso_puntero(x: ent32, y_: ent32, botones: nat32, rueda: ent32)
+        variable cambio: nat32
+        si n_lectores = 0 entonces
+            botones_antes := botones
+            devolver
+        fin
+        mete(EV_ABS, 0, x)
+        mete(EV_ABS, 1, y_)
+        cambio := botones xob botones_antes
+        si cambio yb 1 <> 0 entonces mete(EV_KEY, 0x110, ent32(botones yb 1)) fin
+        si cambio yb 2 <> 0 entonces mete(EV_KEY, 0x111, ent32((botones >> 1) yb 1)) fin
+        si cambio yb 4 <> 0 entonces mete(EV_KEY, 0x112, ent32((botones >> 2) yb 1)) fin
+        si rueda <> 0 entonces mete(EV_REL, 8, rueda) fin
+        botones_antes := botones
+        sin()
+    fin
+
+    ; read: sucesos enteros (24 octetos cada uno); espera si no hay (salvo O_NONBLOCK)
+    función lee_sucesos(p: puntero a Proceso, l: puntero a Lector, v: nat64, n: nat64, sin_esperar: bool): ent64
+        variable tmp: arreglo [96] de nat64            ; 32 sucesos de una vez
+        variable cuántos, i, b, hecho, k: nat64
+        si n < 24 entonces devolver EINVAL fin
+        hecho := 0
+        mientras cierto hacer
+            b := toma(dirección(ev_cerrojo))
+            cuántos := l.n
+            si cuántos > 32 entonces cuántos := 32 fin
+            si cuántos > (n - hecho) div 24 entonces cuántos := (n - hecho) div 24 fin
+            i := 0
+            mientras i < cuántos hacer
+                k := ((l.ini + i) mod LARGO_EV) * 3
+                tmp[i * 3] := l.ev[k]
+                tmp[i * 3 + 1] := l.ev[k + 1]
+                tmp[i * 3 + 2] := l.ev[k + 2]
+                i := i + 1
+            fin
+            l.ini := (l.ini + cuántos) mod LARGO_EV
+            l.n := l.n - cuántos
+            suelta(dirección(ev_cerrojo), b)
+            si cuántos > 0 entonces
+                si no copia_a(p, v + hecho, nat64(dirección(tmp[0])), cuántos * 24) entonces
+                    si hecho = 0 entonces devolver EFAULT fin
+                    devolver ent64(hecho)
+                fin
+                hecho := hecho + cuántos * 24
+                sucesos_leídos := sucesos_leídos + cuántos
+                si (n - hecho) < 24 o l.n = 0 entonces devolver ent64(hecho) fin
+                seguir
+            fin
+            si hecho > 0 entonces devolver ent64(hecho) fin
+            si sin_esperar entonces devolver EAGAIN fin
+            si interrumpido(p) entonces devolver ERESTARTSYS fin
+            ; (de 10 en 10 ms, como poll: el ratón y el teclado no despiertan a nadie)
+            duerme_hasta(p, ahora_ns() + 10000000)
+        fin
+        devolver 0
+    fin
+
+    ; ---- la pantalla: ioctl y mmap ----
+    función pon32(k: nat64, i: nat64, v: nat32)
+        pon_m32(k + i * 4, v)
+    fin
+
+    función hay_doble(): bool
+        devolver nat64(pant_salto()) * alto_puntos() = fb_l
+    fin
+
+    función info_var(k: nat64)
+        variable bits: nat32
+        ceros_mem(k, 160)
+        bits := pant_octetos() * 8
+        pon32(k, 0, ancho_puntos())
+        pon32(k, 1, alto_puntos())
+        pon32(k, 2, ancho_puntos())
+        si hay_doble() entonces pon32(k, 3, alto_puntos() * 2) sino pon32(k, 3, alto_puntos()) fin
+        pon32(k, 6, bits)
+        pon32(k, 8, pant_rojo())
+        pon32(k, 9, 8)
+        pon32(k, 11, pant_verde())
+        pon32(k, 12, 8)
+        pon32(k, 14, pant_azul())
+        pon32(k, 15, 8)
+        pon32(k, 22, 0xFFFFFFFF)         ; el alto y el ancho en mm: no se saben
+        pon32(k, 23, 0xFFFFFFFF)
+    fin
+
+    función info_fija(k: nat64)
+        variable i: nat32
+        variable id: puntero a byte
+        ceros_mem(k, 80)
+        id := "Hispa-64 GOP"
+        i := 0
+        mientras id[i] <> 0 hacer
+            pon_m8(k + i, id[i])
+            i := i + 1
+        fin
+        pon_m32(k + 24, nat32(fb_l * 2))          ; smem_len: la pantalla y el búfer de atrás
+        pon_m32(k + 28, 0)                         ; FB_TYPE_PACKED_PIXELS
+        pon_m32(k + 36, 2)                         ; FB_VISUAL_TRUECOLOR
+        pon_m16(k + 42, 1)                         ; ypanstep
+        pon_m32(k + 48, pant_salto())              ; line_length
+    fin
+
+    función pon_m16(k: nat64, v: nat32)
+        pon_m8(k, byte(v))
+        pon_m8(k + 1, byte(v >> 8))
+    fin
+
+    ; copia del búfer de atrás a la pantalla los octetos [off, off + n) (de la pantalla)
+    función copia_atrás(off: nat64, n: nat64)
+        variable pg, dentro, k: nat64
+        mientras n > 0 hacer
+            pg := off >> 12
+            dentro := off yb 4095
+            k := 4096 - dentro
+            si k > n entonces k := n fin
+            si pg >= atrás_n entonces devolver fin
+            copia_k(pant_base() + off, virt(atrás[pg]) + dentro, k)
+            off := off + k
+            n := n - k
+        fin
+    fin
+
+    ; el rectángulo (x, y, an, al) del búfer de atrás, a la pantalla
+    función copia_rect(x: nat32, y_: nat32, an: nat32, al: nat32)
+        variable f: nat32
+        si atrás = nulo o no modo_gráfico entonces devolver fin
+        si x >= ancho_puntos() o y_ >= alto_puntos() entonces devolver fin
+        si an > ancho_puntos() - x entonces an := ancho_puntos() - x fin
+        si al > alto_puntos() - y_ entonces al := alto_puntos() - y_ fin
+        f := 0
+        mientras f < al hacer
+            copia_atrás(nat64(y_ + f) * pant_salto() + nat64(x) * pant_octetos(), nat64(an) * pant_octetos())
+            f := f + 1
+        fin
+        fb_copias := fb_copias + 1
+    fin
+
+    público función ioctl_disp(p: puntero a Proceso, clase: nat32, d: nat64, orden: nat64, arg: nat64): ent64
+        variable k: arreglo [20] de nat64
+        variable r: arreglo [4] de nat32
+        variable l: puntero a Lector
+        variable b: nat64
+        variable t: puntero a byte
+        variable i, largo: nat32
+        orden := orden yb 0xFFFFFFFF
+        si clase = F_FB entonces
+            si orden = 0x4600 entonces                                  ; FBIOGET_VSCREENINFO
+                info_var(nat64(dirección(k[0])))
+                si no copia_a(p, arg, nat64(dirección(k[0])), 160) entonces devolver EFAULT fin
+                devolver 0
+            fin
+            si orden = 0x4602 entonces                                  ; FBIOGET_FSCREENINFO
+                info_fija(nat64(dirección(k[0])))
+                si no copia_a(p, arg, nat64(dirección(k[0])), 80) entonces devolver EFAULT fin
+                devolver 0
+            fin
+            si orden = 0x4601 o orden = 0x4606 entonces                 ; FBIOPUT_VSCREENINFO, FBIOPAN_DISPLAY
+                si no copia_de(p, nat64(dirección(k[0])), arg, 160) entonces devolver EFAULT fin
+                ; (el modo no cambia: solo se mira el desplazamiento)
+                r[0] := nat32(k[2] yb 0xFFFFFFFF)                       ; xoffset
+                r[1] := nat32(k[2] >> 32)                               ; yoffset
+                si orden = 0x4601 y (nat32(k[0] yb 0xFFFFFFFF) <> ancho_puntos() o nat32(k[0] >> 32) <> alto_puntos()) entonces devolver EINVAL fin
+                si r[0] <> 0 entonces devolver EINVAL fin
+                si r[1] = 0 entonces devolver 0 fin
+                si r[1] <> alto_puntos() o no hay_doble() entonces devolver EINVAL fin
+                si dueño <> p.id entonces devolver EBUSY fin
+                cierra_mutex(dirección(fb_mutex))
+                copia_rect(0, 0, ancho_puntos(), alto_puntos())
+                abre_mutex(dirección(fb_mutex))
+                devolver 0
+            fin
+            si orden = 0x46E0 entonces                                  ; FBIO_HISPA_COPIA (propio): un rectángulo
+                si no copia_de(p, nat64(dirección(r[0])), arg, 16) entonces devolver EFAULT fin
+                si dueño <> p.id entonces devolver EBUSY fin
+                cierra_mutex(dirección(fb_mutex))
+                copia_rect(r[0], r[1], r[2], r[3])
+                abre_mutex(dirección(fb_mutex))
+                devolver 0
+            fin
+            si orden = 0x4611 o orden = 0x40044620 entonces devolver 0 fin    ; FBIOBLANK, FBIO_WAITFORVSYNC
+            devolver ENOTTY
+        fin
+        si clase = F_SUCESOS entonces
+            l := puntero(d)
+            si orden = 0x40044590 entonces                              ; EVIOCGRAB
+                b := toma(dirección(ev_cerrojo))
+                si arg <> 0 y l.agarra = 0 entonces
+                    l.agarra := 1
+                    agarran := agarran + 1
+                sino si arg = 0 y l.agarra <> 0 entonces
+                    l.agarra := 0
+                    agarran := agarran - 1
+                fin
+                suelta(dirección(ev_cerrojo), b)
+                devolver 0
+            fin
+            si orden = 0x80044501 entonces                              ; EVIOCGVERSION
+                r[0] := 0x010001
+                si no copia_a(p, arg, nat64(dirección(r[0])), 4) entonces devolver EFAULT fin
+                devolver 0
+            fin
+            si orden = 0x80084502 entonces                              ; EVIOCGID: BUS_VIRTUAL, Hispa
+                r[0] := 0x00480006
+                r[1] := 0x00010001
+                si no copia_a(p, arg, nat64(dirección(r[0])), 8) entonces devolver EFAULT fin
+                devolver 0
+            fin
+            si (orden yb 0xC000FFFF) = 0x80004506 entonces              ; EVIOCGNAME(largo)
+                largo := (orden >> 16) yb 0x3FFF
+                t := "Hispa-64: teclado y puntero"
+                i := 0
+                mientras t[i] <> 0 hacer i := i + 1 fin
+                i := i + 1
+                si i > largo entonces i := largo fin
+                si no copia_a(p, arg, nat64(t), nat64(i)) entonces devolver EFAULT fin
+                devolver ent64(i)
+            fin
+            devolver ENOTTY
+        fin
+        devolver ENOTTY
+    fin
+
+    ; el búfer de atrás (con fb_mutex): falso si no hay memoria
+    función prepara_atrás(): bool
+        variable i, f: nat64
+        si atrás <> nulo entonces devolver cierto fin
+        atrás := puntero(nat64(reserva((fb_l >> 12) * 8)))
+        si atrás = nulo entonces devolver falso fin
+        atrás_n := 0
+        mientras atrás_n < fb_l >> 12 hacer
+            f := pide()
+            si f = 0 entonces
+                i := 0
+                mientras i < atrás_n hacer
+                    devuelve(atrás[i])
+                    i := i + 1
+                fin
+                libera(puntero(nat64(atrás)))
+                atrás := nulo
+                atrás_n := 0
+                devolver falso
+            fin
+            ceros_mem(virt(f), 4096)
+            atrás[atrás_n] := f
+            atrás_n := atrás_n + 1
+        fin
+        devolver cierto
+    fin
+
+    ; mmap de un dispositivo (Sistema.mapea_, con el mutex de la memoria y la
+    ; región ya puesta): las páginas de [a, a + l) desde «desp»
+    público función mapea_dispo(p: puntero a Proceso, clase: nat32, d: nat64, a: nat64, l: nat64, desp: nat64, prot: nat32): ent64
+        variable e: puntero a Espacio
+        variable fl, v, od, f: nat64
+        variable s: puntero a Shm
+        variable r: ent64
+        variable pm: puntero a nat64
+        e := puntero(p.espacio)
+        fl := COMPARTIDA
+        si prot yb 2 <> 0 entonces fl := fl ob ESCRIBIR fin
+        si prot yb 4 = 0 entonces fl := fl ob bit_nx() fin
+        si clase = F_SHM entonces
+            s := puntero(d)
+            r := 0
+            cierra_mutex(dirección(shm_mutex))
+            v := a
+            mientras v < a + l y r = 0 hacer
+                od := (desp + (v - a)) >> 12
+                si od < s.n entonces
+                    pm := puntero(s.marcos + od * 8)
+                    f := valor(pm)
+                    comparte_marco(f)
+                    si no mapea_u(e, v, f, fl) entonces
+                        suelta_marco_u(f)
+                        r := ENOMEM
+                    fin
+                fin
+                v := v + 4096
+            fin
+            abre_mutex(dirección(shm_mutex))
+            devolver r
+        fin
+        si clase <> F_FB entonces devolver ENODEV fin
+        si desp + l > fb_l * 2 entonces devolver EINVAL fin
+        cierra_mutex(dirección(fb_mutex))
+        si dueño <> 0 y dueño <> p.id entonces
+            abre_mutex(dirección(fb_mutex))
+            devolver EBUSY
+        fin
+        si desp + l > fb_l y no prepara_atrás() entonces
+            abre_mutex(dirección(fb_mutex))
+            devolver ENOMEM
+        fin
+        r := 0
+        v := a
+        mientras v < a + l y r = 0 hacer
+            od := desp + (v - a)
+            si od < fb_l entonces
+                si no mapea_u(e, v, fb_física + od, fl ob DISPOSITIVO ob combinada()) entonces r := ENOMEM fin
+            sino
+                f := atrás[(od - fb_l) >> 12]
+                comparte_marco(f)
+                si no mapea_u(e, v, f, fl) entonces
+                    suelta_marco_u(f)
+                    r := ENOMEM
+                fin
+            fin
+            v := v + 4096
+        fin
+        si r = 0 y dueño = 0 entonces
+            dueño := p.id
+            pon_modo_gráfico(cierto)
+            fb_cambios := fb_cambios + 1
+        fin
+        fb_mapas := fb_mapas + 1
+        abre_mutex(dirección(fb_mutex))
+        devolver r
+    fin
+
+    ; ---- la memoria compartida (/dev/shm) ----
+    función shm_(i: nat32): puntero a Shm
+        devolver puntero(shms[i])
+    fin
+
+    función abre_shm(nombre: puntero a byte, marcas_: nat64, ref obj: nat64): ent64
+        variable i, libre, k: nat32
+        variable s: puntero a Shm
+        k := 0
+        mientras nombre[k] <> 0 hacer
+            si nombre[k] = '/' entonces devolver EINVAL fin
+            k := k + 1
+        fin
+        si k = 0 entonces devolver EINVAL fin
+        si k > 63 entonces devolver ENAMETOOLONG fin
+        cierra_mutex(dirección(shm_mutex))
+        libre := MAX_SHM
+        i := 0
+        mientras i < MAX_SHM hacer
+            si shms[i] = 0 entonces
+                si libre = MAX_SHM entonces libre := i fin
+            sino si shm_(i).borrado = 0 y igual(dirección(shm_(i).nombre[0]), nombre) entonces
+                romper
+            fin
+            i := i + 1
+        fin
+        si i < MAX_SHM entonces
+            s := shm_(i)
+            si marcas_ yb O_CREAT <> 0 y marcas_ yb O_EXCL <> 0 entonces
+                abre_mutex(dirección(shm_mutex))
+                devolver EEXIST
+            fin
+            s.refs := s.refs + 1
+            si marcas_ yb O_TRUNC <> 0 y marcas_ yb O_ACCESO <> 0 entonces trunca_shm_(s, 0) fin
+            abre_mutex(dirección(shm_mutex))
+            obj := nat64(s)
+            devolver 0
+        fin
+        si marcas_ yb O_CREAT = 0 entonces
+            abre_mutex(dirección(shm_mutex))
+            devolver ENOENT
+        fin
+        si libre = MAX_SHM entonces
+            abre_mutex(dirección(shm_mutex))
+            devolver ENFILE
+        fin
+        s := puntero(nat64(reserva(tamaño(Shm))))
+        si s = nulo entonces
+            abre_mutex(dirección(shm_mutex))
+            devolver ENOMEM
+        fin
+        ceros_mem(nat64(s), tamaño(Shm))
+        k := 0
+        mientras nombre[k] <> 0 hacer
+            s.nombre[k] := nombre[k]
+            k := k + 1
+        fin
+        s.refs := 1
+        shms[libre] := nat64(s)
+        shm_hechos := shm_hechos + 1
+        shm_vivos := shm_vivos + 1
+        abre_mutex(dirección(shm_mutex))
+        obj := nat64(s)
+        devolver 0
+    fin
+
+    ; (con shm_mutex) lo deja en t octetos: las páginas de más, soltadas (si
+    ; las tiene alguien puestas, son suyas hasta que las quite); las nuevas, a cero
+    función trunca_shm_(s: puntero a Shm, t: nat64): ent64
+        variable n, i, f, nm: nat64
+        variable pm: puntero a nat64
+        n := (t + 4095) >> 12
+        si n > MÁX_SHM_PÁG entonces devolver ENOMEM fin
+        si n > s.cabe entonces
+            nm := nat64(reserva(n * 8))
+            si nm = 0 entonces devolver ENOMEM fin
+            si s.n > 0 entonces copia_k(nm, s.marcos, s.n * 8) fin
+            si s.marcos <> 0 entonces libera(puntero(s.marcos)) fin
+            s.marcos := nm
+            s.cabe := n
+        fin
+        mientras s.n > n hacer
+            s.n := s.n - 1
+            pm := puntero(s.marcos + s.n * 8)
+            suelta_marco_u(valor(pm))
+            shm_páginas := shm_páginas - 1
+        fin
+        mientras s.n < n hacer
+            f := pide()
+            si f = 0 entonces devolver ENOMEM fin
+            ceros_mem(virt(f), 4096)
+            pm := puntero(s.marcos + s.n * 8)
+            valor(pm) := f
+            s.n := s.n + 1
+            shm_páginas := shm_páginas + 1
+        fin
+        ; (lo de después del final, en la última página, a cero)
+        si t yb 4095 <> 0 y n > 0 entonces
+            i := t yb 4095
+            pm := puntero(s.marcos + (n - 1) * 8)
+            ceros_mem(virt(valor(pm)) + i, 4096 - i)
+        fin
+        s.tamaño := t
+        devolver 0
+    fin
+
+    público función trunca_shm(d: nat64, t: nat64): ent64
+        variable r: ent64
+        cierra_mutex(dirección(shm_mutex))
+        r := trunca_shm_(puntero(d), t)
+        abre_mutex(dirección(shm_mutex))
+        devolver r
+    fin
+
+    público función tamaño_shm(d: nat64): nat64
+        variable s: puntero a Shm
+        s := puntero(d)
+        devolver s.tamaño
+    fin
+
+    ; (con shm_mutex) lo suelta todo si ya no tiene nombre ni descriptores
+    función quizá_fuera(s: puntero a Shm)
+        variable i: nat32
+        si s.refs <> 0 o s.borrado = 0 entonces devolver fin
+        trunca_shm_(s, 0)
+        si s.marcos <> 0 entonces libera(puntero(s.marcos)) fin
+        i := 0
+        mientras i < MAX_SHM hacer
+            si shms[i] = nat64(s) entonces shms[i] := 0 fin
+            i := i + 1
+        fin
+        libera(puntero(nat64(s)))
+        shm_vivos := shm_vivos - 1
+    fin
+
+    función cierra_shm(s: puntero a Shm)
+        cierra_mutex(dirección(shm_mutex))
+        si s.refs > 0 entonces s.refs := s.refs - 1 fin
+        quizá_fuera(s)
+        abre_mutex(dirección(shm_mutex))
+    fin
+
+    ; unlink de /dev/shm/NOMBRE: 0, o el error (-ENOENT)
+    público función borra_shm(t: puntero a byte): ent64
+        variable n: puntero a byte
+        variable i: nat32
+        variable s: puntero a Shm
+        n := tras(t, "/dev/shm/")
+        si n = nulo entonces devolver ENOENT fin
+        cierra_mutex(dirección(shm_mutex))
+        i := 0
+        mientras i < MAX_SHM hacer
+            si shms[i] <> 0 entonces
+                s := shm_(i)
+                si s.borrado = 0 y igual(dirección(s.nombre[0]), n) entonces
+                    s.borrado := 1
+                    quizá_fuera(s)
+                    abre_mutex(dirección(shm_mutex))
+                    devolver 0
+                fin
+            fin
+            i := i + 1
+        fin
+        abre_mutex(dirección(shm_mutex))
+        devolver ENOENT
+    fin
+
+    ; ---- en marcha ----
+    público función prepara_disp(física: nat64)
+        fb_física := física
+        si hay() entonces fb_l := (nat64(pant_salto()) * alto_puntos() + 4095) yb (nob nat64(4095)) fin
+        al_acabar_proc := nat64(dirección(acaba_proc))
+    fin
+
+    público función escribe_disp_resumen()
+        escribir("pantalla: ", fb_mapas, " mmap, ", fb_copias, " copias del búfer de atrás, ", fb_cambios, " cambios de dueño; sucesos: ", sucesos_dados, " dados, ", sucesos_leídos, " leídos; /dev/shm: ", shm_hechos, " hechos, ", shm_vivos, " vivos, ", shm_páginas, " páginas")
+    fin
+
+fin Disp64.

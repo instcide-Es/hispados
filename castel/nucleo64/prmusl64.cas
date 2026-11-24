@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo PrMusl64
 
-    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64
 
     público variable fallos7: nat32
 
@@ -91,6 +91,7 @@ módulo PrMusl64
         si busca_archivo("MPROCESOSD") >= 0 entonces corre("MPROCESOSD", 0) fin
         si busca_archivo("MMAPA") >= 0 entonces corre("MMAPA", 0) fin
         si busca_archivo("MMAPAD") >= 0 entonces corre("MMAPAD", 0) fin
+        si busca_archivo("MDISP") >= 0 entonces corre("MDISP", 0) fin          ; [etapa 8] los dispositivos
         si busca_archivo("LUA") >= 0 y busca_archivo("PRUEBA.LUA") >= 0 entonces corre("LUA /PRUEBA.LUA uno dos", 0) fin
         ; (los que quedasen sueltos acaban solos)
         t0 := ahora_ns()
@@ -114,6 +115,7 @@ módulo PrMusl64
         si vivos <> 0 o en_tabla <> 0 o n_espacios <> 0 o tablas_usuario <> 0 o Tubos64.tubos <> 0 entonces mal("quedan procesos, espacios o tuberías") fin
         si memoria_ahora() <> mem0 entonces mal("se ha perdido memoria") fin
         si en_uso <> montón0 entonces mal("se han perdido bloques del montón") fin
+        si shm_vivos <> 0 o shm_páginas <> 0 entonces mal("queda memoria compartida (/dev/shm)") fin
         si nat64(n_pilas) <> pilas0 entonces mal("se han perdido pilas") fin
     fin
 

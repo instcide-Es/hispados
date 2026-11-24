@@ -13,7 +13,7 @@
 ; =============================================================================
 módulo Raton64
 
-    importar Cifras64, Cerrojo, Pant64
+    importar Cifras64, Cerrojo, Pant64, Disp64
 
     público variable ptr_x, ptr_y: ent32        ; dónde está (puntos)
     público variable ptr_botones: nat32         ; bit 0 el izquierdo, 1 el derecho, 2 el del medio
@@ -55,6 +55,7 @@ módulo Raton64
         botones(b)
         ptr_relativos := ptr_relativos + 1
         ptr_último := quién
+        suceso_puntero(ptr_x, ptr_y, ptr_botones, rueda)       ; [etapa 8] a /dev/input/event0
         suelta(dirección(cerrojo), rf)
     fin
 
@@ -71,6 +72,7 @@ módulo Raton64
         botones(b)
         ptr_absolutos := ptr_absolutos + 1
         ptr_último := 2
+        suceso_puntero(ptr_x, ptr_y, ptr_botones, rueda)
         suelta(dirección(cerrojo), rf)
     fin
 

@@ -73,6 +73,7 @@ módulo Tty64
     variable s_esc: nat32
     variable s_num: arreglo [8] de nat32
     variable s_n: nat32
+    variable s_priv: bool                       ; [etapa 8] ESC [ ? (las privadas de DEC)
     variable tinta, fondo: nat32
     variable s_u: arreglo [4] de byte           ; una letra de UTF-8 cortada entre dos write
     variable s_un, s_uq: nat32
@@ -196,22 +197,34 @@ módulo Tty64
                 fin
                 pon_color_ansi()
             caso 'J':
-                ; (borrar la pantalla: se sube todo lo escrito)
-                si n = 2 o n = 3 entonces
-                    i := 0
-                    mientras i < filas hacer
-                        escribir_car(byte(10))
-                        i := i + 1
-                    fin
-                fin
-            caso 'D':
+                ; [etapa 8] borrar la pantalla de verdad: 0 desde el cursor, 1 hasta él, 2 y 3 toda
+                si n > 3 entonces n := 0 fin
+                si n = 3 entonces n := 2 fin
+                borra(n, falso)
+            caso 'K':
+                ; [etapa 8] la línea: 0 desde el cursor, 1 hasta él, 2 toda
+                si n > 2 entonces n := 0 fin
+                borra(n, cierto)
+            caso 'H', 'f':
+                ; [etapa 8] el cursor a la fila y la columna (desde 1)
+                i := 1
+                v := 1
+                si s_n >= 1 y s_num[0] > 0 entonces i := s_num[0] fin
+                si s_n >= 2 y s_num[1] > 0 entonces v := s_num[1] fin
+                pon_cursor(v - 1, i - 1)
+            caso 'A', 'B', 'C':
                 si n = 0 entonces n := 1 fin
-                si n > 200 entonces n := 200 fin
-                i := 0
-                mientras i < n hacer
-                    escribir_car(byte(8))
-                    i := i + 1
+                si x = 'A' entonces
+                    si n > cursor_y() entonces n := cursor_y() fin
+                    pon_cursor(cursor_x(), cursor_y() - n)
+                sino si x = 'B' entonces
+                    pon_cursor(cursor_x(), cursor_y() + n)
+                sino
+                    pon_cursor(cursor_x() + n, cursor_y())
                 fin
+            caso 'h', 'l':
+                ; [etapa 8] ESC [ ? 25 h y l: el cursor, a la vista o no
+                si s_priv y n = 25 entonces muestra_cursor(x = 'h') fin
             si no: n := 0
         fin
     fin
@@ -225,6 +238,7 @@ módulo Tty64
         si s_esc = 1 entonces
             si u = '[' entonces
                 s_esc := 2
+                s_priv := falso
                 s_n := 0
                 s_num[0] := 0
                 devolver
@@ -246,7 +260,10 @@ módulo Tty64
                 fin
                 devolver
             fin
-            si u = '?' o u = '>' o u = '=' entonces devolver fin
+            si u = '?' o u = '>' o u = '=' entonces
+                s_priv := cierto
+                devolver
+            fin
             s_esc := 0
             si u >= 0x40 y u <= 0x7E entonces fin_esc(byte(u)) fin
             devolver

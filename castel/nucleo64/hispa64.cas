@@ -73,8 +73,9 @@ módulo Hispa64
     importar Tty64, Teclas64
     importar I2chid64
     importar PrMusl64
+    importar Disp64
 
-    constante VERSIÓN = "0.7.0"
+    constante VERSIÓN = "0.8.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
@@ -630,6 +631,7 @@ módulo Hispa64
     función al_apagar()
         variable n: nat64
         variable r: ent64
+        pant_al_día()                       ; [etapa 8] lo que quede por dibujar
         si cb_n = 0 entonces devolver fin
         n := cb_sucios
         r := vfs_sync()
@@ -677,6 +679,7 @@ módulo Hispa64
         tsc_antes := tsc()
         mira_reposo(tiene("ocioso=hlt"), tiene("ocioso=mwait"))
         si no arranca_planificador() entonces para_ya("no hay memoria para el planificador") fin
+        prepara_pantalla()                  ; [etapa 8] el hilo que dibuja la consola
         si tiene("sinsmp") entonces
             arranca_solo()
         sino
@@ -1255,7 +1258,7 @@ módulo Hispa64
         pon_color(14, 0)
         escribir("Hispa-64 ", VERSIÓN, " \xC4 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n")
         pon_color(7, 0)
-        escribir("Etapa 6: el USB, el teclado, el ratón, el touchpad y el intérprete de órdenes, en Castel de 64 bits.\n\n")
+        escribir("Etapa 8: la pantalla para los programas, las ventanas y la oficina, en Castel de 64 bits.\n\n")
         ; el cargador
         escribir("Cargador: ")
         si cargador[0] <> 0 entonces escribir(cargador, ", ") fin
@@ -1293,6 +1296,8 @@ módulo Hispa64
         si hay_fb y no temprana entonces
             si abre(fb_virt, fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces pon_consola() fin
         fin
+        ; [etapa 8] la pantalla para los programas (/dev/fb0) y los demás dispositivos
+        si hay_fb entonces prepara_disp(fb_dir) sino prepara_disp(0) fin
         escribir("El núcleo, en la mitad alta: ")
         hex16(k_ini)
         escribir(" (código, de solo leer), los datos sin ejecutar desde ")
@@ -1352,7 +1357,7 @@ módulo Hispa64
         si no tiene("sinpruebas") y no tiene("sinmusl") y tic_va entonces pruebas_musl() fin
         si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 > 0 entonces
             pon_color(12, 0)
-            escribir("Hispa-64 etapa 7: con fallos (los «MAL» de arriba).\n")
+            escribir("Hispa-64 etapa 8: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             si apagar_al_fallar entonces
                 al_apagar()
@@ -1360,7 +1365,7 @@ módulo Hispa64
             fin
         sino
             pon_color(10, 0)
-            escribir("Hispa-64 etapa 7: todo en orden.\n")
+            escribir("Hispa-64 etapa 8: todo en orden.\n")
             pon_color(7, 0)
         fin
         al_apagar()

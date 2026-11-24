@@ -175,17 +175,16 @@ módulo Smp64
         mientras k < n_cpus hacer
             c := cpu(k)
             si k <> m.número y c.en_marcha <> 0 y c.parado = 0 entonces
-                ; [etapa 6] 10 s (eran 2): quien escribe en la consola lo hace con las
-                ; interrupciones quitadas, y en QEMU con el servidor cargado, la
-                ; pantalla del GOP dibujada letra a letra por el TCG ha llegado a
-                ; pasar de 2 s (por UEFI con «pc» y 2 procesadores, MALO a la vez)
+                ; [etapa 8] 2 s otra vez (en la 6 fueron 10: la consola se dibujaba
+                ; con las interrupciones quitadas; ahora la dibuja el hilo
+                ; «pantalla», con ellas puestas, y escribir solo cambia el texto)
                 t0 := tsc()
                 mientras c.tlb_visto < g hacer
                     pausa()
-                    si tsc_hz > 0 y tsc() - t0 > tsc_hz * 10 entonces
+                    si tsc_hz > 0 y tsc() - t0 > tsc_hz * 2 entonces
                         suelta_sin(dirección(tlb_cerrojo))
                         detén_ini("un procesador no contesta al aviso de vaciar su TLB")
-                        escribir("El procesador ", k, " (APIC ", c.apic, ") lleva 10 s sin contestar.\n")
+                        escribir("El procesador ", k, " (APIC ", c.apic, ") lleva 2 s sin contestar.\n")
                         detén_fin()
                     fin
                 fin
@@ -241,10 +240,10 @@ módulo Smp64
                     ; (al que no se le ha avisado no se le espera: su tlb_visto puede ir atrás)
                     mientras c.tlb_visto < g y c.espacio = esp hacer
                         pausa()
-                        si tsc_hz > 0 y tsc() - t0 > tsc_hz * 10 entonces
+                        si tsc_hz > 0 y tsc() - t0 > tsc_hz * 2 entonces
                             suelta_sin(dirección(tlb_cerrojo))
                             detén_ini("un procesador no contesta al aviso de vaciar su TLB")
-                            escribir("El procesador ", k, " (APIC ", c.apic, ") lleva 10 s sin contestar.\n")
+                            escribir("El procesador ", k, " (APIC ", c.apic, ") lleva 2 s sin contestar.\n")
                             detén_fin()
                         fin
                     fin

@@ -467,6 +467,8 @@ módulo Procesos
             x := pte(espacio_de(p), v)
         fin
         si x yb USUARIO = 0 entonces devolver nob nat64(0) fin
+        ; ([etapa 8] la pantalla de /dev/fb0 no está en el mapa directo: el núcleo no la toca por aquí)
+        si x yb DISPOSITIVO <> 0 entonces devolver nob nat64(0) fin
         si para_escribir y x yb ESCRIBIR = 0 entonces
             si x yb COPIAR = 0 entonces devolver nob nat64(0) fin
             i := región_de(p, v)
@@ -642,6 +644,8 @@ módulo Procesos
     ; [etapa 5] cierra todos los archivos del proceso
     público función cierra_todos(p: puntero a Proceso)
         variable i: nat32
+        ; [etapa 8] lo que tenía de los dispositivos (la pantalla de /dev/fb0: Disp64)
+        si al_acabar_proc <> 0 entonces llama2_(al_acabar_proc, p.id, 0) fin
         i := 0
         mientras i < MAX_FD hacer
             si p.fd_clase[i] <> 0 entonces cierra_fd_obj(p.fd_clase[i], p.fd_obj[i]) fin
@@ -2278,6 +2282,7 @@ módulo Procesos
     ; lo de las tuberías lo hace quien las tiene (al_otro_fd)
     público variable al_otro_fd: nat64          ; f(clase, objeto): una referencia más
     público variable al_cierra_fd: nat64        ; f(clase, objeto): una menos
+    público variable al_acabar_proc: nat64      ; [etapa 8] f(pid, 0): el proceso cierra todo (al acabar)
     público función otro_fd(q: puntero a Proceso, i: nat32)
         si q.fd_clase[i] = F_ARCHIVO y q.fd_obj[i] <> 0 entonces
             vfs_otro(puntero(q.fd_obj[i]))
