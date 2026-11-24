@@ -42,6 +42,7 @@ mkdir $W/f $W/m $W/i
 MEDIO=cd
 . $AQUI/sistema.sh
 . $AQUI/uefi.sh                 # (UEFI)
+instala_efi $W/i                # (SDHCI) y el del disco instalado
 # lo que va en el CD: lo de M: en la raíz; lo de instalar en \INSTALA; la
 # oficina; y los paquetes
 cp $W/f/* $W/m/
@@ -84,9 +85,7 @@ G
 "
     echo 'if [ "$grub_platform" = efi ]; then'
     menu_efi "Arrancar Hispa-Pentium 0.8 sin instalar (desde el CD, UEFI)" ESCRIT8.BIN "escritorio unidad=M" "$M2" auto
-    menu_efi "Instalar Hispa-Pentium 0.8 en el disco duro (arrancara por la BIOS: Legacy/CSM)" SEMILLA.BIN "instalar unidad=M" "$I2" auto '  echo "Ojo: el disco instalado arranca por la BIOS de siempre (Legacy/CSM);"
-  echo "por UEFI, todavia no."
-  sleep 5'
+    menu_efi "Instalar Hispa-Pentium 0.8 en el disco duro (o en una tarjeta SD)" SEMILLA.BIN "instalar unidad=M" "$I2" auto
     menu_efi "Sin instalar, a la medida de la pantalla (UEFI)" ESCRIT8.BIN "escritorio unidad=M amedida" "$M2" auto
     menu_efi "Sin instalar, sin USB, discos, red ni ACPI (por si no arranca)" ESCRIT8.BIN "escritorio unidad=M sindisco sinusb sinred sinacpi" "$M2" auto
     menu_efi "El interprete de ordenes (texto, en la pantalla del firmware)" SEMILLA.BIN "ordenes unidad=M" "$M2" auto

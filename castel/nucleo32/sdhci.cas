@@ -1,0 +1,1091 @@
+; =============================================================================
+;  sdhci.cas - (SDHCI) los discos eMMC y las tarjetas SD del núcleo de
+;  Hispa-Pentium, por una controladora SDHCI (la de las tabletas y los
+;  portátiles pequeños: los Atom Bay Trail como el Acer One 10 y el Medion
+;  S2217 llevan el eMMC y la ranura microSD así). Según «SD Host Controller
+;  Simplified Specification 3.00» y «Physical Layer Simplified Specification»
+;  (las públicas de la SD Association) y JEDEC JESD84 (eMMC).
+;
+;  Dónde está la controladora: en el PCI (clase 08, subclase 05: 8086:0F14 el
+;  eMMC 4.5 de Bay Trail, 0F50 el eMMC 4.5.1, 0F16 la ranura SD; la 0F15, la
+;  SDIO del Wi-Fi, no se toca) o, en los equipos que la tienen en «modo ACPI»
+;  (no sale en el PCI), lo que dice ACPI.BIN de sus dispositivos 80860F14,
+;  80860F16, INT33BB y PNP0D40 (la llamada 160: de_acpi), o la dirección dada
+;  a mano en la línea del cargador («sdhci=XXXXXXXX», en hexadecimal; varias,
+;  con comas).
+;
+;  Por cada ranura con algo dentro: reinicio entero, la corriente (la tensión
+;  más alta que diga la controladora), el reloj a 400 kHz (divisor de 10
+;  bits en la 3.00, potencias de 2 en la 1.00 y la 2.00) y la tarjeta:
+;   - SD: CMD0, CMD8 (2.00 o más), ACMD41 con HCS (SDHC y SDXC: direcciones
+;     por bloques), CMD2, CMD3 (su RCA), CMD9 (el CSD: lo que mide), CMD7,
+;     el SCR (ACMD51), ancho de 4 bits (ACMD6) y alta velocidad (CMD6, 50
+;     MHz) si la tarjeta y la controladora la saben; si no, 25 MHz;
+;   - eMMC (o MMC): CMD1 con el modo por sectores, CMD2, CMD3 (RCA 1),
+;     CMD9, CMD7, el EXT_CSD (CMD8: lo que mide la «user area», las
+;     particiones de arranque no se usan), alta velocidad (52 MHz) y ancho
+;     de 8 bits (o 4) comprobado leyendo otra vez el EXT_CSD.
+;  Leer y escribir: CMD17/18 y CMD24/25 (con el CMD12 que manda la
+;  controladora sola), por ADMA2 de 32 bits (si la controladora lo sabe: una
+;  lista de trozos de 4 K, hasta 64 sectores por orden) o, si no, por PIO
+;  (el puerto de datos, palabra a palabra). Sin interrupciones: se mira el
+;  estado hasta que acaba la orden.
+;
+;  Lo que va viendo queda en el registro del arranque (ARRANQUE.TXT) y lo
+;  enseña la orden «sdhci» de la consola del núcleo. De fábrica NO se
+;  escribe (como en ahci.cas): solo si «escritura» es cierto.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sdhci
+
+    importar Pci, Paginas, Marcos, Tareas, Mem32, Formato, Registro, Textos32, Multiboot
+
+    público constante MAX_TARJETAS = 4          ; las ranuras que se llevan
+    constante OCT_SECTOR = 512
+    constante POR_VEZ = 64                      ; los sectores de cada orden (8 páginas)
+    constante PÁGINAS_DATOS = 8
+
+    ; ---- los registros de la controladora (SD Host Controller 3.00, 2.1) ----
+    constante R_BLOQUE = 0x04                   ; (16) lo que mide un bloque; (16, en 0x06) cuántos
+    constante R_ARGUMENTO = 0x08
+    constante R_MODO = 0x0C                     ; (16) el modo de la transferencia; (16, en 0x0E) la orden
+    constante R_RESPUESTA = 0x10                ; 0x10 a 0x1F
+    constante R_DATOS = 0x20                    ; el puerto de datos (PIO)
+    constante R_ESTADO = 0x24                   ; «Present State»
+    constante R_HOST = 0x28                     ; (8) Host Control 1
+    constante R_CORRIENTE = 0x29                ; (8) Power Control
+    constante R_RELOJ = 0x2C                    ; (16) Clock Control
+    constante R_ESPERA = 0x2E                   ; (8) Timeout Control
+    constante R_REINICIO = 0x2F                 ; (8) Software Reset
+    constante R_AVISOS = 0x30                   ; (16) los normales; (16, en 0x32) los de error
+    constante R_AVISOS_VALEN = 0x34             ; (32) cuáles se apuntan
+    constante R_AVISOS_LLAMAN = 0x38            ; (32) cuáles dan interrupción (ninguno)
+    constante R_HOST2 = 0x3E                    ; (16) Host Control 2 (3.00)
+    constante R_CAP = 0x40                      ; Capabilities (bits 0-31)
+    constante R_CAP2 = 0x44                     ; (bits 32-63, 3.00)
+    constante R_ADMA = 0x58                     ; dónde está la lista de ADMA2
+    constante R_VERSIÓN = 0xFE                  ; (16) la versión de la norma (bits 0-7)
+
+    ; los bits de «Present State»
+    constante E_ORDEN = 0x01                    ; la línea CMD está ocupada
+    constante E_DATOS = 0x02                    ; la DAT está ocupada
+    constante E_TARJETA = 0x10000               ; hay tarjeta
+    constante E_ESTABLE = 0x20000
+    constante E_PATILLA = 0x40000               ; la patilla de detectar la tarjeta
+    constante E_SE_ESCRIBE = 0x80000            ; la patilla del seguro: 1, se puede escribir
+    constante E_DAT0 = 0x100000                 ; la línea DAT0 (0: la tarjeta, ocupada)
+
+    ; los avisos (normales en los bits 0-15; los de error, en los 16-31)
+    constante A_ORDEN = 0x0001                  ; la orden ha acabado
+    constante A_ACABADA = 0x0002                ; la transferencia ha acabado
+    constante A_ESCRIBIR = 0x0010               ; se puede escribir un bloque (PIO)
+    constante A_LEER = 0x0020                   ; hay un bloque que leer (PIO)
+    constante A_ERROR = 0x8000
+    constante A_ERRORES = 0xFFFF0000
+
+    ; las respuestas (los bits 0-7 de la orden: su clase, CRC e índice)
+    constante R_NINGUNA = 0x00
+    constante R_R1 = 0x1A                       ; 48 bits, con CRC e índice (también R6 y R7)
+    constante R_R1B = 0x1B                      ; y la tarjeta ocupada después
+    constante R_R2 = 0x09                       ; 136 bits (el CID y el CSD)
+    constante R_R3 = 0x02                       ; 48 bits sin CRC (el OCR: R3 y R4)
+
+    ; ---- lo que se sabe de cada ranura ----
+    público constante T_SD = 1                  ; una tarjeta SD (SDSC, SDHC o SDXC)
+    público constante T_EMMC = 2                ; un eMMC (o una MMC)
+
+    público tipo Tarjeta = estructura
+        hay: bool                               ; con tarjeta lista para leer
+        clase: nat32                            ; T_SD o T_EMMC
+        por_bloques: bool                       ; direcciones por bloques (SDHC, SDXC, eMMC de más de 2 GB)
+        física: nat32                           ; dónde están sus registros
+        v: nat32                                ; y dónde se ven
+        pci: nat32                              ; su aparato del PCI (NO_HAY_PCI: de ACPI o dada a mano)
+        de_dónde: nat32                         ; 0 PCI, 1 ACPI, 2 la línea del cargador
+        id_pci: nat32                           ; fabricante y aparato
+        irq: nat32                              ; la que dice ACPI (no se usa: se mira el estado)
+        versión: nat32                          ; la de la norma (0: 1.00, 1: 2.00, 2: 3.00...)
+        cap, cap2: nat32
+        base_khz: nat32                         ; el reloj de la controladora
+        khz: nat32                              ; el de la tarjeta
+        ancho: nat32                            ; 1, 4 u 8 bits
+        adma: bool                              ; por ADMA2 (si no, PIO)
+        rca: nat32
+        sectores: nat32
+        tabla: nat32                            ; la página de la lista de ADMA2
+        datos: arreglo [8] de nat32             ; las páginas de los datos
+        respuesta: arreglo [4] de nat32
+        último_error: nat32                     ; los avisos de error de la última orden que falló
+        modelo: arreglo [41] de byte
+        subclase: arreglo [8] de byte           ; «SDSC», «SDHC», «SDXC», «eMMC», «MMC»
+    fin
+
+    público variable tarjetas: arreglo [MAX_TARJETAS] de Tarjeta
+    público variable cuántas: nat32             ; las ranuras apuntadas (con tarjeta o sin ella)
+    público variable controladoras: nat32       ; las que se han visto
+    público variable sectores_leídos, sectores_escritos, fallos_de_disco: nat32
+    público variable escritura: bool
+
+    variable cerrojo: Cerrojo
+    variable bloque: arreglo [512] de byte      ; (el EXT_CSD, el SCR, lo de CMD6)
+    variable copia: arreglo [512] de byte
+
+    ; ---- lo que se ha visto, para el registro del arranque y la orden «sdhci» ----
+    público constante CABE_INFORME = 3000
+    público variable informe: arreglo [CABE_INFORME] de byte
+    variable informe_largo: nat32
+    variable renglón: arreglo [200] de byte
+    variable dd: arreglo [6] de nat32
+
+    ; apunta una línea en el informe (y en el registro del arranque, sin
+    ; escribirla en la pantalla), con formato y hasta 5 datos
+    función di(plantilla: puntero a byte, a: nat32, b: nat32, c: nat32, d: nat32, e: nat32)
+        variable i: nat32
+        dd[0] := a
+        dd[1] := b
+        dd[2] := c
+        dd[3] := d
+        dd[4] := e
+        formatear(renglón, 200, plantilla, dd)
+        i := 0
+        mientras renglón[i] <> 0 y informe_largo + 1 < CABE_INFORME hacer
+            informe[informe_largo] := renglón[i]
+            informe_largo := informe_largo + 1
+            i := i + 1
+        fin
+        informe[informe_largo] := 0
+        apunta_solo(renglón)
+    fin
+
+    ; ¿lo lleva la línea del cargador? («sdhcipio»...)
+    función pedido(qué: puntero a byte): bool
+        devolver buscar(línea_del_cargador(), qué) <> nulo
+    fin
+
+    ; ---- los registros, del ancho que toca ----
+    función l32(t: puntero a Tarjeta, d: nat32): nat32
+        variable p: puntero a nat32
+        p := puntero(t.v + d)
+        devolver p[0]
+    fin
+
+    función p32(t: puntero a Tarjeta, d: nat32, x: nat32)
+        variable p: puntero a nat32
+        p := puntero(t.v + d)
+        p[0] := x
+    fin
+
+    función l16(t: puntero a Tarjeta, d: nat32): nat32
+        variable p: puntero a nat16
+        p := puntero(t.v + d)
+        devolver p[0]
+    fin
+
+    función p16(t: puntero a Tarjeta, d: nat32, x: nat32)
+        variable p: puntero a nat16
+        p := puntero(t.v + d)
+        p[0] := x
+    fin
+
+    función l8(t: puntero a Tarjeta, d: nat32): nat32
+        variable p: puntero a byte
+        p := puntero(t.v + d)
+        devolver p[0]
+    fin
+
+    función p8(t: puntero a Tarjeta, d: nat32, x: nat32)
+        variable p: puntero a byte
+        p := puntero(t.v + d)
+        p[0] := x
+    fin
+
+    ; se queda «cs» centésimas sin hacer nada (con el reloj del núcleo; y un
+    ; tope de vueltas, por si no corre)
+    función pausa(t: puntero a Tarjeta, cs: nat32)
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras tics <= tope y vueltas < cs * 200000 hacer
+            l32(t, R_ESTADO)
+            vueltas := vueltas + 1
+        fin
+    fin
+
+    ; espera (hasta «cs» centésimas) a que los bits «máscara» del registro de
+    ; 32 bits d valgan «igual». Falso si se pasa el tiempo.
+    función espera(t: puntero a Tarjeta, d: nat32, máscara: nat32, igual: nat32, cs: nat32): bool
+        variable tope, vueltas: nat32
+        tope := tics + cs + 1
+        vueltas := 0
+        mientras (l32(t, d) yb máscara) <> igual hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 40000000 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; reinicia lo que digan los bits (1: todo; 2: la línea CMD; 4: las DAT)
+    función reinicia(t: puntero a Tarjeta, bits: nat32): bool
+        variable tope, vueltas: nat32
+        p8(t, R_REINICIO, bits)
+        tope := tics + 30
+        vueltas := 0
+        mientras (l8(t, R_REINICIO) yb bits) <> 0 hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 20000000 entonces devolver falso fin
+        fin
+        devolver cierto
+    fin
+
+    ; el reloj de la tarjeta, a «khz» como mucho. Da el que ha quedado.
+    función pon_reloj(t: puntero a Tarjeta, khz: nat32): nat32
+        variable div_, r, base, real: nat32
+        p16(t, R_RELOJ, 0)
+        si khz = 0 entonces devolver 0 fin
+        base := t.base_khz
+        si t.versión >= 2 entonces
+            ; 3.00: el reloj es base / (2 N), N de 10 bits (0: la base)
+            si base <= khz entonces
+                div_ := 0
+                real := base
+            sino
+                div_ := (base + 2 * khz - 1) div (2 * khz)
+                si div_ > 1023 entonces div_ := 1023 fin
+                real := base div (2 * div_)
+            fin
+            r := ((div_ yb 0xFF) << 8) ob (((div_ >> 8) yb 3) << 6)
+        sino
+            ; 1.00 y 2.00: base / (2 N), N potencia de 2 hasta 128 (0: la base)
+            div_ := 0
+            real := base
+            mientras real > khz y div_ < 128 hacer
+                si div_ = 0 entonces div_ := 1 sino div_ := div_ * 2 fin
+                real := base div (2 * div_)
+            fin
+            r := div_ << 8
+        fin
+        p16(t, R_RELOJ, r ob 1)                         ; el reloj de dentro
+        si no espera(t, R_RELOJ, 2, 2, 20) entonces        ; (en los 16 bits bajos del de 32 de 0x2C)
+            di("sdhci: el reloj de dentro no se estabiliza (%04X)\n", l16(t, R_RELOJ), 0, 0, 0, 0)
+        fin
+        p16(t, R_RELOJ, l16(t, R_RELOJ) ob 4)           ; y el de la tarjeta
+        pausa(t, 1)
+        t.khz := real
+        devolver real
+    fin
+
+    ; manda la orden «índice» con «arg». Si lleva datos («bloques» de
+    ; «largo» octetos; «lee»: de la tarjeta), van por ADMA2 a las páginas de
+    ; la ranura (con «dma») o por PIO a «buf» (sin «dma»). Falso si la
+    ; controladora da un error o se pasa el tiempo.
+    función orden(t: puntero a Tarjeta, índice: nat32, arg: nat32, resp: nat32, bloques: nat32, largo: nat32, lee: bool, dma: bool, buf: puntero a nat32): bool
+        variable modo, orden_, a, k, n, quedan, tope, vueltas: nat32
+        variable lista: puntero a nat32
+        ; las líneas, libres
+        k := E_ORDEN
+        si bloques <> 0 o resp = R_R1B entonces k := E_ORDEN ob E_DATOS fin
+        si no espera(t, R_ESTADO, k, 0, 100) entonces
+            t.último_error := 0xFFFF
+            reinicia(t, 6)
+            si no espera(t, R_ESTADO, k, 0, 50) entonces devolver falso fin
+        fin
+        p32(t, R_AVISOS, 0xFFFFFFFF)
+        modo := 0
+        orden_ := (índice << 8) ob resp
+        si bloques <> 0 entonces
+            orden_ := orden_ ob 0x20
+            p16(t, R_BLOQUE, largo ob 0x7000)           ; (y el límite de SDMA, el mayor: no se usa)
+            p16(t, R_BLOQUE + 2, bloques)
+            modo := 0x02                                ; con la cuenta de bloques
+            si lee entonces modo := modo ob 0x10 fin
+            si bloques > 1 entonces modo := modo ob 0x20 ob 0x04 fin  ; varios, y el CMD12 lo manda ella
+            si dma entonces
+                modo := modo ob 0x01
+                ; la lista de ADMA2: un trozo por página (el último, con «fin»)
+                lista := puntero(t.tabla)
+                quedan := bloques * largo
+                n := 0
+                mientras quedan > 0 hacer
+                    a := quedan
+                    si a > 4096 entonces a := 4096 fin
+                    lista[n * 2] := 0x21 ob ((a yb 0xFFFF) << 16)     ; válido, «transferir»
+                    lista[n * 2 + 1] := t.datos[n]
+                    quedan := quedan - a
+                    n := n + 1
+                fin
+                lista[n * 2 - 2] := lista[n * 2 - 2] ob 0x02          ; el último
+                p32(t, R_ADMA, t.tabla)
+                p32(t, R_ADMA + 4, 0)
+                p8(t, R_HOST, (l8(t, R_HOST) yb nob 0x18) ob 0x10)   ; ADMA2 de 32 bits
+            fin
+        fin
+        p32(t, R_ARGUMENTO, arg)
+        p32(t, R_MODO, modo ob (orden_ << 16))
+        ; que acabe la orden
+        tope := tics + 100
+        vueltas := 0
+        mientras (l32(t, R_AVISOS) yb (A_ORDEN ob A_ERROR)) = 0 hacer
+            vueltas := vueltas + 1
+            si tics > tope o vueltas > 40000000 entonces
+                t.último_error := 0xFFFE
+                reinicia(t, 6)
+                devolver falso
+            fin
+        fin
+        si l32(t, R_AVISOS) yb A_ERROR <> 0 entonces
+            t.último_error := l32(t, R_AVISOS) >> 16
+            k := l32(t, R_AVISOS) yb A_ORDEN
+            p32(t, R_AVISOS, 0xFFFFFFFF)
+            reinicia(t, 6)
+            si k <> 0 entonces para_datos(t, bloques) fin    ; (la tarjeta tomó la orden)
+            devolver falso
+        fin
+        p32(t, R_AVISOS, A_ORDEN)
+        t.respuesta[0] := l32(t, R_RESPUESTA)
+        t.respuesta[1] := l32(t, R_RESPUESTA + 4)
+        t.respuesta[2] := l32(t, R_RESPUESTA + 8)
+        t.respuesta[3] := l32(t, R_RESPUESTA + 12)
+        si bloques = 0 y resp <> R_R1B entonces devolver cierto fin
+        ; los datos por PIO: bloque a bloque, por el puerto
+        si bloques <> 0 y no dma entonces
+            n := 0
+            mientras n < bloques hacer
+                k := A_ESCRIBIR
+                si lee entonces k := A_LEER fin
+                tope := tics + 100
+                vueltas := 0
+                mientras (l32(t, R_AVISOS) yb (k ob A_ERROR)) = 0 hacer
+                    vueltas := vueltas + 1
+                    si tics > tope o vueltas > 40000000 entonces
+                        t.último_error := 0xFFFD
+                        reinicia(t, 6)
+                        para_datos(t, bloques)
+                        devolver falso
+                    fin
+                fin
+                si l32(t, R_AVISOS) yb A_ERROR <> 0 entonces romper fin
+                p32(t, R_AVISOS, k)
+                a := 0
+                mientras a < largo div 4 hacer
+                    si lee entonces buf[a] := l32(t, R_DATOS) sino p32(t, R_DATOS, buf[a]) fin
+                    a := a + 1
+                fin
+                buf := buf + largo div 4                ; (un puntero a nat32: de palabra en palabra)
+                n := n + 1
+            fin
+        fin
+        ; que acabe la transferencia (o, en R1b, que la tarjeta deje de estar ocupada)
+        tope := tics + 300
+        vueltas := 0
+        mientras (l32(t, R_AVISOS) yb (A_ACABADA ob A_ERROR)) = 0 hacer
+            vueltas := vueltas + 1
+            ; (R1b: hay controladoras que no avisan si la tarjeta ya no estaba
+            ; ocupada: la línea DAT, libre, y DAT0 arriba)
+            si resp = R_R1B y bloques = 0 y vueltas > 1000 y (l32(t, R_ESTADO) yb (E_DAT0 ob E_DATOS)) = E_DAT0 entonces
+                p32(t, R_AVISOS, 0xFFFFFFFF)
+                devolver cierto
+            fin
+            si tics > tope o vueltas > 100000000 entonces
+                t.último_error := 0xFFFC
+                reinicia(t, 6)
+                para_datos(t, bloques)
+                devolver falso
+            fin
+        fin
+        si l32(t, R_AVISOS) yb A_ERROR <> 0 entonces
+            t.último_error := l32(t, R_AVISOS) >> 16
+            p32(t, R_AVISOS, 0xFFFFFFFF)
+            reinicia(t, 6)
+            para_datos(t, bloques)
+            devolver falso
+        fin
+        p32(t, R_AVISOS, 0xFFFFFFFF)
+        devolver cierto
+    fin
+
+    ; tras un error a mitad de unos datos, la tarjeta puede seguir mandándolos
+    ; (o esperándolos): CMD12, para que vuelva a «transferencia»
+    función para_datos(t: puntero a Tarjeta, bloques: nat32)
+        variable e: nat32
+        si bloques = 0 entonces devolver fin
+        e := t.último_error
+        orden(t, 12, 0, R_R1B, 0, 0, falso, falso, nulo)
+        t.último_error := e
+    fin
+
+    ; una orden sin datos
+    función manda(t: puntero a Tarjeta, índice: nat32, arg: nat32, resp: nat32): bool
+        devolver orden(t, índice, arg, resp, 0, 0, falso, falso, nulo)
+    fin
+
+    ; una orden que trae un bloque pequeño (de «largo» octetos) a «bloque», por PIO
+    función trae(t: puntero a Tarjeta, índice: nat32, arg: nat32, largo: nat32): bool
+        llenar(bloque, 512, 0)
+        devolver orden(t, índice, arg, R_R1, 1, largo, cierto, falso, puntero(dirección(bloque[0])))
+    fin
+
+    ; «n» bits de la respuesta larga (R2: el CID o el CSD sin su CRC, es
+    ; decir, sus bits 8 a 127 en los 0 a 119) desde el bit «bajo» del CID o
+    ; el CSD
+    función bits(t: puntero a Tarjeta, bajo: nat32, n: nat32): nat32
+        variable r, i, b: nat32
+        r := 0
+        i := n
+        mientras i > 0 hacer
+            i := i - 1
+            b := bajo + i - 8
+            r := (r << 1) ob ((t.respuesta[b >> 5] >> (b yb 31)) yb 1)
+        fin
+        devolver r
+    fin
+
+    ; el estado de la tarjeta (CMD13), o 0xFFFFFFFF si no contesta
+    función estado_tarjeta(t: puntero a Tarjeta): nat32
+        si no manda(t, 13, t.rca << 16, R_R1) entonces devolver 0xFFFFFFFF fin
+        devolver t.respuesta[0]
+    fin
+
+    ; espera a que la tarjeta esté lista para datos y en «transferencia»
+    función espera_lista(t: puntero a Tarjeta, cs: nat32): bool
+        variable tope, e: nat32
+        tope := tics + cs + 1
+        mientras cierto hacer
+            e := estado_tarjeta(t)
+            si e <> 0xFFFFFFFF y e yb 0x100 <> 0 y ((e >> 9) yb 15) = 4 entonces devolver cierto fin
+            si tics > tope entonces devolver falso fin
+            pausa(t, 0)
+        fin
+        devolver falso
+    fin
+
+    ; (eMMC) cambia el octeto «índice» del EXT_CSD a «x» (CMD6, SWITCH)
+    función cambia(t: puntero a Tarjeta, índice: nat32, x: nat32): bool
+        variable e: nat32
+        si no manda(t, 6, (3 << 24) ob (índice << 16) ob (x << 8), R_R1B) entonces devolver falso fin
+        si no espera_lista(t, 100) entonces devolver falso fin
+        e := estado_tarjeta(t)
+        devolver e <> 0xFFFFFFFF y e yb 0x80 = 0                 ; (sin SWITCH_ERROR)
+    fin
+
+    ; pone la controladora con «ancho» bits de datos (1, 4 u 8)
+    función pon_ancho(t: puntero a Tarjeta, ancho: nat32)
+        variable h: nat32
+        h := l8(t, R_HOST) yb nob 0x22
+        si ancho = 4 entonces h := h ob 0x02 fin
+        si ancho = 8 entonces h := h ob 0x20 fin
+        p8(t, R_HOST, h)
+        t.ancho := ancho
+    fin
+
+    ; copia el nombre del producto (del CID: «n» letras desde su bit «alto»)
+    función nombre_cid(t: puntero a Tarjeta, alto: nat32, n: nat32, destino: puntero a byte)
+        variable i, c, k: nat32
+        k := 0
+        para i desde 0 hasta n - 1 hacer
+            c := bits(t, alto - 7 - 8 * i, 8)
+            si c >= 32 y c < 127 entonces
+                destino[k] := c
+                k := k + 1
+            fin
+        fin
+        mientras k > 0 y destino[k - 1] = ' ' hacer k := k - 1 fin
+        destino[k] := 0
+    fin
+
+    ; lo que mide una tarjeta de CSD 1.0 (SDSC, o un eMMC de hasta 2 GB), en
+    ; sectores: (C_SIZE + 1) * 2^(C_SIZE_MULT + 2) bloques de 2^READ_BL_LEN
+    ; octetos (en 2 GB con bloques de 2048 no cabe en 32 bits en octetos)
+    función sectores_csd1(c_size: nat32, mult: nat32, bl: nat32): nat32
+        si bl < 9 o bl > 11 entonces bl := 9 fin
+        devolver (c_size + 1) << (mult + 2 + bl - 9)
+    fin
+
+    ; ---- la tarjeta SD ----
+    función inicia_sd(t: puntero a Tarjeta, v2: bool): bool
+        variable i, arg, tope, c_size, mult, bl, ocr: nat32
+        variable producto: arreglo [8] de byte
+        variable alta: bool
+        ; ACMD41 hasta que deje de estar ocupada (como mucho 1,5 s)
+        arg := 0x00FF8000                               ; de 2,7 a 3,6 V
+        si v2 entonces arg := arg ob 0x40000000 fin     ; (HCS: sabemos de SDHC y SDXC)
+        tope := tics + 150
+        ocr := 0
+        mientras cierto hacer
+            si no manda(t, 55, 0, R_R1) entonces devolver falso fin
+            si no manda(t, 41, arg, R_R3) entonces devolver falso fin
+            ocr := t.respuesta[0]
+            si ocr yb 0x80000000 <> 0 entonces romper fin
+            si tics > tope entonces
+                di("sdhci: la tarjeta SD no acaba de arrancar (OCR %08X)\n", ocr, 0, 0, 0, 0)
+                devolver falso
+            fin
+            pausa(t, 1)
+        fin
+        t.clase := T_SD
+        t.por_bloques := ocr yb 0x40000000 <> 0
+        si no manda(t, 2, 0, R_R2) entonces devolver falso fin
+        nombre_cid(t, 103, 5, producto)
+        si no manda(t, 3, 0, R_R1) entonces devolver falso fin
+        t.rca := t.respuesta[0] >> 16
+        si no manda(t, 9, t.rca << 16, R_R2) entonces devolver falso fin
+        si bits(t, 126, 2) = 1 entonces
+            ; CSD 2.0 (SDHC y SDXC): (C_SIZE + 1) * 512 K
+            c_size := bits(t, 48, 22)
+            t.sectores := (c_size + 1) * 1024
+            si c_size >= 0x400000 entonces t.sectores := 0xFFFFFFFF fin
+        sino
+            c_size := bits(t, 62, 12)
+            mult := bits(t, 47, 3)
+            bl := bits(t, 80, 4)
+            t.sectores := sectores_csd1(c_size, mult, bl)
+        fin
+        alta := t.por_bloques
+        si alta y t.sectores > 67108864 entonces
+            Textos32.copiar(t.subclase, "SDXC")             ; (más de 32 GB)
+        sino si alta entonces
+            Textos32.copiar(t.subclase, "SDHC")
+        sino
+            Textos32.copiar(t.subclase, "SDSC")
+        fin
+        pon_reloj(t, 25000)
+        si no manda(t, 7, t.rca << 16, R_R1B) entonces devolver falso fin
+        si no t.por_bloques entonces manda(t, 16, OCT_SECTOR, R_R1) fin
+        ; el SCR (ACMD51): la versión de la norma y los anchos que sabe
+        i := 0
+        si manda(t, 55, t.rca << 16, R_R1) y trae(t, 51, 0, 8) entonces
+            i := bloque[1] yb 0x0F                      ; SD_BUS_WIDTHS (bit 2: 4 bits)
+            di("sdhci: SCR %02X %02X %02X %02X (la norma SD %u)\n", bloque[0], bloque[1], bloque[2], bloque[3], bloque[0] yb 0x0F)
+            ; alta velocidad (CMD6, desde la 1.10), si la controladora la sabe
+            si bloque[0] yb 0x0F >= 1 y t.cap yb 0x200000 <> 0 y no pedido("sdhcilento") entonces
+                si trae(t, 6, 0x00FFFFF1, 64) y bloque[13] yb 0x02 <> 0 entonces
+                    si trae(t, 6, 0x80FFFFF1, 64) y (bloque[16] yb 0x0F) = 1 entonces
+                        p8(t, R_HOST, l8(t, R_HOST) ob 0x04)
+                        pon_reloj(t, 50000)
+                    fin
+                fin
+            fin
+        fin
+        si i yb 4 <> 0 y no pedido("sdhci1bit") entonces
+            si manda(t, 55, t.rca << 16, R_R1) y manda(t, 6, 2, R_R1) entonces pon_ancho(t, 4) fin
+        fin
+        dd[0] := nat32(dirección(producto[0]))
+        dd[1] := nat32(dirección(t.subclase[0]))
+        si producto[0] = 0 entonces
+            formatear(t.modelo, 41, "tarjeta SD (%s)", dirección(dd[1]))
+        sino
+            formatear(t.modelo, 41, "tarjeta SD %s (%s)", dd)
+        fin
+        devolver cierto
+    fin
+
+    ; ---- el eMMC ----
+    función iguales_ext(): bool
+        variable i: nat32
+        ; lo que no cambia: lo que mide, la versión, las clases de velocidad
+        para i desde 212 hasta 215 hacer
+            si bloque[i] <> copia[i] entonces devolver falso fin
+        fin
+        devolver bloque[192] = copia[192] y bloque[196] = copia[196] y bloque[226] = copia[226] y bloque[160] = copia[160]
+    fin
+
+    función inicia_emmc(t: puntero a Tarjeta): bool
+        variable tope, ocr, c_size, mult, bl, spec, ancho: nat32
+        variable producto: arreglo [8] de byte
+        variable hay_ext: bool
+        manda(t, 0, 0, R_NINGUNA)
+        pausa(t, 1)
+        ; CMD1 con el modo por sectores, hasta que deje de estar ocupado
+        tope := tics + 150
+        mientras cierto hacer
+            si no manda(t, 1, 0x40FF8080, R_R3) entonces devolver falso fin
+            ocr := t.respuesta[0]
+            si ocr yb 0x80000000 <> 0 entonces romper fin
+            si tics > tope entonces
+                di("sdhci: el eMMC no acaba de arrancar (OCR %08X)\n", ocr, 0, 0, 0, 0)
+                devolver falso
+            fin
+            pausa(t, 1)
+        fin
+        t.clase := T_EMMC
+        t.por_bloques := ((ocr >> 29) yb 3) = 2
+        si no manda(t, 2, 0, R_R2) entonces devolver falso fin
+        nombre_cid(t, 103, 6, producto)
+        t.rca := 1
+        si no manda(t, 3, t.rca << 16, R_R1) entonces devolver falso fin
+        si no manda(t, 9, t.rca << 16, R_R2) entonces devolver falso fin
+        spec := bits(t, 122, 4)
+        c_size := bits(t, 62, 12)
+        mult := bits(t, 47, 3)
+        bl := bits(t, 80, 4)
+        t.sectores := sectores_csd1(c_size, mult, bl)
+        pon_reloj(t, 20000)
+        si no manda(t, 7, t.rca << 16, R_R1B) entonces devolver falso fin
+        Textos32.copiar(t.subclase, "MMC")
+        hay_ext := falso
+        si spec >= 4 entonces
+            ; el EXT_CSD: lo que mide de verdad, la partición que se ve y sus velocidades
+            si trae(t, 8, 0, 512) entonces
+                hay_ext := cierto
+                copiar_memoria(copia, bloque, 512)
+                Textos32.copiar(t.subclase, "eMMC")
+                si t.por_bloques entonces
+                    t.sectores := nat32(bloque[212]) ob (nat32(bloque[213]) << 8) ob (nat32(bloque[214]) << 16) ob (nat32(bloque[215]) << 24)
+                fin
+                di("sdhci: EXT_CSD: revisión %u, CARD_TYPE %02X, PARTITION_CONFIG %02X, BOOT_SIZE_MULT %u, SEC_COUNT %u\n", bloque[192], bloque[196], bloque[179], bloque[226], t.sectores)
+                ; las particiones de arranque no se usan: la «user area»
+                si bloque[179] yb 7 <> 0 entonces
+                    si cambia(t, 179, bloque[179] yb 0xF8) entonces
+                        di("sdhci: de la partición %u a la «user area»\n", copia[179] yb 7, 0, 0, 0, 0)
+                    sino
+                        di("sdhci: no se puede pasar a la «user area»\n", 0, 0, 0, 0, 0)
+                        devolver falso
+                    fin
+                fin
+            fin
+        fin
+        ; alta velocidad (52 MHz) si la saben los dos
+        si hay_ext y copia[196] yb 0x02 <> 0 y t.cap yb 0x200000 <> 0 y no pedido("sdhcilento") entonces
+            si cambia(t, 185, 1) entonces
+                p8(t, R_HOST, l8(t, R_HOST) ob 0x04)
+                pon_reloj(t, 52000)
+            fin
+        sino si hay_ext y copia[196] yb 0x01 <> 0 entonces
+            pon_reloj(t, 26000)
+        fin
+        ; el ancho: 8 bits (si la controladora los tiene) o 4, comprobado
+        ; leyendo otra vez el EXT_CSD y comparándolo con el de 1 bit
+        si hay_ext y no pedido("sdhci1bit") entonces
+            ancho := 8
+            si t.cap yb 0x40000 = 0 entonces ancho := 4 fin
+            mientras ancho >= 4 hacer
+                si cambia(t, 183, ancho div 4) entonces            ; (1: 4 bits; 2: 8 bits)
+                    pon_ancho(t, ancho)
+                    si trae(t, 8, 0, 512) y iguales_ext() entonces romper fin
+                    di("sdhci: con %u bits el EXT_CSD no sale igual: se prueba con menos\n", ancho, 0, 0, 0, 0)
+                    pon_ancho(t, 1)
+                    cambia(t, 183, 0)
+                fin
+                ancho := ancho - 4
+            fin
+            si ancho < 4 entonces pon_ancho(t, 1) fin
+        fin
+        si no t.por_bloques entonces manda(t, 16, OCT_SECTOR, R_R1) fin
+        dd[0] := nat32(dirección(producto[0]))
+        si producto[0] = 0 entonces Textos32.copiar(t.modelo, "eMMC") sino formatear(t.modelo, 41, "eMMC %s", dd) fin
+        devolver cierto
+    fin
+
+    ; ---- la ranura: la controladora y lo que tenga dentro ----
+    función nombre_versión(v: nat32): puntero a byte
+        según v
+            caso 0: devolver "1.00"
+            caso 1: devolver "2.00"
+            caso 2: devolver "3.00"
+            caso 3: devolver "4.00"
+            caso 4: devolver "4.10"
+            caso 5: devolver "4.20"
+        fin
+        devolver "?"
+    fin
+
+    función nombre_origen(de: nat32): puntero a byte
+        según de
+            caso 0: devolver "PCI"
+            caso 1: devolver "ACPI"
+        fin
+        devolver "la línea del cargador"
+    fin
+
+    ; arranca la ranura t (ya con sus registros a la vista) y la tarjeta que
+    ; tenga. Falso si no hay tarjeta o no se deja.
+    función arranca(t: puntero a Tarjeta, emmc_primero: bool): bool
+        variable e, volt, i: nat32
+        variable v2, forzada: bool
+        t.versión := l16(t, R_VERSIÓN) yb 0xFF
+        t.cap := l32(t, R_CAP)
+        t.cap2 := 0
+        si t.versión >= 2 entonces t.cap2 := l32(t, R_CAP2) fin
+        si t.cap = 0xFFFFFFFF o t.cap = 0 o t.versión > 5 entonces
+            di("sdhci: en %08X no hay una controladora SDHCI (versión %04X, CAP %08X)\n", t.física, l16(t, R_VERSIÓN), t.cap, 0, 0)
+            devolver falso
+        fin
+        si t.versión >= 2 entonces t.base_khz := ((t.cap >> 8) yb 0xFF) * 1000 sino t.base_khz := ((t.cap >> 8) yb 0x3F) * 1000 fin
+        si t.base_khz = 0 entonces t.base_khz := 100000 fin       ; (no lo dice: el de las Intel)
+        t.adma := t.cap yb 0x80000 <> 0 y no pedido("sdhcipio") y t.datos[PÁGINAS_DATOS - 1] <> 0
+        di("sdhci: controladora en %08X (%s), versión %s, CAP %08X", t.física, nat32(nombre_origen(t.de_dónde)), nat32(nombre_versión(t.versión)), t.cap, 0)
+        si t.adma entonces i := nat32("ADMA2") sino i := nat32("PIO") fin
+        di(" %08X, reloj de %u MHz, %s; estado %08X\n", t.cap2, t.base_khz div 1000, i, l32(t, R_ESTADO), 0)
+        ; reinicio entero; sin interrupciones (se apuntan, pero no llaman)
+        si no reinicia(t, 1) entonces
+            di("sdhci: la controladora no acaba de reiniciarse\n", 0, 0, 0, 0, 0)
+            devolver falso
+        fin
+        p32(t, R_AVISOS_VALEN, 0x03FF00FF)
+        p32(t, R_AVISOS_LLAMAN, 0)
+        p8(t, R_ESPERA, 0x0E)
+        ; ¿hay tarjeta? En los Bay Trail la ranura SD la detecta una patilla
+        ; aparte (GPIO) y la controladora puede decir que no: se le dice que
+        ; sí (CD test) y se prueba igual; el eMMC, soldado, siempre está
+        e := l32(t, R_ESTADO)
+        forzada := falso
+        si e yb E_TARJETA = 0 entonces
+            p8(t, R_HOST, l8(t, R_HOST) ob 0xC0)
+            forzada := cierto
+            pausa(t, 2)
+            di("sdhci: la ranura dice que no hay tarjeta (estado %08X): se prueba igual\n", e, 0, 0, 0, 0)
+        fin
+        ; la corriente: la tensión más alta que sepa
+        volt := 0x0E                                    ; 3,3 V
+        si t.cap yb 0x01000000 = 0 entonces
+            si t.cap yb 0x02000000 <> 0 entonces
+                volt := 0x0C                            ; 3,0 V
+            sino si t.cap yb 0x04000000 <> 0 entonces
+                volt := 0x0A                            ; 1,8 V
+            fin
+        fin
+        p8(t, R_CORRIENTE, 0)
+        pausa(t, 1)
+        p8(t, R_CORRIENTE, volt ob 1)
+        pausa(t, 2)
+        pon_reloj(t, 400)
+        pon_ancho(t, 1)
+        ; CMD0 y CMD8: ¿SD de la 2.00 o más?
+        manda(t, 0, 0, R_NINGUNA)
+        pausa(t, 1)
+        v2 := falso
+        si no emmc_primero entonces
+            si manda(t, 8, 0x1AA, R_R1) entonces v2 := (t.respuesta[0] yb 0xFFF) = 0x1AA fin
+            si inicia_sd(t, v2) entonces devolver cierto fin
+        fin
+        si inicia_emmc(t) entonces devolver cierto fin
+        si emmc_primero entonces
+            manda(t, 0, 0, R_NINGUNA)
+            pausa(t, 1)
+            si manda(t, 8, 0x1AA, R_R1) entonces v2 := (t.respuesta[0] yb 0xFFF) = 0x1AA fin
+            si inicia_sd(t, v2) entonces devolver cierto fin
+        fin
+        ; nada: se apaga
+        i := t.último_error
+        p16(t, R_RELOJ, 0)
+        p8(t, R_CORRIENTE, 0)
+        si forzada entonces
+            di("sdhci: sin tarjeta (no contesta; error %04X)\n", i, 0, 0, 0, 0)
+        sino
+            di("sdhci: hay algo en la ranura, pero no contesta como SD ni como eMMC (error %04X)\n", i, 0, 0, 0, 0)
+        fin
+        devolver falso
+    fin
+
+    ; ¿ya está apuntada la controladora de esa dirección?
+    función ya_está(física: nat32): bool
+        variable i: nat32
+        para i desde 1 hasta cuántas hacer
+            si tarjetas[i - 1].física = física entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; apunta y arranca la ranura de la dirección física «física». Da su
+    ; número si tiene tarjeta lista; 0xFFFFFFFF si no.
+    función apunta_ranura(física: nat32, de_dónde: nat32, pci: nat32, irq: nat32, emmc_primero: bool): nat32
+        variable s, v, i: nat32
+        variable t: puntero a Tarjeta
+        si física = 0 o física yb 0xFF <> 0 o ya_está(física) entonces devolver 0xFFFFFFFF fin
+        si cuántas >= MAX_TARJETAS entonces devolver 0xFFFFFFFF fin
+        v := mapear_aparato(física, 0x100)
+        si v = 0 entonces
+            di("sdhci: no se pueden ver los registros de %08X\n", física, 0, 0, 0, 0)
+            devolver 0xFFFFFFFF
+        fin
+        s := cuántas
+        cuántas := cuántas + 1
+        t := puntero(dirección(tarjetas[s]))
+        t.hay := falso
+        t.física := física
+        t.v := v
+        t.pci := pci
+        t.de_dónde := de_dónde
+        t.irq := irq
+        t.id_pci := 0
+        si pci <> NO_HAY_PCI entonces t.id_pci := pci_leer(pci, 0) fin
+        controladoras := controladoras + 1
+        si t.tabla = 0 entonces t.tabla := reservar_marco() fin
+        para i desde 0 hasta PÁGINAS_DATOS - 1 hacer
+            si t.datos[i] = 0 entonces t.datos[i] := reservar_marco() fin
+        fin
+        si t.tabla = 0 entonces devolver 0xFFFFFFFF fin
+        tomar(cerrojo)
+        si no arranca(t, emmc_primero) entonces
+            soltar(cerrojo)
+            devolver 0xFFFFFFFF
+        fin
+        soltar(cerrojo)
+        si t.sectores = 0 entonces devolver 0xFFFFFFFF fin
+        t.hay := cierto
+        dd[0] := nat32(dirección(t.modelo[0]))
+        dd[1] := t.sectores div 2048
+        dd[2] := t.ancho
+        dd[3] := t.khz div 1000
+        dd[4] := nat32("PIO")
+        si t.adma entonces dd[4] := nat32("ADMA2") fin
+        di("sdhci: %s, %u MB; ancho %u bits; %u MHz; %s", dd[0], dd[1], dd[2], dd[3], dd[4])
+        si l32(t, R_ESTADO) yb E_SE_ESCRIBE = 0 entonces di(" (la patilla del seguro dice «solo lectura»: no se le hace caso)", 0, 0, 0, 0, 0) fin
+        di("\n", 0, 0, 0, 0, 0)
+        devolver s
+    fin
+
+    ; (Bay Trail) como Linux (byt_ocp_setting): el «OCP timeout» del puerto
+    ; SCC del IOSF, que corta las órdenes largas del eMMC. Por el MCR/MDR
+    ; del puente principal (00:00.0); solo si es el de Bay Trail (8086:0F00).
+    función bay_trail_ocp()
+        variable x: nat32
+        si pci_leer(0, 0) <> 0x0F008086 o pedido("sdhcisinocp") entonces devolver fin
+        pci_escribir(0, 0xD8, 0x1000)                   ; (MCRX: la parte alta del registro 1078h)
+        pci_escribir(0, 0xD0, (0x06 << 24) ob (0x63 << 16) ob (0x78 << 8) ob 0xF0)
+        x := pci_leer(0, 0xD4)
+        si x yb 0x700 = 0 entonces devolver fin
+        pci_escribir(0, 0xD4, x yb nob 0x700)
+        pci_escribir(0, 0xD8, 0x1000)
+        pci_escribir(0, 0xD0, (0x07 << 24) ob (0x63 << 16) ob (0x78 << 8) ob 0xF0)
+        di("sdhci: Bay Trail: el «OCP timeout» del SCC, quitado (%08X)\n", x, 0, 0, 0, 0)
+    fin
+
+    ; las controladoras SDHCI del PCI (clase 08 05) y las que diga la línea
+    ; del cargador («sdhci=XXXXXXXX,YYYYYYYY»). Da cuántas tarjetas listas.
+    público función identificar(): nat32
+        variable a, n, id, ranuras, primero, k, b, listas, pm: nat32
+        variable p: puntero a byte
+        informe_largo := 0
+        informe[0] := 0
+        listas := 0
+        si pedido("sinsdhci") entonces devolver 0 fin
+        bay_trail_ocp()
+        a := NO_HAY_PCI
+        n := 0
+        si no pedido("sdhcisinpci") entonces a := pci_busca(0x080500, 0xFFFF00, NO_HAY_PCI) fin
+        mientras a <> NO_HAY_PCI y n < 8 hacer
+            n := n + 1
+            id := pci_leer(a, 0)
+            di("sdhci: en el PCI, %02X:%02X.%u: %04X:%04X", (a >> 16) yb 0xFF, (a >> 11) yb 0x1F, (a >> 8) yb 7, id yb 0xFFFF, id >> 16)
+            di(", clase %06X\n", pci_leer(a, PCI_CLASE) >> 8, 0, 0, 0, 0)
+            si id = 0x0F158086 o id = 0x22958086 entonces
+                di("sdhci: es la SDIO (la del Wi-Fi): no se toca\n", 0, 0, 0, 0, 0)
+            sino
+                ; las ranuras (registro 40h: cuántas y el primer registro base)
+                ranuras := ((pci_leer8(a, 0x40) >> 4) yb 7) + 1
+                primero := pci_leer8(a, 0x40) yb 7
+                si primero + ranuras > 6 entonces
+                    primero := 0
+                    ranuras := 1
+                fin
+                ; encendida (D0) y atendiendo en la memoria, con DMA
+                pm := pci_capacidad(a, 1)
+                si pm <> 0 entonces
+                    si pci_leer16(a, pm + 4) yb 3 <> 0 entonces
+                        pci_escribir16(a, pm + 4, pci_leer16(a, pm + 4) yb nob 3)
+                        di("sdhci: estaba apagada (D%u): a D0\n", pci_leer16(a, pm + 4) yb 3, 0, 0, 0, 0)
+                    fin
+                fin
+                pci_enciende(a)
+                para k desde 0 hasta ranuras - 1 hacer
+                    b := pci_memoria(a, primero + k)
+                    si b = 0 entonces
+                        di("sdhci: su registro base %u no vale\n", primero + k, 0, 0, 0, 0)
+                    sino si apunta_ranura(b, 0, a, pci_leer8(a, PCI_IRQ), id = 0x0F148086 o id = 0x0F508086) <> 0xFFFFFFFF entonces
+                        listas := listas + 1
+                    fin
+                fin
+            fin
+            a := pci_busca(0x080500, 0xFFFF00, a)
+        fin
+        si n = 0 entonces di("sdhci: en el PCI no hay controladoras SD/eMMC (clase 08 05)\n", 0, 0, 0, 0, 0) fin
+        ; las que se den a mano
+        p := buscar(línea_del_cargador(), "sdhci=")
+        si p <> nulo entonces
+            p := p + 6
+            mientras cierto hacer
+                b := 0
+                mientras es_hex(p[0]) hacer
+                    b := (b << 4) ob valor_hex(p[0])
+                    p := p + 1
+                fin
+                si b <> 0 entonces
+                    di("sdhci: la de %08X, dada en la línea del cargador\n", b, 0, 0, 0, 0)
+                    si apunta_ranura(b, 2, NO_HAY_PCI, 0, falso) <> 0xFFFFFFFF entonces listas := listas + 1 fin
+                fin
+                si p[0] <> ',' entonces romper fin
+                p := p + 1
+            fin
+        fin
+        devolver listas
+    fin
+
+    función es_hex(c: nat32): bool
+        devolver (c >= '0' y c <= '9') o (c >= 'A' y c <= 'F') o (c >= 'a' y c <= 'f')
+    fin
+
+    función valor_hex(c: nat32): nat32
+        si c <= '9' entonces devolver c - '0' fin
+        si c >= 'a' entonces devolver c - 'a' + 10 fin
+        devolver c - 'A' + 10
+    fin
+
+    ; (modo ACPI) una controladora que ha dicho ACPI.BIN: su dirección, su
+    ; IRQ y si es un eMMC. Da el número de la ranura si tiene tarjeta lista
+    ; (0xFFFFFFFF si no, o si ya estaba: por el PCI o dada a mano).
+    público función de_acpi(física: nat32, irq: nat32, emmc: bool): nat32
+        si pedido("sinsdhci") entonces devolver 0xFFFFFFFF fin
+        devolver apunta_ranura(física, 1, NO_HAY_PCI, irq, emmc)
+    fin
+
+    ; ¿está ya la controladora de esa dirección? (para no apuntarla dos veces)
+    público función conocida(física: nat32): bool
+        devolver ya_está(física)
+    fin
+
+    ; ---- leer y escribir ----
+    función dirección_de(t: puntero a Tarjeta, lba: nat32): nat32
+        si t.por_bloques entonces devolver lba fin
+        devolver lba * OCT_SECTOR
+    fin
+
+    función vale(s: nat32, lba: nat32, n: nat32): bool
+        si s >= MAX_TARJETAS entonces devolver falso fin
+        devolver tarjetas[s].hay y lba < tarjetas[s].sectores y n <= tarjetas[s].sectores - lba
+    fin
+
+    ; k sectores (hasta POR_VEZ) desde lba: por ADMA2 a las páginas de la
+    ; ranura, o por PIO a «buf» (que ha de caber)
+    función lee_trozo(t: puntero a Tarjeta, lba: nat32, k: nat32, buf: puntero a byte): bool
+        variable índice, i: nat32
+        variable bien: bool
+        índice := 17
+        si k > 1 entonces índice := 18 fin
+        bien := orden(t, índice, dirección_de(t, lba), R_R1, k, OCT_SECTOR, cierto, t.adma, puntero(buf))
+        si bien y t.adma entonces
+            i := 0
+            mientras i < k hacer
+                copiar_memoria(buf + i * OCT_SECTOR, puntero(t.datos[i div 8] + (i mod 8) * OCT_SECTOR), OCT_SECTOR)
+                i := i + 1
+            fin
+        fin
+        devolver bien
+    fin
+
+    función escribe_trozo(t: puntero a Tarjeta, lba: nat32, k: nat32, buf: puntero a byte): bool
+        variable índice, i: nat32
+        índice := 24
+        si k > 1 entonces índice := 25 fin
+        si t.adma entonces
+            i := 0
+            mientras i < k hacer
+                copiar_memoria(puntero(t.datos[i div 8] + (i mod 8) * OCT_SECTOR), buf + i * OCT_SECTOR, OCT_SECTOR)
+                i := i + 1
+            fin
+        fin
+        si no orden(t, índice, dirección_de(t, lba), R_R1, k, OCT_SECTOR, falso, t.adma, puntero(buf)) entonces devolver falso fin
+        ; que la tarjeta acabe de escribir
+        devolver espera_lista(t, 300)
+    fin
+
+    ; la controladora da errores de ADMA2 (no llega a la memoria: en modo
+    ; ACPI, quizá sin permiso de mandar en el bus): de aquí en adelante, PIO
+    función sin_adma(t: puntero a Tarjeta)
+        di("sdhci: en %08X el ADMA2 da error (%04X): sigue por PIO\n", t.física, t.último_error, 0, 0, 0)
+        t.adma := falso
+        p8(t, R_HOST, l8(t, R_HOST) yb nob 0x18)
+    fin
+
+    público función leer_sectores(s: nat32, lba: nat32, n: nat32, destino: puntero a byte): bool
+        variable k, intento: nat32
+        variable bien: bool
+        variable t: puntero a Tarjeta
+        si no vale(s, lba, n) entonces devolver falso fin
+        t := puntero(dirección(tarjetas[s]))
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > POR_VEZ entonces k := POR_VEZ fin
+            bien := lee_trozo(t, lba, k, destino)
+            si no bien y t.adma y t.último_error yb 0x0200 <> 0 entonces sin_adma(t) fin
+            intento := 0
+            mientras no bien y intento < 2 hacer
+                fallos_de_disco := fallos_de_disco + 1
+                si fallos_de_disco <= 8 entonces di("sdhci: no se lee el sector %u (%u): error %04X\n", lba, k, t.último_error, 0, 0) fin
+                bien := lee_trozo(t, lba, k, destino)
+                intento := intento + 1
+            fin
+            si bien entonces
+                destino := destino + k * OCT_SECTOR
+                sectores_leídos := sectores_leídos + k
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    público función escribir_sectores(s: nat32, lba: nat32, n: nat32, origen: puntero a byte): bool
+        variable k: nat32
+        variable bien: bool
+        variable t: puntero a Tarjeta
+        si no escritura entonces devolver falso fin          ; (sin permiso, ni una orden de escribir)
+        si no vale(s, lba, n) entonces devolver falso fin
+        t := puntero(dirección(tarjetas[s]))
+        tomar(cerrojo)
+        bien := cierto
+        mientras bien y n > 0 hacer
+            k := n
+            si k > POR_VEZ entonces k := POR_VEZ fin
+            bien := escribe_trozo(t, lba, k, origen)
+            si no bien y t.adma y t.último_error yb 0x0200 <> 0 entonces sin_adma(t) fin
+            si no bien entonces
+                fallos_de_disco := fallos_de_disco + 1
+                si fallos_de_disco <= 8 entonces di("sdhci: no se escribe el sector %u (%u): error %04X\n", lba, k, t.último_error, 0, 0) fin
+                bien := escribe_trozo(t, lba, k, origen)
+            fin
+            si bien entonces
+                origen := origen + k * OCT_SECTOR
+                sectores_escritos := sectores_escritos + k
+                lba := lba + k
+                n := n - k
+            fin
+        fin
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; lo escrito ya está en la tarjeta (sin caché encendida): basta con que
+    ; esté lista
+    público función asentar(s: nat32): bool
+        variable bien: bool
+        si no escritura o s >= MAX_TARJETAS entonces devolver falso fin
+        si no tarjetas[s].hay entonces devolver falso fin
+        tomar(cerrojo)
+        bien := espera_lista(puntero(dirección(tarjetas[s])), 100)
+        soltar(cerrojo)
+        devolver bien
+    fin
+
+    ; (el Administrador de dispositivos) la ranura con tarjeta del aparato
+    ; del PCI «a» (0xFFFFFFFF: ninguna)
+    público función sdhci_de(a: nat32): nat32
+        variable i: nat32
+        para i desde 1 hasta cuántas hacer
+            si tarjetas[i - 1].pci = a y tarjetas[i - 1].hay entonces devolver i - 1 fin
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    público función es_emmc(s: nat32): bool
+        si s >= MAX_TARJETAS entonces devolver falso fin
+        devolver tarjetas[s].clase = T_EMMC
+    fin
+
+    público función texto_informe(): puntero a byte
+        devolver dirección(informe[0])
+    fin
+
+fin Sdhci.

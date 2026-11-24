@@ -34,7 +34,7 @@
 ; =============================================================================
 módulo Dispositivos
 
-    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid, Sonido, I2c, I2chid
+    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid, Sonido, I2c, I2chid, Sdhci
 
     ; ---- los buses ----
     público constante BUS_PCI = 1
@@ -370,6 +370,27 @@ módulo Dispositivos
             sino
                 lleva(EST_ERROR, "ahci.cas")
                 Textos32.copiar(uno.detalle, "la controladora no se ha dejado poner en marcha")
+            fin
+            devolver
+        fin
+        ; (SDHCI) las controladoras SD/eMMC (clase 08 05)
+        si c = 0x0805 entonces
+            k := sdhci_de(a)
+            si pedido("sinsdhci") entonces
+                lleva(EST_APAGADO, "sdhci.cas")
+            sino si (pci_leer(a, 0) = 0x0F158086) entonces
+                lleva(EST_SIN_CONTROLADOR, "")
+                Textos32.copiar(uno.detalle, "la SDIO (la del Wi-Fi): no se toca")
+            sino si k = 0xFFFFFFFF entonces
+                lleva(EST_FUNCIONA, "sdhci.cas")
+                Textos32.copiar(uno.detalle, "sin tarjeta")
+            sino
+                lleva(EST_FUNCIONA, "sdhci.cas")
+                dd[0] := nat32(dirección(Sdhci.tarjetas[k].modelo[0]))
+                dd[1] := Sdhci.tarjetas[k].sectores div 2048
+                dd[2] := Sdhci.tarjetas[k].ancho
+                dd[3] := Sdhci.tarjetas[k].khz div 1000
+                formatear(uno.detalle, 80, "%s, %u MB; %u bits, %u MHz", dd)
             fin
             devolver
         fin
@@ -770,6 +791,9 @@ módulo Dispositivos
                 sino si Discos.discos[d].clase = DE_AHCI entonces
                     lleva(EST_FUNCIONA, "ahci.cas")
                     p := de_pci(Ahci.aparato)
+                sino si Discos.discos[d].clase = DE_SD o Discos.discos[d].clase = DE_EMMC entonces
+                    lleva(EST_FUNCIONA, "sdhci.cas")                    ; (SDHCI)
+                    si Discos.discos[d].cuál < MAX_TARJETAS y Sdhci.tarjetas[Discos.discos[d].cuál].pci <> NO_HAY_PCI entonces p := de_pci(Sdhci.tarjetas[Discos.discos[d].cuál].pci) fin
                 sino
                     lleva(EST_FUNCIONA, "usbalm.cas")
                     si Discos.discos[d].cuál < MAX_MEMORIAS entonces p := de_bus(BUS_USB, memorias[Discos.discos[d].cuál].aparato) fin

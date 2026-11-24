@@ -66,7 +66,7 @@ INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
 [ -n "${DISCO:-}" ] && INITRD+=(-drive "file=$DISCO,format=raw,if=ide,index=0,snapshot=$INSTANTANEA")
 # con un disco (una imagen), se deja escribir en él; con SOLO_LECTURA=1, no
 # (como en un PC de verdad, donde hay que pedirlo: «escritura»)
-[ -n "${DISCO:-}${SATA:-}" ] && [ -z "${SOLO_LECTURA:-}" ] && ARRANQUE="${ARRANQUE:+$ARRANQUE }escritura"
+[ -n "${DISCO:-}${SATA:-}${SD:-}" ] && [ -z "${SOLO_LECTURA:-}" ] && ARRANQUE="${ARRANQUE:+$ARRANQUE }escritura"
 [ -n "${ARRANQUE:-}" ] && INITRD+=(-append "$ARRANQUE")
 [ -n "${VGA:-}" ] && INITRD+=(-vga "$VGA")        # (VGA=none: un PC sin tarjeta gráfica que valga)
 # con SATA=imagen, esa imagen como disco SATA de una controladora AHCI (con
@@ -75,6 +75,10 @@ INSTANTANEA=on; [ -n "${ESCRIBE:-}" ] && INSTANTANEA=off
 # con QEMU_MAS="...", lo que se quiera añadir (controladoras y aparatos USB, la
 # tarjeta de red)
 [ -n "${SATA:-}" ] && INITRD+=(-device ahci,id=sata -drive "id=dsata,file=$SATA,format=raw,if=none,snapshot=$INSTANTANEA" -device ide-hd,drive=dsata,bus=sata.0)
+# (SDHCI) con SD=imagen, esa imagen como tarjeta SD de una controladora
+# SDHCI del PCI (sdhci-pci; con SD_NORMA=3, la de la norma 3.00; la imagen ha
+# de medir una potencia de 2); como SATA, ESCRIBE=1 deja que llegue lo escrito
+[ -n "${SD:-}" ] && INITRD+=(-device "sdhci-pci${SD_NORMA:+,sd-spec-version=$SD_NORMA}" -drive "id=dsd,file=$SD,format=raw,if=none,snapshot=$INSTANTANEA" -device sd-card,drive=dsd)
 [ -n "${MAQUINA:-}" ] && INITRD+=(-machine "$MAQUINA")
 # shellcheck disable=SC2206
 [ -n "${QEMU_MAS:-}" ] && INITRD+=($QEMU_MAS)

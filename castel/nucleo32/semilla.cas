@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, I2c, I2chid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Sdacpi, Usb, Usbhid, I2c, I2chid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -559,6 +559,7 @@ módulo Semilla
             fin
         fin
         escribir(informe_ahci())
+        escribir(informe_sdhci())                       ; (SDHCI)
         u := del_sistema
         si u = NINGUNA o unidades[u].clase <> U_FAT entonces
             escribir("sistema de archivos: no hay (la unidad del sistema no es un disco con FAT)\n")
@@ -740,6 +741,9 @@ módulo Semilla
         pedida := 0
         si buscar(línea_del_cargador(), "unidad=") <> nulo entonces pedida := opción("unidad=") fin
         elige_sistema(pedida)
+        ; (SDHCI) las controladoras SD/eMMC de «modo ACPI» que ACPI.BIN dijo en
+        ; otro arranque en este equipo (\SDHCI.TXT): sdacpi.cas
+        si buscar(línea_del_cargador(), "sindisco") = nulo entonces Sdacpi.recuerda() fin
         si unidad_en_memoria() entonces
             imprimir1("sin disco: los %u archivos que ha traído el cargador hacen de unidad M: (en memoria, de solo lectura).\n", módulos())
         fin
@@ -1241,7 +1245,7 @@ módulo Semilla
             sino si es("ayuda") entonces
                 escribir("órdenes: ayuda hora memoria mapa paginas monton tareas programas ejecutar N\n")
                 escribir("         toca turnos dormir estropear teclas fallo cero apagar\n")
-                escribir("         disco dir [CARPETA] lanzar PROGRAMA.BIN [ARGUMENTOS] ordenes\n")
+                escribir("         disco sdhci dir [CARPETA] lanzar PROGRAMA.BIN [ARGUMENTOS] ordenes\n")
                 escribir("         teclado es, teclado us, escritorio, usb, quitar UNIDAD\n")
             sino si es("hora") entonces
                 escribir("llevo ", tics div HZ, " segundos y ", tics mod HZ, " centésimas encendido\n")
@@ -1267,6 +1271,8 @@ módulo Semilla
                 orden_ejecutar()
             sino si es("disco") entonces
                 orden_disco()
+            sino si es("sdhci") entonces
+                escribir(informe_sdhci())               ; (SDHCI) lo que ha visto sdhci.cas
             sino si iguales(palabra1, "dir") entonces
                 orden_dir()
             sino si iguales(palabra1, "lanzar") entonces

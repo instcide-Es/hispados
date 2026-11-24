@@ -228,7 +228,7 @@
 #      contra el modelo de la tarjeta (WIFISIM.BIN) con el microcódigo del
 #      disco; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
 #      (la lista, la contraseña con asteriscos, conectar) y Configuración.
-#  53. (INTEL, SOLO=intel) El Wi-Fi de Intel (wifi/nucleo/radio_iwl.c): el lector del
+#  54. (INTEL, SOLO=intel) El Wi-Fi de Intel (wifi/nucleo/radio_iwl.c): el lector del
 #      firmware (.ucode) y el controlador de la 7265 contra el modelo de la tarjeta
 #      (tests/wifi/iwl_modelo.c); en QEMU, la e1000 no pone en marcha WIFI.BIN.
 #  28. (ACCESORIOS, SOLO=accesorios) Los accesorios: la Calculadora (CALC.BIN,
@@ -272,6 +272,11 @@
 #      a 800 x 600, ninguno en la barra ni en el dock (mira_iconos.py); organizar por
 #      nombre, tipo, tamaño y fecha; arrastrar; la cuadrícula, la automática, el teclado,
 #      ICONOS.INI; cambiar la medida en marcha; 47 a 640 x 480, en dos páginas; sin dock.
+#  53. (SDHCI, SOLO=sdhci) Las tarjetas SD y el eMMC (pruebas_sdhci.sh): la sdhci-pci de
+#      QEMU con su tarjeta: leer y escribir por ADMA2 y por PIO, SDSC y SDHC, GPT, la
+#      norma 2.00 y la 3.00, sin tarjeta, sin permiso; el modo ACPI con una SSDT de
+#      prueba (ACPI.BIN, la llamada 160), dada a mano y aprendida (\SDHCI.TXT); e
+#      INSTALAR en la tarjeta SD. (El eMMC no: la QEMU de aquí no lo tiene.)
 #  50. (TOUCHPAD, SOLO=touchpad) El touchpad (pruebas_touchpad.sh): touchpad.cas con
 #      paquetes Synaptics hechos a mano (RATON /ANALIZA con corre32: mover, tocar, doble
 #      toque, arrastrar, el borde derecho, dos dedos, la palma, al escribir, descolocados);
@@ -404,7 +409,7 @@
 #   SOLO=protege ./pruebas.sh     la primera y la 25 (PROTEGE: la zona protegida, los secretos y los servicios por su sello)
 #   SOLO=escudo ./pruebas.sh      la primera y la 26 (Escudo, el antivirus)
 #   SOLO=wifi ./pruebas.sh        la primera y la 27 (el Wi-Fi: WIFI.BIN)
-#   SOLO=intel ./pruebas.sh       la primera y la 53 ((INTEL) el Wi-Fi de Intel: el firmware y la 7265 contra su modelo; IWL_FW=archivo.ucode)
+#   SOLO=intel ./pruebas.sh       la primera y la 54 ((INTEL) el Wi-Fi de Intel: el firmware y la 7265 contra su modelo; IWL_FW=archivo.ucode)
 #   SOLO=accesorios ./pruebas.sh  la primera y la 28 (ACCESORIOS: la Calculadora, el Reloj y el Mapa de caracteres)
 #   SOLO=sonido ./pruebas.sh      la primera y la 29 (el sonido: SONIDO.BIN, la bandeja, DirectSound, HVPRUN)
 #   SOLO=pdf ./pruebas.sh         la primera y la 30 (Hispa-PDF: PDF.BIN y su ventana)
@@ -427,6 +432,7 @@
 #   SOLO=iconos ./pruebas.sh      la primera y la 47 (ICONOS: los iconos del tapiz; pruebas_iconos.sh)
 #   SOLO=compat ./pruebas.sh      la primera y la 49 ((COMPAT) el Asistente de compatibilidad; pruebas_compat.sh)
 #   SOLO=touchpad ./pruebas.sh    la primera y la 50 (TOUCHPAD: el touchpad; pruebas_touchpad.sh)
+#   SOLO=sdhci ./pruebas.sh       la primera y la 53 (SDHCI: las tarjetas SD y el eMMC; pruebas_sdhci.sh)
 #   SOLO=punteros ./pruebas.sh    la primera y la 51 (PUNTEROS: los punteros del ratón; pruebas_punteros.sh)
 #   SOLO=i2chid ./pruebas.sh      la primera y la 52 (I2CHID: los touchpads HID sobre I2C; pruebas_i2chid.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
@@ -495,6 +501,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_iconos.sh          # (ICONOS) la parte 47, como parte_iconos
 . $AQUI/pruebas_compat.sh          # (COMPAT) la parte 49, como parte_compat
 . $AQUI/pruebas_touchpad.sh        # (TOUCHPAD) la parte 50, como parte_touchpad
+. $AQUI/pruebas_sdhci.sh           # (SDHCI) la parte 53, como parte_sdhci
 . $AQUI/pruebas_punteros.sh        # (PUNTEROS) la parte 51, como parte_punteros
 . $AQUI/pruebas_i2chid.sh          # (I2CHID) la parte 52, como parte_i2chid
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
@@ -519,7 +526,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -5848,7 +5855,7 @@ else ko "no se pueden hacer el disco o WIFISIM.BIN: $(tail -2 $Wf/disco.txt) $(t
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi)"
 fi   # el Wi-Fi
-# ------------------------------------------ 53. (INTEL) el Wi-Fi de Intel
+# ------------------------------------------ 54. (INTEL) el Wi-Fi de Intel
 # El controlador de las Intel 7265/3165/3168 (wifi/nucleo/radio_iwl.c, como
 # iwlwifi/MVM) y el lector de su firmware (iwl_fw.c). El firmware de Intel no
 # es libre y no está en el repositorio: en el anfitrión, el lector se prueba
@@ -6038,6 +6045,8 @@ if parte08 iconos; then parte_iconos; else echo "  (SOLO=${SOLO08:-$SOLO}: sin l
 if parte08 compat; then parte_compat; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Asistente de compatibilidad)"; fi   # (COMPAT) la 49
 # ------------------------- 50. (TOUCHPAD) el touchpad (pruebas_touchpad.sh)
 if parte08 touchpad; then parte_touchpad; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el touchpad)"; fi
+# ------------------------- 53. (SDHCI) las tarjetas SD y el eMMC (pruebas_sdhci.sh)
+if parte08 sdhci; then parte_sdhci; else echo "  (SOLO=${SOLO08:-$SOLO}: sin las tarjetas SD)"; fi
 # ------------------------- 51. (PUNTEROS) los punteros del ratón (pruebas_punteros.sh)
 if parte08 punteros; then parte_punteros; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los punteros del ratón)"; fi
 # ------------------------- 52. (I2CHID) los touchpads HID sobre I2C (pruebas_i2chid.sh)

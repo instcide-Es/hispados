@@ -1046,6 +1046,16 @@ int servicio_principal(void)
 					sc(SC_I2CHID, (u32)&tp[k], 0, 0);
 				sc(SC_I2CHID, 0, 0, 0);
 			}
+			/* (SDHCI) las controladoras SD/eMMC de «modo ACPI», para el núcleo
+			 * (llamada 160): el eMMC y la microSD de las tabletas Bay Trail */
+			if (!tiene(args, "sinsdhci")) {
+				static struct pe_sdhci sd[SDHCI_MAX];
+				int k, m = sdhci_busca(sd, SDHCI_MAX);
+
+				for (k = 0; k < m; k++)
+					sc(SC_SDHCI, (u32)&sd[k], 0, 0);
+				sc(SC_SDHCI, 0, 0, 0);
+			}
 		}
 		/* (dispositivos) una vez, con la tarea quieta y ya leída la batería */
 		if (preparado == 1 && apm.fase != FASE_EMPEZANDO && apm.fase != FASE_ERROR && tarea_quieta()) {
