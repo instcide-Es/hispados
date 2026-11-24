@@ -13,6 +13,7 @@
 #                               en Hispa-64, /lib/ld-musl-x86_64.so.1
 #   libsaludo.so                una biblioteca compartida de prueba
 #   LUA, PRUEBA.LUA             Lua 5.5 y su prueba
+#   PING IFCONFIG DESCARGA NTP ECO MRED   los de red (hazred.sh, etapa 9)
 # Uso: hazmusl.sh SALIDA   (dice en la última línea los que ha hecho; si no
 # hay gcc, no hace nada)
 set -e
@@ -62,4 +63,5 @@ rm -rf "$T"
 for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP LUA libsaludo.so ld-musl-x86_64.so.1; do
   strip --strip-unneeded "$S/$f"
 done
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA"
+RED=$("$AQUI/hazred.sh" "$S"); RED=${RED##*hechos: }   # [etapa 9] los programas de red (programas/red/)
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED"
