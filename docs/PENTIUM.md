@@ -4847,7 +4847,47 @@ multiboot2 y con « sdhci=»), red y wifi **0.8.10**, termo **1.1** (pide la bas
 0.8.10: SMI_COUNT, Machine Check y la llamada 220 con EBX = 5, 6 y 7); lo
 demás, tal cual lo publicado (tailscal sigue en la 0.8.9).
 
-<!-- PRUEBAS_0810 -->
+Y lo que se vio por la tarde en los equipos, en la misma rama: **las descargas
+largas que se cortan** (ESCMES.HPQ, 25 MB, «al 12 %» en el HP Mini por Wi-Fi):
+DESCARGA deja lo bajado en NOMBRE.PAR (con NOMBRE.PAI: la dirección, la ETag y
+Last-Modified) y la próxima vez que se pide la misma dirección sigue desde
+ahí (Range con If-Range); 5 intentos, con «Reintentando (2 de 5)» en la barra;
+los 30 s sin datos, por el reloj. PAQUETES dice en corto por qué no hay lista
+de paquetes (la red, la firma, otro servidor) y **Escudo 0.2.2** lo intenta
+otra vez a los 10 s y lo dice en una línea que cabe. WPA dice una vez si el
+punto de acceso pide renovar la clave por pares (aún no se hace: es lo
+primero que mirar si se corta el Wi-Fi en una descarga larga). Paquetes: red
+0.8.10 lleva el DESCARGA nuevo; paquetes 1.7, el mensaje; escudo **0.2.2**.
+
+**Las pruebas de la 0.8.10** (24/11). En el PC de Albinyana (sin KVM: WSL sin
+virtualización anidada), con `tools/pruebas_castel_pc.sh -j 6`, las 42 partes
+(las 39 de la 0.8.9 y `i2chid`, `sdhci` e `intel`) en 69ee02e (con las cuatro
+ramas del Termómetro y su seguridad), y otra vez `cortes`, `paquetes`, `wifi`,
+`red`, `tls` y `cd` con lo de las descargas (fd86e0e): **4042 bien, 0 mal**:
+`16` 139/0, `06` 171/0, `07` 102/0, `castel32` 67/0, `castel64` 72/0,
+`caliente` 79/0, `paquetes` 108/0, `red` 78/0, `acpi` 78/0, `tls` 72/0, `cd`
+77/0, `pantalla` 98/0, `dispositivos` 85/0, `ssh` 70/0, `lectores` 79/0,
+`win32` 90/0, `rueda` 71/0, `menu` 95/0, `programas` 92/0, `protege` 76/0,
+`wifi` 96/0, `accesorios` 81/0, `sonido` 109/0, `zip` 118/0, `mirador` 75/0,
+`usuarios` 94/0, `panel` 108/0, `bloc` 119/0, `reproductor` 111/0,
+`win32juegos` 118/0, `juegos` 98/0, `oficina` 101/0, `correo` 193/0, `agenda`
+91/0, `cortes` 88/0, `iconos` 95/0, `compat` 58/0, `touchpad` 113/0,
+`punteros` 136/0, `i2chid` 96/0, `sdhci` 82/0, `intel` 63/0. En el VPS, una a
+una (antes de las 16:30): `uefi` 88/0, `intel` 64/0 (con `IWL_FW`, el
+firmware de verdad de la 7265), `pluma` 79/0, `cuentas` 85/0, `pintura` 74/0,
+`pdf` 80/0, `navegador` 98/0. `termo` (con KVM, en el VPS): con las cuatro
+ramas, 139/5 (cinco pruebas que miraban «el .LOG» de \TERMO, donde ahora
+también están DISCOS.LOG...: arregladas en la prueba; la vez siguiente, esas
+pasan). `escudo`: con la máquina cargada, la semilla (más grande con el
+Termómetro) tardaba en compilarse más que lo que esperaba el que llama por
+SSH desde fuera; con 240 s, en el PC, 86/1 (lo que falta es la zlib del PC
+para compilar el motor en Linux, que el VPS sí tiene). Antes de juntar las
+ramas del Termómetro, en el VPS: `escudo` 103/0 y `termo` 121/0. Lo que han
+dejado al juntar: la parte 06 (ARRANQUE.TXT en la 437, el traspaso del
+EHCI), la 52 y la 53 (el singular, el SCR del QEMU 10), la del Panel y la del
+Wi-Fi (márgenes de tiempo con el PC cargado). La parte 32 (la octava) no se
+ha pasado: ya fallaba en la 0.8.8 y la 0.8.9 (el explorador).
+
 
 **La 0.8.9** (23/11, rama `pentium-089`: las ramas `pentium-uefi` —dentro de
 `termometro`—, `termometro`, `compat`, `touchpad` y `punteros`, y luego en la
