@@ -710,8 +710,10 @@ apaga
 . prueba/partes_10.sh
 . prueba/partes_11.sh
 . prueba/partes_pluma.sh
+. prueba/partes_cuentas.sh
 PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 flechas v86 v86_flechas pasar duro formatea sistema partir medidas fuentes"
-PARTES="$PARTES pluma pluma_grande pluma_oficina"
+PARTES="$PARTES pluma pluma_grande pluma_oficina"     # (PLUMA, del disquete de Oficina)
+PARTES="$PARTES cuentas cuentas_pantalla cuentas_ordenar cuentas_grande fat_sectores"     # (CUENTAS, del disquete de Oficina)
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)

@@ -6,7 +6,8 @@
 #                     720 K   3½ doble densidad: XT tardíos, portátiles, PS/2 modelo 30
 #                     1,2 M   5¼ alta densidad: los AT (286)
 #                     1,44 M  3½ alta densidad: 286 tardíos en adelante
-#                   y build/oficina-360.img, el de las aplicaciones (PLUMA...)
+#                   y el de Oficina, con las aplicaciones (PLUMA y CUENTAS),
+#                   en las mismas cuatro medidas (build/oficina8086-NNN.img)
 #   make prueba     arranca los cuatro en QEMU y comprueba lo que sale
 #
 # Una unidad no lee más densidad que la suya (la de 360 K no lee 1,2 M, ni la
@@ -98,14 +99,6 @@ $(B)/PLUMA.TXT: pluma/PLUMA.TXT | $(B)
 OFICINA += $(B)/PLUMA.COM $(B)/PLUMA.TXT
 # ---- fin de PLUMA ----
 
-# ---- el disquete de Oficina (360 K, sin sistema): las aplicaciones, que
-# cada una añade a OFICINA en su bloque (OFICINA += ...) ----
-$(B)/oficina-360.img: $(OFICINA)
-	rm -f $@
-	mformat -C -f 360 -v OFICINA -i $@ ::
-	mcopy -i $@ $(OFICINA) ::
-all: $(B)/oficina-360.img
-# ---- fin del disquete de Oficina ----
 
 $(B)/HOLA.COM: prueba/hola.asm | $(B)
 	$(CP437) $< $(B)/gen/hola.asm && $(NASM) -f bin -o $@ $(B)/gen/hola.asm
@@ -145,6 +138,30 @@ endef
 $(B)/hispa8086-%.img: $(B)/arranque.bin $(ARCHIVOS) pon_arranque.py
 	$(call DISQUETE,$*)
 
+# ---- las aplicaciones del disquete de Oficina: cada una tiene su bloque y se
+# añade a OFICINA (OFICINA += ...); PLUMA, más arriba ----
+# CUENTAS, la hoja de cálculo (programas/cuentas.asm y sus programas/cuentas/*.inc)
+CUENTAS_INC = $(wildcard programas/cuentas/*.inc)
+$(B)/CUENTAS.COM: programas/cuentas.asm $(CUENTAS_INC) | $(B)
+	mkdir -p $(B)/gen/cuentas
+	for f in $(CUENTAS_INC); do $(CP437) $$f $(B)/gen/cuentas/$$(basename $$f) || exit 1; done
+	$(CP437) $< $(B)/gen/cuentas.asm && cd $(B)/gen && $(NASM) -f bin -l cuentas.lst -o ../CUENTAS.COM cuentas.asm
+$(B)/GASTOS.CSV: programas/GASTOS.CSV | $(B)
+	$(CP437) $< $(B)/gen/gastos.tmp && sed 's/$$/\r/' $(B)/gen/gastos.tmp > $@
+OFICINA += $(B)/CUENTAS.COM $(B)/GASTOS.CSV
+# (fin de CUENTAS)
+
+# el disquete de Oficina (sin sistema), en las cuatro medidas como el del
+# sistema: build/oficina8086-NNN.img. Su regla va después de todos los
+# «OFICINA +=», que make lee los requisitos al leer la regla
+OFICINAS = $(foreach m,$(MEDIDAS),$(B)/oficina8086-$(m).img)
+$(B)/oficina8086-%.img: $(OFICINA)
+	rm -f $@
+	mformat -C -f $* -v OFICINA -i $@ ::
+	mcopy -i $@ $(OFICINA) ::
+
+all: $(OFICINAS)
+
 # lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
 PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM
 
@@ -155,7 +172,7 @@ $(B)/BASIC.COM: basic/basic.asm $(wildcard basic/*.inc) | $(B)
 	for f in basic/*.asm basic/*.inc; do $(CP437) $$f $(B)/gen/basic/$$(basename $$f) || exit 1; done
 	cd $(B)/gen/basic && $(NASM) -f bin -l basic.lst -o ../../BASIC.COM basic.asm
 
-prueba: $(DISCOS) $(PRUEBAS) $(B)/PLUMA.COM
+prueba: $(DISCOS) $(PRUEBAS) $(OFICINAS)
 	./prueba/prueba.sh
 	./prueba/basic_compara.sh prueba/basic/b0*.bas
 

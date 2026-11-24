@@ -999,10 +999,13 @@ fat_trae:
         stc
         ret
 ; escribe el sector de la FAT que hay en el búfer (si ha cambiado) en todas
-; las copias de la FAT. CF=1, AX=error
+; las copias de la FAT. CF=1, AX=error; si va bien, conserva AX (fat_trae
+; lleva en AX el sector que viene después: antes se perdía, y al pasar de un
+; sector de la FAT a otro con el primero cambiado se leía otro sector)
 fat_vuelca:
         cmp byte [fat_sucia], 0
         je .x
+        push ax
         push bx
         push cx
         mov byte [fat_sucia], 0
@@ -1014,13 +1017,16 @@ fat_vuelca:
         jc .mal
         add ax, [spf]
         loop .c
+        pop cx
+        pop bx
+        pop ax
+.x:
         clc
+        ret
 .mal:
         pop cx
         pop bx
-        ret
-.x:
-        clc
+        add sp, 2                   ; (AX, el error)
         ret
 ; (interna) BX = un octeto de la FAT, contado desde su principio -> SI = su
 ; sitio en el búfer. CF=1 si falla el disco. Conserva lo demás

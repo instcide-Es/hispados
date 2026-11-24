@@ -316,7 +316,7 @@ tilde, no estaba en la FX-80; cabe como otra entrada de la tabla.
 
 **Tamaño:** PLUMA.COM ocupa unos 21 K: el programa, la ayuda y las tablas. En
 memoria pide 64 K, de los que unos 30 K son para el texto. Va en el disquete
-de **Oficina** (`build/oficina-360.img`), con su manual (`PLUMA.TXT`).
+de **Oficina** (`build/oficina8086-360.img`), con su manual (`PLUMA.TXT`).
 
 ### La prueba
 

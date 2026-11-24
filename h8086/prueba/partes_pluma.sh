@@ -241,7 +241,7 @@ if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "fsck.fat no encuentra ning√
 p_pluma_oficina() {
 echo "== PLUMA: desde el disquete de Oficina, en B: =="
 cp $IMG/hispa8086-360.img $T/a.img
-cp build/oficina-360.img $T/b.img
+cp build/oficina8086-360.img $T/b.img
 QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
 escribe "b:pluma b:pluma.txt"; sleep 3
 pantalla o1

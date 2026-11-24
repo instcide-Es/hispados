@@ -86,13 +86,15 @@ Versión 0.11.
   FORMATEA, SISTEMA, PARTIR, REVISAR, ETIQUETA, ATRIBUTO, ARBOL, XCOPIAR,
   MAS, ORDENAR, TECLADO (el teclado español, residente) y PASAR (archivos
   por el puerto serie).
-- **El disquete de Oficina** (`build/oficina-360.img`, sin sistema): **PLUMA**,
-  el procesador de textos (21 K): ajuste de línea, negrita, subrayado y
-  cursiva con atributos de vídeo, párrafos centrados y justificados,
-  documentos mayores que la memoria, deshacer, bloques, buscar sin tildes,
-  la vista de la página, Epson, IBM y texto con la ñ y las tildes bien,
-  exportar a UTF-8 y RTF, y las teclas de WordStar. Está todo en
-  [PLUMA.md](PLUMA.md).
+- **El disquete de Oficina** (`build/oficina8086-NNN.img`, sin sistema, en
+  las mismas cuatro medidas que el del sistema): **PLUMA**, el procesador
+  de textos (21 K): ajuste de línea, negrita, subrayado y cursiva con
+  atributos de vídeo, párrafos centrados y justificados, documentos mayores
+  que la memoria, deshacer, bloques, buscar sin tildes, la vista de la
+  página, Epson, IBM y texto con la ñ y las tildes bien, exportar a UTF-8 y
+  RTF, y las teclas de WordStar (todo en [PLUMA.md](PLUMA.md)); y
+  **CUENTAS**, la hoja de cálculo, con su ejemplo GASTOS.CSV (ver
+  «CUENTAS», más abajo, y [CUENTAS.md](CUENTAS.md)).
 - **Prueba automática** (`make -C h8086 prueba`): 470 comprobaciones en
   QEMU, en veintiuna partes (y la batería entera se pasa también con el
   núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
@@ -394,7 +396,7 @@ Todos los sistemas Hispa comparten el mismo mecanismo:
 | 5 | Órdenes esenciales: FORMAT, SYS, FDISK, COPIAR, REVISAR, EDIT, **PASAR** (serie y paralelo) | **casi**: todas las de MS-DOS 3.3 que hacen falta, EDITAR y TECLADO; falta PASAR por el puerto paralelo (y las menores: IMPRIMIR, COMPARAR, COPIADISCO) |
 | 6 | Modo 286: HMA y memoria extendida | **hecha** (0.10): gestor XMS 2.0 dentro del núcleo, A20, `DOS=ALTO`, DISCORAM `/E`; sin UMB |
 | 7 | Hispa-BASIC | **primera entrega** (0.11): `BASIC.COM`, compatible con GW-BASIC (lee sus programas en texto y en binario) y con las órdenes también en español; ver docs/8086/BASIC.md. Faltan la 0.12 (doble precisión completa, PRINT USING, archivos, ON ERROR) y la 0.13 (pantalla y sonido) |
-| 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | **Pluma hecha** (en el disquete de Oficina; [PLUMA.md](PLUMA.md)) |
+| 8 | Hispa Escritorio y sus aplicaciones: Pluma, Cuentas, Fichas, Gestor | **oficina hecha** (0.13): PLUMA, el procesador de textos, y CUENTAS, la hoja de cálculo, en el disquete de Oficina ([PLUMA.md](PLUMA.md), [CUENTAS.md](CUENTAS.md)); faltan Fichas, Gestor y el Escritorio |
 | 9 | Juegos, manual, versión estable 1.0 | |
 
 Cada etapa se cierra con sus pruebas automáticas y probada en una máquina real.
@@ -863,6 +865,25 @@ de verdad en 1Ah los pierde (los de texto y los programas, no).
 Pendiente: el puerto paralelo (más rápido, y lo tienen todas estas máquinas)
 y un XMODEM de bloques de 1 K.
 
+## CUENTAS (la hoja de cálculo, en el disquete de Oficina)
+
+```
+CUENTAS [hoja] [/G destino] [/I destino]
+```
+
+Una hoja de 256 columnas por 9.999 filas en la que solo ocupa memoria lo que
+tiene algo. Usa números exactos en coma fija de 64 bits: 0,1 + 0,2 da 0,3, y
+REDONDEAR(2,675;2) da 2,68. Admite fórmulas en español y a la manera de hoy
+(`=SUMA(A1:A10)`), y también las de VisiCalc y 1-2-3 (`+A1`,
+`@SUM(A1...A10)`). Solo recalcula lo que depende de lo cambiado, en el orden
+de las dependencias, y avisa de las referencias circulares. Tiene deshacer
+(Ctrl+Z); copiar con referencias relativas y fijas (`$A$1`); formatos de
+euros, pesetas, tanto por ciento y fecha; ordenar e imprimir. Guarda en su
+formato (.CTA), en .CSV con «;» y en .DIF, según la extensión. Con `/G` o
+`/I` convierte o imprime sin pantalla. Ocupa 16,4 K (16.790 octetos). La historia de las hojas
+de cálculo de entonces, lo que tomamos de ellas y lo que hacemos mejor están
+en [CUENTAS.md](CUENTAS.md).
+
 ## Cómo se construye y se prueba
 
 ```
@@ -907,6 +928,8 @@ partes (veinticuatro, con las tres de PLUMA) y tarda unos TIEMPO minutos;
 | `h8086/prueba/partes_11.sh`, `v86_flechas.js` | las teclas de cursor: en la línea de órdenes, BASIC, INKEY$ y EDITAR, con las teclas grises y las del teclado numérico, sin TECLADO y con él; y lo mismo en el emulador v86 |
 | `h8086/prueba/xms.asm` | XMS.COM: prueba del gestor de memoria extendida, de A20 y de la HMA |
 | `h8086/prueba/v86_teclado.js`, `v86_discos.js` | TECLADO y dos disqueteras en el emulador v86 de la web (opcional) |
+| `h8086/programas/cuentas.asm`, `programas/cuentas/*.inc` | CUENTAS, la hoja de cálculo (ver [CUENTAS.md](CUENTAS.md)) |
+| `h8086/prueba/partes_cuentas.sh` | las partes de la prueba de CUENTAS |
 | `h8086/prueba/prueba.sh` | la prueba automática, por partes: `SOLO="partir sistema" ./prueba/prueba.sh` corre solo esas |
 | `h8086/pon_arranque.py` | pone el sector de arranque conservando la BPB del disquete |
 | `h8086/prueba/haz_duro.py` | hace el disco duro de prueba (una partición FAT16) |
