@@ -67,7 +67,7 @@ módulo Hispa64
     importar Entradas, Espacios, Unidad64, Procesos, Sistema, PrProc64
     importar Msi64, Nvme64, Ahci64, Discos64, Nodos64, Fat64, Exfat64, Vfs64, PrDisc64
 
-    constante VERSIÓN = "0.5.0"
+    constante VERSIÓN = "0.6.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 16
@@ -1232,7 +1232,7 @@ módulo Hispa64
         pruebas2()
         si fallos + fallos_proc + fallos_disco > 0 entonces
             pon_color(12, 0)
-            escribir("Hispa-64 etapa 5: con fallos (los «MAL» de arriba).\n")
+            escribir("Hispa-64 etapa 6: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             si apagar_al_fallar entonces
                 al_apagar()
@@ -1240,7 +1240,7 @@ módulo Hispa64
             fin
         sino
             pon_color(10, 0)
-            escribir("Hispa-64 etapa 5: todo en orden.\n")
+            escribir("Hispa-64 etapa 6: todo en orden.\n")
             pon_color(7, 0)
         fin
         al_apagar()

@@ -716,7 +716,7 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.5.0")
+        pon_texto(dirección(t[0]), 130, "0.6.0")
         pon_texto(dirección(t[0]), 195, "etapa 5 (discos y archivos)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
