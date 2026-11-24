@@ -1,0 +1,946 @@
+; =============================================================================
+;  tty64.cas - Hispa-64, etapa 6: la consola como terminal (docs/64/HISPA-64.md,
+;  sección 12). Lo que llega del teclado (Teclas64, ya en UTF-8 y con las
+;  secuencias de VT100/xterm de las flechas y las teclas de función) y lo que
+;  leen y escriben los programas (read, write, ioctl, poll y select de
+;  Sistema):
+;
+;   - el modo canónico (ICANON, el de siempre): la línea se edita aquí, con
+;     eco (ECHO): Retroceso borra una letra entera (de UTF-8), Ctrl+U la
+;     línea, las flechas izquierda y derecha mueven el cursor (Inicio, Fin y
+;     Supr también), arriba y abajo traen las líneas de antes (16), Intro la
+;     da (con su «\n»), Ctrl+D es el fin del archivo (con la línea vacía) y
+;     Ctrl+C (ISIG) cierra los programas del grupo de la consola (TIOCSPGRP):
+;     mientras no haya señales (etapa 7), cerrarlo es lo que haría SIGINT sin
+;     atenderla: acaba con 130 (128 + 2); el que la ignora (SIG_IGN) sigue, y
+;     al que la atiende con una función (que aún no se llama) se le corta la
+;     lectura de la consola con -EINTR;
+;   - el modo crudo (sin ICANON ni ECHO, con ioctl TCSETS): cada octeto tal
+;     cual, con VMIN y VTIME;
+;   - read de la consola duerme el hilo (sin girar) hasta que haya algo;
+;   - ioctl: TCGETS, TCSETS, TCSETSW, TCSETSF, TIOCGWINSZ (las filas y las
+;     columnas de la consola), TIOCGPGRP, TIOCSPGRP, FIONREAD y unas pocas
+;     más que no hacen nada (lo que piden isatty y musl);
+;   - lo que escriben los programas: de UTF-8 a la página 437 de casa (la de
+;     la letra del núcleo: con Á, Í, Ó, Ú, €...) y lo poco de VT100 que hace
+;     falta: los colores (ESC [ ... m), borrar la pantalla (ESC [ 2 J) y
+;     el cursor a la izquierda (ESC [ n D); lo demás se calla.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Tty64
+
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Apic64, Hilos64, Pant64, Procesos
+
+    constante LARGO_LISTO = 4096                ; lo que ya se puede leer
+    constante LARGO_LÍNEA = 1024                ; la línea que se edita
+    constante N_HISTORIA = 16
+    constante LARGO_HIST = 256
+    constante EINTR = -4
+    constante EFAULT = -14
+    constante EINVAL = -22
+    constante ENOTTY = -25
+    ; las marcas de termios (las de Linux)
+    constante ISIG = 1
+    constante ICANON = 2
+    constante ECHO = 8
+    constante ICRNL = 0x100
+    constante IGNCR = 0x80
+    constante INLCR = 0x40
+
+    variable espera_: Espera                    ; su cerrojo guarda lo de la entrada
+    variable listo: arreglo [LARGO_LISTO] de byte
+    variable listo_ini, listo_n: nat32
+    variable fin_archivo: bool
+    variable lin: arreglo [LARGO_LÍNEA] de byte
+    variable lin_n, cur: nat32
+    variable pend: arreglo [4] de byte          ; una letra de UTF-8 a medias
+    variable pend_n, pend_quiere: nat32
+    variable esc: nat32                         ; la secuencia de escape que llega: 0 no, 1 ESC, 2 ESC [, 3 ESC O
+    variable esc_num: nat32
+    variable historia: arreglo [N_HISTORIA * LARGO_HIST] de byte
+    variable hist_n: nat32                      ; las guardadas (hasta N_HISTORIA)
+    variable hist_ver: nat32                    ; 0: la línea nueva; k: la k-ésima de antes
+    variable eco: arreglo [4096] de byte
+    variable eco_n: nat32
+    variable interrumpir: bool
+    ; termios: c_iflag, c_oflag, c_cflag, c_lflag, c_line y c_cc[19] (36 octetos)
+    variable termios: arreglo [36] de byte
+    público variable primer_plano: nat64        ; el grupo de la consola (TIOCSPGRP); 0: todos
+    público variable gen_intr: nat64            ; cuántas veces se ha pulsado Ctrl+C
+    público variable octetos_entrados: nat64
+    público variable líneas_dadas: nat64
+    ; lo que se escribe: la secuencia de escape a medias y los colores
+    variable s_esc: nat32
+    variable s_num: arreglo [8] de nat32
+    variable s_n: nat32
+    variable tinta, fondo: nat32
+    variable s_u: arreglo [4] de byte           ; una letra de UTF-8 cortada entre dos write
+    variable s_un, s_uq: nat32
+
+    ; de Latin-1 a la 437 de casa (0xFFFF: no está) y lo demás, por orden de
+    ; Unicode (copiadas de nucleo32/blocpag.cas, que hace hazblocpag.py)
+    variable l1_437: arreglo [256] de nat16 = (
+        0x0000, 0x0001, 0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007, 0x0008, 0x0009, 0x000A, 0x000B,
+        0x000C, 0x000D, 0x000E, 0x000F, 0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x0015, 0x0016, 0x0017,
+        0x0018, 0x0019, 0x001A, 0x001B, 0x001C, 0x001D, 0x001E, 0x001F, 0x0020, 0x0021, 0x0022, 0x0023,
+        0x0024, 0x0025, 0x0026, 0x0027, 0x0028, 0x0029, 0x002A, 0x002B, 0x002C, 0x002D, 0x002E, 0x002F,
+        0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, 0x0038, 0x0039, 0x003A, 0x003B,
+        0x003C, 0x003D, 0x003E, 0x003F, 0x0040, 0x0041, 0x0042, 0x0043, 0x0044, 0x0045, 0x0046, 0x0047,
+        0x0048, 0x0049, 0x004A, 0x004B, 0x004C, 0x004D, 0x004E, 0x004F, 0x0050, 0x0051, 0x0052, 0x0053,
+        0x0054, 0x0055, 0x0056, 0x0057, 0x0058, 0x0059, 0x005A, 0x005B, 0x005C, 0x005D, 0x005E, 0x005F,
+        0x0060, 0x0061, 0x0062, 0x0063, 0x0064, 0x0065, 0x0066, 0x0067, 0x0068, 0x0069, 0x006A, 0x006B,
+        0x006C, 0x006D, 0x006E, 0x006F, 0x0070, 0x0071, 0x0072, 0x0073, 0x0074, 0x0075, 0x0076, 0x0077,
+        0x0078, 0x0079, 0x007A, 0x007B, 0x007C, 0x007D, 0x007E, 0x007F, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+        0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+        0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
+        0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0x00FF, 0x00AD, 0x009B, 0x009C, 0xFFFF, 0x009D, 0xFFFF, 0xFFFF,
+        0xFFFF, 0x00E7, 0x00A6, 0x00AE, 0x00AA, 0xFFFF, 0x00E8, 0xFFFF, 0x00F8, 0x00F1, 0x00FD, 0xFFFF,
+        0xFFFF, 0x00E6, 0xFFFF, 0x00FA, 0xFFFF, 0xFFFF, 0x00A7, 0x00AF, 0x00AC, 0x00AB, 0xFFFF, 0x00A8,
+        0x00B5, 0x00B6, 0x00B7, 0x00B8, 0x008E, 0x008F, 0x0092, 0x0080, 0x00BD, 0x0090, 0x00BE, 0x00C6,
+        0x00C7, 0x00CF, 0x00D0, 0x00D1, 0xFFFF, 0x00A5, 0x00D2, 0x00D3, 0x00D4, 0x00D5, 0x0099, 0xFFFF,
+        0xFFFF, 0x00D6, 0x00D7, 0x00D8, 0x009A, 0xFFFF, 0xFFFF, 0x00E1, 0x0085, 0x00A0, 0x0083, 0x00DD,
+        0x0084, 0x0086, 0x0091, 0x0087, 0x008A, 0x0082, 0x0088, 0x0089, 0x008D, 0x00A1, 0x008C, 0x008B,
+        0xFFFF, 0x00A4, 0x0095, 0x00A2, 0x0093, 0x00DE, 0x0094, 0x00F6, 0xFFFF, 0x0097, 0x00A3, 0x0096,
+        0x0081, 0xFFFF, 0xFFFF, 0x0098)
+    variable o437_u: arreglo [53] de nat16 = (
+        0x0152, 0x0153, 0x0192, 0x0398, 0x03A3, 0x03A9, 0x03B1, 0x03B4, 0x03B5, 0x03C0, 0x03C6, 0x2026,
+        0x207F, 0x20A7, 0x20AC, 0x2219, 0x221A, 0x221E, 0x2229, 0x2248, 0x2261, 0x2264, 0x2265, 0x2310,
+        0x2500, 0x2502, 0x250C, 0x2510, 0x2514, 0x2518, 0x251C, 0x2524, 0x252C, 0x2534, 0x253C, 0x2550,
+        0x2551, 0x2554, 0x2557, 0x255A, 0x255D, 0x2560, 0x2563, 0x2566, 0x2569, 0x256C, 0x2580, 0x2584,
+        0x2588, 0x2591, 0x2592, 0x2593, 0x25A0)
+    variable o437_c: arreglo [53] de nat16 = (
+        0x00E2, 0x00E5, 0x009F, 0x00E9, 0x00E4, 0x00EA, 0x00E0, 0x00EB, 0x00EE, 0x00E3, 0x00ED, 0x00F5,
+        0x00FC, 0x009E, 0x00F4, 0x00F9, 0x00FB, 0x00EC, 0x00EF, 0x00F7, 0x00F0, 0x00F3, 0x00F2, 0x00A9,
+        0x00C4, 0x00B3, 0x00DA, 0x00BF, 0x00C0, 0x00D9, 0x00C3, 0x00B4, 0x00C2, 0x00C1, 0x00C5, 0x00CD,
+        0x00BA, 0x00C9, 0x00BB, 0x00C8, 0x00BC, 0x00CC, 0x00B9, 0x00CB, 0x00CA, 0x00CE, 0x00DF, 0x00DC,
+        0x00DB, 0x00B0, 0x00B1, 0x00B2, 0x00FE)
+
+    ; ---- lo que se escribe en la consola ----
+    función busca(u: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < 53 hacer
+            si o437_u[i] = u entonces devolver o437_c[i] fin
+            i := i + 1
+        fin
+        devolver 0xFFFF
+    fin
+
+    ; el código de la 437 de casa de un punto de Unicode (o algo parecido, o «?»)
+    público función a_437(u: nat32): nat32
+        variable c: nat32
+        si u < 0x80 entonces devolver u fin
+        c := 0xFFFF
+        si u < 0x100 entonces c := l1_437[u] sino si u <= 0xFFFF entonces c := busca(u) fin
+        si c <> 0xFFFF entonces devolver c fin
+        ; lo que no está: algo parecido
+        si u = 0x2018 o u = 0x2019 entonces devolver '\'' fin
+        si u = 0x201C o u = 0x201D entonces devolver '"' fin
+        si u = 0x2013 o u = 0x2014 entonces devolver '-' fin
+        si u = 0xA0 entonces devolver ' ' fin
+        devolver '?'
+    fin
+
+    función pon_color_ansi()
+        pon_color(byte(tinta), byte(fondo))
+    fin
+
+    ; del orden de ANSI (negro, rojo, verde, amarillo, azul, magenta, cian, blanco) al del PC
+    función color_pc(a: nat32): nat32
+        según a
+            caso 0: devolver 0
+            caso 1: devolver 4
+            caso 2: devolver 2
+            caso 3: devolver 6
+            caso 4: devolver 1
+            caso 5: devolver 5
+            caso 6: devolver 3
+            si no: devolver 7
+        fin
+    fin
+
+    ; (con el cerrojo de la consola) el final de una secuencia ESC [ ... x
+    función fin_esc(x: byte)
+        variable i, n, v: nat32
+        n := s_num[0]
+        según x
+            caso 'm':
+                si s_n = 0 entonces
+                    tinta := 7
+                    fondo := 0
+                fin
+                i := 0
+                mientras i < s_n hacer
+                    v := s_num[i]
+                    si v = 0 entonces
+                        tinta := 7
+                        fondo := 0
+                    sino si v = 1 entonces
+                        tinta := tinta ob 8
+                    sino si v = 22 entonces
+                        tinta := tinta yb 7
+                    sino si v >= 30 y v <= 37 entonces
+                        tinta := (tinta yb 8) ob color_pc(v - 30)
+                    sino si v = 39 entonces
+                        tinta := 7
+                    sino si v >= 40 y v <= 47 entonces
+                        fondo := color_pc(v - 40)
+                    sino si v = 49 entonces
+                        fondo := 0
+                    sino si v >= 90 y v <= 97 entonces
+                        tinta := 8 ob color_pc(v - 90)
+                    sino si v >= 100 y v <= 107 entonces
+                        fondo := 8 ob color_pc(v - 100)
+                    fin
+                    i := i + 1
+                fin
+                pon_color_ansi()
+            caso 'J':
+                ; (borrar la pantalla: se sube todo lo escrito)
+                si n = 2 o n = 3 entonces
+                    i := 0
+                    mientras i < filas hacer
+                        escribir_car(byte(10))
+                        i := i + 1
+                    fin
+                fin
+            caso 'D':
+                si n = 0 entonces n := 1 fin
+                si n > 200 entonces n := 200 fin
+                i := 0
+                mientras i < n hacer
+                    escribir_car(byte(8))
+                    i := i + 1
+                fin
+            si no: n := 0
+        fin
+    fin
+
+    ; (con el cerrojo de la consola) una letra de Unicode o un control
+    función sale_u(u: nat32)
+        si u = 0x1B entonces
+            s_esc := 1
+            devolver
+        fin
+        si s_esc = 1 entonces
+            si u = '[' entonces
+                s_esc := 2
+                s_n := 0
+                s_num[0] := 0
+                devolver
+            fin
+            s_esc := 0
+            devolver
+        fin
+        si s_esc = 2 entonces
+            si u >= '0' y u <= '9' entonces
+                si s_n = 0 entonces s_n := 1 fin
+                si s_num[s_n - 1] < 10000 entonces s_num[s_n - 1] := s_num[s_n - 1] * 10 + (u - '0') fin
+                devolver
+            fin
+            si u = ';' entonces
+                si s_n = 0 entonces s_n := 1 fin
+                si s_n < 8 entonces
+                    s_num[s_n] := 0
+                    s_n := s_n + 1
+                fin
+                devolver
+            fin
+            si u = '?' o u = '>' o u = '=' entonces devolver fin
+            s_esc := 0
+            si u >= 0x40 y u <= 0x7E entonces fin_esc(byte(u)) fin
+            devolver
+        fin
+        si u = 7 entonces devolver fin          ; (el timbre, callado)
+        escribir_car(byte(a_437(u)))
+    fin
+
+    ; (con el cerrojo de la consola) t[0..n): UTF-8 (lo de Linux) o, si no lo
+    ; es, la 437 tal cual (lo de Castel, que ya escribe en la 437)
+    público función a_consola(t: puntero a byte, n: nat32)
+        variable i, c, u: nat32
+        i := 0
+        mientras i < n hacer
+            c := t[i]
+            ; (una letra que se cortó en el write de antes)
+            si s_uq > 0 entonces
+                si c >= 0x80 y c <= 0xBF entonces
+                    s_u[s_un] := byte(c)
+                    s_un := s_un + 1
+                    i := i + 1
+                    si s_un = s_uq entonces
+                        si s_uq = 2 entonces u := ((s_u[0] yb 0x1F) << 6) ob (s_u[1] yb 0x3F)
+                        sino si s_uq = 3 entonces u := ((s_u[0] yb 0x0F) << 12) ob ((s_u[1] yb 0x3F) << 6) ob (s_u[2] yb 0x3F)
+                        sino u := 0x10000 fin
+                        s_uq := 0
+                        sale_u(u)
+                    fin
+                    seguir
+                fin
+                ; (no seguía: lo cortado, tal cual)
+                s_uq := 0
+            fin
+            si c >= 0xC2 y c <= 0xF4 entonces
+                ; ¿cuántas siguen?
+                u := 1
+                si c >= 0xE0 entonces u := 2 fin
+                si c >= 0xF0 entonces u := 3 fin
+                si i + u >= n entonces
+                    ; ¿cortada al final? (todas las que hay, de las que siguen)
+                    c := 1
+                    mientras i + c < n y t[i + c] >= 0x80 y t[i + c] <= 0xBF hacer c := c + 1 fin
+                    si i + c = n entonces
+                        s_un := 0
+                        mientras i < n hacer
+                            s_u[s_un] := t[i]
+                            s_un := s_un + 1
+                            i := i + 1
+                        fin
+                        s_uq := u + 1
+                        devolver
+                    fin
+                    c := t[i]
+                sino
+                    c := 1
+                    mientras c <= u y t[i + c] >= 0x80 y t[i + c] <= 0xBF hacer c := c + 1 fin
+                    si c > u entonces
+                        c := t[i]
+                        si u = 1 entonces u := ((c yb 0x1F) << 6) ob (t[i + 1] yb 0x3F)
+                        sino si u = 2 entonces u := ((c yb 0x0F) << 12) ob ((t[i + 1] yb 0x3F) << 6) ob (t[i + 2] yb 0x3F)
+                        sino u := 0x10000 fin
+                        sale_u(u)
+                        i := i + 1
+                        mientras i < n y t[i] >= 0x80 y t[i] <= 0xBF hacer i := i + 1 fin
+                        seguir
+                    fin
+                    c := t[i]
+                fin
+            fin
+            ; (no es UTF-8: un control, ASCII o la 437 tal cual)
+            si c < 0x80 entonces sale_u(c) sino escribir_car(byte(c)) fin
+            i := i + 1
+        fin
+    fin
+
+    ; lo que escribe un programa (o el eco), con el cerrojo de la consola
+    público función tty_escribe(t: puntero a byte, n: nat32)
+        variable b: nat64
+        b := toma_atento(dirección(cerrojo_consola))
+        a_consola(t, n)
+        suelta(dirección(cerrojo_consola), b)
+    fin
+
+    ; ---- termios ----
+    función iflag(): nat32
+        devolver m32(nat64(dirección(termios[0])))
+    fin
+
+    función lflag(): nat32
+        devolver m32(nat64(dirección(termios[12])))
+    fin
+
+    función canónico(): bool
+        devolver lflag() yb ICANON <> 0
+    fin
+
+    función con_eco(): bool
+        devolver lflag() yb ECHO <> 0
+    fin
+
+    ; ---- la entrada (con el cerrojo de espera_) ----
+    función eco_c(c: nat32)
+        si eco_n < 4096 entonces
+            eco[eco_n] := byte(c)
+            eco_n := eco_n + 1
+        fin
+    fin
+
+    función eco_trozo(t: puntero a byte, n: nat32)
+        variable i: nat32
+        si no con_eco() entonces devolver fin
+        i := 0
+        mientras i < n hacer
+            eco_c(t[i])
+            i := i + 1
+        fin
+    fin
+
+    función eco_atrás(n: nat32)
+        variable i: nat32
+        si no con_eco() entonces devolver fin
+        i := 0
+        mientras i < n hacer
+            eco_c(8)
+            i := i + 1
+        fin
+    fin
+
+    ; las letras (no los octetos) de lin[a..b)
+    función letras(a: nat32, b: nat32): nat32
+        variable n: nat32
+        n := 0
+        mientras a < b hacer
+            si lin[a] < 0x80 o lin[a] >= 0xC0 entonces n := n + 1 fin
+            a := a + 1
+        fin
+        devolver n
+    fin
+
+    ; al listo, t[0..n) (lo que no quepa se pierde)
+    función a_listo(t: puntero a byte, n: nat32)
+        variable i: nat32
+        i := 0
+        mientras i < n y listo_n < LARGO_LISTO hacer
+            listo[(listo_ini + listo_n) yb (LARGO_LISTO - 1)] := t[i]
+            listo_n := listo_n + 1
+            i := i + 1
+        fin
+    fin
+
+    ; mete una letra entera (t[0..n), de UTF-8) en el cursor
+    función mete(t: puntero a byte, n: nat32)
+        variable i: nat32
+        si lin_n + n >= LARGO_LÍNEA - 1 entonces devolver fin
+        i := lin_n
+        mientras i > cur hacer
+            lin[i + n - 1] := lin[i - 1]
+            i := i - 1
+        fin
+        i := 0
+        mientras i < n hacer
+            lin[cur + i] := t[i]
+            i := i + 1
+        fin
+        lin_n := lin_n + n
+        eco_trozo(dirección(lin[cur]), lin_n - cur)
+        cur := cur + n
+        eco_atrás(letras(cur, lin_n))
+    fin
+
+    ; dónde empieza la letra de antes de la posición i
+    función antes_de(i: nat32): nat32
+        si i = 0 entonces devolver 0 fin
+        i := i - 1
+        mientras i > 0 y lin[i] >= 0x80 y lin[i] < 0xC0 hacer i := i - 1 fin
+        devolver i
+    fin
+
+    ; dónde acaba la letra de la posición i
+    función después_de(i: nat32): nat32
+        si i >= lin_n entonces devolver lin_n fin
+        i := i + 1
+        mientras i < lin_n y lin[i] >= 0x80 y lin[i] < 0xC0 hacer i := i + 1 fin
+        devolver i
+    fin
+
+    ; quita lin[a..b) (con el cursor en a) y lo vuelve a pintar
+    función quita(a: nat32, b: nat32)
+        variable i, k: nat32
+        k := letras(a, b)
+        i := b
+        mientras i < lin_n hacer
+            lin[a + i - b] := lin[i]
+            i := i + 1
+        fin
+        lin_n := lin_n - (b - a)
+        cur := a
+        eco_trozo(dirección(lin[cur]), lin_n - cur)
+        i := 0
+        mientras i < k hacer
+            si con_eco() entonces eco_c(' ') fin
+            i := i + 1
+        fin
+        eco_atrás(letras(cur, lin_n) + k)
+    fin
+
+    función retroceso()
+        variable a: nat32
+        si cur = 0 entonces devolver fin
+        a := antes_de(cur)
+        eco_atrás(1)
+        quita(a, cur)
+    fin
+
+    función suprime()
+        si cur >= lin_n entonces devolver fin
+        quita(cur, después_de(cur))
+    fin
+
+    función a_la_izquierda()
+        si cur = 0 entonces devolver fin
+        cur := antes_de(cur)
+        eco_atrás(1)
+    fin
+
+    función a_la_derecha()
+        variable b: nat32
+        si cur >= lin_n entonces devolver fin
+        b := después_de(cur)
+        eco_trozo(dirección(lin[cur]), b - cur)
+        cur := b
+    fin
+
+    función al_principio()
+        eco_atrás(letras(0, cur))
+        cur := 0
+    fin
+
+    función al_final()
+        eco_trozo(dirección(lin[cur]), lin_n - cur)
+        cur := lin_n
+    fin
+
+    ; borra la línea entera (Ctrl+U), también de la pantalla
+    función borra_línea()
+        variable k, i: nat32
+        al_final()
+        k := letras(0, lin_n)
+        eco_atrás(k)
+        i := 0
+        mientras i < k hacer
+            si con_eco() entonces eco_c(' ') fin
+            i := i + 1
+        fin
+        eco_atrás(k)
+        lin_n := 0
+        cur := 0
+    fin
+
+    ; la línea pasa a ser t (de la historia)
+    función pon_línea(t: puntero a byte)
+        variable i: nat32
+        borra_línea()
+        i := 0
+        mientras t[i] <> 0 y i < LARGO_HIST - 1 hacer
+            lin[i] := t[i]
+            i := i + 1
+        fin
+        lin_n := i
+        cur := i
+        eco_trozo(dirección(lin[0]), lin_n)
+    fin
+
+    ; la k-ésima de antes (1: la última)
+    función de_antes(k: nat32): puntero a byte
+        devolver dirección(historia[((hist_n - k) mod N_HISTORIA) * LARGO_HIST])
+    fin
+
+    función guarda_en_historia()
+        variable i, n: nat32
+        variable t: puntero a byte
+        si lin_n = 0 o lin_n >= LARGO_HIST entonces devolver fin
+        ; (si es igual que la última, no)
+        si hist_n > 0 entonces
+            t := de_antes(1)
+            i := 0
+            mientras i < lin_n y t[i] = lin[i] hacer i := i + 1 fin
+            si i = lin_n y t[i] = 0 entonces devolver fin
+        fin
+        t := dirección(historia[(hist_n mod N_HISTORIA) * LARGO_HIST])
+        n := 0
+        mientras n < lin_n hacer
+            t[n] := lin[n]
+            n := n + 1
+        fin
+        t[n] := 0
+        hist_n := hist_n + 1
+    fin
+
+    función arriba()
+        variable cuántas: nat32
+        cuántas := hist_n
+        si cuántas > N_HISTORIA entonces cuántas := N_HISTORIA fin
+        si hist_ver >= cuántas entonces devolver fin
+        hist_ver := hist_ver + 1
+        pon_línea(de_antes(hist_ver))
+    fin
+
+    función abajo()
+        si hist_ver = 0 entonces devolver fin
+        hist_ver := hist_ver - 1
+        si hist_ver = 0 entonces borra_línea() sino pon_línea(de_antes(hist_ver)) fin
+    fin
+
+    ; la línea, a lo que se puede leer (con el «\n» si lo lleva)
+    función da_línea(con_nl: bool)
+        si con_nl entonces
+            al_final()
+            guarda_en_historia()
+            lin[lin_n] := 10
+            lin_n := lin_n + 1
+            si con_eco() entonces eco_c(10) fin
+        fin
+        a_listo(dirección(lin[0]), lin_n)
+        lin_n := 0
+        cur := 0
+        hist_ver := 0
+        líneas_dadas := líneas_dadas + 1
+    fin
+
+    ; el final de una secuencia de escape (de las flechas y las teclas)
+    función tecla_esc(x: nat32)
+        si esc = 3 entonces devolver fin         ; (ESC O P..S: F1 a F4, nada en la línea)
+        según x
+            caso 'A': arriba()
+            caso 'B': abajo()
+            caso 'C': a_la_derecha()
+            caso 'D': a_la_izquierda()
+            caso 'H': al_principio()
+            caso 'F': al_final()
+            caso '~':
+                si esc_num = 3 entonces suprime()
+                sino si esc_num = 1 o esc_num = 7 entonces al_principio()
+                sino si esc_num = 4 o esc_num = 8 entonces al_final()
+                fin
+            si no: esc_num := 0
+        fin
+    fin
+
+    ; un octeto en el modo canónico
+    función canónica(c: nat32)
+        variable cc: puntero a byte
+        cc := dirección(termios[17])
+        ; las secuencias de escape
+        si esc = 1 entonces
+            si c = '[' entonces
+                esc := 2
+                esc_num := 0
+            sino si c = 'O' entonces
+                esc := 3
+            sino
+                esc := 0
+            fin
+            devolver
+        fin
+        si esc >= 2 entonces
+            si c >= '0' y c <= '9' entonces
+                esc_num := esc_num * 10 + (c - '0')
+                devolver
+            fin
+            si c = ';' entonces devolver fin
+            tecla_esc(c)
+            esc := 0
+            devolver
+        fin
+        ; una letra de UTF-8 a medias
+        si pend_quiere > 0 entonces
+            si c >= 0x80 y c < 0xC0 entonces
+                pend[pend_n] := byte(c)
+                pend_n := pend_n + 1
+                si pend_n = pend_quiere entonces
+                    mete(dirección(pend[0]), pend_n)
+                    pend_quiere := 0
+                fin
+                devolver
+            fin
+            pend_quiere := 0
+        fin
+        si c >= 0xC2 y c <= 0xF4 entonces
+            pend[0] := byte(c)
+            pend_n := 1
+            pend_quiere := 2
+            si c >= 0xE0 entonces pend_quiere := 3 fin
+            si c >= 0xF0 entonces pend_quiere := 4 fin
+            devolver
+        fin
+        si c >= 0x80 entonces devolver fin
+        si c = 13 entonces
+            si iflag() yb IGNCR <> 0 entonces devolver fin
+            si iflag() yb ICRNL <> 0 entonces c := 10 fin
+        sino si c = 10 entonces
+            si iflag() yb INLCR <> 0 entonces c := 13 fin
+        fin
+        si lflag() yb ISIG <> 0 y c = cc[0] entonces
+            si con_eco() entonces
+                eco_c('^')
+                eco_c('C')
+                eco_c(10)
+            fin
+            lin_n := 0
+            cur := 0
+            hist_ver := 0
+            interrumpir := cierto
+            devolver
+        fin
+        si c = cc[4] entonces                    ; VEOF (Ctrl+D)
+            si lin_n = 0 entonces fin_archivo := cierto sino da_línea(falso) fin
+            devolver
+        fin
+        si c = 10 entonces
+            da_línea(cierto)
+            devolver
+        fin
+        si c = cc[2] o c = 8 entonces           ; VERASE (0x7F) y Ctrl+H
+            retroceso()
+            devolver
+        fin
+        si c = cc[3] entonces                    ; VKILL (Ctrl+U)
+            borra_línea()
+            devolver
+        fin
+        si c = 27 entonces
+            esc := 1
+            devolver
+        fin
+        si c = 9 entonces c := ' ' fin
+        si c < 32 entonces devolver fin
+        pend[0] := byte(c)
+        mete(dirección(pend[0]), 1)
+    fin
+
+    ; un octeto en el modo crudo
+    función cruda(c: nat32)
+        variable cc: puntero a byte
+        variable t: arreglo [1] de byte
+        cc := dirección(termios[17])
+        si c = 13 y iflag() yb IGNCR <> 0 entonces devolver fin
+        si c = 13 y iflag() yb ICRNL <> 0 entonces c := 10
+        sino si c = 10 y iflag() yb INLCR <> 0 entonces c := 13 fin
+        si lflag() yb ISIG <> 0 y c = cc[0] entonces
+            interrumpir := cierto
+            devolver
+        fin
+        t[0] := byte(c)
+        a_listo(dirección(t[0]), 1)
+        si con_eco() entonces eco_c(c) fin
+    fin
+
+    ; [la de Teclas64] lo que llega del teclado: t[0..n), en UTF-8 (una tecla:
+    ; una letra, un control o una secuencia de escape entera)
+    público función entra(t: puntero a byte, n: nat32)
+        variable b: nat64
+        variable i: nat32
+        variable intr: bool
+        b := toma(dirección(espera_.cerrojo))
+        eco_n := 0
+        interrumpir := falso
+        i := 0
+        mientras i < n hacer
+            si canónico() entonces canónica(t[i]) sino cruda(t[i]) fin
+            i := i + 1
+        fin
+        octetos_entrados := octetos_entrados + n
+        intr := interrumpir
+        suelta(dirección(espera_.cerrojo), b)
+        si eco_n > 0 entonces tty_escribe(dirección(eco[0]), eco_n) fin
+        ; Ctrl+C: a los del grupo de la consola
+        si intr entonces
+            suma_atómica(dirección(gen_intr), 1)
+            señala_grupo(primer_plano, SIGINT)
+        fin
+        despierta_todos(dirección(espera_))
+    fin
+
+    ; ---- lo que leen los programas ----
+    público función hay_datos(): bool
+        devolver listo_n > 0 o fin_archivo
+    fin
+
+    ; (con el cerrojo) saca hasta n octetos (en el modo canónico, hasta el «\n») a k
+    función saca(k: puntero a byte, n: nat32): nat32
+        variable i: nat32
+        variable c: byte
+        i := 0
+        mientras i < n y listo_n > 0 hacer
+            c := listo[listo_ini]
+            k[i] := c
+            listo_ini := (listo_ini + 1) yb (LARGO_LISTO - 1)
+            listo_n := listo_n - 1
+            i := i + 1
+            si c = 10 y canónico() entonces romper fin
+        fin
+        devolver i
+    fin
+
+    ; read de la consola: duerme el hilo hasta que haya algo (en el modo
+    ; canónico, una línea; en el crudo, con VMIN y VTIME)
+    público función tty_lee(p: puntero a Proceso, v: nat64, n: nat64): ent64
+        variable k: arreglo [1024] de byte
+        variable b, gen, límite: nat64
+        variable r: ent64
+        variable cc: puntero a byte
+        variable sin_esperar: bool
+        si n = 0 entonces devolver 0 fin
+        si n > 1024 entonces n := 1024 fin
+        gen := gen_intr
+        cc := dirección(termios[17])
+        límite := 0
+        r := 0
+        b := toma(dirección(espera_.cerrojo))
+        mientras cierto hacer
+            si listo_n > 0 entonces
+                r := ent64(saca(dirección(k[0]), nat32(n)))
+                romper
+            fin
+            si fin_archivo entonces
+                fin_archivo := falso
+                r := 0
+                romper
+            fin
+            si p.matar <> 0 entonces
+                r := EINTR
+                romper
+            fin
+            si gen_intr <> gen y la_atiende(p, SIGINT) entonces
+                r := EINTR
+                romper
+            fin
+            sin_esperar := falso
+            si no canónico() y cc[6] = 0 entonces
+                ; VMIN = 0: con VTIME, en décimas de segundo; sin él, nada
+                si cc[5] = 0 entonces sin_esperar := cierto fin
+                si límite = 0 entonces límite := ahora_ns() + nat64(cc[5]) * 100000000 fin
+                si ahora_ns() >= límite o no tic_va entonces sin_esperar := cierto fin
+            fin
+            si sin_esperar entonces
+                r := 0
+                romper
+            fin
+            si límite <> 0 y tic_va entonces
+                duerme_en_hasta(dirección(espera_), límite)
+            sino
+                duerme_en(dirección(espera_))
+            fin
+            toma_sin(dirección(espera_.cerrojo))
+        fin
+        sal_de(dirección(espera_))
+        suelta(dirección(espera_.cerrojo), b)
+        si r > 0 entonces
+            si no copia_a(p, v, nat64(dirección(k[0])), nat64(r)) entonces devolver EFAULT fin
+        fin
+        devolver r
+    fin
+
+    ; poll y select: duerme hasta que haya algo que leer o hasta «límite» (ns
+    ; de ahora_ns; nob 0: sin límite)
+    público función espera_datos(p: puntero a Proceso, límite: nat64)
+        variable b: nat64
+        si no tic_va entonces
+            ; (sin el tic nadie despertaría a tiempo: se cede el procesador)
+            mientras no hay_datos() y p.matar = 0 y ahora_ns() < límite hacer cede() fin
+            devolver
+        fin
+        b := toma(dirección(espera_.cerrojo))
+        mientras listo_n = 0 y no fin_archivo y p.matar = 0 y ahora_ns() < límite hacer
+            si límite <> nob nat64(0) entonces duerme_en_hasta(dirección(espera_), límite) sino duerme_en(dirección(espera_)) fin
+            toma_sin(dirección(espera_.cerrojo))
+        fin
+        sal_de(dirección(espera_))
+        suelta(dirección(espera_.cerrojo), b)
+    fin
+
+    ; ---- ioctl de la consola ----
+    función escribe_int(p: puntero a Proceso, v: nat64, x: nat64): ent64
+        si no copia_a(p, v, nat64(dirección(x)), 4) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    público función tty_ioctl(p: puntero a Proceso, orden: nat64, arg: nat64): ent64
+        variable t: arreglo [36] de byte
+        variable w: arreglo [4] de nat16
+        variable x: nat64
+        variable b: nat64
+        variable i: nat32
+        variable era_canónico: bool
+        según orden
+            caso 0x5401:                                            ; TCGETS
+                b := toma(dirección(espera_.cerrojo))
+                i := 0
+                mientras i < 36 hacer
+                    t[i] := termios[i]
+                    i := i + 1
+                fin
+                suelta(dirección(espera_.cerrojo), b)
+                si no copia_a(p, arg, nat64(dirección(t[0])), 36) entonces devolver EFAULT fin
+                devolver 0
+            caso 0x5402, 0x5403, 0x5404:                            ; TCSETS, TCSETSW, TCSETSF
+                si no copia_de(p, nat64(dirección(t[0])), arg, 36) entonces devolver EFAULT fin
+                b := toma(dirección(espera_.cerrojo))
+                era_canónico := canónico()
+                i := 0
+                mientras i < 36 hacer
+                    termios[i] := t[i]
+                    i := i + 1
+                fin
+                si orden = 0x5404 entonces
+                    listo_n := 0
+                    lin_n := 0
+                    cur := 0
+                fin
+                ; (de canónico a crudo: lo que se estaba escribiendo, ya se puede leer)
+                si era_canónico y no canónico() y lin_n > 0 entonces da_línea(falso) fin
+                esc := 0
+                pend_quiere := 0
+                suelta(dirección(espera_.cerrojo), b)
+                despierta_todos(dirección(espera_))
+                devolver 0
+            caso 0x5413:                                            ; TIOCGWINSZ
+                si hay() entonces
+                    w[0] := nat16(filas)
+                    w[1] := nat16(columnas)
+                    w[2] := nat16(ancho_puntos())
+                    w[3] := nat16(alto_puntos())
+                sino
+                    w[0] := 25
+                    w[1] := 80
+                    w[2] := 0
+                    w[3] := 0
+                fin
+                si no copia_a(p, arg, nat64(dirección(w[0])), 8) entonces devolver EFAULT fin
+                devolver 0
+            caso 0x5414, 0x540E, 0x5422, 0x5409, 0x540A:            ; TIOCSWINSZ, TIOCSCTTY, TIOCNOTTY, TCSBRK, TCXONC
+                devolver 0
+            caso 0x540B:                                            ; TCFLSH
+                si arg = 0 o arg = 2 entonces
+                    b := toma(dirección(espera_.cerrojo))
+                    listo_n := 0
+                    suelta(dirección(espera_.cerrojo), b)
+                fin
+                devolver 0
+            caso 0x540F:                                            ; TIOCGPGRP
+                x := primer_plano
+                si x = 0 entonces x := p.grupo fin
+                devolver escribe_int(p, arg, x)
+            caso 0x5429:                                            ; TIOCGSID
+                devolver escribe_int(p, arg, p.grupo)
+            caso 0x5410:                                            ; TIOCSPGRP
+                x := 0
+                si no copia_de(p, nat64(dirección(x)), arg, 4) entonces devolver EFAULT fin
+                si ent32(x) <= 0 entonces devolver EINVAL fin
+                primer_plano := x
+                devolver 0
+            caso 0x541B:                                            ; FIONREAD
+                devolver escribe_int(p, arg, nat64(listo_n))
+            si no: devolver ENOTTY
+        fin
+    fin
+
+    ; la consola, lista (los valores de termios de Linux: ICRNL e IXON;
+    ; OPOST y ONLCR; B38400, CS8 y CREAD; ISIG, ICANON, ECHO, ECHOE, ECHOK,
+    ; ECHOCTL, ECHOKE e IEXTEN; ^C ^\ DEL ^U ^D, VTIME 0, VMIN 1...)
+    público función prepara_tty()
+        variable cc: puntero a byte
+        pon_m32(nat64(dirección(termios[0])), 0x500)
+        pon_m32(nat64(dirección(termios[4])), 0x5)
+        pon_m32(nat64(dirección(termios[8])), 0xBF)
+        pon_m32(nat64(dirección(termios[12])), 0x8A3B)
+        cc := dirección(termios[17])
+        cc[0] := 3
+        cc[1] := 0x1C
+        cc[2] := 0x7F
+        cc[3] := 0x15
+        cc[4] := 4
+        cc[5] := 0
+        cc[6] := 1
+        cc[8] := 0x11
+        cc[9] := 0x13
+        cc[10] := 0x1A
+        cc[12] := 0x12
+        cc[13] := 0x0F
+        cc[14] := 0x17
+        cc[15] := 0x16
+        tinta := 7
+        fondo := 0
+    fin
+
+fin Tty64.

@@ -40,6 +40,9 @@ módulo Apic64
     variable cola: arreglo [64] de byte
     público variable cola_pon, cola_toma: nat32
     público variable teclado_gsi: nat32
+    ; [etapa 6] si no es 0, la función (de Teclas64) que recibe cada código del
+    ; teclado, al_teclado(código), en vez de la cola
+    público variable al_teclado: nat64
     ; los IOAPIC, ya a la vista
     variable io_v: arreglo [8] de nat64
     variable io_n: arreglo [8] de nat32         ; cuántas entradas tiene cada uno
@@ -245,6 +248,14 @@ módulo Apic64
         fin
     fin
 
+    función llama1(f: nat64, a: nat64)
+        ensamblador
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
     ; ---- lo que se atiende ----
     interrupción función tic()
         variable c: puntero a Cpu
@@ -276,7 +287,9 @@ módulo Apic64
         variable c: nat32
         mientras entra8(0x64) yb 1 <> 0 hacer
             c := entra8(0x60)
-            si cola_pon - cola_toma < 64 entonces
+            si al_teclado <> 0 entonces
+                llama1(al_teclado, nat64(c))
+            sino si cola_pon - cola_toma < 64 entonces
                 cola[cola_pon yb 63] := byte(c)
                 cola_pon := cola_pon + 1
             fin

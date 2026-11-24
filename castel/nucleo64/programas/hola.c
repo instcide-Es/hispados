@@ -76,8 +76,9 @@ int principal(i64 *sp)
 	mira(sis(S_CLOSE, fd, 0, 0) == 0 && sis(S_CLOSE, fd, 0, 0) == -EBADF, "close dos veces");
 	mira(sis(S_OPEN, "NOESTA.TXT", 0, 0) == -ENOENT, "open de uno que no est\xc3\xa1");
 	mira(sis(S_OPEN, "SALUDO.TXT", 1, 0) == -EROFS, "open para escribir");
-	mira(sis6(S_OPENAT, -100, (i64)"saludo.txt", 0, 0, 0, 0) >= 3, "openat (sin mirar may\xc3\xbasculas)");
-	mira(sis(S_IOCTL, 1, 0x5413, t) == -ENOTTY, "ioctl");
+	fd = sis6(S_OPENAT, -100, (i64)"saludo.txt", 0, 0, 0, 0);
+	mira(fd >= 3, "openat (sin mirar may\xc3\xbasculas)");
+	mira(sis(S_IOCTL, fd, 0x5413, t) == -ENOTTY, "ioctl de un archivo (no es una terminal)");
 	iov[0] = (u64)"  writev: "; iov[1] = 10;
 	iov[2] = (u64)"en tres "; iov[3] = 8;
 	iov[4] = (u64)"trozos\n"; iov[5] = 7;

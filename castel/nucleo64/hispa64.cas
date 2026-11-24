@@ -68,6 +68,7 @@ módulo Hispa64
     importar Msi64, Nvme64, Ahci64, Discos64, Nodos64, Fat64, Exfat64, Vfs64, PrDisc64
     importar Raton64, Usbvigia, Usbhid64
     importar Tty64, Teclas64
+    importar I2chid64
 
     constante VERSIÓN = "0.6.0"
     constante MB1 = 0x2BADB002
@@ -617,7 +618,7 @@ módulo Hispa64
             fin
             duerme_ms(10)
         fin
-        escribir("Puntero: ", n, " cambios; ", ptr_relativos, " del ratón y ", ptr_absolutos, " de la tableta, ", ptr_clics, " clics; teclas USB: ", uh_teclas, "\n")
+        escribir("Puntero: ", n, " cambios; ", ptr_relativos, " del ratón y ", ptr_absolutos, " de la tableta, ", ptr_clics, " clics; teclas USB: ", uh_teclas, ", LED puestos: ", uh_leds, "\n")
     fin
 
     ; [etapa 5] antes de apagar: lo que quede sin escribir, al disco (sync)
@@ -1110,7 +1111,9 @@ módulo Hispa64
         variable r, t0: nat64
         prepara_tty()
         si no prepara_teclas() entonces mal6("no se pone en marcha el hilo del teclado") fin
-        escribir("Consola: una terminal (modo canónico con eco y edición de línea, y crudo), ", columnas, " x ", filas, "; el teclado, con el mapa español (PS/2 y HID)\n")
+        escribir("Consola: una terminal (modo canónico con eco y edición de línea, y crudo), ")
+        si hay() entonces escribir("de ", columnas, " x ", filas) sino escribir("por el puerto serie") fin
+        escribir("; el teclado, con el mapa español (PS/2 y HID)\n")
         si tiene("sinpruebas") o no tic_va entonces devolver fin
         si busca_archivo("HIJOS") < 0 entonces
             escribir("(sin el programa HIJOS en la unidad: sin las pruebas de fork, execve y wait4)\n")
@@ -1328,6 +1331,7 @@ módulo Hispa64
         etapa3()
         prepara_ratón()
         etapa5()
+        prepara_i2chid(tiene("sini2c"), tiene("prueba=hid"), tiene("prueba=barcero"))     ; [etapa 6] HID (sus pruebas) e I2C-HID
         etapa4()
         pruebas5()
         si tiene("prueba=raton") entonces prueba_ratón() fin

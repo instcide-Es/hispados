@@ -410,6 +410,60 @@ módulo Espacios
         tab := tab + 1
     fin
 
+    ; [etapa 6] fork: las páginas puestas de «de», copiadas a marcos nuevos de
+    ; «a» (con las mismas marcas). Copiar al escribir (compartirlas de solo leer
+    ; hasta que uno escriba) es de la etapa 7.
+    función copia_página(a: nat64, de: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov ecx, 512
+            rep movsq
+        fin
+    fin
+
+    función copia_nivel(f: nat64, nivel: nat32, base: nat64, a: puntero a Espacio): bool
+        variable t: puntero a nat64
+        variable i: nat32
+        variable x, nuevo, v: nat64
+        t := tabla(f)
+        i := 0
+        mientras i < 512 hacer
+            x := t[i]
+            si x yb PRESENTE <> 0 entonces
+                v := base + (nat64(i) << (12 + 9 * (nivel - 1)))
+                si nivel = 1 entonces
+                    nuevo := pide()
+                    si nuevo = 0 entonces devolver falso fin
+                    copia_página(virt(nuevo), virt(x yb MÁSCARA))
+                    si no mapea_u(a, v, nuevo, x yb (nob MÁSCARA) yb (nob nat64(0x60))) entonces
+                        devuelve(nuevo)
+                        devolver falso
+                    fin
+                sino
+                    si no copia_nivel(x yb MÁSCARA, nivel - 1, v, a) entonces devolver falso fin
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; falso si no hay memoria (lo copiado se queda en «a»: se deshace con él)
+    público función copia_espacio(de: puntero a Espacio, a: puntero a Espacio): bool
+        variable r: puntero a nat64
+        variable i: nat32
+        r := tabla(de.raíz)
+        i := 0
+        mientras i < 256 hacer
+            si r[i] yb PRESENTE <> 0 entonces
+                si no copia_nivel(r[i] yb MÁSCARA, 3, nat64(i) << 39, a) entonces devolver falso fin
+            fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
     ; deshace el espacio: sus páginas, sus tablas y él. Ningún procesador debe
     ; tenerlo puesto (el último hilo ya ha puesto el del núcleo).
     público función destruye_espacio(e: puntero a Espacio)

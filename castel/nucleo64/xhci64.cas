@@ -492,7 +492,17 @@ módulo Xhci64
         fin
         ceros(nat64(x), tamaño(Ctl))
         x.aparato := i
+        ; (como las I2C de Tiger Lake: a D0 antes de nada, y la BAR, si está sin poner, con dirección)
+        pon_d0(i)
         base := bar_mem(i, 0)
+        si base = 0 entonces
+            base := asigna_bar(i, 0)
+            si base <> 0 entonces
+                escribir(" (su BAR 0 estaba sin poner: ")
+                hex(base)
+                escribir(")")
+            fin
+        fin
         tam := bar_largo(i, 0)
         si base = 0 o tam < 0x1000 entonces
             xh_motivo := "su BAR 0 no es de memoria"

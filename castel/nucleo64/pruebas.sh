@@ -60,7 +60,9 @@
 #     un espacio va solo al que lo tiene puesto (con SMEP, SMAP y UMIP con
 #     -cpu max); y el CD (grub-mkrescue) por BIOS y por UEFI.
 #   - [etapa 5] los discos y los archivos, con los discos de prueba de
-#     programas/hazdiscos.sh (NVMe con GPT, SATA con MBR y una lógica exFAT,
+#     programas/hazdiscos.sh (NVMe con GPT, SATA con MBR: FAT32, FAT12 y cuatro
+#     lógicas: exFAT, FAT16 de tipo 0x0E, FAT16 de tipo 0x04 y otra exFAT con
+#     cúmulos de 512 octetos,
 #     dos de 3 TB con una partición más allá de 2^32 sectores, uno crudo):
 #     NVMe (con MSI-X y una cola por procesador) y AHCI (con MSI), y sin
 #     ellas («sinmsix sinmsi», con la AHCI aparte de «pc»); las particiones;
@@ -68,9 +70,13 @@
 #     programa ARCHIVOS (crear, escribir, leer, O_APPEND, O_TRUNC,
 #     pread/pwrite, huecos, ftruncate, nombres largos con acentos, 40
 #     archivos, getdents64, rename, unlink de uno abierto, las *at, chdir,
-#     los errores; exFAT, de solo leer); al apagar, lo que quedaba en la
-#     caché, al disco; y desde el anfitrión, fsck.fat sin quejas y lo dejado
-#     comprobado con mtools; sin «escribir», ni un octeto cambiado; y por UEFI
+#     los errores, un nombre de 255 letras; en FAT32, FAT16, FAT12 y exFAT;
+#     la raíz fija de la FAT12, llena hasta ENOSPC); al apagar, lo que
+#     quedaba en la caché, al disco; y desde el anfitrión, fsck.fat sin quejas
+#     y lo dejado comprobado con mtools (FAT32, FAT16 y FAT12) y con
+#     miraexfat.py (exFAT: el arranque y su suma, VolumeDirty limpio, las
+#     sumas y el NameHash de cada grupo, las cadenas y el mapa de bits, y lo
+#     dejado); sin «escribir», ni un octeto cambiado; y por UEFI
 #     desde el disco de la imagen puesto en SATA (la partición EFI a la vista,
 #     un programa arrancado desde ella).
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
@@ -172,7 +178,7 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 7 archivos: " <<< "$v" \
+    && grep -q "^Unidad en memoria: 9 archivos: " <<< "$v" \
     && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.6.0 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
@@ -188,7 +194,7 @@ e4_bien() {   # SALIDA N
     && grep -q "^El programa MALO (proceso [0-9]*) ha dividido entre cero.$" <<< "$v" \
     && grep -q "^El programa MALO (proceso [0-9]*) ha intentado ejecutar una instrucción que no existe.$" <<< "$v" \
     && grep -q "se le ha desbordado la pila).$" <<< "$v" && grep -q "que es suya, pero es de solo leer.$" <<< "$v" \
-    && [ "$(grep -c "Se cierra el programa; el sistema sigue.$" <<< "$v")" = 11 ] \
+    && [ "$(sed -n '1,/^Después: /p' <<< "$v" | grep -c "Se cierra el programa; el sistema sigue.$")" = 11 ] \
     && grep -q "^Malos: 11 programas que fallan, a la vez: todos cerrados con su señal (SIGSEGV 139, SIGFPE 136, SIGILL 132)" <<< "$v" \
     && grep -q "^No se arrancan: «NOESTA»: no está en la unidad; «SALUDO.TXT»: no es un programa ELF$" <<< "$v" \
     && grep -q "^Después: 0 procesos, 0 espacios, 0 tablas de programas; 23 arrancados, 11 cerrados por un fallo" <<< "$v" \
@@ -415,7 +421,7 @@ else ko "sin modo largo no lo dice (código $c): $(tr -d '\r' < "$T/no64.txt" | 
 # los discos de prueba (programas/hazdiscos.sh), y una copia de trabajo de cada uno
 DS=$T/discos
 if "$AQUI/programas/hazdiscos.sh" "$DS" > "$T/discos.txt" 2>&1; then
-  ok "los discos de prueba (hazdiscos.sh: GPT y MBR con una lógica, FAT32 con mkfs.fat, exFAT con hazexfat.py; 3 TB dispersos): $(tail -1 "$T/discos.txt" | cut -d: -f2)"
+  ok "los discos de prueba (hazdiscos.sh: GPT y MBR con lógicas, FAT32, FAT16 y FAT12 con mkfs.fat, exFAT con hazexfat.py; 3 TB dispersos): $(tail -1 "$T/discos.txt" | cut -d: -f2)"
 else ko "no se hacen los discos de prueba: $(tail -2 "$T/discos.txt" | paste -sd ' ')"; fi
 copia_discos() { rm -rf "$T/w5"; mkdir -p "$T/w5"; cp --sparse=always "$DS"/*.img "$T/w5/"; }
 # una partición de una imagen, suelta: IMAGEN PRIMER_SECTOR SECTORES SALIDA
@@ -448,6 +454,44 @@ sys.exit(0 if d == bytes(e) else 1)' "$T/grande.bin" \
     && [ "$(mdir -i "$p" "$d" 2> /dev/null | grep -c '^hueco *bin *3 ')" = 1 ] \
     && ! mdir -i "$p" "$d" 2> /dev/null | grep -qE 'hola *txt|uno *txt|dos *txt|abierto|desde|movido'
 }
+# lo mismo en un exFAT (etapa 6), con miraexfat.py: el volumen bien (sin
+# VolumeDirty: lo ha limpiado el apagado) y lo que ha dejado ARCHIVOS
+MIRAEX="python3 -I $AQUI/programas/miraexfat.py"
+exfat_bien() {   # IMAGEN PRIMER_SECTOR SECTORES (lo que dice, a miraexfat.txt)
+  saca "$1" "$2" "$3" "$T/exfat.part"
+  $MIRAEX "$T/exfat.part" >> "$T/miraexfat.txt" 2>&1
+}
+exfat_dice() { grep -m 3 MAL "$T/miraexfat.txt" | paste -sd ' '; }
+lo_dejado_ex() {   # IMAGEN PRIMER_SECTOR SECTORES
+  local p="$T/dejado.part" d="Prueba de Hispa-64"
+  saca "$1" "$2" "$3" "$p"
+  [ "$($MIRAEX "$p" tipo ULTIMO.TXT 2> /dev/null)" = "Escrito sin fsync: lo vacía el apagado." ] \
+    && [ "$($MIRAEX "$p" tipo "$d/adios.txt" 2> /dev/null)" = "$(printf 'Hola, MUNDO\nsegunda línea')" ] \
+    && [ "$($MIRAEX "$p" tipo "$d/UN NOMBRE MUY LARGO CON ACENTOS ÁÉÍÓÚ Y EÑE Ñ.TXT" 2> /dev/null)" = "¡Hola!" ] \
+    && [ "$($MIRAEX "$p" tipo "$d/sub2/Dentro/movido.txt" 2> /dev/null)" = "me han movido" ] \
+    && [ "$($MIRAEX "$p" dir "$d/Muchos" 2> /dev/null | grep -c '^archivo número [0-9][13579].txt 22$')" = 20 ] \
+    && [ "$($MIRAEX "$p" dir "$d/Muchos" 2> /dev/null | wc -l)" = 20 ] \
+    && $MIRAEX "$p" tipo "$d/grande.bin" > "$T/grande.bin" 2> /dev/null \
+    && python3 -I -c '
+import sys
+d = open(sys.argv[1], "rb").read()
+e = bytearray(((i * 131 + (i >> 8)) & 255) for i in range(1234567))
+e[500000:500100] = b"X" * 100
+sys.exit(0 if d == bytes(e) else 1)' "$T/grande.bin" \
+    && [ "$($MIRAEX "$p" dir "$d" 2> /dev/null | grep -c '^hueco.bin 3$')" = 1 ] \
+    && ! $MIRAEX "$p" dir "$d" 2> /dev/null | grep -qE '^(hola|uno|dos|abierto|desde|movido)' \
+    && [ "$($MIRAEX "$p" dir / 2> /dev/null | grep -c '^RAIZ')" = 0 ]
+}
+# la SATA de prueba: FAT32 (p1), FAT12 (p2), exFAT (p5 y p8), FAT16 (p6 y p7): las escritas, bien
+sata_bien() {   # IMAGEN
+  rm -f "$T/miraexfat.txt"
+  fsck_bien "$1" 2048 172032 && lo_dejado "$1" 2048 172032 \
+    && fsck_bien "$1" 174080 8192 && lo_dejado "$1" 174080 8192 \
+    && fsck_bien "$1" 251904 65536 && lo_dejado "$1" 251904 65536 \
+    && fsck_bien "$1" 319488 16384 && lo_dejado "$1" 319488 16384 \
+    && exfat_bien "$1" 184320 65536 && lo_dejado_ex "$1" 184320 65536 \
+    && exfat_bien "$1" 337920 32768 && lo_dejado_ex "$1" 337920 32768
+}
 e5_bien() {   # SALIDA: lo que dice siempre una vuelta de la etapa 5 sin fallos
   local v; v=$(serie "$1")
   grep -q "^Después de los archivos: 0 abiertos, [0-9]* nodos (los de antes: las raíces), el montón como antes$" <<< "$v" \
@@ -467,26 +511,33 @@ if [ $c = 85 ] && hay $S "^NVMe: 00:0[0-9A-F].0 1B36:0010, «QEMU NVMe Ctrl» (s
    && hay $S "^SATA (AHCI): 00:1F.2 8086:2922, AHCI 1.0, 6 puertos, direcciones de 64 bits; MSI; 1 disco$" \
    && hay $S "^  nvme0: «QEMU NVMe Ctrl», 112,0 MB (229376 sectores de 512 octetos), tabla GPT; se puede escribir$" \
    && hay $S "^    nvme0p1: 40,0 MB, desde el sector 2048, EFI$" && hay $S "^    nvme0p2: 70,9 MB, desde el sector 83968, datos (Windows: FAT, exFAT o NTFS)$" \
-   && hay $S "^  sata0: «QEMU HARDDISK», 128,0 MB (262144 sectores de 512 octetos), tabla MBR; se puede escribir$" \
-   && hay $S "^    sata0p1: 84,0 MB, desde el sector 2048, FAT32$" && hay $S "^    sata0p5: 32,0 MB, desde el sector 182272, exFAT o NTFS$" \
+   && hay $S "^  sata0: «QEMU HARDDISK», 184,0 MB (376832 sectores de 512 octetos), tabla MBR; se puede escribir$" \
+   && hay $S "^    sata0p1: 84,0 MB, desde el sector 2048, FAT32$" && hay $S "^    sata0p2: 4,0 MB, desde el sector 174080, FAT12$" \
+   && hay $S "^    sata0p5: 32,0 MB, desde el sector 184320, exFAT o NTFS$" && hay $S "^    sata0p6: 32,0 MB, desde el sector 251904, FAT16$" \
+   && hay $S "^    sata0p7: 8,0 MB, desde el sector 319488, FAT16$" && hay $S "^    sata0p8: 16,0 MB, desde el sector 337920, exFAT o NTFS$" \
    && hay $S "^  nvme1: «QEMU NVMe Ctrl», 16,0 MB (32768 sectores de 512 octetos), sin tabla de particiones; se puede escribir$" \
-   && hay $S "^Archivos (el VFS): 5 montajes$" && hay $S "^  /nvme0p1: FAT32 «ESP», .*; de leer y escribir$" \
+   && hay $S "^Archivos (el VFS): 9 montajes$" && hay $S "^  /nvme0p1: FAT32 «ESP», .*; de leer y escribir$" \
    && hay $S "^  /nvme0p2: FAT32 «DATOS», 69,8 MB en 143076 cúmulos de 512 octetos, " && hay $S "^  /sata0p1: FAT32 «SATAFAT», 83,3 MB en 85332 cúmulos de 1 KB" \
-   && hay $S "^  /sata0p5: exFAT «EXFATPRB», 31,9 MB en 8168 cúmulos de 4 KB; de solo leer$" \
+   && hay $S "^  /sata0p5: exFAT «EXFATPRB», 31,9 MB en 8168 cúmulos de 4 KB, 31,1 MB libres; de leer y escribir$" \
+   && hay $S "^  /sata0p2: FAT12 «FAT12PRB», 3,9 MB en 4081 cúmulos de 1 KB, .* libres; de leer y escribir$" \
+   && hay $S "^  /sata0p6: FAT16 «FAT16PRB», 31,8 MB en 32623 cúmulos de 1 KB, .* libres; de leer y escribir$" \
+   && hay $S "^  /sata0p7: FAT16 «FAT16CHICA», 7,9 MB en 16223 cúmulos de 512 octetos, .* libres; de leer y escribir$" \
+   && hay $S "^  /sata0p8: exFAT «EXFAT512», 15,8 MB en 32384 cúmulos de 512 octetos, 15,5 MB libres; de leer y escribir$" \
    && hay $S "^La caché: los primeros 4 KB de los 3 discos, iguales por la caché y a pelo$" \
    && hay $S "^  escribir y leer a pelo: 1 sector, 8, 256 (128 KB), 500 (varias órdenes) y los 300 del final: iguales; más allá del final, no$" \
    && hay $S "^  4 hilos a la vez, cada uno en su procesador, 32 lecturas de 128 KB cada uno: bien; colas de NVMe usadas: 4$" \
-   && hay $S "^ARCHIVOS: 3 discos de prueba (2 escritos); todo bien ([0-9]* pruebas)$" && hay $S "^Programa «ARCHIVOS auto»: acaba con el código 0, como debe" \
+   && hay $S "^ARCHIVOS: 7 discos de prueba (7 escritos); todo bien ([0-9]* pruebas)$" && hay $S "^Programa «ARCHIVOS auto»: acaba con el código 0, como debe" \
+   && hay $S "^  la raíz fija: [1-9][0-9]* archivos hasta ENOSPC, y borrados$" \
    && hay $S "^      Canción de cuna ñandú.txt (37 octetos)$" && hay $S "^Al apagar: [1-9][0-9]* bloques sin escribir en la caché; vaciados (sync): [1-9][0-9]* escritos$" \
    && e5_bien $S; then
-  ok "etapa 5 (q35, 4 procesadores, MSI-X y MSI): NVMe con 4 colas, SATA, GPT y MBR con una lógica, 4 volúmenes (FAT32 y exFAT); «$(serie $S | grep '^  leerlo entero' | cut -d: -f2- | sed 's/^ //')»; «$(serie $S | grep '^ARCHIVOS: 3')»; al apagar, lo sin vaciar, al disco"
+  ok "etapa 5 (q35, 4 procesadores, MSI-X y MSI): NVMe con 4 colas, SATA, GPT y MBR con lógicas, 8 volúmenes (FAT32, FAT16, FAT12 y exFAT, todos escritos); «$(serie $S | grep '^  leerlo entero' | cut -d: -f2- | sed 's/^ //')»; «$(serie $S | grep '^ARCHIVOS: 3')»; al apagar, lo sin vaciar, al disco"
 else ko "etapa 5 en q35 no dice lo que debe (código $c): $(e5_dice $S)"; fi
 e4_ok $S 4 "con los discos (q35, 4 procesadores)"
 if fsck_bien "$T/w5/nvme.img" 83968 145375 && lo_dejado "$T/w5/nvme.img" 83968 145375 \
-   && fsck_bien "$T/w5/sata.img" 2048 172032 && lo_dejado "$T/w5/sata.img" 2048 172032 \
-   && fsck_bien "$T/w5/nvme.img" 2048 81920; then
-  ok "desde el anfitrión: fsck.fat sin quejas en los dos FAT32 escritos (y la EFI) y, con mtools, lo que ha dejado ARCHIVOS (los nombres largos con acentos, grande.bin byte a byte, los 20 de Muchos, ULTIMO.TXT, que vació el apagado)"
-else ko "desde el anfitrión, los volúmenes escritos no están bien: $(fsck_dice)"; fi
+   && fsck_bien "$T/w5/nvme.img" 2048 81920 && sata_bien "$T/w5/sata.img"; then
+  ok "desde el anfitrión: fsck.fat sin quejas en los dos FAT32, la FAT12 y las dos FAT16 escritas (y la EFI) y, con mtools, lo que ha dejado ARCHIVOS (los nombres largos con acentos, grande.bin byte a byte, los 20 de Muchos, ULTIMO.TXT, que vació el apagado; nada de la raíz llena de la FAT12)"
+  ok "desde el anfitrión, las dos exFAT escritas, con miraexfat.py: $(cut -d: -f2- "$T/miraexfat.txt" | sed 's/^ //' | paste -sd ';' | sed 's/;/; y /'); y lo que ha dejado ARCHIVOS, leído por él"
+else ko "desde el anfitrión, los volúmenes escritos no están bien: $(fsck_dice) $(exfat_dice)"; fi
 # 2. 3 TB: las particiones de más allá de 2^32 sectores, por NVMe y por SATA (LBA de 48 bits)
 # shellcheck disable=SC2086
 mb1 "apagar escribir" "$T/e5g.txt" 512 -machine q35 -smp 2 -drive file="$T/w5/grande.img",if=none,id=n0,format=raw -device nvme,serial=grande,drive=n0 \
@@ -507,10 +558,10 @@ mb1 "apagar escribir sinmsix sinmsi" "$T/e5s.txt" 256 -machine pc -smp 2 $NVME5 
   -drive file="$T/w5/sata.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ah.2; c=$?
 S=$T/e5s.txt
 if [ $c = 85 ] && [ "$(serie $S | grep -c '; sin interrupciones (se mira la cola);')" = 3 ] \
-   && hay $S "^ARCHIVOS: 3 discos de prueba (2 escritos); todo bien" && e5_bien $S \
-   && fsck_bien "$T/w5/sata.img" 2048 172032 && lo_dejado "$T/w5/sata.img" 2048 172032; then
-  ok "etapa 5 sin MSI ni MSI-X («pc», 2 procesadores, la AHCI aparte): las tres controladoras mirando la cola, y todo igual (fsck.fat, bien)"
-else ko "etapa 5 sin interrupciones no sale (código $c): $(e5_dice $S)"; fi
+   && hay $S "^ARCHIVOS: 7 discos de prueba (7 escritos); todo bien" && e5_bien $S \
+   && sata_bien "$T/w5/sata.img"; then
+  ok "etapa 5 sin MSI ni MSI-X («pc», 2 procesadores, la AHCI aparte): las tres controladoras mirando la cola, y todo igual (fsck.fat y miraexfat.py, bien)"
+else ko "etapa 5 sin interrupciones no sale (código $c): $(e5_dice $S) $(fsck_dice) $(exfat_dice)"; fi
 # 4. sin «escribir»: nada cambia en los discos (ni un octeto)
 copia_discos
 antes=$(cat "$T"/w5/nvme.img "$T"/w5/sata.img "$T"/w5/crudo.img | md5sum)
@@ -519,8 +570,8 @@ mb1 "apagar" "$T/e5r.txt" 256 -machine q35 -smp 2 $NVME5 $CRUDO5 $SATA5; c=$?
 S=$T/e5r.txt
 if [ $c = 85 ] && [ "$(cat "$T"/w5/nvme.img "$T"/w5/sata.img "$T"/w5/crudo.img | md5sum)" = "$antes" ] \
    && [ "$(serie $S | grep -c '; solo se lee$')" = 3 ] && hay $S "^  no se escribe en él (sin «escribir» en la línea de órdenes)$" \
-   && [ "$(serie $S | grep -c '^  de solo leer (EROFS): no se escribe$')" = 3 ] \
-   && hay $S "^ARCHIVOS: 3 discos de prueba (0 escritos); todo bien" && ! hay $S "^Al apagar" && e5_bien $S; then
+   && [ "$(serie $S | grep -c '^  de solo leer (EROFS): no se escribe$')" = 7 ] \
+   && hay $S "^ARCHIVOS: 7 discos de prueba (0 escritos); todo bien" && ! hay $S "^Al apagar" && e5_bien $S; then
   ok "etapa 5 sin «escribir»: todo de solo leer (EROFS), y los discos, iguales octeto a octeto (md5sum)"
 else ko "etapa 5 sin «escribir» no sale (código $c): $(e5_dice $S)"; fi
 # 5. el núcleo de antes de la etapa 5 no escribía; el de ahora, con los discos y sin pruebas
@@ -530,7 +581,317 @@ if [ $c = 85 ] && hay "$T/e5n.txt" "^Hispa-64 etapa 6: todo en orden.$" && hay "
   ok "sinpruebas con los discos: el disco crudo sí (es del núcleo), los programas no"
 else ko "sinpruebas con los discos no sale (código $c): $(e5_dice "$T/e5n.txt")"; fi
 
+# ---- [etapa 6] el USB: xHCI, concentradores, HID y memorias ----
+"$AQUI/programas/hazusb.sh" "$T/usbd" > "$T/usbd.txt" 2>&1 || ko "hazusb.sh no hace las memorias: $(tail -2 "$T/usbd.txt" | paste -sd ' ')"
+copia_usb() { rm -rf "$T/w6"; mkdir -p "$T/w6"; cp "$T/usbd/usbfat.img" "$T/usbd/usbexfat.img" "$T/w6/"; }
+# los aparatos de las pruebas: un concentrador de USB 1.1 (velocidad plena) con
+# el teclado y la tableta detrás, el ratón (de alta velocidad), y las dos
+# memorias (de USB 3: SuperSpeed)
+USBD="-device qemu-xhci,id=xhci -device usb-hub,bus=xhci.0,port=1 -device usb-kbd,bus=xhci.0,port=1.1 -device usb-tablet,bus=xhci.0,port=1.2 \
+ -device usb-mouse,bus=xhci.0,port=2"
+memorias() { echo "-drive if=none,id=u1,format=raw,file=$T/w6/usbfat.img -device usb-storage,bus=xhci.0,drive=u1 -drive if=none,id=u2,format=raw,file=$T/w6/usbexfat.img -device usb-storage,bus=xhci.0,drive=u2"; }
+e6_dice() { serie "$1" | grep -E '^xHCI|^  versión|^USB|^  [0-9]-|^  usb|^  /usb|^ARCHIVOS|MAL|parado' | cut -c1-150 | paste -sd '|'; }
+copia_usb
+# shellcheck disable=SC2046,SC2086
+mb1 "apagar escribir" "$T/e6.txt" 512 -machine q35 -smp 4 $USBD $(memorias); c=$?
+S=$T/e6.txt
+# shellcheck disable=SC2086
+if [ $c = 85 ] && hay $S "^xHCI: 00:0[0-9A-F].0 1B36:000D en 0x[0-9A-F]*$" \
+   && hay $S "^  versión 1.00, 8 puertos (4 de USB 2 y 4 de USB 3), 63 ranuras, contextos de 32 octetos, direcciones de 64 bits; MSI-X$" \
+   && hay $S "^USB: 6 aparatos (1 concentradores) en [0-9]* ms$" \
+   && hay $S "^  1-[0-9]: 0409:55AA «QEMU USB Hub», USB 1.1, velocidad plena (12 Mbit/s), ranura [0-9]*, paquete del extremo 0: 8; concentrador de 8 puertos$" \
+   && hay $S "^  1-[0-9].1: 0627:0001 «QEMU USB Keyboard», USB 2.0, velocidad plena (12 Mbit/s), ranura [0-9]*, paquete del extremo 0: 8; HID: teclado (por su descriptor, con LED)$" \
+   && hay $S "^  1-[0-9].2: 0627:0001 «QEMU USB Tablet», .*; HID: tableta (por su descriptor, de 0 a 32767)$" \
+   && hay $S "«QEMU USB Mouse», USB 2.0, velocidad alta (480 Mbit/s), ranura [0-9]*, paquete del extremo 0: 64; HID: ratón (por su descriptor, con rueda)$" \
+   && [ "$(serie $S | grep -c '«QEMU USB HARDDRIVE», USB 3.0, velocidad SuperSpeed (5 Gbit/s), ranura [0-9]*, paquete del extremo 0: 512; almacenamiento (SCSI, Bulk-Only)$')" = 2 ] \
+   && hay $S "^  usb0: «QEMU    QEMU HARDDISK», 64,0 MB (131072 sectores de 512 octetos), tabla MBR; se puede escribir$" \
+   && hay $S "^    usb0p1: 63,0 MB, desde el sector 2048, FAT32$" \
+   && hay $S "^  usb1: «QEMU    QEMU HARDDISK», 48,0 MB (98304 sectores de 512 octetos), sin tabla: un volumen entero; se puede escribir$" \
+   && hay $S "^  /usb0p1: FAT32 «USBFAT», .*; de leer y escribir$" && hay $S "^  /usb1: exFAT «USBEXFAT», .*; de leer y escribir$" \
+   && hay $S "^ARCHIVOS: 2 discos de prueba (2 escritos); todo bien ([0-9]* pruebas)$" && e4_bien $S 4; then
+  ok "etapa 6, el USB (q35, 4 procesadores): xHCI con MSI-X, «$(serie $S | grep '^USB:' | cut -d' ' -f2-5)»: el concentrador de USB 1.1 con el teclado y la tableta de velocidad plena (extremo 0 de 8: Evaluate Context), el ratón de alta con rueda, dos memorias SuperSpeed; ARCHIVOS en las dos («$(serie $S | grep '^ARCHIVOS: 2 discos' | cut -d';' -f2 | sed 's/^ //')»); la etapa 4, igual"
+else ko "etapa 6, el USB, no dice lo que debe (código $c): $(e6_dice $S)"; fi
+saca "$T/w6/usbfat.img" 2048 129024 "$T/usbfat.part"
+if fsck_bien "$T/w6/usbfat.img" 2048 129024 && lo_dejado "$T/w6/usbfat.img" 2048 129024; then
+  ok "etapa 6, desde el anfitrión: la FAT32 de la memoria USB, sin quejas de fsck.fat, y lo que ha dejado ARCHIVOS, comprobado con mtools"
+else ko "etapa 6: la FAT32 de la memoria USB no está bien: $(fsck_dice)"; fi
+rm -f "$T/miraexfat.txt"
+if exfat_bien "$T/w6/usbexfat.img" 0 98304 && ! grep -q MAL "$T/miraexfat.txt" && lo_dejado_ex "$T/w6/usbexfat.img" 0 98304; then
+  ok "etapa 6, desde el anfitrión: el exFAT de la otra memoria, bien (miraexfat.py: $(tail -1 "$T/miraexfat.txt" | cut -c1-80)), y lo que ha dejado ARCHIVOS"
+else ko "etapa 6: el exFAT de la memoria USB no está bien: $(exfat_dice)"; fi
+# sin MSI-X: el nec-usb-xhci con MSI y el qemu-xhci mirando la cola, a la vez (dos controladoras)
+copia_usb
+# shellcheck disable=SC2086
+mb1 "apagar escribir sinmsix" "$T/e6b.txt" 256 -machine q35 -smp 2 -device nec-usb-xhci,id=xhci,msix=off -device usb-kbd,bus=xhci.0 \
+  -drive if=none,id=u1,format=raw,file=$T/w6/usbfat.img -device usb-storage,bus=xhci.0,drive=u1 \
+  -device qemu-xhci,id=x2 -drive if=none,id=u2,format=raw,file=$T/w6/usbexfat.img -device usb-storage,bus=x2.0,drive=u2; c=$?
+S=$T/e6b.txt
+if [ $c = 85 ] && hay $S "^xHCI: 00:0[0-9A-F].0 1033:0194 en " && hay $S "^  versión 1.00, 8 puertos .*; MSI$" \
+   && hay $S "^  versión 1.00, 8 puertos .*; sin interrupciones (se mira la cola)$" && hay $S "^USB: 3 aparatos (0 concentradores)" \
+   && hay $S "^  2-[0-9]: 46F4:0001 «QEMU USB HARDDRIVE»" && hay $S "^ARCHIVOS: 2 discos de prueba (2 escritos); todo bien ([0-9]* pruebas)$" && e4_bien $S 2; then
+  ok "etapa 6, dos controladoras: el nec-usb-xhci con MSI y el qemu-xhci sin MSI-X (se mira la cola); las dos memorias, escritas por ARCHIVOS"
+else ko "etapa 6 con dos controladoras no dice lo que debe (código $c): $(e6_dice $S)"; fi
+# el puntero, el teclado y enchufar en marcha: con el monitor de QEMU (y la
+# tableta, por QMP: «mouse_move» del monitor solo mueve en relativo)
+abs_qmp() {   # SOCKET X Y (de 0 a 32767)
+  python3 -I - "$@" <<'PY' 2> /dev/null
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); f = s.makefile('rw')
+f.readline(); f.write('{"execute": "qmp_capabilities"}\n'); f.flush(); f.readline()
+ev = [{"type": "abs", "data": {"axis": "x", "value": int(sys.argv[2])}}, {"type": "abs", "data": {"axis": "y", "value": int(sys.argv[3])}}]
+f.write(json.dumps({"execute": "input-send-event", "arguments": {"events": ev}}) + '\n'); f.flush(); f.readline()
+PY
+}
+con_usb() {   # SALIDA ÓRDENES -- opciones de QEMU (las órdenes, separadas por «;», al ver «Puntero: 10 s»)
+  local s=$1 o=$2 q c; shift 3
+  rm -f "$s" "$T/mon6.sock"
+  rm -f "$T/qmp6.sock"
+  timeout 90 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$T/HISPA64.SIM" -append "apagar sinpruebas prueba=raton" -display none -serial file:"$s" \
+    -monitor unix:"$T/mon6.sock",server,nowait -qmp unix:"$T/qmp6.sock",server,nowait $DBG -no-reboot -nic none -m 256 -machine q35 -device qemu-xhci,id=xhci "$@" > /dev/null 2>&1 &
+  q=$!
+  for _ in $(seq 1 200); do grep -q "^Puntero: 10 s" "$s" 2> /dev/null && break; sleep 0.2; done
+  sleep 0.5
+  IFS=';' read -ra OS <<< "$o"
+  for x in "${OS[@]}"; do
+    if [ "${x%% *}" = abs ]; then abs_qmp "$T/qmp6.sock" ${x#abs }; else python3 -I "$AQUI/pantallazo.py" orden "$T/mon6.sock" "$x" 2> /dev/null; fi
+    sleep 0.6
+  done
+  wait $q; c=$?
+  return $c
+}
+con_usb "$T/e6r.txt" "mouse_move 10 20;mouse_move -5 3 1;mouse_button 1;mouse_button 0;sendkey a;sendkey shift-b" -- -device usb-mouse,bus=xhci.0 -device usb-kbd,bus=xhci.0; c=$?
+P=$(serie "$T/e6r.txt" | grep -E '^Puntero: \(|^Tecla USB' | paste -sd '|')
+if [ $c = 85 ] && [ "$P" = "Puntero: (522, 404), botones 0, rueda 0 (ratón)|Puntero: (517, 407), botones 0, rueda 1 (ratón)|Puntero: (517, 407), botones 1, rueda 1 (ratón)|Puntero: (517, 407), botones 0, rueda 1 (ratón)|Tecla USB: uso 0x4|Tecla USB: uso 0x5" ] \
+   && hay "$T/e6r.txt" ", 1 clics; teclas USB: 3, LED puestos: "; then
+  ok "etapa 6, el ratón USB (mouse_move y mouse_button del monitor): lo movido, la rueda y el clic, exactos; y las teclas del teclado USB (a, Mayúsculas, b)"
+else ko "etapa 6, el ratón y el teclado USB no dan lo que deben (código $c): $P"; fi
+con_usb "$T/e6t.txt" "abs 16384 8192;mouse_button 2;mouse_button 0;abs 32767 32767" -- -device usb-hub,bus=xhci.0,port=1 -device usb-tablet,bus=xhci.0,port=1.1; c=$?
+P=$(serie "$T/e6t.txt" | grep -E '^Puntero: \(' | paste -sd '|')
+if [ $c = 85 ] && grep -q "^Puntero: (51[0-2], 19[0-2]), botones 0, rueda 0 (tableta)|Puntero: (51[0-2], 19[0-2]), botones 2, rueda 0 (tableta)|Puntero: (51[0-2], 19[0-2]), botones 0, rueda 0 (tableta)|Puntero: (1023, 767), botones 0, rueda 0 (tableta)$" <<< "$P"; then
+  ok "etapa 6, la tableta USB detrás del concentrador (posición absoluta de 0 a 32767): al medio, el botón derecho y a la esquina: «$(cut -d'|' -f1 <<< "$P")»"
+else ko "etapa 6, la tableta USB no da lo que debe (código $c): $P"; fi
+con_usb "$T/e6c.txt" "device_add usb-kbd,bus=xhci.0,id=k9;sendkey c;device_del k9;device_add usb-mouse,bus=xhci.0,port=1.3,id=m9;mouse_move 3 4;device_del h1" -- -device usb-hub,bus=xhci.0,port=1,id=h1; c=$?
+S=$T/e6c.txt
+if [ $c = 85 ] && hay $S "^USB: se ha enchufado 1-[0-9]: 0627:0001 «QEMU USB Keyboard», .*HID: teclado" && hay $S "^Tecla USB: uso 0x6$" \
+   && hay $S "^USB: se ha enchufado 1-[0-9].3: 0627:0001 «QEMU USB Mouse», USB 2.0, velocidad plena .*HID: ratón (por su descriptor, con rueda)$" \
+   && hay $S "^Puntero: (515, 388), botones 0, rueda 0 (ratón)$" && [ "$(serie $S | grep -c '^USB: se ha desenchufado ')" = 3 ] && hay $S "^Hispa-64 etapa 6: todo en orden.$"; then
+  ok "etapa 6, enchufar y desenchufar en marcha: un teclado (su tecla llega), un ratón detrás del concentrador, y quitar el concentrador con lo que cuelga (3 desenchufados)"
+else ko "etapa 6, en marcha, no sale (código $c): $(serie $S | grep -E '^USB:|^Tecla|^Puntero' | paste -sd '|')"; fi
+# sinusb: no se toca
+mb1 "apagar sinpruebas sinusb" "$T/e6n.txt" 256 -machine q35 -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0; c=$?
+if [ $c = 85 ] && ! hay "$T/e6n.txt" "^xHCI:" && hay "$T/e6n.txt" "^Hispa-64 etapa 6: todo en orden.$"; then
+  ok "etapa 6, sinusb: el xHCI, sin tocar"
+else ko "etapa 6, sinusb, no sale (código $c)"; fi
+
+# ---- [etapa 6] HID: los descriptores (Hidesc64) e I2C-HID (Aml64, I2c64, I2chid64) ----
+# QEMU no tiene ni controladora I2C DesignWare ni HID sobre I2C, así que: los
+# descriptores de informe (touchpads de verdad, los aparatos USB de QEMU) se
+# analizan en el arranque (prhid64.cas, con «prueba=hid» uno a uno); los
+# PNP0C50 se buscan en tablas de prueba dadas con -acpitable (la SSDT de
+# prueba de Hispa-Pentium, una como la del ThinkPad E14 con «NULL», y las
+# tablas de verdad del ASUS GL553VD: su DSDT, partida en SSDT de 60 KB por
+# comossdt.py); sin controladora, el arranque lo dice y no falla; «sini2c»; y
+# dar dirección a una BAR sin poner (la del aparato edu de QEMU, «prueba=barcero»).
+I2=$AQUI/i2chid
+hid_orden() {   # SALIDA QUÉ LÍNEAS...: ¿salen esas líneas, en ese orden? (las de «prueba=hid», sin los dos espacios)
+  local s=$1 q=$2; shift 2
+  serie "$s" | sed -n 's/^  //p' > "$T/hid.lin"
+  if python3 -I - "$T/hid.lin" "$@" <<'PY' > "$T/hid.orden"; then ok "etapa 6, HID: $q"; else ko "etapa 6, HID: $q: $(cat "$T/hid.orden")"; fi
+import sys
+l = open(sys.argv[1], encoding='utf-8').read().split('\n')
+i = 0
+for q in sys.argv[2:]:
+    while i < len(l) and l[i] != q:
+        i += 1
+    if i == len(l):
+        print('falta: ' + q)
+        sys.exit(1)
+    i += 1
+PY
+}
+if python3 -I "$I2/hazdatos.py" --mira; then ok "etapa 6, HID: los guiones de i2chid/ (reales.txt, sint.txt, qemu.txt) están al día en prhid64.cas (hazdatos.py)"
+else ko "etapa 6, HID: prhid64.cas no lleva los guiones de ahora (vuelva a hacerlo con i2chid/hazdatos.py)"; fi
+python3 -I "$I2/hazi2chid.py" "$T/i2chid.aml" && python3 -I "$I2/hazi2chid.py" "$T/i2cnull.aml" null
+if cmp -s "$T/i2chid.aml" "$I2/i2chid-qemu.aml"; then ok "etapa 6, I2C-HID: hazi2chid.py hace la misma SSDT de prueba que i2chid/i2chid-qemu.aml"
+else ko "etapa 6, I2C-HID: i2chid/i2chid-qemu.aml no es la que hace hazi2chid.py"; fi
+mb1 "apagar sinpruebas prueba=hid" "$T/e6h.txt" 128 -machine q35; c=$?
+S=$T/e6h.txt
+if [ $c = 85 ] && hay $S "^HID: 16 descriptores de prueba (touchpads de verdad y los aparatos USB de QEMU): 11 ratones, 1 punteros absolutos, 2 teclados (2 con LED), 8 con modo de entrada, 1 mal hechos; 13 informes leídos, 7 descriptores HID de I2C y 6 órdenes$" \
+   && hay $S "^i2c: no hay controladora I2C (Intel LPSS)$" && hay $S "^i2c-hid: ACPI no dice ningún dispositivo HID sobre I2C (PNP0C50)$" \
+   && hay $S "^I2C-HID: en las tablas de ACPI (buscado sin AML, en 1 tablas: [0-9]* dispositivos): 0 dispositivos HID sobre I2C (PNP0C50)$" && hay $S "^Hispa-64 etapa 6: todo en orden.$"; then
+  ok "etapa 6, HID: los 16 descriptores de prueba, analizados en el arranque; sin controladora I2C ni PNP0C50 (QEMU), lo dice y sigue"
+else ko "etapa 6, HID con prueba=hid no sale (código $c): $(serie $S | grep -E '^HID|^I2C|^i2c|MAL|parado' | paste -sd '|')"; fi
+hid_orden $S "Dell XPS 9360 (Synaptics, 665 octetos): el ratón es el informe 2 y el modo de entrada, el 4; touchpad de precisión" \
+  "descriptor: 665 octetos, 13 informes" "ratón: informe 2, 2 botones en el bit 0, X en el 8, Y en el 16, de 8 bits; rueda en el 0, de 0 bits; 3 octetos" \
+  "modo: informe 4, en el bit 0, de 8 bits; el informe, 1 octetos" "digitalizador: 5"
+hid_orden $S "ELAN 04F3:300B y 04F3:3045: el ratón con rueda y AC Pan (el informe 1, 8 octetos) y el modo de dos octetos (el 3)" \
+  "descriptor: 361 octetos, 11 informes" "ratón: informe 1, 2 botones en el bit 0, X en el 8, Y en el 16, de 8 bits; rueda en el 24, de 8 bits; 8 octetos" \
+  "pan: en el bit 32, de 8 bits" "modo: informe 3, en el bit 0, de 8 bits; el informe, 2 octetos" "descriptor: 356 octetos, 10 informes" \
+  "ratón: informe 1, 2 botones en el bit 0, X en el 8, Y en el 16, de 8 bits; rueda en el 24, de 8 bits; 8 octetos" "modo: informe 3, en el bit 0, de 8 bits; el informe, 2 octetos"
+hid_orden $S "ELAN 04F3:313A (tres botones, el modo de 16 bits), Synaptics 06CB:CE08 (751 octetos) y Dell 06CB:75DB (521)" \
+  "descriptor: 464 octetos, 14 informes" "ratón: informe 1, 3 botones en el bit 0, X en el 8, Y en el 16, de 8 bits; rueda en el 0, de 0 bits; 8 octetos" \
+  "modo: informe 3, en el bit 0, de 16 bits; el informe, 2 octetos" "descriptor: 751 octetos, 15 informes" \
+  "ratón: informe 2, 2 botones en el bit 0, X en el 8, Y en el 16, de 8 bits; rueda en el 0, de 0 bits; 3 octetos" "modo: informe 4, en el bit 0, de 8 bits; el informe, 1 octetos" \
+  "descriptor: 521 octetos, 13 informes" "ratón: informe 2, 2 botones en el bit 0, X en el 8, Y en el 16, de 8 bits; rueda en el 0, de 0 bits; 3 octetos"
+hid_orden $S "la pantalla táctil ELAN del XPS 9360 (945 octetos, con Push y Pop): ni ratón, ni puntero absoluto (son dedos), ni modo; Touch Screen" \
+  "descriptor: 945 octetos, 6 informes" "ratón: no" "absoluto: no" "teclado: no" "modo: no" "digitalizador: 4"
+hid_orden $S "los informes del ELAN (con signo, botones, rueda; otro identificador o corto, no), sus descriptores HID de 30 octetos (bien y los que no valen), el modo a 0 y las órdenes" \
+  "informe: dx=5 dy=-5 botones=1 rueda=1" "informe: dx=-128 dy=127 botones=2 rueda=-1" "informe: no es del ratón" "informe: no es del ratón" \
+  "hid: bien: 04F3:300B, informe de 361 octetos en 0002h, entrada en 0003h (34), órdenes en 0005h, datos en 0006h" "modo 0: 05 00 33 03 06 00 05 00 03 00 00" \
+  "hid: mal: no es la versión 1.00" "hid: mal: todo FFh o todo 0 (no contesta un HID)" "hid: mal: no llegan los 30 octetos" \
+  "hid: mal: no dice que mide 30 octetos" "hid: mal: sus registros no tienen sentido" \
+  "orden: 05 00 00 08" "orden: 05 00 00 01" "orden: 05 00 3F 03 14" "orden: 20 00 34 02"
+hid_orden $S "el Dell a mano (sus informes, su descriptor HID, su modo de un octeto), uno que se acaba a medias y un ratón USB de 12 bits y 5 botones" \
+  "informe: dx=-1 dy=1 botones=2 rueda=0" "informe: dx=0 dy=0 botones=3 rueda=0" "informe: no es del ratón" \
+  "hid: bien: 046D:B000, informe de 665 octetos en 0020h, entrada en 0021h (64), órdenes en 0023h, datos en 0024h" "modo 0: 23 00 34 03 24 00 04 00 04 00" \
+  "descriptor: 13 octetos, 1 informes, mal hecho" "ratón: no" \
+  "ratón: informe 0, 5 botones en el bit 0, X en el 8, Y en el 20, de 12 bits; rueda en el 32, de 8 bits; 5 octetos" "informe: dx=-1 dy=0 botones=17 rueda=-1"
+hid_orden $S "usb-mouse de QEMU (52 octetos): 5 botones, X, Y y la rueda de 8 bits, 4 octetos; sus informes" \
+  "descriptor: 52 octetos, 1 informes" "ratón: informe 0, 5 botones en el bit 0, X en el 8, Y en el 16, de 8 bits; rueda en el 24, de 8 bits; 4 octetos" \
+  "absoluto: no" "teclado: no" "informe: dx=5 dy=-5 botones=1 rueda=1" "informe: dx=-128 dy=127 botones=18 rueda=-1"
+hid_orden $S "usb-tablet de QEMU (74 octetos): no es un ratón; el puntero absoluto, X e Y de 16 bits de 0 a 32767, la rueda, 6 octetos; sus informes" \
+  "descriptor: 74 octetos, 1 informes" "ratón: no" \
+  "absoluto: informe 0, 3 botones en el bit 0, X en el 8 (16 bits, de 0 a 32767), Y en el 24 (16 bits, de 0 a 32767); rueda en el 40, de 8 bits; 6 octetos" \
+  "absoluto: x=16383 y=32767 botones=1 rueda=1" "absoluto: x=0 y=0 botones=6 rueda=-1" "absoluto: no es del puntero"
+hid_orden $S "usb-kbd de QEMU (63 octetos): los 8 modificadores, 6 teclas de 8 bits en el bit 16 (de 0 a 255: 25 FF sin signo), 5 LED; un modificador en el arreglo, el rollover, corto; los LED" \
+  "descriptor: 63 octetos, 1 informes" "teclado: informe 0, 8 modificadores en el bit 0, 6 teclas de 8 bits en el bit 16 (usos desde 00h, de 0 a 255); 8 octetos" \
+  "leds: informe 0, 5 en el bit 0; 1 octetos" "teclado: modificadores 02h, teclas 04 05" "teclado: modificadores 02h, teclas 1D" \
+  "teclado: no es del teclado (o demasiadas teclas a la vez)" "teclado: no es del teclado (o demasiadas teclas a la vez)" "leds 3: 03" "leds 7: 07"
+hid_orden $S "un ratón con AC Pan (la rueda de lado) y un teclado NKRO con identificador (un mapa de 56 teclas) y sus LED" \
+  "descriptor: 61 octetos, 1 informes" "pan: en el bit 32, de 8 bits" "informe: dx=1 dy=2 botones=4 rueda=-1" "pan=-2" \
+  "descriptor: 47 octetos, 1 informes" "teclado: informe 1, 8 modificadores en el bit 0, un mapa de 56 teclas en el bit 8 (desde 04h); 8 octetos" \
+  "leds: informe 1, 3 en el bit 0; 1 octetos" "teclado: modificadores 02h, teclas 04 07" "teclado: no es del teclado (o demasiadas teclas a la vez)" "leds 2: 01 02"
+# la SSDT de prueba (dos touchpads, uno «ausente» con el _CRS de quien no es Windows 8)
+mb1 "apagar sinpruebas" "$T/e6i.txt" 256 -machine q35 -acpitable file="$I2/i2chid-qemu.aml"; c=$?
+S=$T/e6i.txt
+if [ $c = 85 ] && hay $S "^I2C-HID: en las tablas de ACPI (buscado sin AML, en 2 tablas: [0-9]* dispositivos): 2 dispositivos HID sobre I2C (PNP0C50)$" \
+   && hay $S "^  ._SB.PCI0.I2C1.TPD0: ELAN1200 (_CID PNP0C50), _STA 0Fh$" \
+   && hay $S "^    I2cSerialBus 15h a 400 kHz por ._SB.PCI0.I2C1; la controladora: ._SB.PCI0.I2C1, _ADR 00150001h: 00:15.1$" \
+   && hay $S "^    GpioInt 55; _DSM: el descriptor HID en 0001h (con el GUID de HID sobre I2C); SSCN 528/640/30; FMCN 128/160/30$" \
+   && hay $S "^  ._SB.PCI0.I2C1.TPD1: SYNA2393 (_CID PNP0C50), _STA 00h$" \
+   && hay $S "^    I2cSerialBus 2Ch a 100 kHz por ._SB.PCI0.I2C1, de su plantilla SBFB (su _CRS no es fijo); la controladora: ._SB.PCI0.I2C1, _ADR 00150001h: 00:15.1$" \
+   && hay $S "^    Interrupt 16; _DSM: el descriptor HID en 0020h; SSCN 528/640/30; FMCN 128/160/30$" \
+   && hay $S "^i2c: no hay controladora I2C (Intel LPSS)$" && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" \
+   && hay $S "^HID: 16 descriptores de prueba " && hay $S "^Hispa-64 etapa 6: todo en orden.$"; then
+  ok "etapa 6, I2C-HID con la SSDT de prueba (sin AML): el ELAN1200 (15h, 400 kHz, I2C1 = 00:15.1, GpioInt 55, _DSM 0001h, SSCN/FMCN) y el Synaptics de su plantilla SBFB (2Ch, 100 kHz, _DSM 0020h); sin controladora, lo dice"
+else ko "etapa 6, I2C-HID con la SSDT de prueba no sale (código $c): $(serie $S | grep -E '^I2C|^  ._SB|^    |^i2c|MAL|parado' | paste -sd '|')"; fi
+# como la del ThinkPad E14 Gen 5 (Raptor Lake): «NULL» en el I2cSerialBus: la controladora, su padre
+mb1 "apagar sinpruebas" "$T/e6n2.txt" 256 -machine pc -acpitable file="$T/i2cnull.aml"; c=$?
+S=$T/e6n2.txt
+if [ $c = 85 ] && hay $S "^    I2cSerialBus 15h a 400 kHz por NULL, de su plantilla SBFB (su _CRS no es fijo); la controladora: ._SB.PCI0.I2C0 (su padre), _ADR 00150000h: 00:15.0$" \
+   && hay $S "^    Interrupt 16; _DSM: el descriptor HID en 0001h; FMCN 100/214/28$" \
+   && hay $S "^    I2cSerialBus 2Ch a 400 kHz por NULL, de su plantilla SBFB (su _CRS no es fijo); la controladora: ._SB.PCI0.I2C3 (su padre), por su nombre: 00:15.3$" \
+   && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" && hay $S "^Hispa-64 etapa 6: todo en orden.$"; then
+  ok "etapa 6, I2C-HID como el ThinkPad E14 («NULL»): la controladora, la de su padre (I2C0 por su _ADR, 00:15.0; I2C3 por su nombre, 00:15.3)"
+else ko "etapa 6, I2C-HID con «NULL» no sale (código $c): $(serie $S | grep -E '^I2C|^  ._SB|^    |^i2c|MAL|parado' | paste -sd '|')"; fi
+# las tablas de verdad del ASUS GL553VD (su DSDT, partida en SSDT de 60 KB, y sus 10 SSDT)
+rm -f "$T"/asusd*.aml
+if python3 -I "$I2/comossdt.py" "$I2/asus-gl553vd/DSDT.BIN" "$T/asusd"; then
+  AT=""
+  for f in "$T"/asusd*.aml "$I2"/asus-gl553vd/SSDT*.BIN; do AT="$AT -acpitable file=$f"; done
+  # shellcheck disable=SC2086
+  mb1 "apagar sinpruebas" "$T/e6a.txt" 256 -machine q35 $AT; c=$?
+  S=$T/e6a.txt
+  if [ $c = 85 ] && hay $S "^I2C-HID: en las tablas de ACPI (buscado sin AML, en 16 tablas: [0-9]* dispositivos): 2 dispositivos HID sobre I2C (PNP0C50)$" \
+     && hay $S "^  ._SB.PCI0.I2C0.TPD0: XXXX0000 (_CID PNP0C50), _STA: lo decide un método$" \
+     && hay $S "^    I2cSerialBus 20h a 400 kHz por ._SB.PCI0.I2C0, de su plantilla SBFB (su _CRS no es fijo); la controladora: ._SB.PCI0.I2C0, _ADR 00150000h: 00:15.0$" \
+     && hay $S "_DSM: el descriptor HID, en HID2 (lo pone su _INI) (con el GUID de HID sobre I2C)$" \
+     && hay $S "^    según el BIOS, su _INI lo hace: SYNA2393 (descriptor en 0020h); 06CB2846 (descriptor en 0020h); ELAN1200 (15h a 400 kHz, descriptor en 0001h); FTE1200 (15h a 400 kHz, descriptor en 0001h)$" \
+     && hay $S "^  ._SB.PCI0.I2C1.TPL1: XXXX0000 (_CID PNP0C50)" && hay $S "^    según el BIOS, su _INI lo hace: ATML3432 (4Ch a 400 kHz, descriptor en 0000h); " \
+     && hay $S "^i2c-hid: ACPI dice 2 dispositivos HID sobre I2C, pero no hay controladora I2C en marcha$" && ! hay $S "trozos sin entender" && hay $S "^Hispa-64 etapa 6: todo en orden.$"; then
+    ok "etapa 6, I2C-HID con las tablas de verdad del ASUS GL553VD (sin AML, nada sin entender): TPD0 en I2C0 (00:15.0), su plantilla (20h, 400 kHz) y lo que su _INI hace según el BIOS: el ELAN1200 en 15h con el descriptor en 0001h (y SYNA2393, 06CB2846, FTE1200); TPL1 (la pantalla táctil) en I2C1"
+  else ko "etapa 6, I2C-HID con las tablas del ASUS no sale (código $c): $(serie $S | grep -E '^I2C|^  ._SB|^    |^i2c|MAL|parado' | cut -c1-160 | paste -sd '|')"; fi
+else ko "etapa 6, I2C-HID: comossdt.py no parte la DSDT del ASUS"; fi
+# «sini2c»: ni se busca nada de I2C (las pruebas de los descriptores, sí)
+mb1 "apagar sinpruebas sini2c" "$T/e6s.txt" 256 -machine q35 -acpitable file="$I2/i2chid-qemu.aml"; c=$?
+S=$T/e6s.txt
+if [ $c = 85 ] && hay $S "^(sini2c: ni las controladoras I2C ni los touchpads HID sobre I2C)$" && ! hay $S "^I2C-HID\|^i2c" && hay $S "^HID: 16 descriptores" && hay $S "^Hispa-64 etapa 6: todo en orden.$"; then
+  ok "etapa 6, sini2c: ni las controladoras I2C ni los PNP0C50"
+else ko "etapa 6, sini2c no sale (código $c): $(serie $S | grep -E '^I2C|^i2c|^.sini2c|parado' | paste -sd '|')"; fi
+# una BAR sin poner (como las I2C de Tiger y Raptor Lake): la del edu de QEMU, a 0; Pci64.asigna_bar le da otra
+mb1 "apagar sinpruebas prueba=barcero" "$T/e6b.txt" 256 -machine q35 -device edu; c=$?
+S=$T/e6b.txt
+if [ $c = 85 ] && hay $S "^i2c: (prueba=barcero) la zona 0 de 00:0[0-9A-F].0 1234:11E8 (estaba en 0x[0-9A-F]*), a 0: puesta en 0x[0-9A-F]* (1,0 MB); el aparato dice 0x[0-9A-F]*; se lee bien: sí$" \
+   && hay $S "^Hispa-64 etapa 6: todo en orden.$"; then
+  ok "etapa 6, una BAR sin poner (la del edu de QEMU, a 0): $(serie $S | grep -o 'puesta en 0x[0-9A-F]*'), libre, y el aparato se lee bien en ella"
+else ko "etapa 6, prueba=barcero no sale (código $c): $(serie $S | grep -E 'barcero|parado' | paste -sd '|')"; fi
+
 # ---- por UEFI de 64 bits (OVMF), con GRUB y multiboot2 ----
+# ---- [etapa 6] la consola y el intérprete ----
+# HIJOS, en cada arranque de los de arriba (fork, execve, wait4, los huérfanos y
+# los zombis; la consola como terminal; poll y select con plazo); y el
+# intérprete ORDENES con las teclas del monitor de QEMU (sendkey), escritas
+# con el mapa español por programas/teclas.py: las órdenes, un archivo escrito
+# en un disco, un programa con sus argumentos y su código, uno que no está, los
+# acentos con las teclas muertas, la ñ y AltGr, Retroceso, las flechas, la
+# historia, Ctrl+U, Ctrl+C (al programa y en el indicador), Ctrl+D, y «salir»,
+# que apaga. Para repetirlo con otro teclado (USB): con_interprete con sus
+# opciones de QEMU.
+e6c_bien() {   # SALIDA
+  local v; v=$(serie "$1")
+  grep -q "^Consola: una terminal (modo canónico con eco y edición de línea, y crudo), " <<< "$v" \
+    && grep -q "^HIJOS: todo bien ([0-9]* pruebas)$" <<< "$v" && grep -q "^Programa «HIJOS»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^  el hijo cerrado por su señal: estado 11 (SIGSEGV)$" <<< "$v" \
+    && grep -q "^  execve de HIJOS en un hijo: sus argumentos y su entorno, lo de O_CLOEXEC cerrado: 42$" <<< "$v" \
+    && grep -q "^Después de los hijos: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas; 4[0-9] fork, 1 execve, 4[0-9] recogidos por wait4, 2 huérfanos$" <<< "$v" \
+    && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 6: todo en orden.$" <<< "$v"
+}
+for x in mb1:1 q35:4 smp8:8 smp2:2; do
+  f=$T/${x%%:*}.txt
+  if e6c_bien "$f"; then
+    ok "etapa 6, HIJOS con ${x##*:} procesador(es) (${x%%:*}): $(serie "$f" | grep '^HIJOS: todo bien' | sed 's/^HIJOS: //'); «$(serie "$f" | grep '^Después de los hijos:' | cut -d';' -f2 | sed 's/^ //')»"
+  else ko "etapa 6, HIJOS (${x%%:*}) no dice lo que debe: $(serie "$f" | grep -E '^HIJOS|^Programa «HIJOS|^Después de los hijos|MAL|parado' | cut -c1-120 | paste -sd '|')"; fi
+done
+manda_teclas() {   # MONITOR.sock TEXTO... (con el mapa español; {intro} {retro} {izq} {arriba} {ctrl-c} {pausa}...)
+  python3 -I "$AQUI/programas/teclas.py" "$@"
+}
+con_interprete() {   # SALIDA TEXTO [opciones de QEMU]: «apagar sinpruebas escribir ordenes»; las teclas, al ver el indicador
+  local s=$1 x=$2 q c; shift 2
+  rm -f "$s" "$T/mon7.sock"
+  timeout 180 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "apagar sinpruebas escribir ordenes" -display none -serial file:"$s" \
+    -monitor unix:"$T/mon7.sock",server,nowait $DBG -no-reboot -nic none -m 256 -machine q35 -smp 4 "$@" > /dev/null 2>&1 &
+  q=$!
+  for _ in $(seq 1 300); do grep -q "^/> " "$s" 2> /dev/null && break; sleep 0.2; done
+  manda_teclas "$T/mon7.sock" "$x"
+  wait $q; c=$?
+  return $c
+}
+mkdir -p "$T/w7"; rm -f "$T/w7/fat.img"
+truncate -s 48M "$T/w7/fat.img" && mkfs.fat -F 32 -n ESCRIBIR "$T/w7/fat.img" > /dev/null
+TECLAS7='ver{intro}dir /{intro}cd /sata0{intro}mkdir prueba{intro}cd prueba{intro}echo hola desde el teclado > saludo.txt{intro}'
+TECLAS7+='type saludo.txt{intro}cp saludo.txt copia.txt{intro}dir{intro}mkdir /nada{intro}cd /{intro}HOLA uno dos{intro}CUENTA 3{intro}'
+TECLAS7+='noexiste{intro}echo canción ñandú pingüino àlex a@b#c{intro}echo holx{retro}a{intro}echo mudo{izq}{izq}n{intro}{arriba}{intro}'
+TECLAS7+='basura{ctrl-u}echo limpio{intro}echo Hola {bloqmayus}abcñ{bloqmayus}def{intro}a medias{ctrl-c}{pausa}'
+TECLAS7+='HIJOS lee{intro}{pausa}una línea{intro}{pausa}{ctrl-c}{pausa}'
+TECLAS7+='HIJOS lee{intro}{pausa}otra{intro}{ctrl-d}{pausa}salir{intro}'
+con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
+v=$(serie "$T/e7.txt")
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.6.0, etapa 6 " <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  9 archivos (" <<< "$v" \
+   && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
+   && grep -q "^/sata0/prueba> " <<< "$v" \
+   && grep -q "^mkdir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
+   && grep -q "^  argc = 3: HOLA uno dos$" <<< "$v" && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && ! grep -q "^(HOLA " <<< "$v" \
+   && grep -q "^(CUENTA ha acabado con el código 30)$" <<< "$v" \
+   && grep -q "^No hay ninguna orden ni ningún programa que se llame «noexiste»" <<< "$v" \
+   && grep -q "^canción ñandú pingüino àlex a@b#c$" <<< "$v" \
+   && grep -q "^hola$" <<< "$v" && [ "$(grep -c "^mundo$" <<< "$v")" = 2 ] && grep -q "^limpio$" <<< "$v" && grep -q "^Hola ABCÑdef$" <<< "$v" \
+   && grep -q "a medias^C$" <<< "$v" \
+   && grep -q "^  leído: una línea$" <<< "$v" && grep -q "^(HIJOS se ha cerrado por la señal 2, SIGINT: Ctrl+C)$" <<< "$v" \
+   && grep -q "^  leído: otra$" <<< "$v" && grep -q "^HIJOS lee: fin del archivo$" <<< "$v" \
+   && grep -q "^El intérprete de órdenes ha acabado (código 0).$" <<< "$v" \
+   && [ "$(mtype -i "$T/w7/fat.img" ::prueba/copia.txt 2> /dev/null)" = "hola desde el teclado" ] \
+   && fsck.fat -n "$T/w7/fat.img" > "$T/w7/fsck.txt" 2>&1; then
+  ok "etapa 6, el intérprete ORDENES con las teclas del monitor de QEMU (PS/2, mapa español, $(manda_teclas -n "$TECLAS7" | wc -w) teclas): ver, dir, cd, mkdir, echo > archivo, type, cp (en el disco: fsck.fat bien), EROFS, HOLA uno dos, CUENTA 3 (código 30), una que no está, «canción ñandú pingüino àlex a@b#c», Bloq Mayús, Retroceso, las flechas, la historia, Ctrl+U, Ctrl+C (en el indicador y a HIJOS: 130), Ctrl+D, salir"
+else ko "etapa 6, el intérprete no hace lo que debe (código $c): $(sed -n '/^ORDENES, el/,$p' <<< "$v" | tr -d '\b' | cut -c1-80 | paste -sd '|' | cut -c1-1500)"; fi
+# lo mismo por un teclado USB (sin 8042: todo llega por tecla_hid)
+TECLAS7U='echo canción ñandú a@b{intro}echo holx{retro}a{intro}echo Hola {bloqmayus}abc{bloqmayus}d{intro}HOLA uno{intro}salir{intro}'
+con_interprete "$T/e7u.txt" "$TECLAS7U" -machine q35,i8042=off -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0; c=$?
+v=$(serie "$T/e7u.txt")
+if [ $c = 85 ] && grep -q "^Teclado PS/2: no hay 8042" <<< "$v" && grep -q "^canción ñandú a@b$" <<< "$v" && grep -q "^hola$" <<< "$v" \
+   && grep -q "^Hola ABCd$" <<< "$v" && grep -q "^  argc = 2: HOLA uno$" <<< "$v" && grep -q "^El intérprete de órdenes ha acabado (código 0).$" <<< "$v"; then
+  ok "etapa 6, el intérprete con un teclado USB (sin 8042): los acentos, la ñ, AltGr, Retroceso, Bloq Mayús, HOLA uno y salir"
+else ko "etapa 6, el intérprete con el teclado USB no hace lo que debe (código $c): $(sed -n '/^ORDENES, el/,$p' <<< "$v" | tr -d '\b' | cut -c1-80 | paste -sd '|' | cut -c1-800)"; fi
 if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /dev/null; then
   "$AQUI/imagen.sh" "$T/uefi" prueba > "$T/img.txt" 2>&1 || ko "imagen.sh no hace la imagen: $(tail -2 "$T/img.txt" | paste -sd ' ')"
   uefi() {   # SALIDA [opciones de QEMU]
@@ -551,6 +912,16 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
      && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 6: todo en orden.$" <<< "$S"; then
     ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 128 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
   else ko "por UEFI con 128 MB no dice lo que debe (código $c): $(grep -E 'Memoria:|pantalla, en|parado' <<< "$S" | paste -sd ' ')"; fi
+  # [etapa 6] el USB por UEFI: OVMF deja la BAR del xHCI por encima de 4 GB, y ha usado él antes el teclado y la memoria
+  copia_usb
+  uefi "$T/uefi6.txt" -m 512 -smp 2 -monitor none -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0 -device usb-tablet,bus=xhci.0 \
+    -drive if=none,id=u1,format=raw,file="$T/w6/usbfat.img" -device usb-storage,bus=xhci.0,drive=u1; c=$?
+  S=$(serie "$T/uefi6.txt")
+  if [ $c = 85 ] && grep -q "^xHCI: 00:0[0-9A-F].0 1B36:000D en 0x[0-9A-F]\{9,\} (por encima de 4 GB)$" <<< "$S" && grep -q "^USB: 3 aparatos (0 concentradores)" <<< "$S" \
+     && grep -q "HID: teclado (por su descriptor, con LED)$" <<< "$S" && grep -q "HID: tableta (por su descriptor, de 0 a 32767)$" <<< "$S" \
+     && grep -q "^  /usb0p1: FAT32 «USBFAT», .*; de solo leer$" <<< "$S" && grep -q "^Hispa-64 etapa 6: todo en orden.$" <<< "$S"; then
+    ok "por UEFI, el USB después de OVMF: «$(grep '^xHCI:' <<< "$S" | cut -d' ' -f4-)», el teclado, la tableta y la memoria (de solo leer)"
+  else ko "por UEFI, el USB no sale (código $c): $(grep -E '^xHCI|^USB|^  /usb|parado' <<< "$S" | paste -sd '|')"; fi
   e4_ok "$T/uefi.txt" 1 "por UEFI (GRUB, module2) con 1 procesador"
   uefi "$T/uefi-max.txt" -m 3G -cpu max -smp 4,cores=4 -monitor none; c=$?
   S=$(serie "$T/uefi-max.txt")
@@ -625,7 +996,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
     -drive if=pflash,format=raw,file="$T/vars2.fd" -drive file="$T/uefi-p/hispa64.img",format=raw,if=virtio \
     -display none -serial file:"$T/pant.txt" -monitor unix:"$T/mon.sock",server,nowait -no-reboot -nic none > /dev/null 2>&1 &
   q=$!
-  for _ in $(seq 1 90); do grep -q "Pulse teclas para ver" "$T/pant.txt" 2> /dev/null && break; sleep 1; done
+  for _ in $(seq 1 90); do grep -q "^/> " "$T/pant.txt" 2> /dev/null && break; sleep 1; done
   sleep 1
   python3 -I "$AQUI/pantallazo.py" captura "$T/mon.sock" "$T/pantalla.ppm" 2> /dev/null
   wait $q 2> /dev/null

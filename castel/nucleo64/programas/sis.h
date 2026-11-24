@@ -26,6 +26,12 @@ enum { S_READ = 0, S_WRITE = 1, S_OPEN = 2, S_CLOSE = 3, S_LSEEK = 8, S_MMAP = 9
        S_MUNMAP = 11, S_BRK = 12, S_IOCTL = 16, S_WRITEV = 20, S_YIELD = 24, S_NANOSLEEP = 35,
        S_GETPID = 39, S_EXIT = 60, S_UNAME = 63, S_ARCH_PRCTL = 158, S_SET_TID = 218,
        S_CLOCK_GETTIME = 228, S_EXIT_GROUP = 231, S_OPENAT = 257 };
+/* [etapa 6] arrancar programas desde un programa, la consola, poll y select */
+enum { S_POLL = 7, S_SIGACTION = 13, S_SIGPROCMASK = 14, S_SELECT = 23, S_CLONE = 56, S_FORK = 57,
+       S_VFORK = 58, S_EXECVE = 59, S_WAIT4 = 61, S_FCNTL = 72, S_SETPGID = 109, S_GETPPID = 110,
+       S_GETPGRP = 111, S_PSELECT6 = 270, S_PPOLL = 271, S_DUP3 = 292 };
+enum { TCGETS = 0x5401, TCSETS = 0x5402, TIOCGPGRP = 0x540F, TIOCSPGRP = 0x5410, TIOCGWINSZ = 0x5413,
+       FIONREAD = 0x541B };
 enum { EPERM = 1, ENOENT = 2, EBADF = 9, ENOMEM = 12, EFAULT = 14, ENODEV = 19, EINVAL = 22,
        ENOTTY = 25, ESPIPE = 29, EROFS = 30, ENOSYS = 38 };
 

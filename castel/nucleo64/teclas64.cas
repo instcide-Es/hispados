@@ -1,0 +1,548 @@
+; =============================================================================
+;  teclas64.cas - Hispa-64, etapa 6: el teclado, de los códigos a las letras
+;  (docs/64/HISPA-64.md, sección 12), con **el mapa español**: la ñ y la ç,
+;  los acentos muertos (´ ` ¨ ^, que se juntan con la vocal que sigue: á, à,
+;  ü, â...; con el espacio, el acento solo), AltGr (| @ # ~ € ¬ [ ] { } \),
+;  las mayúsculas, Bloq Mayús, Bloq Num y el teclado numérico, Ctrl (los
+;  controles: Ctrl+C, Ctrl+D, Ctrl+U...), Alt (ESC delante, como xterm), y
+;  las flechas, Inicio, Fin, Insert, Supr, RePág, AvPág y F1-F12 como las
+;  secuencias de escape de VT100/xterm. Lo que sale, en UTF-8, va a la consola
+;  (Tty64.entra).
+;
+;  Dos entradas:
+;   - los códigos del teclado PS/2 (el juego 1, el que da el 8042 con la
+;     traducción: con 0xE0 delante para las teclas de más; lo de Pausa, 0xE1,
+;     se salta), que le pasa la interrupción del teclado (Apic64.al_teclado);
+;   - los usos de HID de la página 7 (los del teclado USB): tecla_hid(uso,
+;     pulsada), también los modificadores (0xE0-0xE7) como teclas. La
+;     repetición de las de USB la lleva este módulo (a los 500 ms, 30 por
+;     segundo); los teclados PS/2 repiten solos.
+;  Los códigos de PS/2 se pasan a usos de HID, y desde ahí todo es igual. La
+;  interrupción (o el driver de USB) solo deja el código en una cola y avisa
+;  al hilo «teclado», que hace lo demás (el eco escribe en la pantalla: no se
+;  hace dentro de una interrupción).
+;  Los LED: leds_teclado() (bit 0 Bloq Num, 1 Bloq Mayús, 2 Bloq Despl: el
+;  orden del informe de salida de HID) y leds_cambio, que sube cada vez que
+;  cambian (lo mira el driver de USB); al PS/2 se le mandan con 0xED.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Teclas64
+
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Apic64, Hilos64, Sinc64, Tty64
+
+    constante LARGO_COLA = 256
+    constante DE_HID = 0x80000000               ; (en la cola) un uso de HID; si no, un código de PS/2
+    constante PULSADA = 0x100
+    constante REPITE_PRIMERA = 500000000        ; la repetición de USB: a los 500 ms
+    constante REPITE_CADA = 33000000            ;   y luego cada 33 ms
+
+    público variable leds_cambio: nat32         ; sube cada vez que cambian los LED
+    público variable teclas_n: nat64            ; las teclas pulsadas (de las dos entradas)
+    público variable hid_n: nat64               ; las que han llegado por tecla_hid
+    variable leds: nat32
+    variable cola: arreglo [LARGO_COLA] de nat32
+    variable cola_pon, cola_toma: nat32
+    variable cola_cerrojo: nat64
+    variable hay: Suceso
+    variable con_ps2: bool
+    variable e0: bool
+    variable e1: nat32
+    variable mods: nat32                        ; los de HID: bit 0 Ctrl izq., 1 Mayús izq., 2 Alt, 3 Win, 4 Ctrl der., 5 Mayús der., 6 AltGr, 7 Win der.
+    variable muerta: nat32                      ; el acento muerto que espera (´ ` ¨ ^), o 0
+    variable rep_uso: nat32
+    variable rep_cuándo: nat64
+    variable en_marcha: bool
+
+    ; del juego 1 de PS/2 (sin 0xE0) al uso de HID
+    variable ps2_hid: arreglo [89] de byte = (
+        0x00, 0x29, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2D, 0x2E, 0x2A, 0x2B,
+        0x14, 0x1A, 0x08, 0x15, 0x17, 0x1C, 0x18, 0x0C, 0x12, 0x13, 0x2F, 0x30, 0x28, 0xE0, 0x04, 0x16,
+        0x07, 0x09, 0x0A, 0x0B, 0x0D, 0x0E, 0x0F, 0x33, 0x34, 0x35, 0xE1, 0x32, 0x1D, 0x1B, 0x06, 0x19,
+        0x05, 0x11, 0x10, 0x36, 0x37, 0x38, 0xE5, 0x55, 0xE2, 0x2C, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E,
+        0x3F, 0x40, 0x41, 0x42, 0x43, 0x53, 0x47, 0x5F, 0x60, 0x61, 0x56, 0x5C, 0x5D, 0x5E, 0x57, 0x59,
+        0x5A, 0x5B, 0x62, 0x63, 0x00, 0x00, 0x64, 0x44, 0x45)
+
+    ; del juego 1 con 0xE0 delante al uso de HID (0: nada)
+    función de_e0(k: nat32): nat32
+        según k
+            caso 0x1C: devolver 0x58           ; Intro del teclado numérico
+            caso 0x1D: devolver 0xE4           ; Ctrl derecho
+            caso 0x35: devolver 0x54           ; / del teclado numérico
+            caso 0x37: devolver 0x46           ; Impr Pant
+            caso 0x38: devolver 0xE6           ; AltGr
+            caso 0x47: devolver 0x4A           ; Inicio
+            caso 0x48: devolver 0x52           ; arriba
+            caso 0x49: devolver 0x4B           ; RePág
+            caso 0x4B: devolver 0x50           ; izquierda
+            caso 0x4D: devolver 0x4F           ; derecha
+            caso 0x4F: devolver 0x4D           ; Fin
+            caso 0x50: devolver 0x51           ; abajo
+            caso 0x51: devolver 0x4E           ; AvPág
+            caso 0x52: devolver 0x49           ; Insert
+            caso 0x53: devolver 0x4C           ; Supr
+            caso 0x5B: devolver 0xE3           ; Windows
+            caso 0x5C: devolver 0xE7
+            si no: devolver 0
+        fin
+    fin
+
+    ; ---- lo que sale ----
+    función sale(t: puntero a byte, n: nat32)
+        entra(t, n)
+    fin
+
+    función sale_texto(t: puntero a byte)
+        variable n: nat32
+        n := 0
+        mientras t[n] <> 0 hacer n := n + 1 fin
+        entra(t, n)
+    fin
+
+    ; una letra de Unicode, en UTF-8 (con ESC delante si va con Alt)
+    función sale_u(u: nat32, con_alt: bool)
+        variable t: arreglo [5] de byte
+        variable n: nat32
+        n := 0
+        si con_alt entonces
+            t[0] := 27
+            n := 1
+        fin
+        si u < 0x80 entonces
+            t[n] := byte(u)
+            n := n + 1
+        sino si u < 0x800 entonces
+            t[n] := byte(0xC0 ob (u >> 6))
+            t[n + 1] := byte(0x80 ob (u yb 0x3F))
+            n := n + 2
+        sino
+            t[n] := byte(0xE0 ob (u >> 12))
+            t[n + 1] := byte(0x80 ob ((u >> 6) yb 0x3F))
+            t[n + 2] := byte(0x80 ob (u yb 0x3F))
+            n := n + 3
+        fin
+        sale(dirección(t[0]), n)
+    fin
+
+    ; ---- el mapa español ----
+    ; la vocal (o la y) con el acento muerto m, o 0 si no se juntan
+    función junta(m: nat32, c: nat32): nat32
+        variable i: ent32
+        variable vocales: puntero a byte
+        vocales := "aeiouyAEIOUY"
+        i := 0
+        mientras i < 12 y vocales[nat32(i)] <> byte(c) hacer i := i + 1 fin
+        si i >= 12 entonces devolver 0 fin
+        según m
+            caso 0xB4:
+                según i
+                    caso 0: devolver 0xE1
+                    caso 1: devolver 0xE9
+                    caso 2: devolver 0xED
+                    caso 3: devolver 0xF3
+                    caso 4: devolver 0xFA
+                    caso 5: devolver 0xFD
+                    caso 6: devolver 0xC1
+                    caso 7: devolver 0xC9
+                    caso 8: devolver 0xCD
+                    caso 9: devolver 0xD3
+                    caso 10: devolver 0xDA
+                    si no: devolver 0xDD
+                fin
+            caso 0x60:
+                según i
+                    caso 0: devolver 0xE0
+                    caso 1: devolver 0xE8
+                    caso 2: devolver 0xEC
+                    caso 3: devolver 0xF2
+                    caso 4: devolver 0xF9
+                    caso 6: devolver 0xC0
+                    caso 7: devolver 0xC8
+                    caso 8: devolver 0xCC
+                    caso 9: devolver 0xD2
+                    caso 10: devolver 0xD9
+                    si no: devolver 0
+                fin
+            caso 0xA8:
+                según i
+                    caso 0: devolver 0xE4
+                    caso 1: devolver 0xEB
+                    caso 2: devolver 0xEF
+                    caso 3: devolver 0xF6
+                    caso 4: devolver 0xFC
+                    caso 5: devolver 0xFF
+                    caso 6: devolver 0xC4
+                    caso 7: devolver 0xCB
+                    caso 8: devolver 0xCF
+                    caso 9: devolver 0xD6
+                    caso 10: devolver 0xDC
+                    si no: devolver 0
+                fin
+            caso 0x5E:
+                según i
+                    caso 0: devolver 0xE2
+                    caso 1: devolver 0xEA
+                    caso 2: devolver 0xEE
+                    caso 3: devolver 0xF4
+                    caso 4: devolver 0xFB
+                    caso 6: devolver 0xC2
+                    caso 7: devolver 0xCA
+                    caso 8: devolver 0xCE
+                    caso 9: devolver 0xD4
+                    caso 10: devolver 0xDB
+                    si no: devolver 0
+                fin
+            si no: devolver 0
+        fin
+    fin
+
+    ; la letra de una tecla de las de escribir (0: ninguna; con el bit 31: un acento muerto)
+    función letra_de(uso: nat32, mayús: bool, altgr: bool, bloq: bool): nat32
+        variable c: nat32
+        si uso >= 0x04 y uso <= 0x1D entonces
+            si altgr entonces
+                si uso = 0x08 entonces devolver 0x20AC fin        ; AltGr+E: €
+                devolver 0
+            fin
+            c := 'a' + (uso - 0x04)
+            si mayús <> bloq entonces c := c - 32 fin
+            devolver c
+        fin
+        si altgr entonces
+            según uso
+                caso 0x1E: devolver '|'
+                caso 0x1F: devolver '@'
+                caso 0x20: devolver '#'
+                caso 0x21: devolver '~'
+                caso 0x22: devolver 0x20AC
+                caso 0x23: devolver 0xAC         ; ¬
+                caso 0x2F: devolver '['
+                caso 0x30: devolver ']'
+                caso 0x31, 0x32: devolver '}'
+                caso 0x34: devolver '{'
+                caso 0x35: devolver '\\'
+                caso 0x2C: devolver ' '
+                si no: devolver 0
+            fin
+        fin
+        según uso
+            caso 0x1E: si mayús entonces devolver '!' sino devolver '1' fin
+            caso 0x1F: si mayús entonces devolver '"' sino devolver '2' fin
+            caso 0x20: si mayús entonces devolver 0xB7 sino devolver '3' fin
+            caso 0x21: si mayús entonces devolver '$' sino devolver '4' fin
+            caso 0x22: si mayús entonces devolver '%' sino devolver '5' fin
+            caso 0x23: si mayús entonces devolver '&' sino devolver '6' fin
+            caso 0x24: si mayús entonces devolver '/' sino devolver '7' fin
+            caso 0x25: si mayús entonces devolver '(' sino devolver '8' fin
+            caso 0x26: si mayús entonces devolver ')' sino devolver '9' fin
+            caso 0x27: si mayús entonces devolver '=' sino devolver '0' fin
+            caso 0x2C: devolver ' '
+            caso 0x2D: si mayús entonces devolver '?' sino devolver '\'' fin
+            caso 0x2E: si mayús entonces devolver 0xBF sino devolver 0xA1 fin
+            caso 0x2F: si mayús entonces devolver DE_HID ob 0x5E sino devolver DE_HID ob 0x60 fin      ; ^ `
+            caso 0x30: si mayús entonces devolver '*' sino devolver '+' fin
+            caso 0x31, 0x32: si mayús <> bloq entonces devolver 0xC7 sino devolver 0xE7 fin         ; Ç ç
+            caso 0x33: si mayús <> bloq entonces devolver 0xD1 sino devolver 0xF1 fin               ; Ñ ñ
+            caso 0x34: si mayús entonces devolver DE_HID ob 0xA8 sino devolver DE_HID ob 0xB4 fin    ; ¨ ´
+            caso 0x35: si mayús entonces devolver 0xAA sino devolver 0xBA fin                         ; ª º
+            caso 0x36: si mayús entonces devolver ';' sino devolver ',' fin
+            caso 0x37: si mayús entonces devolver ':' sino devolver '.' fin
+            caso 0x38: si mayús entonces devolver '_' sino devolver '-' fin
+            caso 0x64: si mayús entonces devolver '>' sino devolver '<' fin
+            si no: devolver 0
+        fin
+    fin
+
+    ; las teclas que no son letras: su secuencia (o nulo)
+    función secuencia(uso: nat32, num: bool): puntero a byte
+        si uso >= 0x59 y uso <= 0x63 y no num entonces
+            ; el teclado numérico sin Bloq Num: las flechas y compañía
+            según uso
+                caso 0x59: uso := 0x4D
+                caso 0x5A: uso := 0x51
+                caso 0x5B: uso := 0x4E
+                caso 0x5C: uso := 0x50
+                caso 0x5E: uso := 0x4F
+                caso 0x5F: uso := 0x4A
+                caso 0x60: uso := 0x52
+                caso 0x61: uso := 0x4B
+                caso 0x62: uso := 0x49
+                caso 0x63: uso := 0x4C
+                si no: devolver nulo
+            fin
+        fin
+        según uso
+            caso 0x28, 0x58: devolver "\r"
+            caso 0x29: devolver "\x1B"
+            caso 0x2A: devolver "\x7F"
+            caso 0x2B: devolver "\t"
+            caso 0x4F: devolver "\x1B[C"
+            caso 0x50: devolver "\x1B[D"
+            caso 0x51: devolver "\x1B[B"
+            caso 0x52: devolver "\x1B[A"
+            caso 0x4A: devolver "\x1B[H"
+            caso 0x4D: devolver "\x1B[F"
+            caso 0x49: devolver "\x1B[2~"
+            caso 0x4C: devolver "\x1B[3~"
+            caso 0x4B: devolver "\x1B[5~"
+            caso 0x4E: devolver "\x1B[6~"
+            caso 0x3A: devolver "\x1BOP"
+            caso 0x3B: devolver "\x1BOQ"
+            caso 0x3C: devolver "\x1BOR"
+            caso 0x3D: devolver "\x1BOS"
+            caso 0x3E: devolver "\x1B[15~"
+            caso 0x3F: devolver "\x1B[17~"
+            caso 0x40: devolver "\x1B[18~"
+            caso 0x41: devolver "\x1B[19~"
+            caso 0x42: devolver "\x1B[20~"
+            caso 0x43: devolver "\x1B[21~"
+            caso 0x44: devolver "\x1B[23~"
+            caso 0x45: devolver "\x1B[24~"
+            caso 0x54: devolver "/"
+            caso 0x55: devolver "*"
+            caso 0x56: devolver "-"
+            caso 0x57: devolver "+"
+            caso 0x59: devolver "1"
+            caso 0x5A: devolver "2"
+            caso 0x5B: devolver "3"
+            caso 0x5C: devolver "4"
+            caso 0x5D: devolver "5"
+            caso 0x5E: devolver "6"
+            caso 0x5F: devolver "7"
+            caso 0x60: devolver "8"
+            caso 0x61: devolver "9"
+            caso 0x62: devolver "0"
+            caso 0x63: devolver "."
+            si no: devolver nulo
+        fin
+    fin
+
+    ; ---- los LED ----
+    público función leds_teclado(): nat32
+        devolver leds
+    fin
+
+    función espera_8042(): bool
+        variable i: nat32
+        i := 0
+        mientras i < 100000 hacer
+            si entra8(0x64) yb 2 = 0 entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    función cambia_leds(bit: nat32)
+        leds := leds xob bit
+        leds_cambio := leds_cambio + 1
+        si con_ps2 entonces
+            ; (al PS/2: bit 0 Bloq Despl, 1 Bloq Num, 2 Bloq Mayús; contesta 0xFA, que se salta)
+            si espera_8042() entonces
+                sale8(0x60, 0xED)
+                si espera_8042() entonces sale8(0x60, ((leds yb 4) >> 2) ob ((leds yb 1) << 1) ob ((leds yb 2) << 1)) fin
+            fin
+        fin
+    fin
+
+    ; ---- una tecla (un uso de HID), pulsada ----
+    función pulsa(uso: nat32)
+        variable ctrl, mayús, altgr, alt: bool
+        variable u, m: nat32
+        variable s: puntero a byte
+        variable t: arreglo [2] de byte
+        teclas_n := teclas_n + 1
+        si uso = 0x39 entonces
+            cambia_leds(2)
+            devolver
+        fin
+        si uso = 0x53 entonces
+            cambia_leds(1)
+            devolver
+        fin
+        si uso = 0x47 entonces
+            cambia_leds(4)
+            devolver
+        fin
+        ctrl := mods yb 0x11 <> 0
+        mayús := mods yb 0x22 <> 0
+        alt := mods yb 0x04 <> 0
+        altgr := mods yb 0x40 <> 0 o (ctrl y alt)           ; (Ctrl+Alt hace de AltGr, como en Windows)
+        si altgr entonces
+            ctrl := falso
+            alt := falso
+        fin
+        s := secuencia(uso, leds yb 1 <> 0)
+        si s <> nulo entonces
+            si muerta <> 0 entonces
+                sale_u(muerta, falso)
+                muerta := 0
+            fin
+            si alt entonces
+                t[0] := 27
+                sale(dirección(t[0]), 1)
+            fin
+            sale_texto(s)
+            devolver
+        fin
+        u := letra_de(uso, mayús, altgr, leds yb 2 <> 0)
+        si u = 0 entonces devolver fin
+        ; Ctrl con una letra: su control (Ctrl+C = 3, Ctrl+D = 4...)
+        si ctrl entonces
+            si uso >= 0x04 y uso <= 0x1D entonces
+                t[0] := byte(uso - 0x04 + 1)
+                sale(dirección(t[0]), 1)
+            sino si uso = 0x2C entonces
+                t[0] := 0
+                sale(dirección(t[0]), 1)
+            fin
+            devolver
+        fin
+        ; los acentos muertos
+        si u yb DE_HID <> 0 entonces
+            u := u yb 0xFFFF
+            si muerta <> 0 entonces
+                ; (dos seguidos: los dos)
+                sale_u(muerta, falso)
+                sale_u(u, falso)
+                muerta := 0
+                devolver
+            fin
+            muerta := u
+            devolver
+        fin
+        si muerta <> 0 entonces
+            m := junta(muerta, u)
+            si m <> 0 entonces
+                sale_u(m, alt)
+            sino si u = ' ' entonces
+                sale_u(muerta, alt)
+            sino
+                sale_u(muerta, falso)
+                sale_u(u, alt)
+            fin
+            muerta := 0
+            devolver
+        fin
+        sale_u(u, alt)
+    fin
+
+    ; una tecla pulsada o soltada (de las dos entradas)
+    función una_tecla(uso: nat32, pulsada: bool, de_usb: bool)
+        si uso >= 0xE0 y uso <= 0xE7 entonces
+            si pulsada entonces mods := mods ob (1 << (uso - 0xE0)) sino mods := mods yb (nob (1 << (uso - 0xE0))) fin
+            devolver
+        fin
+        si pulsada entonces
+            pulsa(uso)
+            si de_usb y uso <> 0x39 y uso <> 0x53 y uso <> 0x47 entonces
+                rep_uso := uso
+                rep_cuándo := ahora_ns() + REPITE_PRIMERA
+            fin
+        sino si uso = rep_uso entonces
+            rep_uso := 0
+        fin
+    fin
+
+    ; un código de PS/2 (el juego 1)
+    función código_ps2(c: nat32)
+        variable k, uso: nat32
+        si e1 > 0 entonces
+            e1 := e1 - 1
+            devolver
+        fin
+        si c = 0xE0 entonces
+            e0 := cierto
+            devolver
+        fin
+        si c = 0xE1 entonces
+            e1 := 5                             ; (Pausa: E1 1D 45 E1 9D C5)
+            devolver
+        fin
+        si c = 0xFA o c = 0xFE o c = 0xEE o c = 0x00 o c = 0xFF entonces devolver fin     ; (respuestas del teclado)
+        k := c yb 0x7F
+        si e0 entonces
+            e0 := falso
+            si k = 0x2A o k = 0x36 entonces devolver fin       ; (las mayúsculas de mentira)
+            uso := de_e0(k)
+        sino si k < 89 entonces
+            uso := ps2_hid[k]
+        sino
+            uso := 0
+        fin
+        si uso <> 0 entonces una_tecla(uso, c yb 0x80 = 0, falso) fin
+    fin
+
+    ; ---- la cola (la llenan la interrupción y el driver de USB) ----
+    función a_la_cola(x: nat32)
+        variable b: nat64
+        b := toma(dirección(cola_cerrojo))
+        si cola_pon - cola_toma < LARGO_COLA entonces
+            cola[cola_pon yb (LARGO_COLA - 1)] := x
+            cola_pon := cola_pon + 1
+        fin
+        suelta(dirección(cola_cerrojo), b)
+    fin
+
+    función de_la_cola(ref x: nat32): bool
+        variable b: nat64
+        variable hay_: bool
+        b := toma(dirección(cola_cerrojo))
+        hay_ := cola_toma <> cola_pon
+        si hay_ entonces
+            x := cola[cola_toma yb (LARGO_COLA - 1)]
+            cola_toma := cola_toma + 1
+        fin
+        suelta(dirección(cola_cerrojo), b)
+        devolver hay_
+    fin
+
+    ; (en la interrupción del teclado PS/2: Apic64.al_teclado) un código
+    función al_código(c: nat64)
+        con_ps2 := cierto
+        a_la_cola(nat32(c yb 0xFF))
+        si en_marcha entonces señala(dirección(hay)) fin
+    fin
+
+    ; [para el driver de teclado USB] una tecla de HID (página 7; también los
+    ; modificadores, 0xE0-0xE7, como teclas), pulsada o soltada
+    público función tecla_hid(uso: nat32, pulsada: bool)
+        variable x: nat32
+        si uso = 0 o uso > 0xE7 entonces devolver fin
+        x := DE_HID ob uso
+        si pulsada entonces x := x ob PULSADA fin
+        hid_n := hid_n + 1
+        a_la_cola(x)
+        si en_marcha entonces señala(dirección(hay)) fin
+    fin
+
+    ; el hilo «teclado»
+    función hilo_teclado(arg: nat64)
+        variable x: nat32
+        variable ahora: nat64
+        mientras cierto hacer
+            rearma(dirección(hay))
+            mientras de_la_cola(x) hacer
+                si x yb DE_HID <> 0 entonces una_tecla(x yb 0xFF, x yb PULSADA <> 0, cierto) sino código_ps2(x) fin
+            fin
+            si rep_uso <> 0 entonces
+                ahora := ahora_ns()
+                si ahora >= rep_cuándo entonces
+                    pulsa(rep_uso)
+                    rep_cuándo := ahora + REPITE_CADA
+                sino
+                    espera_plazo(dirección(hay), rep_cuándo - ahora)
+                fin
+            sino
+                espera(dirección(hay))
+            fin
+        fin
+    fin
+
+    ; en marcha: el hilo y la interrupción del teclado PS/2 hacia aquí
+    público función prepara_teclas(): bool
+        si crea(nat64(dirección(hilo_teclado)), 0, "teclado", INTERACTIVO, CUALQUIERA) = nulo entonces devolver falso fin
+        en_marcha := cierto
+        al_teclado := nat64(dirección(al_código))
+        devolver cierto
+    fin
+
+fin Teclas64.

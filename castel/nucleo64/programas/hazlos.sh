@@ -9,6 +9,8 @@
 #                                 Linux x86-64 vale tal cual)
 #   HOLACAS                       en Castel, «modelo linux64» (ccastel.py y NASM)
 #   SALUDO.TXT                    un texto, para leerlo con open y read
+#   HIJOS, ORDENES                [etapa 6] fork, execve, wait4, la consola y
+#                                 los plazos; y el intérprete de órdenes
 # Uso: hazlos.sh SALIDA   (dice en la última línea los que ha hecho)
 set -e
 AQUI=$(cd "$(dirname "$0")" && pwd)
@@ -18,7 +20,7 @@ S=$1
 mkdir -p "$S"
 HECHOS=""
 if command -v gcc > /dev/null; then
-  for p in hola memoria cuenta malo archivos; do
+  for p in hola memoria cuenta malo archivos hijos ordenes; do
     gcc -static -nostdlib -ffreestanding -fno-stack-protector -fno-pie -no-pie -O2 -fno-builtin \
         -fcf-protection=none -fno-asynchronous-unwind-tables -o "$S/$(echo $p | tr a-z A-Z)" "$AQUI/$p.c"
     HECHOS="$HECHOS $(echo $p | tr a-z A-Z)"
