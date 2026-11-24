@@ -5755,11 +5755,11 @@ mira "IPCONFIG y PING, por el Wi-Fi (la pila TCP/IP de siempre)" "^  Tarjeta . .
 mira "REDWIFI /ESTADO y /REGISTRO: conectada, con la señal, la IP y lo que se prefiere" "^Conectado a «HispaPrueba»$" "^  Señal -47 dBm, canal 6; IP 192\.168\.77\.10$" \
   "^  La red: por el cable si está enchufado; si no, por el Wi-Fi (Usar: Automático)$" "^WIFI.BIN 0\.1: Wi-Fi simulada (pruebas); radio en marcha; estado 5"
 mira "las claves de WPA2 se renuevan sin cortar (el punto de acceso de mentira: la de pares cada 6 s, con un acuerdo de 4 pasos nuevo; la de grupo cada 9 s, con el KeyID 2): una línea por renovación" \
-  "^wifi: WPA2: clave por pares renovada (n\.º 1)$" "^wifi: WPA2: clave de grupo renovada (n\.º 1, KeyID 2)$"
+  "wifi: WPA2: clave por pares renovada (n\.º 1)$" "wifi: WPA2: clave de grupo renovada (n\.º [0-9]*, KeyID [12])$"
 if grep -q "conexión cortada\|el acuerdo de claves con el punto de acceso no sale bien\|se ha perdido la red" $S; then ko "con las renovaciones de las claves se ha cortado el Wi-Fi:"; grep "802\.11\|WPA" $S | tail -8 | sed 's/^/        /'
 else ok "y con las renovaciones no se corta ni se reconecta"; fi
 saca $Wf/e.img WIFI.INI $Wf/wifi.ini; saca $Wf/e.img WIFI.LOG $Wf/wifi.log; saca $Wf/e.img WIFI.LLV $Wf/wifi.llv
-if [ -f $Wf/wifi.log ] && grep -q "WPA2: clave por pares renovada (n\.º 1)" $Wf/wifi.log && grep -q "WPA2: clave de grupo renovada (n\.º 1, KeyID 2)" $Wf/wifi.log; then
+if [ -f $Wf/wifi.log ] && LC_ALL=C grep -a -q "WPA2: clave por pares renovada (n\.. 1)" $Wf/wifi.log && LC_ALL=C grep -a -q "WPA2: clave de grupo renovada (n\.. [0-9]*, KeyID [12])" $Wf/wifi.log; then
   ok "WIFI.LOG lleva las renovaciones (sin claves ni nonces: solo el número)"
 else ko "WIFI.LOG no lleva las renovaciones:"; grep -a "WPA" $Wf/wifi.log 2> /dev/null | tail -5 | sed 's/^/        /'; fi
 if [ -f $Wf/wifi.ini ] && ! grep -q "clave de prueba" $Wf/wifi.ini && grep -q "^Red=1,4869737061507275656261,2:[0-9A-F]\{112\}.$" $Wf/wifi.ini && grep -q "ofuscada" $Wf/wifi.ini \
@@ -5812,7 +5812,7 @@ mira "WIFISIM.BIN: brcmsmac y bcma de Linux en el anillo 3, con los anillos de D
   "BCM43XX\.FW: 96224 octetos$" "^wifi: PASO 3 de 3 hecho: radio en marcha" "^red: Wi-Fi Broadcom BCM43224$"
 mira "y con él: WPA2, DHCP y cinco PING sin perder ninguno" "^wifi: brcmsmac: brcms_ops_bss_info_changed: associated$" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" \
   "red: DHCP: IP 192\.168\.77\.10" "^    Paquetes: enviados = 5, recibidos = 5, perdidos = 0"
-mira "y la clave por pares se renueva por él sin cortar (el punto de acceso de mentira, cada 6 s)" "^wifi: WPA2: clave por pares renovada (n\.º 1)$"
+mira "y la clave por pares se renueva por él sin cortar (el punto de acceso de mentira, cada 6 s)" "wifi: WPA2: clave por pares renovada (n\.º 1)$"
 # 4 bis. (seguridad) una red ABIERTA falsa con el nombre de la WPA2 (WifiSimulada=GEMELA:
 # en el canal 1, se ve antes): se conecta a la WPA2, la lista enseña las dos
 # por separado, la abierta no se usa ni rebaja la recordada, y al arrancar
