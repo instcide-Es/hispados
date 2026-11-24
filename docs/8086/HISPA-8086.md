@@ -117,8 +117,8 @@ Versión 0.13.
   mismas cuatro medidas): **DERRIBO**, de pala, pelota y ladrillos, y
   **MARCIANADA**, de marcianitos, con sus instrucciones en `JUEGOS.TXT`
   (ver «Juegos», más abajo).
-- **Prueba automática** (`make -C h8086 prueba`): 470 comprobaciones en
-  QEMU, en veintiuna partes (y la batería entera se pasa también con el
+- **Prueba automática** (`make -C h8086 prueba`): 825 comprobaciones en
+  QEMU, en treinta y tres partes (con las de PLUMA, CUENTAS y los juegos) (y la batería entera se pasa también con el
   núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
   discos partidos y formateados por el propio sistema, disquetes de siete
   medidas, una sola disquetera cambiando de disquete, discos estropeados a
@@ -930,7 +930,8 @@ make -C h8086 prueba     # los arranca en QEMU y comprueba la pantalla
 
 Hace falta NASM, mtools, QEMU y socat, como para el resto del proyecto, y
 `fsck.fat` (dosfstools) para repasar los discos desde fuera. La prueba va por
-partes (veinticuatro, con las tres de PLUMA) y tarda unos TIEMPO minutos;
+partes (treinta y tres, con las de PLUMA, CUENTAS y los juegos) y tarda
+unos 55 minutos;
 `SOLO="formatea partir" ./prueba/prueba.sh` corre solo las que se digan.
 
 | Archivo | Qué es |
