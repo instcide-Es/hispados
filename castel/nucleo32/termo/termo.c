@@ -35,6 +35,7 @@
 #include "veredicto.h"
 #include "envio.h"
 #include "rendimiento.h"
+#include "disco.h"
 
 static int mas_caliente(void);
 static void mira_envio(void);
@@ -1775,6 +1776,7 @@ static void empieza(void)
 		hubo_prueba = 1;
 	}
 	carga_on = 1;
+	disco_pausa(carpeta, 1);	/* (TERMO) la lectura de los discos espera (disco.c) */
 	sc(SC_CARGA, 1, 1, 0);
 	/* (TERMO) los demás procesadores: sus núcleos, y otra vez la foto de
 	 * empezar, ya con ellos */
@@ -2287,7 +2289,7 @@ static void informe_autonomia(char *b, size_t cabe)
 
 static void escribe_informe(void)
 {
-	static char t[6000];
+	static char t[6000 + 8000];	/* (TERMO) + los discos */
 	char r[120], g1[24], g2[24], g3[24];
 	u32 a, me, d, h, mi, se;
 	int n = 0, k;
@@ -2391,7 +2393,7 @@ static void escribe_informe(void)
 		IN("\r\nQUÉ APUNTA A LA ALIMENTACIÓN Y QUÉ NO (sin sacar conclusiones antes de tiempo)\r\n");
 		IN("A favor de un problema de alimentación:\r\n%s", fav ? f : "  (nada visto)\r\n");
 		IN("En contra, o que no dice nada de ella:\r\n%s", c[0] ? c : "  (nada visto)\r\n");
-		IN("  Falta, para otra vez: una prueba de la memoria RAM y una lectura larga del disco (si fuera la alimentación, también fallarían).\r\n");
+		IN("  Falta, para otra vez: una prueba de la memoria RAM (si fuera la alimentación, también fallaría; la lectura de los discos, en DISCOS).\r\n");
 	}
 	/* (TERMO) los parones (el MSI GT80): para el técnico */
 	if (parones || bloqueos || cmos_atras_dicho || smi_total || carga_vueltas) {
@@ -2432,6 +2434,12 @@ static void escribe_informe(void)
 	}
 	if (sin_bat_texto[0] && !(hay_bateria && en.pct <= 100))
 		IN("\r\nBatería: %s.\r\n", sin_bat_texto);
+	{
+		static char dt[8000];	/* (TERMO) los discos de dentro (disco.c: TERMO\\DISCOS.TXT) */
+
+		if (disco_informe(carpeta, dt, (int)sizeof dt) > 0)
+			IN("%s", dt);
+	}
 	if (anterior[0])
 		IN("\r\nLA VEZ ANTERIOR\r\n  %s\r\n", anterior);
 	if (hay_zonas && za.t.equipo_hecho == 1 && (za.t.equipo_tablas || za.t.equipo_pci))
@@ -2479,9 +2487,11 @@ static void escribe_resumen(void)
 	VP.frenado = frenado_en_carga();
 	mira_mca(1);
 	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
+	disco_veredicto(carpeta, resumen, (int)sizeof resumen, parones || bloqueos);	/* (TERMO) lo de los discos */
 	for (k = 0; k < ns && k < VE_MAXS; k++)
 		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
 	escribe_informe();
+	disco_pausa(carpeta, 0);	/* (TERMO) acabada la prueba (y el enfriamiento): los discos, otra vez */
 	serie("termo: resumen: %s\n", resumen);
 	suceso_log("RESULTADO: %s", resumen);
 	if (carpeta[0] && !csv_malo && ruta_txt[0]) {
@@ -2932,6 +2942,17 @@ static void pulso(void)
 		mira_frenos();
 		mira_envio();
 		mira_mide();
+		{
+			char ad[320];	/* (TERMO) los discos (disco.c): cómo va; al acabar, al informe si ya estaba hecho */
+
+			if (disco_mira(carpeta, ad, sizeof ad)) {
+				suceso_log("%s", ad);
+				if (disco_acabado() && fase == F_RESULTADO && informe_dicho[0]) {
+					disco_veredicto(carpeta, resumen, (int)sizeof resumen, parones || bloqueos);
+					escribe_informe();
+				}
+			}
+		}
 		if (!csv_listo && !csv_malo && cuenta_s >= 6)
 			csv_cabecera();
 		apunta_historia();
@@ -3598,6 +3619,7 @@ static void lanza_mide(void)
 		return;
 	}
 	midiendo = 1;
+	disco_pausa(carpeta, 1);	/* (TERMO) los discos esperan al rendimiento */
 	t_mide = jg_tics();
 	snprintf(aviso_mide, sizeof aviso_mide, "Rendimiento: empezando...");
 	suceso_log("EMPIEZA la medida del rendimiento (TERMO.BIN /MIDE; menos de 2 min; Esc la para)");
@@ -3631,11 +3653,16 @@ static void mira_mide(void)
 		snprintf(aviso_mide, sizeof aviso_mide, "Rendimiento: %s", t);
 		if (busca(t, "Hecho") || busca(t, "cancelada") || busca(t, "No hay memoria")) {
 			midiendo = 0;
+			if (fase != F_CARGA && fase != F_ENFRIA)
+				disco_pausa(carpeta, 0);
 			suceso_log("medida del rendimiento: %s", t);
 		}
 	}
-	if ((int)(jg_tics() - t_mide) > 300 * (int)jg_hz)
+	if ((int)(jg_tics() - t_mide) > 300 * (int)jg_hz && midiendo) {
 		midiendo = 0;
+		if (fase != F_CARGA && fase != F_ENFRIA)
+			disco_pausa(carpeta, 0);
+	}
 }
 
 /* SSH.INI: equipo=, puerto=, usuario= */
@@ -3898,6 +3925,8 @@ int principal(void)
 		snprintf(eq, sizeof eq, "%s %s", hay_zonas ? za.t.fabricante : "", hay_zonas ? za.t.producto : "equipo");
 		return carpeta[0] ? rendimiento_principal(carpeta, eq, cpu.marca) : 1;
 	}
+	if (arg_aqui("/DISCO"))		/* (TERMO) los discos de dentro, solo leer (disco.c) */
+		return carpeta[0] ? disco_principal(carpeta) : 1;
 	if (arg_aqui("/ENVIAR")) {
 		if (!carpeta[0]) {
 			sc(SC_ESCRIBIR, (u32)"TERMO: no hay carpeta TERMO.\n", 29, 0);
@@ -3955,6 +3984,7 @@ int principal(void)
 		return 1;
 	mide_tsc();
 	prepara_archivos();
+	disco_lanza(carpeta);	/* (TERMO) los discos de dentro, antes de la carga (disco.c) */
 	lee_paron_prueba();
 	t_inicio = jg_tics();
 	lee_todo();

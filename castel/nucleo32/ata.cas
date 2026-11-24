@@ -285,6 +285,65 @@ módulo Ata
         devolver bien
     fin
 
+    ; (TERMO) para el Termómetro (tdisco.cas), SOLO LEER, como en ahci.cas
+    ; (orden_salud): qué = 1, IDENTIFY; 2, SMART READ DATA (B0h/D0h); 3,
+    ; READ THRESHOLDS (D1h); 4, RETURN STATUS (DAh); 5, el registro de
+    ; errores resumido (D5h, 01h). Da 0 bien (512 octetos a destino; con 4,
+    ; 0/1/2: bien, umbral pasado, no se sabe) o 0xFFFFFFFF.
+    público función orden_salud(u: nat32, qué: nat32, destino: puntero a byte): nat32
+        variable rasgo, sector, r: nat32
+        variable bien: bool
+        variable medio, alto: byte
+        si u >= DISCOS entonces devolver 0xFFFFFFFF fin
+        si no discos[u].hay o qué < 1 o qué > 5 entonces devolver 0xFFFFFFFF fin
+        rasgo := 0
+        sector := 0
+        según qué
+            caso 2: rasgo := 0xD0
+            caso 3:
+                rasgo := 0xD1
+                sector := 1
+            caso 4: rasgo := 0xDA
+            caso 5:
+                rasgo := 0xD5
+                sector := 1
+        fin
+        tomar(cerrojo)
+        r := 0xFFFFFFFF
+        bien := espera_libre()
+        si bien entonces
+            sacar_puerto(UNIDAD, 0xA0 ob (u << 4))
+            pausa()
+            sacar_puerto(0x1F1, rasgo)
+            sacar_puerto(CUENTA, 1)
+            sacar_puerto(LBA_BAJO, sector)
+            si qué = 1 entonces
+                sacar_puerto(LBA_MEDIO, 0)
+                sacar_puerto(LBA_ALTO, 0)
+                sacar_puerto(ORDEN, ORDEN_IDENTIFICAR)
+            sino
+                sacar_puerto(LBA_MEDIO, 0x4F)
+                sacar_puerto(LBA_ALTO, 0xC2)
+                sacar_puerto(ORDEN, 0xB0)
+            fin
+            pausa()
+            si qué = 4 entonces
+                si espera_hecho() entonces
+                    medio := meter_puerto(LBA_MEDIO)
+                    alto := meter_puerto(LBA_ALTO)
+                    r := 2
+                    si medio = 0x4F y alto = 0xC2 entonces r := 0 fin
+                    si medio = 0xF4 y alto = 0x2C entonces r := 1 fin
+                fin
+            sino si espera_datos() entonces
+                trae_sector(destino)
+                r := 0
+            fin
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
     ; ---- (CD) el canal primario, para atapi.cas: un lector de CD en él (el
     ; esclavo, o el maestro sin disco) usa el mismo cerrojo que los discos ----
     público función toma_canal()

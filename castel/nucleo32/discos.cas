@@ -17,7 +17,7 @@
 ; =============================================================================
 módulo Discos
 
-    importar Ata, Ahci, Usbalm, Cdrom, Tareas, Textos32, Mem32, Pozo, Sdhci
+    importar Ata, Ahci, Usbalm, Cdrom, Tareas, Textos32, Mem32, Pozo, Sdhci, Multiboot
 
     público constante SECTOR = 512
     público constante MAX_DISCOS = 8
@@ -85,6 +85,10 @@ módulo Discos
     ; PERMISO_TODOS)
     público función permiso(cuál: nat32)
         el_permiso := cuál
+        ; (TERMO) salvaguarda: la memoria del Termómetro («termo» en la línea
+        ; del cargador) va a equipos de otras personas: en sus discos de
+        ; dentro no se escribe nunca, se diga lo que se diga; solo en la memoria
+        si buscar(línea_del_cargador(), "termo") <> nulo y cuál <> SIN_PERMISO entonces el_permiso := PERMISO_USB fin
         reparte_permiso()
     fin
 

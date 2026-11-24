@@ -118,6 +118,7 @@ módulo Sdhci
         último_error: nat32                     ; los avisos de error de la última orden que falló
         modelo: arreglo [41] de byte
         subclase: arreglo [8] de byte           ; «SDSC», «SDHC», «SDXC», «eMMC», «MMC»
+        vida: nat32                             ; (TERMO) del EXT_CSD: bit 31, lo hay; la revisión (192) en 24-30, PRE_EOL_INFO (267) en 16-23, LIFE_TIME_EST_TYP_B (269) en 8-15 y TYP_A (268) en 0-7
     fin
 
     público variable tarjetas: arreglo [MAX_TARJETAS] de Tarjeta
@@ -622,11 +623,13 @@ módulo Sdhci
         si no manda(t, 7, t.rca << 16, R_R1B) entonces devolver falso fin
         Textos32.copiar(t.subclase, "MMC")
         hay_ext := falso
+        t.vida := 0
         si spec >= 4 entonces
             ; el EXT_CSD: lo que mide de verdad, la partición que se ve y sus velocidades
             si trae(t, 8, 0, 512) entonces
                 hay_ext := cierto
                 copiar_memoria(copia, bloque, 512)
+                t.vida := 0x80000000 ob ((nat32(bloque[192]) yb 0x7F) << 24) ob (nat32(bloque[267]) << 16) ob (nat32(bloque[269]) << 8) ob nat32(bloque[268])
                 Textos32.copiar(t.subclase, "eMMC")
                 si t.por_bloques entonces
                     t.sectores := nat32(bloque[212]) ob (nat32(bloque[213]) << 8) ob (nat32(bloque[214]) << 16) ob (nat32(bloque[215]) << 24)
@@ -1085,6 +1088,13 @@ módulo Sdhci
             si tarjetas[i - 1].pci = a y tarjetas[i - 1].hay entonces devolver i - 1 fin
         fin
         devolver 0xFFFFFFFF
+    fin
+
+    ; (TERMO) lo que dice el eMMC de la ranura s de su desgaste (Tarjeta.vida; 0: no se sabe)
+    público función vida(s: nat32): nat32
+        si s >= MAX_TARJETAS entonces devolver 0 fin
+        si no tarjetas[s].hay entonces devolver 0 fin
+        devolver tarjetas[s].vida
     fin
 
     público función es_emmc(s: nat32): bool
