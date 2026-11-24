@@ -1371,3 +1371,71 @@ unidad en memoria), EBUSY (rmdir de un montaje); dup (comparten la posición), s
 y ULTIMO.TXT escrito sin fsync, que lo vacía el apagado.
 
 El núcleo ocupa 188 KB (eran 124).
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **62 pruebas, todas bien** (eran 53), unos 12 minutos
+con el servidor (de ellos, unos 3 son de ensambla.py). Las de la etapa 5, con los
+discos de `programas/hazdiscos.sh` (sin montar nada: sgdisk, sfdisk, mkfs.fat,
+mtools y `hazexfat.py`, que hace el exFAT porque en el servidor no hay mkfs.exfat y no
+se instala nada):
+
+- **q35, 4 procesadores, con `escribir`**: un NVMe de 112 MB con GPT (la EFI y una de
+  datos, FAT32 con cúmulos de 512 octetos), un NVMe crudo de 16 MB y un SATA de 128 MB
+  con MBR (una FAT32 primaria y una exFAT lógica dentro de una extendida): NVMe con 4
+  colas y MSI-X, AHCI con MSI, las particiones con sus tipos, los 5 montajes; la
+  caché, igual que a pelo; el disco crudo escrito y leído a pelo (1, 8, 256, 500 y
+  los 300 últimos sectores; más allá del final, no) y leído entero (**16 MB en 29 ms,
+  unos 560 MB/s en QEMU**), y 4 hilos a la vez, cada uno en su procesador y por su
+  cola (las 4 colas usadas); ARCHIVOS: **192 comprobaciones bien** en los tres
+  volúmenes de prueba (la prueba entera en las dos FAT32; en la exFAT, leer lo del
+  anfitrión y EROFS); «dir /» con el árbol; después, 0 abiertos, los nodos y el
+  montón como antes; al apagar, los bloques sin vaciar, al disco; y la etapa 4
+  entera, igual;
+- **desde el anfitrión**, tras esa vuelta: `fsck.fat -n -v` sin quejas (también el
+  resumen de los libres: FSInfo al día) en las dos FAT32 escritas y en la EFI, y
+  con mtools lo que ha dejado ARCHIVOS: ULTIMO.TXT (escrito sin fsync: lo vació el
+  apagado), adios.txt, el nombre largo con acentos, sub2/Dentro/movido.txt, los 20
+  impares de Muchos (y solo ellos), grande.bin octeto a octeto (con sus 100 X),
+  hueco.bin de 3 octetos, y que no queda nada de lo borrado;
+- **dos discos de 3 TB** (dispersos), por NVMe y por SATA, con una partición desde el
+  sector 4.999.999.488 (más allá de 2^32): la prueba entera en las cuatro (365
+  comprobaciones), y fsck.fat y lo dejado, bien en las de arriba;
+- **sin MSI ni MSI-X** (`sinmsix sinmsi`, `-machine pc` con la AHCI aparte): las tres
+  controladoras mirando la cola, y todo igual;
+- **sin `escribir`**: todo de solo leer (EROFS en las pruebas, el disco crudo sin
+  tocar, nada al apagar) y los tres discos, **iguales octeto a octeto** (md5sum);
+- `sinpruebas` con los discos;
+- **por UEFI desde SATA** (OVMF, q35, 4 procesadores, la imagen de `imagen.sh` como
+  disco SATA): la partición EFI a la vista (BOOTX64.EFI, HISPA64.BIN), HOLACAS
+  arrancado desde ella (`programa=/sata0p1/boot/prog/HOLACAS`), la partición de
+  pruebas escrita por ARCHIVOS, y fsck.fat bien en las dos.
+
+`SOLO=castel64` (CASTEL64 y ENSAMB64 sacan el núcleo igual, octeto a octeto): ver
+abajo. `ensambla.py` da los mismos octetos que NASM (hubo que cambiar un `si` de
+`lista_apic`: con el núcleo más grande, NASM y ensambla.py elegían distinto un salto
+que quedaba justo a 127 octetos; y `mfence`, que no saben ensambla.py ni ENSAMB64, va
+en `db`). Las imágenes de la carpeta del taller (el VDI por UEFI en SATA, con 4
+procesadores), arrancadas en QEMU hasta «todo en orden».
+
+Lo que QEMU no prueba: los NVMe y las AHCI de verdad (los tiempos de encender un
+puerto, los discos que tardan en girar, las controladoras sin S64A, los NVMe con
+espacios de nombres de 4 KB, las BAR por encima de 4 GB: el código está, pero en
+QEMU todo cae por debajo), los MSI-X de varios vectores (se usa uno) y la velocidad:
+en el TCG de QEMU no se llega a 1 GB/s; eso, en el ThinkPad y el Monovate.
+
+### Lo que queda para la etapa 6 (y más adelante)
+
+- **USB de almacenamiento** (con xHCI, etapa 6): un disco más de Bloques64 (la clase
+  D_USB), con lo mismo encima (particiones, FAT32, exFAT); y entonces **escribir en
+  exFAT** (el mapa de bits, las sumas, el «hash» del nombre) y **FAT12/FAT16** (las
+  particiones EFI pequeñas y las memorias viejas).
+- **Más velocidad**: leer de un tirón los cúmulos seguidos (hoy, de 4 KB en 4 KB por
+  la caché), leer por delante, varias órdenes a la vez por cola (NCQ en SATA), un
+  vector de MSI-X por cola, y cerrojos más finos en el VFS (con los hilos de POSIX,
+  etapa 7).
+- **La caché de páginas y `mmap` de archivos** (etapa 7, con musl), los permisos
+  (uid, modo), los enlaces, `O_CLOEXEC` de verdad (hoy se acepta y no hace nada),
+  `flock`, la hora local en FAT (hoy se escribe la del CMOS, que en QEMU es UTC).
+- NTFS y ext4 para leer; TRIM; los discos que se enchufan en marcha; leer CD (ATAPI).
+- La consola para escribir órdenes (el intérprete, con la entrada de la etapa 6).
