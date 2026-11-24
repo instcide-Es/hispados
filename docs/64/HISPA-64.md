@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0, 1, 2, 3, 4 y 5 están hechas** (secciones 6, 7, 8, 9, 10 y 11).
+**etapas 0, 1, 2, 3, 4, 5 y 6 están hechas** (secciones 6 a 12).
 
 ---
 
@@ -263,7 +263,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 3 | SMP, planificador, hilos del núcleo | **hecha (23/11)** | — |
 | 4 | Anillo 3, syscall/sysret, ELF64, procesos | **hecha (23/11)** | — |
 | 5 | NVMe, AHCI, GPT, VFS, FAT32/exFAT | **hecha (24/11)** | — |
-| 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento | 5–7 sem. | 8 meses |
+| 6 | xHCI, HID, i8042, I2C-HID, USB de almacenamiento; la consola y el intérprete | **hecha (24/11)** | — |
 | 7 | musl, POSIX, herramientas de compilar cruzado | 6–8 sem. | 9,5 meses |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | 5–7 sem. | 11 meses |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | 6–8 sem. (+ Wi-Fi 3–5 meses) | 12,5 meses |
@@ -358,7 +358,15 @@ por NVMe y por SATA; y se ha añadido arrancar un programa desde un disco.
   ThinkPad y Monovate (NVMe), ASUS y MacBook (AHCI). **Nunca escribir en el disco
   interno de un equipo de Carlos sin su permiso**: las primeras versiones, solo leer.
 
-### Etapa 6 — USB y la entrada
+### Etapa 6 — USB y la entrada (hecha: sección 12)
+
+Lo que cambió del plan al hacerla: se ha añadido **la entrada para los programas**
+(la consola como terminal, `fork`, `execve`, `wait4`, `poll` y `select`) y **el
+intérprete de órdenes en el anillo 3** (ORDENES), que pedía la etapa 4; la
+**escritura de exFAT y FAT12/FAT16** (de la etapa 5); el touchpad I2C-HID **sin
+ACPICA** (los PNP0C50 buscados en las tablas sin interpretar el AML; ACPICA, en la
+11); las memorias USB que se enchufan en marcha se ven al arrancar otra vez (los
+discos en marcha, etapa 7).
 
 - xHCI (de Hispa-Pentium, con el BAR donde esté), HID, almacenamiento masivo, i8042
   (teclado de los portátiles, con la distribución española), I2C-HID (touchpads).
@@ -1441,3 +1449,282 @@ en el TCG de QEMU no se llega a 1 GB/s; eso, en el ThinkPad y el Monovate.
   `flock`, la hora local en FAT (hoy se escribe la del CMOS, que en QEMU es UTC).
 - NTFS y ext4 para leer; TRIM; los discos que se enchufan en marcha; leer CD (ATAPI).
 - La consola para escribir órdenes (el intérprete, con la entrada de la etapa 6).
+
+---
+
+## 12. La etapa 6, hecha (24/11/2026): el USB, la entrada y el intérprete
+
+### Las decisiones
+
+- **xHCI de 64 bits, desde cero pero con lo del taller.** Lo de Hispa-Pentium
+  (xhci.cas y usb.cas, probados en los equipos de Carlos) pasado a 64 bits y a
+  un núcleo con hilos: la BAR 0 donde esté (de 64 bits; con HCCPARAMS1.AC64 =
+  0, las páginas de la controladora por debajo de 4 GB); el **traspaso de la
+  BIOS** (USBLEGSUP: el semáforo del sistema, hasta 1 s para que la BIOS
+  suelte, sus SMI fuera); en los PCH de Intel de las series 7 y 8, los puertos
+  pasados del EHCI al xHCI (XUSB2PR y USB3_PSSEN, como Linux: aquí no hay
+  EHCI); **varias controladoras** (hasta 4), cada una con su DCBAA, sus anillos
+  y sus páginas de borrador; qué puertos son de USB 2 y cuáles de USB 3 (la
+  capacidad «Supported Protocol»). Los de **velocidad plena** empiezan con un
+  extremo 0 de 64 octetos y se les pone el que digan con **Evaluate Context**;
+  tras un fallo, **Reset Endpoint** (si se ha parado) o Stop Endpoint (si se
+  pasa el tiempo) y **Set TR Dequeue Pointer**; los **concentradores** (los de
+  USB 1.1, 2 y 3: su descriptor 0x29 o 0x2A, SET_HUB_DEPTH, la cadena de ruta,
+  el traductor de los de USB 1.x detrás de uno de alta velocidad, MTT); los de
+  **USB 3** (SuperSpeed), sin reinicio si el enlace ya está entrenado (y con el
+  reinicio «caliente», WPR, si no), con la ráfaga del compañero de su extremo.
+- **Las interrupciones por mensaje, con plan B.** El interruptor 0 con MSI-X (o
+  MSI): la interrupción recoge el anillo de sucesos (con un cerrojo: también lo
+  recoge quien espera) y despierta a quien espera lo suyo (cada extremo, su
+  suceso; las órdenes, el de la controladora) y al vigía. Quien espera mira
+  primero un momento, luego duerme con plazo (20 ms) y vuelve a mirar; sin
+  mensajes («sinmsix sinmsi», o si no los tiene) mira el anillo cediendo el
+  procesador, y el vigía, cada 10 ms. Las órdenes, de una en una (un mutex y un
+  contexto de entrada por controladora); las transferencias, una a la vez por
+  aparato (su mutex) y a la vez entre aparatos.
+- **El vigía del USB**: un hilo del núcleo que atiende lo que llega: los informes
+  de los teclados, ratones y tabletas (pide otro al llegar cada uno), los
+  cambios de los puertos raíz (el suceso de la controladora) y de los
+  concentradores (su tubería de interrupción): **enchufar y desenchufar en
+  marcha** los aparatos HID y los concentradores con lo que cuelga; y los LED
+  del teclado cuando cambian. Las memorias que se enchufan en marcha se
+  enumeran, pero el disco no aparece hasta el próximo arranque (Discos64 y el
+  VFS aún no saben de discos nuevos en marcha: etapa 7).
+- **HID por su descriptor de informe** (Hidesc64, el analizador de Hispa-Pentium
+  ampliado: el teclado con sus modificadores y su arreglo de teclas o su mapa de
+  bits, los LED, el ratón con rueda y «AC Pan», el puntero absoluto con su
+  mínimo y su máximo, los identificadores de informe): con el protocolo de
+  informes, que es el que da la rueda y la tableta; el de arranque, solo si el
+  descriptor no se entiende. Las teclas, pulsadas y soltadas, a Teclas64 (el
+  mapa español); el puntero, a Raton64 (relativo o absoluto, en puntos de la
+  pantalla).
+- **Las memorias USB, otro disco de Discos64** (la clase D_USB: «usb0»,
+  «usb1»...): BOT con SCSI (INQUIRY, TEST UNIT READY con REQUEST SENSE hasta 3 s,
+  READ CAPACITY 10 y 16, READ y WRITE 10 o 16, SYNCHRONIZE CACHE), los datos por
+  DMA a la página de la caché, hasta 128 KB por orden en TRB que no cruzan 64 KB
+  (con el «TD Size»), sectores de 512, 2048 o 4096 octetos; si se atasca,
+  quitar la parada o el reinicio de la clase, y otra vez. Encima, lo mismo que
+  en los otros discos: MBR o GPT, FAT y exFAT, y de solo leer salvo con
+  «escribir».
+- **El touchpad I2C-HID, sin ACPICA.** Hispa-64 aún no interpreta el AML, así
+  que los PNP0C50 se buscan **recorriendo la DSDT y las SSDT como un árbol**
+  (Aml64: Scope, Device, Name, If/Else fuera de los métodos; las expresiones se
+  saltan): de cada uno, su `_HID`/`_CID` (texto o EISAID), su `_STA`, las
+  plantillas de recursos con el **I2cSerialBusV2** (la dirección, la velocidad,
+  7 o 10 bits y la controladora; si dice «NULL», como en el ThinkPad E14, la del
+  padre), el GpioInt o Interrupt, el registro del descriptor HID que devuelve
+  el `_DSM` y, cuando el `_INI` lo decide por variables del BIOS (el ASUS
+  GL553VD: SYNA2393, 06CB2846, **ELAN1200**, FTE1200), **todos los
+  candidatos**; la controladora, por su `_ADR` o por su nombre (I2C0 a I2C7), y
+  sus SSCN/FMCN si son fijos. En el equipo se prueban los candidatos (dirección
+  y registro) hasta que uno conteste con un descriptor HID de verdad (30
+  octetos, versión 1.00). Las controladoras, Intel LPSS (DesignWare) con lo
+  aprendido en Hispa-Pentium: **a D0 antes**, la **BAR sin poner** con dirección
+  (`Pci64.asigna_bar`, como `pci_assign_unassigned_resources` de Linux), el
+  **reloj por modelo** (la tabla de intel-lpss-pci). HID sobre I2C: SET_POWER,
+  RESET, el descriptor de informe con Hidesc64, el touchpad en modo ratón, y se
+  lee cada 10 ms (un hilo; el GpioInt aún no se usa). **Cuando llegue ACPICA**
+  (etapa 11), rellenará la misma ficha evaluando de verdad `_STA`, `_INI`,
+  `_CRS`, `_DSM`, SSCN/FMCN y `_PS0`, con un solo candidato; I2chid64 no
+  cambia.
+- **exFAT para escribir, y FAT12 y FAT16.** exFAT: el mapa de bits de los
+  cúmulos, la tabla de mayúsculas (comprobada con su suma; con ella se
+  comparan los nombres y se calcula el NameHash), SetChecksum rehecho en cada
+  cambio, los archivos seguidos (NoFatChain) mientras se pueda y si no, a
+  cadena de FAT (como Windows), ValidDataLength y DataLength, las horas con los
+  10 ms y la zona, **VolumeDirty** al empezar a escribir y limpio al vaciar o
+  apagar, PercentInUse; de solo leer si algo no se entiende (TexFAT, otra
+  revisión). FAT12 y FAT16: la clase por el número de cúmulos (la norma), las
+  entradas de 12 bits que cruzan sectores, la raíz fija (llena: ENOSPC).
+- **El teclado, con el mapa español, en un solo sitio** (Teclas64): los códigos
+  PS/2 (el juego 1, con 0xE0) se pasan a los usos HID de la página 7, y desde
+  ahí todo va igual para el teclado del portátil y para uno USB: la ñ y la ç,
+  los acentos muertos (´ ` ¨ ^, y con espacio, el acento solo), AltGr (| @ # ~ €
+  ¬ [ ] { } \), Bloq Mayús, Bloq Num con el teclado numérico, Ctrl y Alt, y las
+  flechas, Inicio, Fin, Supr, RePág, AvPág y F1–F12 como secuencias de VT100. La
+  interrupción (o el vigía del USB) solo deja el código en una cola; lo demás,
+  el hilo «teclado» (el eco escribe en la pantalla: no en una interrupción). La
+  repetición del USB, aquí (a los 500 ms, cada 33 ms); los LED, al 8042 y a los
+  teclados USB.
+- **La consola es una terminal** (Tty64): modo canónico con eco y edición de
+  línea (Retroceso borra una letra UTF-8 entera, Ctrl+U, las flechas, Inicio y
+  Fin, 16 líneas de historia, Ctrl+D fin de archivo, Ctrl+C) y modo crudo
+  (VMIN, VTIME); `read(0)` duerme el hilo; los `ioctl` de las terminales que
+  usan musl e `isatty`; `/dev/tty` y `/dev/console`; la salida pasa de UTF-8 a
+  la página 437 de la casa y entiende lo mínimo de VT100 (colores, borrar). Sin
+  señales de verdad (etapa 7), **Ctrl+C cierra con 130** los programas del
+  grupo de la consola al volver de su llamada al sistema.
+- **Arrancar programas desde un programa, como Linux**: `fork` (y `vfork`, y
+  `clone` con solo SIGCHLD) **copiando** las páginas que el padre tiene puestas
+  (copiar al escribir, con musl: etapa 7), `execve` por el VFS (la unidad en
+  memoria o cualquier disco), `wait4` con el estado de Linux, y los huérfanos y
+  los zombis, recogidos. Con eso, **el intérprete de órdenes es un programa
+  más** (ORDENES, en C, `-nostdlib`), en el anillo 3, en español.
+- **El plazo del aviso de vaciar la TLB, 10 s** (eran 2): escribir en la consola
+  se hace con las interrupciones quitadas, y por UEFI con «pc» y 2 procesadores,
+  con el servidor cargado, la pantalla del GOP dibujada por el TCG pasó de 2 s
+  una vez (MALO explicando sus fallos). En un equipo de verdad (escritura
+  combinada) son milisegundos; dibujar sin quitar las interrupciones, más
+  adelante (con las ventanas, etapa 8).
+
+### Qué hace
+
+Hispa-64 0.6.0. Los módulos nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `xhci64.cas` | las controladoras xHCI: tomarlas (el traspaso de la BIOS, los puertos de Intel, D0 y la BAR sin poner), los anillos, el de sucesos con su interrupción (MSI-X o MSI) o mirándolo, las órdenes (Enable Slot, Address Device, Evaluate Context, Configure Endpoint, Reset Endpoint, Stop Endpoint, Set TR Dequeue Pointer, Disable Slot), los puertos raíz, las transferencias de control, a granel y de interrupción |
+| `usb64.cas` | los aparatos: enumerar (con el reintento), los descriptores (también el compañero de USB 3 y los textos), los concentradores (los de USB 2 y 3), quitar; las transferencias para las clases |
+| `usbhid64.cas` | los teclados, ratones y tabletas USB: por su descriptor (Hidesc64) o por el protocolo de arranque; las teclas a Teclas64, el puntero a Raton64, los LED |
+| `usbalm64.cas` | las memorias USB: BOT y SCSI, para Discos64 |
+| `usbvigia.cas` | el USB entero al arrancar y el hilo vigía (los informes, enchufar y desenchufar, los concentradores, los LED) |
+| `raton64.cas` | el puntero: la posición en la pantalla, los botones, la rueda |
+| `hidesc64.cas` | el analizador de descriptores de informe HID (y lo de HID sobre I2C) |
+| `prhid64.cas` | sus pruebas de cada arranque (los descriptores de verdad de `i2chid/reales.txt`, `sint.txt` y `qemu.txt`, metidos dentro por `i2chid/hazdatos.py`); `prueba=hid`, todo lo que dice |
+| `aml64.cas` | los PNP0C50 en la DSDT y las SSDT, sin interpretar el AML |
+| `i2c64.cas`, `i2chid64.cas` | las controladoras I2C Intel LPSS y el HID sobre I2C de Microsoft (el touchpad, cada 10 ms) |
+| `teclas64.cas`, `tty64.cas` | el teclado con el mapa español y la consola como terminal |
+| `discos64.cas` | la clase D_USB |
+| `exfat64.cas`, `fat64.cas`, `nodos64.cas`, `vfs64.cas` | exFAT para escribir; FAT12 y FAT16 |
+| `pci64.cas` | `pon_d0`, `asigna_bar` (una BAR sin poner, con dirección), `relee_bar` |
+| `procesos.cas`, `espacios.cas`, `sistema.cas` | la tabla de procesos, `fork` (`copia_espacio`), `execve`, `wait4`; las llamadas nuevas: 7 poll, 13 rt_sigaction y 14 rt_sigprocmask (lo mínimo), 23 select, 56 clone (como fork), 57 fork, 58 vfork, 59 execve, 61 wait4, 109 setpgid, 110 getppid, 111 getpgrp, 112 setsid, 121 getpgid, 124 getsid, 270 pselect6, 271 ppoll; `read`, `ioctl` y `fstat` de la consola por Tty64; O_CLOEXEC de verdad |
+| `apic64.cas` | la interrupción del teclado PS/2, a Teclas64 |
+| `smp64.cas` | el plazo del aviso de la TLB, 10 s |
+| `hispa64.cas` | el USB antes de la caché de bloques (las memorias son discos), el I2C-HID, la consola; `prueba=raton`; «ordenes» arranca el intérprete; sin «apagar», el intérprete en la consola |
+| `programas/` | `ordenes.c` (el intérprete), `hijos.c` (HIJOS: fork, execve, wait4, poll, select, la terminal), `hazusb.sh` (las memorias de prueba), `teclas.py` (un texto a teclas de `sendkey` con el mapa español), `miraexfat.py` (el comprobador de exFAT del anfitrión); `hazdiscos.sh` con FAT12, FAT16 y otra exFAT |
+| `i2chid/` | los datos de prueba: descriptores de touchpads de verdad, la SSDT de prueba y las tablas del ASUS GL553VD (partidas en SSDT de menos de 64 KB por `comossdt.py`, que QEMU no admite más) |
+| `imagen.sh` | el menú de la 0.6.0: «sinusb», «sini2c», «prueba=raton», el USB sin MSI |
+
+Lo que dice (QEMU, q35, 4 procesadores, con `escribir`; abreviado):
+
+```
+xHCI: 00:02.0 1B36:000D en 0xFEBF0000
+  versión 1.00, 8 puertos (4 de USB 2 y 4 de USB 3), 63 ranuras, contextos de 32 octetos, direcciones de 64 bits; MSI-X
+USB: 6 aparatos (1 concentradores) en 435 ms
+  1-3: 46F4:0001 «QEMU USB HARDDRIVE», USB 3.0, velocidad SuperSpeed (5 Gbit/s), ranura 1, paquete del extremo 0: 512; almacenamiento (SCSI, Bulk-Only)
+  1-4: 46F4:0001 «QEMU USB HARDDRIVE», USB 3.0, velocidad SuperSpeed (5 Gbit/s), ranura 2, paquete del extremo 0: 512; almacenamiento (SCSI, Bulk-Only)
+  1-5: 0409:55AA «QEMU USB Hub», USB 1.1, velocidad plena (12 Mbit/s), ranura 3, paquete del extremo 0: 8; concentrador de 8 puertos
+  1-5.1: 0627:0001 «QEMU USB Keyboard», USB 2.0, velocidad plena (12 Mbit/s), ranura 4, paquete del extremo 0: 8; HID: teclado (por su descriptor, con LED)
+  1-5.2: 0627:0001 «QEMU USB Tablet», USB 2.0, velocidad plena (12 Mbit/s), ranura 5, paquete del extremo 0: 8; HID: tableta (por su descriptor, de 0 a 32767)
+  1-6: 0627:0001 «QEMU USB Mouse», USB 2.0, velocidad alta (480 Mbit/s), ranura 6, paquete del extremo 0: 64; HID: ratón (por su descriptor, con rueda)
+  usb0: «QEMU    QEMU HARDDISK» en 1-3, 64,0 MB (131072 sectores de 512 octetos)
+  usb1: «QEMU    QEMU HARDDISK» en 1-4, 48,0 MB (98304 sectores de 512 octetos)
+  ...
+  usb0: «QEMU    QEMU HARDDISK», 64,0 MB (131072 sectores de 512 octetos), tabla MBR; se puede escribir
+    usb0p1: 63,0 MB, desde el sector 2048, FAT32
+  usb1: «QEMU    QEMU HARDDISK», 48,0 MB (98304 sectores de 512 octetos), sin tabla: un volumen entero; se puede escribir
+  /usb1: exFAT «USBEXFAT», 47,8 MB en 12260 cúmulos de 4 KB, 47,4 MB libres; de leer y escribir
+  /usb0p1: FAT32 «USBFAT», 62,0 MB en 127006 cúmulos de 512 octetos, 61,7 MB libres; de leer y escribir
+...
+ARCHIVOS: 2 discos de prueba (2 escritos); todo bien (183 pruebas)
+...
+Hispa-64 etapa 6: todo en orden.
+/> ver
+...
+```
+
+Con `prueba=raton` (10 s mirando el puntero) y el monitor de QEMU:
+
+```
+Puntero: (522, 404), botones 0, rueda 0 (ratón)
+Puntero: (517, 407), botones 0, rueda 1 (ratón)
+Puntero: (517, 407), botones 1, rueda 1 (ratón)
+Puntero: (511, 191), botones 0, rueda 0 (tableta)
+USB: se ha enchufado 1-6: 0627:0001 «QEMU USB Keyboard», USB 2.0, velocidad alta (480 Mbit/s), ...
+USB: se ha desenchufado 1-5.3
+```
+
+Por UEFI, OVMF deja la BAR del xHCI por encima de 4 GB («xHCI: 00:02.0 1B36:000D en
+0xC000004000 (por encima de 4 GB)»), y el núcleo la usa ahí, después de que el
+firmware haya usado él el teclado y la memoria.
+
+En las tablas de verdad del ASUS GL553VD, Aml64 encuentra `\_SB.PCI0.I2C0.TPD0`
+(en la I2C 00:15.0, por su `_ADR`) con sus candidatos según el BIOS (SYNA2393 en
+0x20, 06CB2846, **ELAN1200 en 0x15 a 400 kHz con el descriptor en 0x0001** y
+FTE1200) y `\_SB.PCI0.I2C1.TPL1` (la pantalla táctil); «nada sin entender» en sus
+14 tablas, con 224 dispositivos.
+
+### Cómo se ha probado
+
+El núcleo ocupa 304 KB (eran 188).
+
+`castel/nucleo64/pruebas.sh`: **96 pruebas, todas bien** (eran 62), unos 23
+minutos con el servidor (de ellos, unos 8 son de `ensambla.py`, que con el núcleo
+de 83.000 líneas de ensamblador va despacio: da los mismos octetos que NASM). Las
+de la etapa 6:
+
+- **el USB** (q35, 4 procesadores, con `escribir`): un concentrador de USB 1.1 con
+  el teclado y la tableta detrás (velocidad plena: el extremo 0 de 8 octetos, con
+  Evaluate Context), el ratón de alta velocidad y **dos memorias de USB 3**
+  (SuperSpeed) hechas por `programas/hazusb.sh`: una con MBR y FAT32 y otra exFAT
+  sin tabla; las seis líneas de la lista, los HID por su descriptor (el teclado con
+  LED, el ratón con rueda, la tableta de 0 a 32767), los dos discos con sus
+  montajes, **ARCHIVOS entero en las dos** (191 comprobaciones) y la etapa 4 igual;
+  **desde el anfitrión**, la FAT32 sin quejas de fsck.fat y lo dejado por ARCHIVOS
+  con mtools, y el exFAT bien con `miraexfat.py` y lo dejado;
+- **dos controladoras a la vez**: el nec-usb-xhci con **MSI** (sin MSI-X) y el
+  qemu-xhci **mirando la cola**, una memoria en cada una, escritas por ARCHIVOS;
+- **con el monitor de QEMU** (`prueba=raton`): el ratón (lo movido, la rueda y el
+  clic, exactos) y las teclas USB; la tableta detrás del concentrador, movida por
+  QMP (`input-send-event`: el `mouse_move` del monitor solo mueve en relativo) al
+  medio, con el botón derecho, y a la esquina; **enchufar y desenchufar en
+  marcha** un teclado (su tecla llega), un ratón detrás del concentrador, y quitar
+  el concentrador con lo que cuelga; y `sinusb`;
+- **por UEFI**: OVMF deja la BAR del xHCI por encima de 4 GB (0xC000004000) y el
+  núcleo la usa ahí, con el teclado, la tableta y la memoria que ha usado antes el
+  firmware;
+- **el HID y el I2C-HID** (sin controladora I2C en QEMU): los 16 descriptores de
+  prueba analizados en cada arranque (los touchpads de verdad de Dell, ELAN y
+  Synaptics, la pantalla táctil del XPS 9360, los de QEMU, un ratón con AC Pan y
+  un teclado NKRO hechos a mano; sus informes, los descriptores HID de I2C y las
+  órdenes), la SSDT de prueba (el ELAN1200 y el Synaptics de su plantilla), la del
+  ThinkPad E14 con «NULL», **las tablas de verdad del ASUS GL553VD** (el ELAN1200 en
+  0x15 con el descriptor en 0x0001, en la I2C0), `sini2c` y una **BAR sin poner**
+  (la del aparato `edu` de QEMU puesta a 0: `asigna_bar` le da 0xFBF00000 y se lee
+  bien ahí);
+- **HIJOS** con 1, 2, 4 y 8 procesadores (49 comprobaciones: fork, la copia de la
+  memoria, execve con argv y envp, wait4 con WNOHANG y -ECHILD, un hijo que falla
+  con su señal, los huérfanos, poll y select con plazo, isatty, TCGETS/TCSETS,
+  TIOCGWINSZ, O_CLOEXEC); después, «0 procesos, 0 en la tabla, 0 espacios»;
+- **el intérprete con las teclas del monitor de QEMU** (343 teclas PS/2, de
+  `programas/teclas.py` con el mapa español, en unos 30 s): ver, dir, cd a un disco
+  FAT32, mkdir, `echo ... > archivo`, type, cp, EROFS en «/», `HOLA uno dos`,
+  `CUENTA 3` (dice el código 30), una orden que no está, «canción ñandú pingüino
+  àlex a@b#c», Bloq Mayús, Retroceso, las flechas y la historia, Ctrl+U, Ctrl+C (en
+  el indicador y a un programa), Ctrl+D y `salir`, que apaga; desde el anfitrión,
+  el archivo copiado y fsck.fat; y **lo mismo con un teclado USB** (q35 sin 8042);
+- lo de las etapas 0 a 5, igual (los discos de prueba de la etapa 5 ahora llevan
+  además FAT12, dos FAT16 y otra exFAT: **670 comprobaciones de ARCHIVOS** en 7
+  volúmenes, fsck.fat en las FAT y miraexfat.py en las exFAT).
+
+Con CASTEL64 y ENSAMB64, el núcleo sale igual, octeto a octeto (el ensamblador y
+el binario de 311.296 octetos). La imagen de la carpeta del taller (el disco por
+UEFI en SATA, con 4 procesadores y un teclado USB), arrancada en QEMU hasta
+«todo en orden», con `ver` y `salir` escritos en el intérprete por el teclado USB.
+
+Lo que QEMU no prueba: **el touchpad I2C de verdad** (QEMU no tiene controladora
+DesignWare ni HID sobre I2C: las transferencias, el reloj de cada modelo, los
+candidatos del ASUS, el modo ratón; el código está y lo primero que hay que mirar
+en el taller es qué dice «I2C-HID:»), el traspaso de la BIOS de verdad, los puertos
+de Intel de las series 7 y 8, las controladoras sin direcciones de 64 bits, los
+concentradores de USB 2 con traductor (MTT) y los de USB 3 (QEMU solo tiene uno de
+USB 1.1), las memorias que tardan en estar listas o de sectores de 4 KB, y los
+teclados de los portátiles (cada uno con lo suyo).
+
+### Lo que queda para la etapa 7 (y más adelante)
+
+- **Señales de verdad** (rt_sigaction con sus funciones, kill, Ctrl+C a un
+  programa que no llama al sistema), **copiar al escribir** en `fork`, `clone` con
+  hilos de POSIX, `futex`: con musl.
+- **Los discos que se enchufan en marcha** (una memoria USB después de arrancar:
+  hoy se enumera, pero el disco aparece en el próximo arranque) y quitarlos con
+  seguridad.
+- **ACPICA** (etapa 11): el touchpad con su `_STA`, `_INI`, `_CRS` y `_DSM`
+  evaluados (un candidato, no varios), su GpioInt (hoy se lee cada 10 ms), `_PS0`.
+- La consola: un cursor visible, borrar la pantalla de verdad (hoy sube el texto),
+  las líneas más anchas que la pantalla, dibujar sin quitar las interrupciones.
+- Más USB: UAS, los isócronos (sonido, cámaras), varios informes pedidos a la vez,
+  Bluetooth, el adaptador de red RTL8153 (etapa 9), el i8042 de los portátiles que
+  tienen un «touchpad PS/2» (hoy solo el teclado).
+- Los nombres de más de 255 octetos en UTF-8 (exFAT y FAT admiten 255 letras
+  UTF-16).
