@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Usb, Usbhid, I2c, I2chid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -642,7 +642,10 @@ módulo Semilla
         mientras s < 120 hacer
             dormir(HZ)
             s := s + 1
-            si s = 30 y teclados + ratones <> 0 entonces enseña_estado() fin
+            si s = 30 y teclados + ratones + I2c.cuántas <> 0 entonces
+                Usbhid.enseña_estado()
+                I2chid.enseña_estado()          ; (I2CHID)
+            fin
             si registro_largo <> visto entonces
                 visto := registro_largo
                 guarda_registro()
@@ -692,6 +695,10 @@ módulo Semilla
                 Usbcal.prepara()
             fin
         fin
+        ; (I2CHID) las controladoras I2C (Intel LPSS): de ellas cuelgan los
+        ; touchpads HID sobre I2C, que dice luego ACPI.BIN (i2chid.cas); con
+        ; «sini2c», no se tocan
+        I2c.prepara()
         ; (CD) los lectores de CD y DVD (detrás de los discos y las memorias)
         si buscar(línea_del_cargador(), "sindisco") = nulo entonces busca_cd() fin
         n := 0
@@ -1278,7 +1285,8 @@ módulo Semilla
                 escribir("teclado: el español\n")
             sino si es("usb") entonces
                 Usb.enseña()
-                enseña_estado()
+                Usbhid.enseña_estado()
+                I2chid.enseña_estado()
             sino si iguales(palabra1, "quitar") entonces
                 orden_quitar()
             sino si es("escritorio") entonces

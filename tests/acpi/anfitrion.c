@@ -14,6 +14,9 @@
  *   evento NN          el controlador embebido tiene el aviso NN pendiente
  *   mudo 1             el controlador embebido deja de contestar (0: vuelve)
  *   @N                 lo que sigue se pone justo antes de la lectura N
+ * -m DIR VALOR pone ese octeto en la memoria física (las variables de la BIOS:
+ * la GNVS). Con -i2chid, al acabar, los dispositivos HID sobre I2C (acpi/pentium/i2chid.c,
+ * lo que ACPI.BIN le manda al núcleo de Hispa-Pentium): una línea «I2CHID n: ...».
  * Escribe el registro (lo que en el equipo es BATERIA.LOG) y, por cada
  * lectura, una línea «APM n: ...» con lo que contestaría INT 15h AX=530Ah.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -21,6 +24,9 @@
 #include "accommon.h"
 #include "nucleo.h"
 #include "sim.h"
+#include "../../acpi/pentium/pentium.h"
+
+int tarea_quieta(void);
 
 int sim_charla;
 
@@ -165,7 +171,8 @@ static u32 pet[4];
 
 void entrada_c(long *pila)
 {
-	int argc = pila[0], i, lecturas = 3, ntab = 0;
+	int argc = pila[0], i, lecturas = 3, ntab = 0, con_i2chid = 0, npoke = 0;
+	u32 poke_d[32], poke_v[32];
 	char **argv = (char **)(pila + 1);
 	u8 *xsdt, *rsdp, *fadt = 0;
 	u32 fis = FIS_TABLAS, dsdt = 0, facs = 0, hechas = 0, vueltas = 0, nx = 0;
@@ -178,6 +185,12 @@ void entrada_c(long *pila)
 	for (i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-v"))
 			sim_charla = 1, in.opciones |= LL_OP_DETALLE;
+		else if (!strcmp(argv[i], "-m") && i + 2 < argc && npoke < 32) {
+			poke_d[npoke] = strtoul(argv[i + 1], 0, 16);
+			poke_v[npoke++] = strtoul(argv[i + 2], 0, 16);
+			i += 2;
+		} else if (!strcmp(argv[i], "-i2chid"))
+			con_i2chid = 1;
 		else if (!strcmp(argv[i], "-n") && i + 1 < argc)
 			lecturas = strtoul(argv[++i], 0, 10);
 		else if (!strcmp(argv[i], "-o") && i + 1 < argc)
@@ -260,6 +273,8 @@ void entrada_c(long *pila)
 	sim_region((u32)pet, sizeof pet, pet);
 	in.dir_apm = (u32)&ap;
 	in.dir_salud = (u32)&sa;
+	for (i = 0; i < npoke; i++)
+		*(u8 *)mq_mapa(poke_d[i], 1) = poke_v[i];
 	escenario(1);
 	if (nucleo_llamada(LL_INICIA, (u32)&in))
 		sim_muere("LL_INICIA falla");
@@ -293,6 +308,21 @@ void entrada_c(long *pila)
 		if (++vueltas > 200000)
 			sim_muere("la tarea no acaba");
 		sim_avanza_us(r * 54925);
+	}
+	if (con_i2chid) {
+		static struct pe_i2chid f[I2CHID_MAX];
+		int n, k;
+
+		for (k = 0; k < 2000 && !tarea_quieta(); k++)
+			if (nucleo_llamada(LL_PASO, 0) < 0)
+				break;
+		n = i2chid_busca(f, I2CHID_MAX);
+		vuelca_registro();
+		for (k = 0; k < n; k++)
+			di("I2CHID %d: %s hid=%s cid=%s sta=%X esclavo=%02X velocidad=%u diez=%u fuente=%s adr=%08X pci=%06X "
+			   "registro=%X gpio=%d/%X ss=%u/%u/%u fm=%u/%u/%u origen=%u\n", k + 1, f[k].ruta, f[k].hid, f[k].cid, f[k].sta,
+			   f[k].esclavo, f[k].velocidad, f[k].diez, f[k].fuente, f[k].adr, f[k].pci, f[k].registro,
+			   (int)f[k].gpio_pin, f[k].gpio_modo, f[k].ss[0], f[k].ss[1], f[k].ss[2], f[k].fm[0], f[k].fm[1], f[k].fm[2], f[k].origen);
 	}
 	pet[0] = (u32)&es;
 	pet[1] = sizeof es;

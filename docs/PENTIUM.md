@@ -232,6 +232,9 @@ cuarta parte, los discos y el USB).
 | `grafico.cas` (Grafico), `letra.cas` (Letra) | **Dibujar**: los lienzos; rectángulos, degradados, esquinas redondas, líneas, círculos, el disquete de la casa, texto con la **letra de 8x16** (la de Hispa Ventanas, hecha por `hazletra.py`) y copiar de un lienzo a otro. |
 | `raton.cas` (Raton) | El **ratón** (el PS/2, por la IRQ 12, o uno USB): dónde está la flecha y la cola de clics. |
 | `touchpad.cas` (Touchpad) | (TOUCHPAD) **El touchpad Synaptics en modo absoluto**: de sus paquetes, el ratón (mover, tocar para hacer clic, el borde derecho como rueda, dos dedos, la palma); sin tocar el equipo (sección 14 sexvicies). |
+| `hiddesc.cas` (Hiddesc) | (I2CHID) **Los descriptores de informe HID**, sin tocar el equipo: dónde van los botones, los ejes y la rueda del ratón, el «modo de entrada» de los touchpads de precisión; y lo de HID sobre I2C (el descriptor de 30 octetos, las órdenes). Lo usan `usbhid.cas` e `i2chid.cas` (sección 14 duodetricies). |
+| `i2c.cas` (I2c) | (I2CHID) **Las controladoras I2C de Intel LPSS** (DesignWare; Skylake en adelante): sacarlas del reinicio, la velocidad, escribir y leer con «repeated start» (sección 14 duodetricies). |
+| `i2chid.cas` (I2chid) | (I2CHID) **Los touchpads HID sobre I2C**: lo que dice ACPI.BIN (la llamada 159), RESET, el descriptor de informe, el modo ratón y leer sus informes (sección 14 duodetricies). |
 | `ventanas.cas` (Ventanas) | El **gestor de ventanas**: un lienzo por ventana, el marco, el orden, componer solo lo que cambia con doble búfer, la flecha (y sus formas), mover y **cambiar de tamaño**, y repartir el ratón y las teclas. |
 | `emergente.cas` (Emergente) | Los **menús emergentes**: el del botón secundario y el que cuelga de una barra de menús. |
 | `terminal.cas` (Terminal) | Los **terminales**: dos tubos para que una ventana tenga dentro al intérprete de órdenes y a sus programas. |
@@ -280,6 +283,7 @@ Y, para el anillo 3 (`modelo usuario`, CASTEL32.md §1), también en Castel:
 | `uraton.cas` | `RATON.BIN` | (TOUCHPAD) **El touchpad**: qué hay, `RATON /TOUCHPAD` (graba lo que manda en TOUCHPAD.TXT), `/ANALIZA` y `/INYECTA` (las pruebas) (sección 14 sexvicies). |
 | `panelpun.cas` | (en `PANEL.BIN`) | (PUNTEROS) **Panel de control › Ratón › Puntero**: la forma, el tamaño, el color, el rastro, localizar y para zurdos, con la vista previa. |
 | `upuntest.cas` | `PUNTEST.BIN` | (PUNTEROS) La prueba de los punteros (la parte 51; no va en el sistema). |
+| `uhidprue.cas` | `HIDPRUEB.BIN` | (I2CHID) La prueba de `hiddesc.cas`: descriptores de informe, informes, descriptores HID y órdenes, de un archivo (con corre32, la parte 52). |
 | `uhorared.cas` con `ntp.cas` y `zonas.cas` | `HORARED.BIN` | (NTP) **La hora por Internet** (SNTP) y el horario de verano; la orden HORARED (sección 14 quattuordecies). |
 | `panelaj.cas` (Panelaj) | — | (PANEL) Las llamadas 174 (los ajustes) y 175 (la hora exacta) para los programas. |
 | `ubucle.cas` | `BUCLE.BIN` | El que no acaba nunca (da vueltas, duerme, espera teclas o escribe sin parar): para probar **Ctrl+C**. |
@@ -10439,6 +10443,229 @@ aparta antes el ratón: la «I» tapaba su pie.
   sus enlaces (con la llamada 177 es una línea).
 - Punteros de colores hechos por el usuario (un .CUR o un .ANI): por ahora,
   los seis juegos propios.
+
+## 14 duodetricies. Los touchpads HID sobre I2C (rama pentium-i2chid, «(I2CHID)»)
+
+*23/11/2026.* Los portátiles de 2015 en adelante (el ASUS GL553VD de Carlos,
+Kaby Lake-H; el ThinkPad E14 Gen 5, Raptor Lake-U; los i3-1115G4, Tiger
+Lake) no llevan el touchpad en el PS/2 sino en un bus **I2C** del PCH, con
+el protocolo **HID sobre I2C** de Microsoft (1.0). Con Hispa-Pentium el
+teclado (PS/2, del controlador embebido) iba y el touchpad no. Ahora va como
+un ratón: mover, sus botones y, si el touchpad la da, la rueda. Son tres
+piezas, como en Linux (`intel-lpss-pci`, `i2c-designware`, `i2c-hid-acpi`,
+`hid-multitouch`; se ha mirado cómo lo hacen, sin copiar su código):
+
+**1. La controladora** (`i2c.cas`). Las I2C de los PCH de Intel desde
+Skylake son las de su «Low Power Subsystem» (LPSS), con el bloque I2C de
+Synopsys **DesignWare** dentro:
+
+- En el PCI son de Intel, **clase 1180h** (en algunos, 0C80h) y su modelo
+  está en la tabla de `reloj_de`: series 100 (9D60-9D65, A160-A163) y 200
+  (A2E0-A2E3), Apollo y Gemini Lake, Elkhart Lake, y Cannon, Comet, Ice,
+  Jasper, Tiger, Alder, Raptor y Meteor Lake (xxE8-xxEB, xxC5-xxC6...). La
+  misma clase la llevan otras cosas del PCH (el termómetro, A131 en el ASUS):
+  **lo que no está en la tabla no se toca**.
+- Primero, **encendida (PMCSR a D0)**: al salir de D3 sin «No_Soft_Reset»
+  el aparato se reinicia y pierde sus registros base, así que antes de
+  mirar o poner la zona (el registro dice «estaba en D3: a D0»).
+- Su zona 0 (4 K). Si el firmware la pone por encima de los 4 GB (OVMF),
+  `pci_memoria` la mueve debajo, como la del xHCI: «su zona estaba por
+  encima de los 4 GB (...): movida a ...». **Si la deja sin poner (a 0)**,
+  que es lo que hacen el Monovate 14.1 (Tiger Lake-UP3, AMI «ALASKA»
+  TN29V2.17) y el ThinkPad E14 Gen 5 (Raptor Lake-U, TP-R2A 1.43) con sus
+  I2C (el registro decía «sin zona de memoria: no se usa» en las cinco del
+  Monovate, A0E8-A0EB y A0C5, y en las del E14, 51E8 y 51EA), `pci_memoria`
+  **le da dirección** (`asigna_zona`, pci.cas, como el
+  `pci_assign_unassigned_resources` de Linux) en el mismo hueco libre que
+  usa para mover (fuera del mapa de memoria, de las zonas de los demás y de
+  las ventanas de los puentes; primero entre y justo encima de las que ha
+  repartido el firmware), y se apunta: «su zona 0 estaba sin poner (BAR
+  00000004h, alta 0h): puesta en ...h (4 K)», y en el resumen del USB «pci:
+  la zona del 00:15.0 (registro 10h: ...) estaba sin poner: puesta en ...;
+  puestas, N». Si no se puede, el motivo y no se usa (y siempre el valor
+  crudo del registro base). Con la orden PCI (memoria y bus); los registros «privados» de LPSS en 200h: **204h, el
+  reinicio** (se suelta con 7), y 2FCh, que dice si es una I2C.
+- `IC_COMP_TYPE` (FCh) tiene que decir **44570140h**; `IC_COMP_PARAM_1`,
+  lo hondas que son sus colas.
+- **El reloj** del bloque no se puede leer: el de la tabla de
+  `intel-lpss-pci` de Linux, modelo a modelo: **120 MHz** en las series 100
+  y 200, Comet Lake-V y **Tiger Lake-LP** (A0C5-A0C6, A0D8-A0D9, A0E8-A0EB:
+  el Monovate); **216** en Cannon y Comet Lake; **133** en Broxton, Apollo y
+  Gemini Lake, Ice, Jasper, Tiger Lake-H, **Alder y Raptor Lake** (51xx: el
+  E14), Lakefield, Meteor y Arrow Lake; **100** en Elkhart Lake y los de
+  después (Lunar, Panther, Wildcat y Nova Lake). (Antes se suponían 216 en
+  todos los de Cannon Lake en adelante: en el Monovate, el bus habría ido a
+  algo más de la mitad.) Los contadores del
+  reloj SCL (`IC_SS_SCL_HCNT/LCNT` a 100 kHz, `IC_FS_SCL_HCNT/LCNT` a 400) y
+  la retención de SDA salen de los métodos **SSCN y FMCN** de ACPI si la
+  controladora los tiene; si no, se calculan de los tiempos de la norma I2C
+  (alto 4,0 y 0,6 µs; bajo 4,7 y 1,3 µs; 300 ns de bajada).
+- **Transferir**: maestro, 7 o 10 bits, una escritura y detrás una lectura
+  con **repeated start** (`RESTART` en la primera lectura y `STOP` en la
+  última orden de la cola), sin interrupciones de la controladora: se mira su
+  estado, y las del procesador van tapadas durante la transferencia (que no
+  se vacíe la cola a medias); nunca se piden más lecturas de las que caben
+  en la cola de entrada. Lo que dice `IC_TX_ABRT_SOURCE` se traduce: nadie
+  contesta (NACK de la dirección), no acepta un octeto, arbitraje perdido.
+
+Al arrancar: `i2c: controladora 00:15.0 8086:A160 (Intel LPSS, zona en
+DF42E000h, DesignWare 1.11*, colas de 64 y 64, reloj de 120 MHz supuesto)
+en marcha`, o `i2c: no hay controladora I2C (Intel LPSS)`.
+
+**2. ACPI** (`acpi/pentium/i2chid.c`, en ACPI.BIN). Qué hay en el bus y dónde
+no lo dice el PCI sino la DSDT, y para eso ya estaba ACPI.BIN con ACPICA
+(sección 11): en cuanto tiene el espacio de nombres (antes de la primera
+lectura de la batería), busca los dispositivos con **_HID o _CID
+«PNP0C50»** (o «ACPI0C50») y, de cada uno:
+
+- su **_STA** y, si está presente, su **_INI** (ACPI.BIN, en el modo
+  mínimo, no ejecuta los _INI; el de un touchpad suele decidir cuál es) y
+  otra vez su _HID;
+- su **_CRS**: el `I2cSerialBusV2` (la dirección, la velocidad, 7 o 10 bits y
+  la ruta de su controladora) y la `GpioInt` (su interrupción: se apunta, aún
+  no se usa). **Las DSDT de Intel solo dan la interrupción a quien no es
+  Windows 8** (`If (OSYS < 0x07DC) Return (SBFI)`), y ACPI.BIN no se presenta
+  como Windows (para no cambiar lo de la batería): si el _CRS no trae el
+  I2cSerialBus, se leen los `ResourceTemplate` del propio dispositivo
+  (`SBFB`, que su _INI ya ha puesto bien);
+- su **_DSM** de HID sobre I2C (GUID 3CDFF6F7-4267-4555-AD05-B30A3D8938DE,
+  revisión 1, función 1): **el registro del descriptor HID**;
+- de la controladora (por la ruta del I2cSerialBus; **si esa ruta no
+  existe** —las DSDT de Intel traen «NULL» en la plantilla y el _CRS solo
+  la completa para Windows 8: el ThinkPad E14 Gen 5— o no se sabe qué
+  aparato PCI es, **la de su padre**, como el `ACPI_COMPANION` de Linux: el
+  touchpad cuelga de la suya, `\_SB.PC00.I2C0.TPD0`; en ACPI.TXT, «por NULL
+  (no existe: la de su padre, \_SB_.PC00.I2C0, _ADR 00150000h)»): su **_ADR** (el
+  aparato y la función del PCI; si no lo tiene, por su nombre: I2C0-3 son
+  15.0-15.3, I2C4 19.2 e I2C5 19.1), **SSCN y FMCN**, y su _PS0 y el del
+  touchpad (como hace Linux al encenderlos).
+
+Lo apunta (`ACPI: I2C-HID: \_SB_.PCI0.I2C0.TPD0 ELAN1200 (_CID PNP0C50),
+_STA Fh: I2cSerialBus 15h a 400000 Hz por \_SB.PCI0.I2C0, de su
+ResourceTemplate (no del _CRS) (_ADR 00150000h), GpioInt ...; _DSM:
+descriptor HID en 0001h`) y se lo da al núcleo con la **llamada 159** (solo
+el servicio de ACPI; una ficha `pe_i2chid` / `Ficha_i2c` de 196 octetos por
+dispositivo y una vacía al final). Los que su _STA dice que no están se
+mandan también (detrás): con `OSYS` bajo hay DSDT que los esconden.
+
+**3. HID sobre I2C** (`i2chid.cas`, con `hiddesc.cas`). Al llegar la ficha
+vacía, una tarea del núcleo, por cada touchpad (primero los presentes):
+
+1. pone su controladora a su velocidad (400 kHz como mucho);
+2. lee el **descriptor HID** (30 octetos: se escribe el registro y se lee con
+   repeated start) y lo comprueba (mide 30, versión 1.00, con registros).
+   Si en la dirección y el registro que dice ACPI no hay nada, prueba los de
+   siempre: 0001h y 0020h en la misma dirección, 15h/0001h (ELAN, FocalTech),
+   2Ch/0020h y 20h/0020h (Synaptics);
+3. **SET_POWER** (encendido) y **RESET**, y espera su contestación (un
+   informe de largo 0) leyendo, hasta 1 s;
+4. lee el **descriptor de informe** y lo analiza `hiddesc.cas` (el mismo de
+   los ratones USB, que se ha sacado de `usbhid.cas` y ahora sabe más: Push y
+   Pop, usos de 32 bits, X e Y en elementos distintos, la rueda, varios
+   informes): el informe del **ratón** (X e Y relativos: todo touchpad de
+   precisión lo lleva, y es lo que manda recién encendido), y el **modo de
+   entrada** (Input Mode, 0D:52, una característica), que se pone a **0,
+   ratón** con un SET_REPORT (Windows y Linux lo ponen a 3, los dedos);
+5. y luego, cada 10 ms (y hasta cuatro seguidos si tenía guardados), **lee
+   el registro de entrada** sin escribir antes, como manda la norma: dos
+   octetos de largo y el informe. Largo 0 es que no había nada (la norma lo
+   pide así para las interrupciones compartidas: por eso vale **leer sin la
+   GpioInt**). Lo del ratón va a `raton.cas` como un ratón USB (y mientras
+   se escribe, con lo de «Quieto mientras se escribe» del Panel, no se mueve).
+   Si un touchpad da el mismo informe con movimiento una y otra vez (no lo
+   debería hacer), se apunta y desde entonces solo cuenta lo que cambia.
+
+El registro: `i2c-hid: touchpad \_SB_.PCI0.I2C0.TPD0 (ELAN1200, dirección
+15h, 400 kHz; controladora 00:15.0, la dirección de su ResourceTemplate,
+_DSM: 0001h)`, `i2c-hid:   el descriptor HID (15h, registro 0001h): bien:
+04F3:xxxx, ...` (o «mal: ...» con sus 30 octetos), `RESET: contestado en
+30 ms`, los octetos del descriptor de informe, `el ratón: informe 1, 2
+botones, X e Y de 8 bits, rueda de 8 bits`, `el modo de entrada (informe 3)
+a 0, ratón: bien` y `en marcha`; y al medio minuto, cuántos informes han
+llegado. Todo eso va a `ARRANQUE.TXT` (con «registro»; al medio minuto se
+guarda otra vez también si solo hay controladoras I2C) y lo de ACPI.BIN a
+`ACPI.TXT`. Con **`sini2c`** en la línea del cargador, ni el núcleo ni
+ACPI.BIN tocan nada de I2C. En el Administrador de dispositivos, la
+controladora sale llevada por `i2c.cas`, con su velocidad y cuántos
+touchpads cuelgan de ella.
+
+**El ASUS GL553VD** (sus tablas de verdad, en `tests/acpi/asus-gl553vd/`,
+sin la MSDM; desensambladas con `tools/amlver.py`, un desensamblador de AML
+pequeño hecho para esto: no hay iasl). La única controladora I2C del PCI es
+la **00:15.0 8086:A160** (I2C0; zona en DF42E000h). Su touchpad es
+`\_SB.PCI0.I2C0.TPD0`, con `_CID "PNP0C50"` y `_HID "XXXX0000"`, que cambia
+su **_INI** según lo que haya elegido la BIOS (`SDS0`, en la GNVS) y lo que
+haya visto (los bits `ELAN` y `AWTP` de su CMOS, índice D2h por 72h/73h):
+
+| SDS0 | La BIOS ha visto | _HID | Dirección | Registro del descriptor (_DSM) |
+|---|---|---|---|---|
+| 5 | ELAN | ELAN1200 | 15h | 0001h |
+| 5 | FocalTech (AWTP) | FTE1200 | 15h | 0001h |
+| 1 | — | SYNA2393 | 20h | 0020h |
+| 2 | — | 06CB2846 | 20h | 0020h |
+| 0 | — | (no está: _STA 0) | — | — |
+
+Siempre a **400 kHz**, sin SSCN ni FMCN (los contadores se calculan para
+120 MHz) y con su interrupción en una `GpioInt` de `\_SB.PCI0.GPI0`
+(nivel, activa en bajo; el número de patilla lo pone su _INI con `GNUM
+(GPDI)`). Su _CRS, a quien no es Windows 8, solo da la interrupción: por eso
+se lee `SBFB`. La DSDT trae otro, `\_SB.PCI0.I2C1.TPL1` (en 4Ch), en una I2C1
+que este equipo no tiene en el PCI. Lo más probable, por los ASUS de 2017,
+es el **ELAN1200 en 15h**; cuál es de verdad lo dirá el registro del
+arranque en el equipo.
+
+**El ThinkPad E14 Gen 5** (Raptor Lake-U): el TrackPoint y sus botones van
+por el PS/2 (y funcionan); el touchpad, `\_SB_.PC00.I2C0.TPD0` ELAN06C6 en
+15h a 400 kHz (descriptor en 0001h, GpioInt 177), por I2C: sus controladoras
+51E8 y 51EA estaban sin zona (a 0) y su I2cSerialBus dice «NULL» (las dos
+cosas, arregladas el 23/11, arriba).
+
+**El Monovate 14.1** (i3-1115G4, Tiger Lake-UP3): `\_SB_.PC00.I2C0.TPD1`
+SYNA3602 en 2Ch a 400 kHz por `\_SB.PC00.I2C0` (_ADR 00150000h), descriptor
+en 0020h, GpioInt 264; sus cinco I2C, sin zona (a 0): arreglado el 23/11.
+El ASUS GL553VD (ELAN1200 en 15h por la 00:15.0 A160), **funciona en el
+equipo** (se mueve y hace clic) y no cambia: su firmware sí le pone zona.
+
+**Lo que falta**: la **GpioInt** (leer cada 10 ms gasta poco, pero el
+informe llega hasta 10 ms tarde; para usarla hay que saber dónde está la
+patilla en el controlador GPIO de cada PCH, como hace `pinctrl-intel` de
+Linux); el **modo de los dedos** (Input Mode = 3: los contactos irían a
+`touchpad.cas`, con tocar para hacer clic, el borde y dos dedos para
+desplazar, como el Synaptics PS/2); las **pantallas táctiles** (también
+PNP0C50, pero sin ratón: se dicen y no se usan); las controladoras I2C que
+solo están en ACPI (Bay Trail y Cherry Trail, INT33C3/80860F41; AMD,
+AMDI0010).
+
+**Probarlo**: `SOLO=i2chid castel/pruebas.sh` (la parte 52,
+`castel/pruebas_i2chid.sh`). QEMU no tiene ni controladora DesignWare ni
+HID sobre I2C, así que:
+
+1. con corre32, `HIDPRUEB.BIN` (`uhidprue.cas`) con los descriptores de
+   informe de **siete touchpads y pantallas de verdad** (ELAN 04F3:300B,
+   3045 y 313A; Synaptics 06CB:CE08 y 75DB; Dell XPS 9360; la pantalla táctil
+   ELAN del XPS 9360; de las pruebas del núcleo Linux,
+   `nucleo32/i2chid/reales.txt`) y con informes, descriptores HID y órdenes
+   hechos a mano (`nucleo32/i2chid/sint.txt`);
+2. con `build/acpi_sim -i2chid` (ACPICA en Linux, como en ACPI.BIN; la
+   opción nueva `-m DIR VALOR` pone un octeto en la memoria, para las
+   variables de la BIOS): la SSDT de prueba `tests/acpi/i2chid-qemu.aml`
+   (hecha a mano por `tests/acpi/hazi2chid.py`: un ELAN con _CRS y _DSM, y
+   un Synaptics ausente con el _CRS «de Intel»), las tablas del Toshiba (no
+   tiene ninguno) y las del ASUS con cada elección de su BIOS;
+3. en QEMU: sin controladora I2C, el arranque lo dice y sigue; con la SSDT
+   de prueba (`-acpitable`), ACPI.BIN halla los dos touchpads y se los da al
+   núcleo por la 159, que dice que no hay controladora; con `sini2c`, nada;
+4. (23/11) las zonas sin poner y las altas, sin I2C en QEMU: en la línea
+   del cargador, **`pci=cero`** pone a 0 la zona 0 de las controladoras USB
+   (la del xHCI, de 64 bits; la del EHCI, de 32) antes de que las pida su
+   driver, y **`pci=arriba`** sube la del xHCI por encima de los 4 GB (por la
+   BIOS); `pci_memoria` tiene que darles dirección o bajarla y el teclado y el
+   ratón USB tienen que ir. Y la SSDT «como la del E14»
+   (`hazi2chid.py ... null`: «NULL» en el I2cSerialBus, un padre con _ADR y
+   otro sin él, I2C3 = 15.3), con acpi_sim y en QEMU.
+
+En el equipo, lo primero que mirar es `ARRANQUE.TXT` (las líneas `i2c:` e
+`i2c-hid:`) y `ACPI.TXT` (las `ACPI: I2C-HID:`).
 
 ## 15. Las pruebas
 

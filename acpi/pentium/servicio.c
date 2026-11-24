@@ -1037,6 +1037,15 @@ int servicio_principal(void)
 				prepara_energia();
 			reg("ACPI: SMBIOS en %08Xh\n", mq_smbios());	/* (UEFI) */
 			reg("ACPI: el núcleo ha puesto a la vista %u KB de memoria física\n", mq_puestos >> 10);
+			/* (I2CHID) los touchpads HID sobre I2C, para el núcleo (llamada 159) */
+			if (!tiene(args, "sini2c")) {
+				static struct pe_i2chid tp[I2CHID_MAX];
+				int k, m = i2chid_busca(tp, I2CHID_MAX);
+
+				for (k = 0; k < m; k++)
+					sc(SC_I2CHID, (u32)&tp[k], 0, 0);
+				sc(SC_I2CHID, 0, 0, 0);
+			}
 		}
 		/* (dispositivos) una vez, con la tarea quieta y ya leída la batería */
 		if (preparado == 1 && apm.fase != FASE_EMPEZANDO && apm.fase != FASE_ERROR && tarea_quieta()) {

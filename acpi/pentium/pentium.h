@@ -23,6 +23,7 @@
 #define SC_PCI 152		/* EBX dirección (como en CF8h; bits 0-1: el octeto), ECX valor, EDX octetos | ES_ESCRIBE */
 #define SC_SERVICIO 153		/* EBX struct pe_energia (o 0), ECX tics que esperar como mucho -> la orden */
 #define SC_DISPOSITIVO 156	/* (dispositivos) EBX struct pe_dispositivo, ECX 0 apuntar / 1 olvidar los suyos */
+#define SC_I2CHID 159		/* (I2CHID) EBX struct pe_i2chid; 0: ya están todas */
 #define ES_ESCRIBE 0x100
 #define ES_ERROR(r) ((r) >= 0xFFFFFFF0u)
 
@@ -99,5 +100,25 @@ struct pe_dispositivo {
 	struct pe_recurso recursos[6];
 	char pnp[16], controlador[16], nombre[48], marca[32], detalle[80];
 };
+
+/* (I2CHID) un dispositivo HID sobre I2C (PNP0C50) que ha hallado el servicio
+ * (acpi/pentium/i2chid.c), para el núcleo (la llamada 159). La misma ficha
+ * que Ficha_i2c de castel/nucleo32/i2chid.cas (196 octetos): si cambia una,
+ * la otra. */
+#define PE_I2CHID_VERSION 1
+#define I2CHID_MAX 8
+struct pe_i2chid {
+	u32 version;		/* PE_I2CHID_VERSION */
+	u32 sta;		/* su _STA (0x0F si no lo tiene) */
+	u32 pci;		/* la controladora: bus << 16 | disp << 11 | func << 8; FFFFFFFFh no se sabe */
+	u32 adr;		/* el _ADR de la controladora */
+	u32 esclavo, velocidad, diez;	/* del I2cSerialBus */
+	u32 registro;		/* el del descriptor HID (_DSM, función 1); FFFFFFFFh no lo dice */
+	u32 ss[3], fm[3];	/* SSCN y FMCN de la controladora: alto, bajo, retención (0: no hay) */
+	u32 gpio_pin, gpio_modo;	/* su GpioInt (FFFFFFFFh: no tiene); modo: disparo | polaridad << 8 */
+	u32 origen;		/* bit 0: el I2cSerialBus no viene del _CRS sino de un ResourceTemplate suyo; bit 1: «pci» por el nombre; bit 2: la controladora es su padre (la de su I2cSerialBus no existe: «NULL») */
+	char ruta[48], hid[16], cid[16], fuente[48];
+};
+int i2chid_busca(struct pe_i2chid *f, int cabe);
 
 #endif
