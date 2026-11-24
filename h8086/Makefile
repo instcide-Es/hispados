@@ -123,10 +123,29 @@ endef
 $(B)/hispa8086-%.img: $(B)/arranque.bin $(ARCHIVOS) pon_arranque.py
 	$(call DISQUETE,$*)
 
+# ---- el disquete de Oficina: las aplicaciones (va aparte del sistema) ----
+# CUENTAS, la hoja de cálculo (programas/cuentas.asm y sus programas/cuentas/*.inc)
+CUENTAS_INC = $(wildcard programas/cuentas/*.inc)
+$(B)/CUENTAS.COM: programas/cuentas.asm $(CUENTAS_INC) | $(B)
+	mkdir -p $(B)/gen/cuentas
+	for f in $(CUENTAS_INC); do $(CP437) $$f $(B)/gen/cuentas/$$(basename $$f) || exit 1; done
+	$(CP437) $< $(B)/gen/cuentas.asm && cd $(B)/gen && $(NASM) -f bin -l cuentas.lst -o ../CUENTAS.COM cuentas.asm
+$(B)/GASTOS.CSV: programas/GASTOS.CSV | $(B)
+	$(CP437) $< $(B)/gen/gastos.tmp && sed 's/$$/\r/' $(B)/gen/gastos.tmp > $@
+OFICINA += $(B)/CUENTAS.COM $(B)/GASTOS.CSV
+# (fin de CUENTAS)
+
+$(B)/oficina8086-%.img: $(OFICINA)
+	rm -f $@
+	mformat -C -f $* -v OFICINA -i $@ ::
+	mcopy -i $@ $(OFICINA) ::
+
+all: $(B)/oficina8086-360.img
+
 # lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
 PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM
 
-prueba: $(DISCOS) $(PRUEBAS)
+prueba: $(DISCOS) $(PRUEBAS) $(B)/oficina8086-360.img
 	./prueba/prueba.sh
 
 clean:

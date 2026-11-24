@@ -1,0 +1,8 @@
+Gastos de la casa;Enero;Febrero;Marzo;Total
+Luz;45,20;51,75;39,90;=SUMA(B2:D2)
+Agua;18,40;18,40;19,10;=SUMA(B3:D3)
+Teléfono;29,99;29,99;29,99;=SUMA(B4:D4)
+Compra;312,55;298,10;305,80;=SUMA(B5:D5)
+Total;=SUMA(B2:B5);=SUMA(C2:C5);=SUMA(D2:D5);=SUMA(E2:E5)
+Media al mes;;;;=REDONDEAR(E6/3;2)
+IVA del 21 %;;;;=REDONDEAR(E6*21%;2)
