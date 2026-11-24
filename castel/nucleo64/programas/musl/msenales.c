@@ -203,9 +203,9 @@ int main(void)
 	MIRA(write(tubo[1], "y", 1) == -1 && errno == EPIPE, "escribir sin quien lea: EPIPE (SIGPIPE ignorada)");
 	close(tubo[1]);
 	pipe(tubo);
+	close(tubo[0]);	/* antes del fork: si no, el hijo podría escribir mientras el padre aún lee */
 	h = fork();
-	if (h == 0) { signal(SIGPIPE, SIG_DFL); close(tubo[0]); write(tubo[1], "z", 1); _exit(0); }
-	close(tubo[0]);
+	if (h == 0) { signal(SIGPIPE, SIG_DFL); write(tubo[1], "z", 1); _exit(0); }
 	close(tubo[1]);
 	MIRA(waitpid(h, &st, 0) == h && WIFSIGNALED(st) && WTERMSIG(st) == SIGPIPE, "sin ignorarla, SIGPIPE cierra al hijo");
 	printf("  SIG_IGN; SIGPIPE: ignorada, EPIPE; sin ignorarla, cierra el proceso\n");
