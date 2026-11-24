@@ -72,12 +72,29 @@ instala_efi $W/i                # (SDHCI) y el del disco instalado
 IMG=$W/usb.img
 truncate -s ${USB_MB:-64}M $IMG   # (USB_MB=256: con sitio para las firmas de Escudo)
 parted -s $IMG mklabel msdos mkpart primary fat16 1MiB 100% set 1 boot on
-L=$(losetup -fP --show $IMG)
-# (la partición tarda un momento en aparecer)
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -b ${L}p1 ] && break; sleep 0.1; done
-[ -b ${L}p1 ] || { partprobe $L 2> /dev/null; sleep 0.5; }
-mkfs.fat -F 16 -n HISPAPENT ${L}p1 > /dev/null
-mount ${L}p1 $W/m
+# El dispositivo loop y su partición: con otras pruebas haciendo lo mismo a
+# la vez, la partición puede tardar, no aparecer (el examen de particiones,
+# ocupado) o desaparecer justo después (udev, al quitar la de otro loop que
+# acaba de soltarse con el mismo número): se espera, se pide otra vez y, si
+# no, se suelta y se prueba con otro loop (hasta 6 veces)
+loop_listo() {
+  local i
+  for i in $(seq 30); do
+    if [ -b ${L}p1 ] && mkfs.fat -F 16 -n HISPAPENT ${L}p1 > $W/mkfs.txt 2>&1 && mount ${L}p1 $W/m 2>> $W/mkfs.txt; then return 0; fi
+    [ $((i % 5)) = 0 ] && { partprobe $L 2> /dev/null || partx -u $L 2> /dev/null || true; }
+    sleep 0.2
+  done
+  return 1
+}
+for intento in 1 2 3 4 5 6; do
+  L=$(losetup -fP --show $IMG) || { L=; [ $intento = 6 ] && { echo "usb.sh: no hay un loop libre"; exit 1; }; sleep $intento; continue; }
+  loop_listo && break
+  echo "usb.sh: $L sin su partición (vez $intento): $(tail -n 1 $W/mkfs.txt 2> /dev/null)" >&2
+  losetup -d $L 2> /dev/null || true
+  L=
+  [ $intento = 6 ] && { echo "usb.sh: no se puede preparar la partición de la memoria"; exit 1; }
+  sleep $intento
+done
 # (TERMO) con TERMO=1, la memoria del Termómetro: TERMO.BIN (termo/hacer.sh)
 # en la raíz y como módulo, y en el menú, primero (y solo, a los 5 s), el
 # escritorio con «termo», que lo abre al arrancar
