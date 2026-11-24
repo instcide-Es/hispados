@@ -1,0 +1,326 @@
+; =============================================================================
+;  hora64.cas - Hispa-64, etapa 9: la hora de verdad y la zona horaria
+;  (docs/64/HISPA-64.md, sección 15).
+;   - El reloj del sistema (CLOCK_REALTIME, gettimeofday, time) es UTC: el
+;     reloj del núcleo (ahora_ns, que no para) más un desfase; clock_settime
+;     y settimeofday (lo que hace NTP) cambian el desfase.
+;   - Al arrancar se toma del CMOS. En los equipos con Windows el CMOS va en
+;     la hora local; por eso, por omisión, **se toma como hora local** de la
+;     zona («cmos=utc» en la línea del núcleo, si va en UTC, como en Linux).
+;   - La zona: «zona=Europa/Madrid» (la de por omisión), Atlántico/Canarias,
+;     Europa/Lisboa, Europa/Londres, UTC (también con los nombres en inglés
+;     de la base de datos de zonas), o una zona de POSIX tal cual
+;     («zona=CET-1CEST,M3.5.0,M10.5.0/3»). Se entiende la forma de POSIX
+;     con las reglas «M» (mes, semana —5 es la última— y día, a una hora): el
+;     núcleo la usa para el CMOS, y los programas la reciben en la variable
+;     TZ (musl hace lo demás: localtime, strftime, tm_zone...).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Hora64
+
+    importar Reloj64
+
+    público variable zona_tz: arreglo [64] de byte     ; la de POSIX (la variable TZ)
+    público variable zona_nombre: arreglo [40] de byte
+    público variable cmos_local: bool
+    público variable puesta_veces: nat64        ; cuántas veces la han puesto (clock_settime)
+    variable desfase: ent64                     ; real (ns desde 1970, UTC) = ahora_ns() + desfase
+    ; la zona, ya leída
+    variable std_este, dst_este: ent64          ; segundos al este de UTC (Madrid: 3600 y 7200)
+    variable con_dst: bool
+    variable ini_m, ini_s, ini_d, fin_m, fin_s, fin_d: nat32
+    variable ini_h, fin_h: ent64                ; la hora del cambio (segundos de la hora local de antes)
+    variable std_nombre, dst_nombre: arreglo [8] de byte
+
+    ; ---- las fechas ----
+    ; los días desde el 1/1/1970 de d/m/a (el algoritmo de «days_from_civil»)
+    público función días_de(d: nat32, me: nat32, a: nat32): ent64
+        variable an, m, era, yoe, doy, doe: ent64
+        an := ent64(a)
+        m := ent64(me)
+        si m <= 2 entonces an := an - 1 fin
+        era := an div 400
+        yoe := an - era * 400
+        si m > 2 entonces doy := (153 * (m - 3) + 2) div 5 + ent64(d) - 1 sino doy := (153 * (m + 9) + 2) div 5 + ent64(d) - 1 fin
+        doe := yoe * 365 + yoe div 4 - yoe div 100 + doy
+        devolver era * 146097 + doe - 719468
+    fin
+
+    ; de los días desde 1970, el día, el mes y el año («civil_from_days»)
+    público función fecha_de(z0: ent64, ref d: nat32, ref me: nat32, ref a: nat32)
+        variable z, era, doe, yoe, y_, doy, mp: ent64
+        z := z0 + 719468
+        era := z div 146097
+        doe := z - era * 146097
+        yoe := (doe - doe div 1460 + doe div 36524 - doe div 146096) div 365
+        y_ := yoe + era * 400
+        doy := doe - (365 * yoe + yoe div 4 - yoe div 100)
+        mp := (5 * doy + 2) div 153
+        d := nat32(doy - (153 * mp + 2) div 5 + 1)
+        si mp < 10 entonces me := nat32(mp + 3) sino me := nat32(mp - 9) fin
+        si me <= 2 entonces y_ := y_ + 1 fin
+        a := nat32(y_)
+    fin
+
+    ; el día de la semana de un día desde 1970 (0 domingo; el 1/1/1970 fue jueves)
+    función semana_de(z: ent64): nat32
+        devolver nat32((z + 4) mod 7)
+    fin
+
+    ; el día (desde 1970) de la regla «M»: mes m, semana s (1 a 5, 5 la última), día d
+    función día_regla(a: nat32, m: nat32, s: nat32, d: nat32): ent64
+        variable z, z1: ent64
+        variable w, días_mes: nat32
+        z := días_de(1, m, a)
+        w := semana_de(z)
+        z := z + ent64((d + 7 - w) mod 7)                   ; el primer «d» del mes
+        z := z + ent64((s - 1) * 7)
+        si m = 12 entonces z1 := días_de(1, 1, a + 1) sino z1 := días_de(1, m + 1, a) fin
+        días_mes := nat32(z1 - días_de(1, m, a))
+        mientras z >= días_de(1, m, a) + ent64(días_mes) hacer z := z - 7 fin
+        devolver z
+    fin
+
+    ; ¿es la hora de verano en el instante «u» (segundos UTC)?
+    público función de_verano(u: ent64): bool
+        variable d, me, a: nat32
+        variable ini, fin_: ent64
+        si no con_dst entonces devolver falso fin
+        fecha_de((u + std_este) div 86400, d, me, a)
+        ; (los cambios, en UTC: el de primavera con la hora de invierno, el de otoño con la de verano)
+        ini := día_regla(a, ini_m, ini_s, ini_d) * 86400 + ini_h - std_este
+        fin_ := día_regla(a, fin_m, fin_s, fin_d) * 86400 + fin_h - dst_este
+        si ini < fin_ entonces devolver u >= ini y u < fin_ fin
+        devolver u >= ini o u < fin_                         ; (el hemisferio sur)
+    fin
+
+    ; los segundos al este de UTC en el instante u
+    público función este_de(u: ent64): ent64
+        si de_verano(u) entonces devolver dst_este fin
+        devolver std_este
+    fin
+
+    público función nombre_en(u: ent64): puntero a byte
+        si de_verano(u) entonces devolver dirección(dst_nombre[0]) fin
+        devolver dirección(std_nombre[0])
+    fin
+
+    ; ---- leer una zona de POSIX ----
+    función es_letra(c: byte): bool
+        devolver (c >= 'A' y c <= 'Z') o (c >= 'a' y c <= 'z')
+    fin
+
+    función es_cifra(c: byte): bool
+        devolver c >= '0' y c <= '9'
+    fin
+
+    ; un número desde t[i]; avanza i
+    función número(t: puntero a byte, ref i: nat32): nat32
+        variable n: nat32
+        n := 0
+        mientras es_cifra(t[i]) hacer
+            n := n * 10 + nat32(t[i] - '0')
+            i := i + 1
+        fin
+        devolver n
+    fin
+
+    ; [+-]hh[:mm[:ss]] en segundos (con su signo)
+    función hora_posix(t: puntero a byte, ref i: nat32): ent64
+        variable s: ent64
+        variable neg: bool
+        neg := falso
+        si t[i] = '-' entonces
+            neg := cierto
+            i := i + 1
+        sino si t[i] = '+' entonces
+            i := i + 1
+        fin
+        s := ent64(número(t, i)) * 3600
+        si t[i] = ':' entonces
+            i := i + 1
+            s := s + ent64(número(t, i)) * 60
+            si t[i] = ':' entonces
+                i := i + 1
+                s := s + ent64(número(t, i))
+            fin
+        fin
+        si neg entonces devolver -s fin
+        devolver s
+    fin
+
+    ; el nombre (letras, o <...>) a n
+    función nombre_posix(t: puntero a byte, ref i: nat32, n: puntero a byte)
+        variable k: nat32
+        k := 0
+        si t[i] = '<' entonces
+            i := i + 1
+            mientras t[i] <> 0 y t[i] <> '>' hacer
+                si k < 7 entonces
+                    n[k] := t[i]
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+            si t[i] = '>' entonces i := i + 1 fin
+        sino
+            mientras es_letra(t[i]) hacer
+                si k < 7 entonces
+                    n[k] := t[i]
+                    k := k + 1
+                fin
+                i := i + 1
+            fin
+        fin
+        n[k] := 0
+    fin
+
+    ; «,Mm.s.d[/hora]»; falso si no es de esa forma
+    función regla(t: puntero a byte, ref i: nat32, ref m: nat32, ref s: nat32, ref d: nat32, ref h: ent64): bool
+        si t[i] <> ',' entonces devolver falso fin
+        i := i + 1
+        si t[i] <> 'M' entonces devolver falso fin
+        i := i + 1
+        m := número(t, i)
+        si t[i] <> '.' entonces devolver falso fin
+        i := i + 1
+        s := número(t, i)
+        si t[i] <> '.' entonces devolver falso fin
+        i := i + 1
+        d := número(t, i)
+        h := 7200
+        si t[i] = '/' entonces
+            i := i + 1
+            h := hora_posix(t, i)
+        fin
+        devolver m >= 1 y m <= 12 y s >= 1 y s <= 5 y d <= 6
+    fin
+
+    ; lee la zona de POSIX t; falso si no se entiende (y se queda en UTC)
+    función lee_zona(t: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        con_dst := falso
+        std_este := 0
+        dst_este := 0
+        nombre_posix(t, i, dirección(std_nombre[0]))
+        si std_nombre[0] = 0 entonces devolver falso fin
+        si no es_cifra(t[i]) y t[i] <> '-' y t[i] <> '+' entonces devolver falso fin
+        std_este := -hora_posix(t, i)
+        dst_este := std_este + 3600
+        si t[i] = 0 entonces devolver cierto fin
+        nombre_posix(t, i, dirección(dst_nombre[0]))
+        si dst_nombre[0] = 0 entonces devolver falso fin
+        si es_cifra(t[i]) o t[i] = '-' o t[i] = '+' entonces dst_este := -hora_posix(t, i) fin
+        si no regla(t, i, ini_m, ini_s, ini_d, ini_h) entonces devolver falso fin
+        si no regla(t, i, fin_m, fin_s, fin_d, fin_h) entonces devolver falso fin
+        con_dst := cierto
+        devolver t[i] = 0
+    fin
+
+    función copia(a: puntero a byte, de: puntero a byte, máx: nat32)
+        variable i: nat32
+        i := 0
+        mientras de[i] <> 0 y i + 1 < máx hacer
+            a[i] := de[i]
+            i := i + 1
+        fin
+        a[i] := 0
+    fin
+
+    función igual(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y a[i] = b[i] hacer i := i + 1 fin
+        devolver a[i] = b[i]
+    fin
+
+    ; el nombre de una zona (o una de POSIX) a la de POSIX
+    función de_nombre(n: puntero a byte): puntero a byte
+        si n[0] = 0 o igual(n, "Europa/Madrid") o igual(n, "Europe/Madrid") o igual(n, "Madrid") entonces devolver "CET-1CEST,M3.5.0,M10.5.0/3" fin
+        si igual(n, "Atlántico/Canarias") o igual(n, "Atlantico/Canarias") o igual(n, "Atlantic/Canary") o igual(n, "Canarias") entonces devolver "WET0WEST,M3.5.0/1,M10.5.0" fin
+        si igual(n, "Europa/Lisboa") o igual(n, "Europe/Lisbon") o igual(n, "Lisboa") entonces devolver "WET0WEST,M3.5.0/1,M10.5.0" fin
+        si igual(n, "Europa/Londres") o igual(n, "Europe/London") o igual(n, "Londres") entonces devolver "GMT0BST,M3.5.0/1,M10.5.0" fin
+        si igual(n, "Europa/París") o igual(n, "Europe/Paris") o igual(n, "Europa/Berlín") o igual(n, "Europe/Berlin") o igual(n, "Europa/Roma") o igual(n, "Europe/Rome") entonces devolver "CET-1CEST,M3.5.0,M10.5.0/3" fin
+        si igual(n, "UTC") o igual(n, "GMT") entonces devolver "UTC0" fin
+        devolver n
+    fin
+
+    ; ---- el reloj ----
+    ; los ns desde 1970 (UTC)
+    público función real_ns(): nat64
+        devolver nat64(ent64(ahora_ns()) + desfase)
+    fin
+
+    público función real_s(): nat64
+        devolver real_ns() div 1000000000
+    fin
+
+    ; pone la hora (clock_settime, settimeofday)
+    público función pon_real_ns(ns: nat64)
+        desfase := ent64(ns) - ent64(ahora_ns())
+        puesta_veces := puesta_veces + 1
+    fin
+
+    ; de un instante del reloj real a ahora_ns (para los plazos absolutos)
+    público función real_a_mono(ns: nat64): nat64
+        variable m: ent64
+        m := ent64(ns) - desfase
+        si m < 0 entonces devolver 0 fin
+        devolver nat64(m)
+    fin
+
+    ; la hora local (de la zona) del instante u: d/m/a h:mi:s
+    público función local_de(u: ent64, ref d: nat32, ref me: nat32, ref a: nat32, ref h: nat32, ref mi: nat32, ref s: nat32)
+        variable l, r: ent64
+        l := u + este_de(u)
+        fecha_de(l div 86400, d, me, a)
+        r := l mod 86400
+        si r < 0 entonces r := r + 86400 fin
+        h := nat32(r div 3600)
+        mi := nat32((r div 60) mod 60)
+        s := nat32(r mod 60)
+    fin
+
+    ; al arrancar: la zona (el valor de «zona=», o vacío) y el CMOS
+    público función prepara_hora(nombre: puntero a byte, cmos_utc: bool)
+        variable t: puntero a byte
+        variable c: ent64
+        si nombre[0] = 0 entonces copia(dirección(zona_nombre[0]), "Europa/Madrid", 40) sino copia(dirección(zona_nombre[0]), nombre, 40) fin
+        t := de_nombre(nombre)
+        copia(dirección(zona_tz[0]), t, 64)
+        si no lee_zona(dirección(zona_tz[0])) entonces
+            copia(dirección(zona_tz[0]), "UTC0", 64)
+            copia(dirección(zona_nombre[0]), "UTC (no se entiende la zona dada)", 40)
+            lee_zona(dirección(zona_tz[0]))
+        fin
+        cmos_local := no cmos_utc
+        c := 0
+        si hay_cmos() entonces c := ent64(segundos_unix()) fin
+        si cmos_local entonces
+            ; (la hora local del CMOS menos lo que va la zona; en la hora que se
+            ; repite al pasar al invierno, se toma la de verano)
+            c := c - std_este
+            si de_verano(c - (dst_este - std_este)) entonces c := c - (dst_este - std_este) fin
+        fin
+        desfase := c * 1000000000 - ent64(ahora_ns())
+    fin
+
+    ; «24/11/2026 22:30:05 CET (UTC+1)»
+    público función escribe_local()
+        variable u, e: ent64
+        variable d, me, a, h, mi, s: nat32
+        u := ent64(real_s())
+        local_de(u, d, me, a, h, mi, s)
+        escribir(d div 10, d mod 10, "/", me div 10, me mod 10, "/", a, " ")
+        escribir(h div 10, h mod 10, ":", mi div 10, mi mod 10, ":", s div 10, s mod 10, " ", nombre_en(u))
+        e := este_de(u)
+        escribir(" (UTC")
+        si e >= 0 entonces escribir("+") sino escribir("-") fin
+        si e < 0 entonces e := -e fin
+        escribir(e div 3600)
+        si e mod 3600 <> 0 entonces escribir(":", (e mod 3600) div 60) fin
+        escribir(")")
+    fin
+
+fin Hora64.

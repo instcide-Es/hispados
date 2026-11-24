@@ -1,0 +1,386 @@
+; =============================================================================
+;  redbase64.cas - Hispa-64, etapa 9: lo de base de la red (docs/64/
+;  HISPA-64.md, sección 15), lo que comparten los drivers de las tarjetas
+;  (intel64, rtl64, virtio64, usbred64), la pila TCP/IP (ip64, tcp64) y los
+;  sockets (red64):
+;   - las interfaces (Ifz): la tarjeta que la lleva (su clase y su número en
+;     el driver), la MAC, el enlace, la configuración de IPv4 (de DHCP) y lo
+;     que se cuenta; la 0 es «lo», la de 127.0.0.1;
+;   - los sockets (Sock): uno por socket(), y los que llegan a uno que
+;     escucha; todo lo de TCP va dentro (su estado, las secuencias, los
+;     búferes, los plazos);
+;   - el cerrojo de la red (un mutex: todo lo de los protocolos y los
+;     sockets se toca con él cerrado) y el suceso del hilo «red» (lo señalan
+;     las interrupciones de las tarjetas y quien deja algo para él);
+;   - el orden de los octetos de la red (big endian) y la suma de IP.
+;  Las IP se guardan como números (10.0.2.15 es 0x0A00020F) y se ponen y se
+;  leen en la red octeto a octeto.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Redbase64
+
+    importar Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64
+
+    ; ---- las interfaces ----
+    público constante MAX_IFZ = 6
+    público constante T_LO = 0                  ; las clases de tarjeta
+    público constante T_E1000 = 1               ; Intel PRO/1000 (8254x, 82574 «e1000e», I217/I218/I219)
+    público constante T_RTL = 2                 ; Realtek RTL8111/8168 y su familia
+    público constante T_VIRTIO = 3              ; virtio-net (QEMU, VirtualBox «paravirtualizada»)
+    público constante T_USB = 4                 ; por USB: CDC-ECM (RTL8153 y los demás)
+    público constante MTU = 1500
+    público constante TRAMA = 1536              ; lo que cabe de una trama (con su cabecera de 14)
+
+    público tipo Ifz = estructura
+        clase, índice: nat32
+        arriba, enlace: nat32
+        velocidad, mtu: nat32
+        mac: arreglo [8] de byte
+        nombre: arreglo [8] de byte
+        tarjeta: arreglo [56] de byte          ; qué es («Intel 82540EM (e1000)»)
+        ip, máscara, puerta, dns, dns2: nat32
+        con_dhcp: nat32
+        dhcp_estado, dhcp_xid, dhcp_servidor, dhcp_intentos: nat32
+        dhcp_concesión: nat64                   ; segundos
+        dhcp_dada, dhcp_próximo: nat64          ; (ns de ahora_ns)
+        dhcp_veces: nat64                       ; cuántas veces se ha tenido IP
+        modo_int: nat32                         ; 0 mirando, 1 MSI, 2 MSI-X, 3 INTx
+        pci: nat32
+        interrupciones: nat64
+        rx_paq, tx_paq, rx_oct, tx_oct, rx_err, tx_err, rx_tirados: nat64
+    fin
+
+    público variable ifzs: arreglo [MAX_IFZ] de Ifz
+    público variable n_ifz: nat32
+
+    ; ---- los sockets ----
+    público constante MAX_SOCK = 256
+    público constante S_STREAM = 1
+    público constante S_DGRAM = 2
+    público constante S_RAW = 3
+    ; las marcas
+    público constante M_LIGADO = 1
+    público constante M_CONECTADO = 2           ; (UDP) connect: el destino de send y de quién se recibe
+    público constante M_ESCUCHA = 4
+    público constante M_NO_LEE = 8              ; shutdown(SHUT_RD)
+    público constante M_NO_ESCRIBE = 16         ; shutdown(SHUT_WR): (TCP) el FIN, cuando salga lo que queda
+    público constante M_HUÉRFANO = 32           ; cerrado por el programa: lo suelta TCP al acabar
+    público constante M_EN_COLA = 64            ; (TCP) llegado a uno que escucha, aún sin accept
+    público constante M_REUSE = 128
+    público constante M_NODELAY = 256
+    público constante M_KEEPALIVE = 512
+    público constante M_DIFUSIÓN = 1024
+    público constante M_FIN_ENVIADO = 2048
+    público constante M_FIN_RECIBIDO = 4096
+    público constante M_FIN_PENDIENTE = 8192    ; (TCP) hay que mandar el FIN en cuanto se pueda
+    público constante M_ACK_YA = 16384          ; (TCP) hay que contestar
+    público constante M_RESETEADO = 32768
+    ; los estados de TCP (RFC 793)
+    público constante T_CERRADO = 0
+    público constante T_ESCUCHA = 1
+    público constante T_SYN_ENVIADO = 2
+    público constante T_SYN_RECIBIDO = 3
+    público constante T_ESTABLECIDO = 4
+    público constante T_FIN_ESPERA1 = 5
+    público constante T_FIN_ESPERA2 = 6
+    público constante T_CERRANDO = 7
+    público constante T_ESPERA_CIERRE = 8       ; CLOSE_WAIT
+    público constante T_ÚLTIMO_ACK = 9
+    público constante T_ESPERA_TIEMPO = 10      ; TIME_WAIT
+    público constante COLA_ESCUCHA = 32
+
+    público tipo Sock = estructura
+        refs: nat64                             ; los descriptores que lo tienen
+        tipo_, proto: nat32
+        estado, marcas: nat32
+        l_ip, l_puerto, r_ip, r_puerto: nat32
+        error: ent32                            ; el error pendiente (SO_ERROR), en negativo
+        ttl: nat32
+        ; lo que llega (TCP: los octetos; UDP y RAW: los datagramas con su cabecera)
+        rx, rx_tam, rx_ini, rx_n: nat64
+        rx_datagramas: nat64
+        ; lo que sale (TCP: desde snd_una)
+        tx, tx_tam, tx_ini, tx_n: nat64
+        ; TCP
+        iss, snd_una, snd_nxt, snd_wnd, snd_wl1, snd_wl2, snd_max: nat32
+        irs, rcv_nxt, rcv_adv: nat32
+        mss, escala_tx, escala_rx: nat32
+        dupacks, retx_n: nat32
+        srtt, rttvar, rto: nat64                ; (ns)
+        rtt_seq: nat32
+        rtt_t: nat64
+        t_retx: nat64                           ; cuándo se retransmite (ns de ahora_ns), 0: nada
+        t_persiste: nat64                       ; la ventana a 0: cuándo se pregunta
+        t_fin: nat64                            ; TIME_WAIT, FIN_WAIT_2...: cuándo se acaba
+        t_vivo: nat64                           ; lo último que llegó (para keepalive)
+        ; escuchar
+        padre: nat64
+        cola_n, cola_máx: nat32
+        cola: arreglo [COLA_ESCUCHA] de nat64
+        rcvbuf, sndbuf: nat64
+        rcv_plazo, snd_plazo: nat64             ; SO_RCVTIMEO y SO_SNDTIMEO (ns; 0: sin plazo)
+        segs_rx, segs_tx, retx_total: nat64
+    fin
+
+    público variable socks: arreglo [MAX_SOCK] de nat64
+    público variable socks_vivos, socks_hechos: nat64
+
+    ; ---- el cerrojo y el hilo ----
+    público variable red_m: Mutex
+    público variable red_suceso: Suceso
+    público variable red_va: bool               ; el hilo «red» está en marcha
+
+    ; ---- lo de las IP ----
+    público función ip4(a: nat32, b: nat32, c: nat32, d: nat32): nat32
+        devolver (a << 24) ob (b << 16) ob (c << 8) ob d
+    fin
+
+    público función be16(d: nat64): nat32
+        devolver (m8(d) << 8) ob m8(d + 1)
+    fin
+
+    público función be32(d: nat64): nat32
+        devolver (m8(d) << 24) ob (m8(d + 1) << 16) ob (m8(d + 2) << 8) ob m8(d + 3)
+    fin
+
+    público función pon_be16(d: nat64, v: nat32)
+        pon_m8(d, (v >> 8) yb 0xFF)
+        pon_m8(d + 1, v yb 0xFF)
+    fin
+
+    público función pon_be32(d: nat64, v: nat32)
+        pon_m8(d, v >> 24)
+        pon_m8(d + 1, (v >> 16) yb 0xFF)
+        pon_m8(d + 2, (v >> 8) yb 0xFF)
+        pon_m8(d + 3, v yb 0xFF)
+    fin
+
+    ; la suma de IP (complemento a uno, de 16 en 16 bits) de n octetos en d,
+    ; empezando por «inicial» (sin plegar del todo: plegar() al final)
+    público función suma(d: nat64, n: nat64, inicial: nat64): nat64
+        ensamblador
+            mov rsi, {d}
+            mov rcx, {n}
+            mov rax, {inicial}
+            xor edx, edx
+        .pares:
+            cmp rcx, 2
+            jb .uno
+            movzx edx, byte [rsi]
+            shl edx, 8
+            movzx ebx, byte [rsi+1]
+            or edx, ebx
+            add rax, rdx
+            add rsi, 2
+            sub rcx, 2
+            jmp .pares
+        .uno:
+            test rcx, rcx
+            jz .ya
+            movzx edx, byte [rsi]
+            shl edx, 8
+            add rax, rdx
+        .ya:
+        fin
+    fin
+
+    ; la suma, plegada a 16 bits e invertida (lo que va en la cabecera)
+    público función plegar(s: nat64): nat32
+        mientras s >> 16 <> 0 hacer s := (s yb 0xFFFF) + (s >> 16) fin
+        devolver nat32((nob s) yb 0xFFFF)
+    fin
+
+    ; ¿son iguales las MAC?
+    público función misma_mac(a: nat64, b: nat64): bool
+        variable i: nat64
+        i := 0
+        mientras i < 6 hacer
+            si m8(a + i) <> m8(b + i) entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; ---- las interfaces ----
+    público función ifz(i: nat32): puntero a Ifz
+        devolver dirección(ifzs[i])
+    fin
+
+    ; da de alta una tarjeta (la llama su driver al ponerla en marcha); su
+    ; número de interfaz, o 0xFFFFFFFF si no caben
+    público función alta_ifz(clase: nat32, índice: nat32, mac: nat64, tarjeta: puntero a byte): nat32
+        variable x: puntero a Ifz
+        variable i, k: nat32
+        si n_ifz = 0 entonces n_ifz := 1 fin         ; (la 0, «lo»)
+        si n_ifz >= MAX_IFZ entonces devolver 0xFFFFFFFF fin
+        i := n_ifz
+        x := ifz(i)
+        x.clase := clase
+        x.índice := índice
+        x.mtu := MTU
+        x.arriba := 1
+        k := 0
+        mientras k < 6 hacer
+            x.mac[k] := byte(m8(mac + k))
+            k := k + 1
+        fin
+        x.nombre[0] := 'e'
+        x.nombre[1] := 't'
+        x.nombre[2] := 'h'
+        x.nombre[3] := byte('0' + i - 1)
+        x.nombre[4] := 0
+        k := 0
+        mientras tarjeta[k] <> 0 y k < 55 hacer
+            x.tarjeta[k] := tarjeta[k]
+            k := k + 1
+        fin
+        x.tarjeta[k] := 0
+        x.con_dhcp := 1
+        n_ifz := n_ifz + 1
+        devolver i
+    fin
+
+    ; (de las interrupciones de las tarjetas) que el hilo «red» mire
+    público función avisa_red()
+        señala(dirección(red_suceso))
+    fin
+
+    ; las llamadas por puntero (los ganchos de un módulo de arriba)
+    público función llama1(f: nat64, a: nat64)
+        ensamblador
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    público función llama3(f: nat64, a: nat64, b: nat64, c: nat64)
+        ensamblador
+            push qword {c}
+            push qword {b}
+            push qword {a}
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    público función llama0(f: nat64)
+        ensamblador
+            mov rax, {f}
+            call rax
+        fin
+    fin
+
+    ; ---- los búferes de los sockets (anillos de octetos) ----
+    público función copia_k(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    público función ceros_k(a: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    ; del anillo (base, tam, ini) a d: n octetos desde la posición «desde» (relativa a ini)
+    función del_anillo(base: nat64, tam: nat64, ini: nat64, desde_: nat64, d: nat64, n: nat64)
+        variable p, k: nat64
+        p := (ini + desde_) mod tam
+        k := tam - p
+        si k > n entonces k := n fin
+        copia_k(d, base + p, k)
+        si n > k entonces copia_k(d + k, base, n - k) fin
+    fin
+
+    función al_anillo(base: nat64, tam: nat64, p0: nat64, de: nat64, n: nat64)
+        variable p, k: nat64
+        p := p0 mod tam
+        k := tam - p
+        si k > n entonces k := n fin
+        copia_k(base + p, de, k)
+        si n > k entonces copia_k(base, de + k, n - k) fin
+    fin
+
+    público función rx_sitio(s: puntero a Sock): nat64
+        devolver s.rx_tam - s.rx_n
+    fin
+
+    ; mete n octetos de d en lo recibido (todos o ninguno)
+    público función rx_mete(s: puntero a Sock, d: nat64, n: nat64): bool
+        si s.rx = 0 o n > s.rx_tam - s.rx_n entonces devolver falso fin
+        al_anillo(s.rx, s.rx_tam, s.rx_ini + s.rx_n, d, n)
+        s.rx_n := s.rx_n + n
+        devolver cierto
+    fin
+
+    público función rx_mira(s: puntero a Sock, desde_: nat64, d: nat64, n: nat64)
+        del_anillo(s.rx, s.rx_tam, s.rx_ini, desde_, d, n)
+    fin
+
+    público función rx_quita(s: puntero a Sock, n: nat64)
+        si n > s.rx_n entonces n := s.rx_n fin
+        s.rx_ini := (s.rx_ini + n) mod s.rx_tam
+        s.rx_n := s.rx_n - n
+        si s.rx_n = 0 entonces s.rx_ini := 0 fin
+    fin
+
+    ; lo que sale: mete lo que quepa (cuántos)
+    público función tx_mete(s: puntero a Sock, d: nat64, n: nat64): nat64
+        si s.tx = 0 entonces devolver 0 fin
+        si n > s.tx_tam - s.tx_n entonces n := s.tx_tam - s.tx_n fin
+        si n = 0 entonces devolver 0 fin
+        al_anillo(s.tx, s.tx_tam, s.tx_ini + s.tx_n, d, n)
+        s.tx_n := s.tx_n + n
+        devolver n
+    fin
+
+    público función tx_mira(s: puntero a Sock, desde_: nat64, d: nat64, n: nat64)
+        del_anillo(s.tx, s.tx_tam, s.tx_ini, desde_, d, n)
+    fin
+
+    público función tx_quita(s: puntero a Sock, n: nat64)
+        si n > s.tx_n entonces n := s.tx_n fin
+        s.tx_ini := (s.tx_ini + n) mod s.tx_tam
+        s.tx_n := s.tx_n - n
+        si s.tx_n = 0 entonces s.tx_ini := 0 fin
+    fin
+
+    público función sock(i: nat32): puntero a Sock
+        devolver puntero(socks[i])
+    fin
+
+    público función escribe_ip(ip: nat32)
+        escribir(ip >> 24, ".", (ip >> 16) yb 0xFF, ".", (ip >> 8) yb 0xFF, ".", ip yb 0xFF)
+    fin
+
+    público función escribe_mac(d: nat64)
+        variable i: nat64
+        variable c: nat32
+        i := 0
+        mientras i < 6 hacer
+            si i > 0 entonces escribir(":") fin
+            c := m8(d + i)
+            escribe_hex2(c)
+            i := i + 1
+        fin
+    fin
+
+    público función escribe_hex2(c: nat32)
+        variable t: arreglo [3] de byte
+        variable h: puntero a byte
+        h := "0123456789abcdef"
+        t[0] := h[(c >> 4) yb 15]
+        t[1] := h[c yb 15]
+        t[2] := 0
+        escribir(dirección(t[0]))
+    fin
+
+fin Redbase64.

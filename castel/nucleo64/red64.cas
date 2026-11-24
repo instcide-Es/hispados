@@ -1,0 +1,1600 @@
+; =============================================================================
+;  red64.cas - Hispa-64, etapa 9: los sockets de POSIX (docs/64/HISPA-64.md,
+;  sección 15), con los números y las formas de Linux x86-64: 41 socket, 42
+;  connect, 43 accept, 288 accept4, 44 sendto, 45 recvfrom, 46 sendmsg, 47
+;  recvmsg, 48 shutdown, 49 bind, 50 listen, 51 getsockname, 52 getpeername,
+;  54 setsockopt, 55 getsockopt; y read, write, readv, writev, close, poll,
+;  select, epoll, fcntl (O_NONBLOCK), ioctl (FIONREAD, FIONBIO y los SIOCGIF*
+;  de las interfaces) y fstat (S_IFSOCK) con ellos.
+;  Solo IPv4 (AF_INET): SOCK_STREAM (TCP), SOCK_DGRAM (UDP, y los «ping
+;  sockets» de ICMP, como Linux) y SOCK_RAW de ICMP. AF_INET6 y AF_UNIX dan
+;  EAFNOSUPPORT (musl lo entiende: getaddrinfo se queda con IPv4).
+;  Lo que espera (connect, accept, recv, send con el búfer lleno) duerme en
+;  Sondeo64 (lo despierta la pila al cambiar algo) y se interrumpe con una
+;  señal (SA_RESTART lo repite); O_NONBLOCK, MSG_DONTWAIT, SO_RCVTIMEO y
+;  SO_SNDTIMEO, como en Linux.
+;  Y los archivos de texto de la red, hechos al abrirlos: /etc/resolv.conf
+;  (los DNS de DHCP), /etc/hosts (localhost, el equipo y los de «hosts=» de
+;  la línea del núcleo), /etc/hostname, /etc/services (los puertos de
+;  siempre: getaddrinfo los mira), /proc/net/route y /proc/net/dev (con la
+;  forma de Linux: los leen ifconfig y los demás).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Red64
+
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64, Procesos, Sondeo64, Azar64, Objetos64, Redbase64, Ip64, Tcp64
+
+    constante EPERM = -1
+    constante EINTR = -4
+    constante EBADF = -9
+    constante EAGAIN = -11
+    constante ENOMEM = -12
+    constante EFAULT = -14
+    constante EINVAL = -22
+    constante EMFILE = -24
+    constante ENOTTY = -25
+    constante EPIPE = -32
+    constante ENOTSOCK = -88
+    constante EDESTADDRREQ = -89
+    constante EMSGSIZE = -90
+    constante EPROTOTYPE = -91
+    constante ENOPROTOOPT = -92
+    constante EPROTONOSUPPORT = -93
+    constante ESOCKTNOSUPPORT = -94
+    constante EOPNOTSUPP = -95
+    constante EAFNOSUPPORT = -97
+    constante EADDRINUSE = -98
+    constante EADDRNOTAVAIL = -99
+    constante ENETUNREACH = -101
+    constante ECONNRESET = -104
+    constante EISCONN = -106
+    constante ENOTCONN = -107
+    constante ETIMEDOUT = -110
+    constante ECONNREFUSED = -111
+    constante EALREADY = -114
+    constante EINPROGRESS = -115
+    constante SOCK_NONBLOCK = 0x800
+    constante SOCK_CLOEXEC = 0x80000
+    constante MSG_PEEK = 2
+    constante MSG_TRUNC = 0x20
+    constante MSG_DONTWAIT = 0x40
+    constante MSG_WAITALL = 0x100
+    constante MSG_NOSIGNAL = 0x4000
+    constante UDP_RX = 65536
+    constante MAX_HOSTS = 8
+
+    público variable sockets_abiertos: nat64
+    variable hosts_ip: arreglo [MAX_HOSTS] de nat32
+    variable hosts_nombre: arreglo [MAX_HOSTS] de arreglo [48] de byte
+    variable n_hosts: nat32
+
+    función sk(d: nat64): puntero a Sock
+        devolver puntero(d)
+    fin
+
+    función bloquea()
+        cierra_mutex(dirección(red_m))
+    fin
+
+    función suelta_()
+        abre_mutex(dirección(red_m))
+    fin
+
+    ; el primer descriptor libre de p (o -1)
+    función fd_nuevo(p: puntero a Proceso): ent32
+        variable fd: nat32
+        fd := 0
+        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
+        si fd >= MAX_FD entonces devolver -1 fin
+        devolver ent32(fd)
+    fin
+
+    ; el socket del descriptor fd (o nulo, con el error)
+    función de_fd(p: puntero a Proceso, fd: nat64, ref err: ent64): puntero a Sock
+        err := 0
+        si fd >= MAX_FD o p.fd_clase[nat32(fd)] = 0 entonces
+            err := EBADF
+            devolver nulo
+        fin
+        si p.fd_clase[nat32(fd)] <> F_SOCKET entonces
+            err := ENOTSOCK
+            devolver nulo
+        fin
+        devolver sk(p.fd_obj[nat32(fd)])
+    fin
+
+    función sin_esperar(p: puntero a Proceso, fd: nat64, marcas_: nat64): bool
+        devolver p.fd_nobloq[nat32(fd)] <> 0 o marcas_ yb MSG_DONTWAIT <> 0
+    fin
+
+    ; ---- las direcciones (struct sockaddr_in: familia, puerto, IP) ----
+    función lee_dir(p: puntero a Proceso, v: nat64, l: nat64, ref ip: nat32, ref puerto: nat32, ref fam: nat32): ent64
+        variable a: arreglo [16] de byte
+        si l < 2 entonces devolver EINVAL fin
+        ceros_k(nat64(dirección(a[0])), 16)
+        si l > 16 entonces l := 16 fin
+        si no copia_de(p, nat64(dirección(a[0])), v, l) entonces devolver EFAULT fin
+        fam := nat32(a[0]) ob (nat32(a[1]) << 8)
+        si fam = 0 entonces devolver 0 fin                       ; AF_UNSPEC
+        si fam <> 2 entonces devolver EAFNOSUPPORT fin
+        si l < 8 entonces devolver EINVAL fin
+        puerto := (nat32(a[2]) << 8) ob nat32(a[3])
+        ip := (nat32(a[4]) << 24) ob (nat32(a[5]) << 16) ob (nat32(a[6]) << 8) ob nat32(a[7])
+        devolver 0
+    fin
+
+    ; escribe la dirección (y su largo en lv, si se da) como hace Linux: hasta lo que quepa
+    función da_dir(p: puntero a Proceso, v: nat64, lv: nat64, ip: nat32, puerto: nat32): ent64
+        variable a: arreglo [16] de byte
+        variable l: nat32
+        si v = 0 o lv = 0 entonces devolver 0 fin
+        si no copia_de(p, nat64(dirección(l)), lv, 4) entonces devolver EFAULT fin
+        ceros_k(nat64(dirección(a[0])), 16)
+        a[0] := 2
+        a[2] := byte(puerto >> 8)
+        a[3] := byte(puerto yb 0xFF)
+        a[4] := byte(ip >> 24)
+        a[5] := byte((ip >> 16) yb 0xFF)
+        a[6] := byte((ip >> 8) yb 0xFF)
+        a[7] := byte(ip yb 0xFF)
+        si ent32(l) < 0 entonces devolver EINVAL fin
+        si l > 16 entonces l := 16 fin
+        si l > 0 entonces
+            si no copia_a(p, v, nat64(dirección(a[0])), nat64(l)) entonces devolver EFAULT fin
+        fin
+        l := 16
+        si no copia_a(p, lv, nat64(dirección(l)), 4) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; ¿es una IP de aquí (o ninguna)?
+    función ip_local(ip: nat32): bool
+        devolver ip = 0 o ifz_de_ip(ip) <> 0xFFFFFFFF
+    fin
+
+    ; ¿está el puerto en uso? (con SO_REUSEADDR, los que están acabando no cuentan)
+    función ocupado(s: puntero a Sock, ip: nat32, puerto: nat32): bool
+        variable i: nat32
+        variable ot: puntero a Sock
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 y socks[i] <> nat64(s) entonces
+                ot := sock(i)
+                si ot.tipo_ = s.tipo_ y ot.proto = s.proto y ot.l_puerto = puerto y (ot.marcas yb M_LIGADO <> 0 o ot.estado <> T_CERRADO) y (ot.l_ip = 0 o ip = 0 o ot.l_ip = ip) entonces
+                    ; (con SO_REUSEADDR, como Linux: estorba solo uno que escucha, o uno
+                    ; atado sin conectar; los que están acabando o conectados, no)
+                    si s.marcas yb M_REUSE = 0 entonces devolver cierto fin
+                    si s.tipo_ <> S_STREAM y ot.marcas yb M_REUSE = 0 entonces devolver cierto fin
+                    si ot.estado = T_ESCUCHA entonces devolver cierto fin
+                    si s.tipo_ = S_STREAM y ot.estado = T_CERRADO y ot.marcas yb M_HUÉRFANO = 0 y ot.marcas yb M_REUSE = 0 entonces devolver cierto fin
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; (con el cerrojo) que tenga puerto: uno libre si no lo tiene
+    función liga_si_no(s: puntero a Sock): ent64
+        variable pt: nat32
+        si s.marcas yb M_LIGADO <> 0 entonces devolver 0 fin
+        pt := puerto_libre(s.tipo_, s.proto)
+        si pt = 0 entonces devolver EADDRINUSE fin
+        s.l_puerto := pt
+        s.marcas := s.marcas ob M_LIGADO
+        devolver 0
+    fin
+
+    ; ---- socket ----
+    público función socket_(p: puntero a Proceso, dom: nat64, tipo_: nat64, proto: nat64): ent64
+        variable t: nat32
+        variable fd: ent32
+        variable s: puntero a Sock
+        si dom = 10 o dom = 1 o dom = 16 o dom = 17 entonces devolver EAFNOSUPPORT fin     ; AF_INET6, AF_UNIX, AF_NETLINK, AF_PACKET
+        si dom <> 2 entonces devolver EAFNOSUPPORT fin
+        t := nat32(tipo_ yb 0xF)
+        si tipo_ yb (nob nat64(0xF ob SOCK_NONBLOCK ob SOCK_CLOEXEC)) <> 0 entonces devolver EINVAL fin
+        si t = S_STREAM entonces
+            si proto <> 0 y proto <> 6 entonces devolver EPROTONOSUPPORT fin
+            proto := 6
+        sino si t = S_DGRAM entonces
+            si proto <> 0 y proto <> 17 y proto <> 1 entonces devolver EPROTONOSUPPORT fin
+            si proto = 0 entonces proto := 17 fin
+        sino si t = S_RAW entonces
+            si proto <> 1 entonces devolver EPROTONOSUPPORT fin
+        sino
+            devolver ESOCKTNOSUPPORT
+        fin
+        fd := fd_nuevo(p)
+        si fd < 0 entonces devolver EMFILE fin
+        bloquea()
+        si t = S_STREAM entonces s := nuevo_sock(t, nat32(proto), TCP_RX, TCP_TX) sino s := nuevo_sock(t, nat32(proto), UDP_RX, 0) fin
+        suelta_()
+        si s = nulo entonces devolver ENOMEM fin
+        s.refs := 1
+        p.fd_clase[nat32(fd)] := F_SOCKET
+        p.fd_obj[nat32(fd)] := nat64(s)
+        p.fd_nobloq[nat32(fd)] := 0
+        si tipo_ yb SOCK_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 fin
+        p.fd_cloexec[nat32(fd)] := 0
+        si tipo_ yb SOCK_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 fin
+        sockets_abiertos := sockets_abiertos + 1
+        devolver ent64(fd)
+    fin
+
+    ; (de Sistema: dup, fork) una referencia más; (close) una menos
+    público función otro_sock(d: nat64)
+        bloquea()
+        sk(d).refs := sk(d).refs + 1
+        suelta_()
+    fin
+
+    público función cierra_sock(d: nat64)
+        variable s: puntero a Sock
+        s := sk(d)
+        bloquea()
+        si s.refs > 0 entonces s.refs := s.refs - 1 fin
+        si s.refs = 0 entonces
+            si s.tipo_ = S_STREAM entonces tcp_suelta(s) sino quita_sock(s) fin
+        fin
+        suelta_()
+        Sondeo64.avisa()
+    fin
+
+    ; ---- bind ----
+    público función bind_(p: puntero a Proceso, fd: nat64, v: nat64, l: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        variable ip, pt, fam: nat32
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        ip := 0
+        pt := 0
+        err := lee_dir(p, v, l, ip, pt, fam)
+        si err < 0 entonces devolver err fin
+        si fam <> 2 y no (fam = 0 y ip = 0) entonces devolver EAFNOSUPPORT fin
+        bloquea()
+        si s.marcas yb M_LIGADO <> 0 entonces
+            err := EINVAL
+        sino si no ip_local(ip) y ip <> 0xFFFFFFFF entonces
+            err := EADDRNOTAVAIL
+        sino
+            si pt = 0 entonces
+                pt := puerto_libre(s.tipo_, s.proto)
+                si pt = 0 entonces err := EADDRINUSE fin
+            sino si ocupado(s, ip, pt) entonces
+                err := EADDRINUSE
+            fin
+            si err = 0 entonces
+                s.l_ip := ip
+                s.l_puerto := pt
+                s.marcas := s.marcas ob M_LIGADO
+            fin
+        fin
+        suelta_()
+        devolver err
+    fin
+
+    ; ---- listen ----
+    público función listen_(p: puntero a Proceso, fd: nat64, máx: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si s.tipo_ <> S_STREAM entonces devolver EOPNOTSUPP fin
+        bloquea()
+        si s.estado <> T_CERRADO y s.estado <> T_ESCUCHA entonces
+            err := EINVAL
+        sino
+            err := liga_si_no(s)
+            si err = 0 entonces
+                si ent64(máx) < 1 o máx > 4096 entonces máx := COLA_ESCUCHA fin
+                tcp_escucha(s, nat32(máx))
+            fin
+        fin
+        suelta_()
+        devolver err
+    fin
+
+    ; ---- accept y accept4 ----
+    público función accept_(p: puntero a Proceso, fd: nat64, v: nat64, lv: nat64, marcas_: nat64): ent64
+        variable s, c: puntero a Sock
+        variable err: ent64
+        variable nfd: ent32
+        variable g, lím: nat64
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si marcas_ yb (nob nat64(SOCK_NONBLOCK ob SOCK_CLOEXEC)) <> 0 entonces devolver EINVAL fin
+        si s.tipo_ <> S_STREAM entonces devolver EOPNOTSUPP fin
+        lím := nob nat64(0)
+        si s.rcv_plazo <> 0 entonces lím := ahora_ns() + s.rcv_plazo fin
+        mientras cierto hacer
+            g := Sondeo64.gen
+            bloquea()
+            si s.estado <> T_ESCUCHA entonces
+                suelta_()
+                devolver EINVAL
+            fin
+            c := tcp_acepta(s)
+            suelta_()
+            si c <> nulo entonces romper fin
+            si sin_esperar(p, fd, 0) entonces devolver EAGAIN fin
+            si interrumpido(p) entonces devolver ERESTARTSYS fin
+            si ahora_ns() >= lím entonces devolver EAGAIN fin
+            espera_cambio(p, g, lím)
+        fin
+        nfd := fd_nuevo(p)
+        si nfd < 0 entonces
+            ; (sin descriptor: la conexión se corta)
+            bloquea()
+            tcp_suelta(c)
+            suelta_()
+            devolver EMFILE
+        fin
+        c.refs := 1
+        p.fd_clase[nat32(nfd)] := F_SOCKET
+        p.fd_obj[nat32(nfd)] := nat64(c)
+        p.fd_nobloq[nat32(nfd)] := 0
+        si marcas_ yb SOCK_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(nfd)] := 1 fin
+        p.fd_cloexec[nat32(nfd)] := 0
+        si marcas_ yb SOCK_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(nfd)] := 1 fin
+        sockets_abiertos := sockets_abiertos + 1
+        si v <> 0 entonces
+            err := da_dir(p, v, lv, c.r_ip, c.r_puerto)
+            si err < 0 entonces devolver err fin
+        fin
+        devolver ent64(nfd)
+    fin
+
+    ; ---- connect ----
+    público función connect_(p: puntero a Proceso, fd: nat64, v: nat64, l: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        variable ip, pt, fam, yo_: nat32
+        variable g: nat64
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        ip := 0
+        pt := 0
+        err := lee_dir(p, v, l, ip, pt, fam)
+        si err < 0 entonces devolver err fin
+        ; UDP y RAW: el destino de siempre (AF_UNSPEC: sin él)
+        si s.tipo_ <> S_STREAM entonces
+            bloquea()
+            si fam = 0 entonces
+                s.marcas := s.marcas yb (nob nat32(M_CONECTADO))
+                s.r_ip := 0
+                s.r_puerto := 0
+            sino
+                si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
+                yo_ := ip_para(ip)
+                si yo_ = 0 entonces
+                    err := ENETUNREACH
+                sino
+                    err := liga_si_no(s)
+                    si err = 0 entonces
+                        si s.l_ip = 0 entonces s.l_ip := 0 fin
+                        s.r_ip := ip
+                        s.r_puerto := pt
+                        s.marcas := s.marcas ob M_CONECTADO
+                    fin
+                fin
+            fin
+            suelta_()
+            devolver err
+        fin
+        si fam <> 2 entonces devolver EAFNOSUPPORT fin
+        si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
+        bloquea()
+        si s.estado = T_SYN_ENVIADO entonces
+            suelta_()
+            devolver EALREADY
+        fin
+        si s.estado = T_ESCUCHA entonces
+            suelta_()
+            devolver EINVAL
+        fin
+        si s.estado <> T_CERRADO o s.marcas yb M_FIN_RECIBIDO <> 0 entonces
+            ; (ya conectado: EISCONN; si se acabó con error, ese error una vez)
+            si s.error <> 0 entonces
+                err := ent64(s.error)
+                s.error := 0
+            sino si s.estado <> T_CERRADO entonces
+                err := EISCONN
+            sino
+                err := EISCONN
+            fin
+            suelta_()
+            devolver err
+        fin
+        yo_ := ip_para(ip)
+        si yo_ = 0 entonces
+            suelta_()
+            devolver ENETUNREACH
+        fin
+        si s.l_ip = 0 entonces s.l_ip := yo_ fin
+        err := liga_si_no(s)
+        si err < 0 entonces
+            suelta_()
+            devolver err
+        fin
+        s.r_ip := ip
+        s.r_puerto := pt
+        s.error := 0
+        tcp_conecta(s)
+        suelta_()
+        si sin_esperar(p, fd, 0) entonces devolver EINPROGRESS fin
+        mientras cierto hacer
+            g := Sondeo64.gen
+            bloquea()
+            si s.estado = T_ESTABLECIDO o s.estado = T_ESPERA_CIERRE o s.estado = T_CERRADO entonces
+                err := 0
+                si s.estado = T_CERRADO entonces
+                    err := ent64(s.error)
+                    si err = 0 entonces err := ECONNREFUSED fin
+                    s.error := 0
+                fin
+                suelta_()
+                devolver err
+            fin
+            suelta_()
+            si interrumpido(p) entonces devolver EINTR fin
+            espera_cambio(p, g, nob nat64(0))
+        fin
+        devolver 0
+    fin
+
+    ; ---- enviar ----
+    ; lo de v (n octetos del programa) por s, a ip:puerto (o al conectado si ip_dada es falso)
+    función envía(p: puntero a Proceso, fd: nat64, s: puntero a Sock, v: nat64, n: nat64, marcas_: nat64, ip_dada: bool, ip: nat32, pt: nat32): ent64
+        variable k: arreglo [1536] de byte
+        variable hecho, trozo, g, lím, metido: nat64
+        variable err: ent64
+        variable id, yo_: nat32
+        variable bien: bool
+        si s.tipo_ <> S_STREAM entonces
+            ; un datagrama, de una vez
+            si no ip_dada entonces
+                si s.marcas yb M_CONECTADO = 0 entonces devolver EDESTADDRREQ fin
+                ip := s.r_ip
+                pt := s.r_puerto
+            fin
+            si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
+            si n > MTU - 28 entonces devolver EMSGSIZE fin
+            si s.proto <> 17 y n < 8 entonces devolver EINVAL fin
+            si n > 0 entonces
+                si no copia_de(p, nat64(dirección(k[0])), v, n) entonces devolver EFAULT fin
+            fin
+            bloquea()
+            err := liga_si_no(s)
+            si err = 0 y s.error <> 0 entonces
+                err := ent64(s.error)
+                s.error := 0
+            fin
+            si err = 0 entonces
+                yo_ := s.l_ip
+                si yo_ = 0 entonces yo_ := ip_para(ip) fin
+                si ip = 0xFFFFFFFF y s.marcas yb M_DIFUSIÓN = 0 entonces
+                    err := -13                                      ; EACCES (sin SO_BROADCAST)
+                sino si s.proto = 17 entonces
+                    bien := udp_envía(yo_, s.l_puerto, ip, pt, nat64(dirección(k[0])), nat32(n))
+                    si no bien entonces err := ENETUNREACH fin
+                sino si s.proto = 1 y s.tipo_ = S_DGRAM entonces
+                    ; un ping socket: el identificador es su «puerto», y la suma la pone el núcleo
+                    si k[0] <> 8 entonces
+                        err := EINVAL
+                    sino
+                        id := s.l_puerto
+                        k[4] := byte(id >> 8)
+                        k[5] := byte(id yb 0xFF)
+                        k[2] := 0
+                        k[3] := 0
+                        id := plegar(suma(nat64(dirección(k[0])), n, 0))
+                        k[2] := byte(id >> 8)
+                        k[3] := byte(id yb 0xFF)
+                        bien := ip_envía(yo_, ip, 1, nat64(dirección(k[0])), nat32(n), s.ttl)
+                        si no bien entonces err := ENETUNREACH fin
+                    fin
+                sino
+                    bien := ip_envía(yo_, ip, s.proto, nat64(dirección(k[0])), nat32(n), s.ttl)
+                    si no bien entonces err := ENETUNREACH fin
+                fin
+            fin
+            suelta_()
+            si err < 0 entonces devolver err fin
+            devolver ent64(n)
+        fin
+        ; TCP: al búfer de envío, lo que quepa; si no cabe nada, se espera
+        hecho := 0
+        lím := nob nat64(0)
+        si s.snd_plazo <> 0 entonces lím := ahora_ns() + s.snd_plazo fin
+        mientras hecho < n hacer
+            trozo := n - hecho
+            si trozo > 1536 entonces trozo := 1536 fin
+            si no copia_de(p, nat64(dirección(k[0])), v + hecho, trozo) entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver EFAULT
+            fin
+            mientras cierto hacer
+                g := Sondeo64.gen
+                bloquea()
+                si s.error <> 0 entonces
+                    err := ent64(s.error)
+                    s.error := 0
+                    suelta_()
+                    si hecho > 0 entonces devolver ent64(hecho) fin
+                    si err = ECONNRESET o err = EPIPE entonces
+                        si marcas_ yb MSG_NOSIGNAL = 0 entonces señala_me(SIGPIPE) fin
+                    fin
+                    devolver err
+                fin
+                si s.estado <> T_ESTABLECIDO y s.estado <> T_ESPERA_CIERRE entonces
+                    suelta_()
+                    si hecho > 0 entonces devolver ent64(hecho) fin
+                    si s.estado = T_SYN_ENVIADO o s.estado = T_SYN_RECIBIDO entonces devolver EAGAIN fin
+                    si s.estado = T_CERRADO y s.marcas yb (M_FIN_RECIBIDO ob M_FIN_ENVIADO ob M_RESETEADO) = 0 entonces devolver ENOTCONN fin
+                    si marcas_ yb MSG_NOSIGNAL = 0 entonces señala_me(SIGPIPE) fin
+                    devolver EPIPE
+                fin
+                si s.marcas yb (M_NO_ESCRIBE ob M_FIN_PENDIENTE) <> 0 entonces
+                    suelta_()
+                    si hecho > 0 entonces devolver ent64(hecho) fin
+                    si marcas_ yb MSG_NOSIGNAL = 0 entonces señala_me(SIGPIPE) fin
+                    devolver EPIPE
+                fin
+                metido := tx_mete(s, nat64(dirección(k[0])), trozo)
+                si metido > 0 entonces sale_lo_que_haya(s) fin
+                suelta_()
+                si metido > 0 entonces
+                    trozo := metido
+                    romper
+                fin
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                si sin_esperar(p, fd, marcas_) entonces devolver EAGAIN fin
+                si interrumpido(p) entonces devolver ERESTARTSYS fin
+                si ahora_ns() >= lím entonces devolver EAGAIN fin
+                espera_cambio(p, g, lím)
+            fin
+            hecho := hecho + trozo
+        fin
+        devolver ent64(hecho)
+    fin
+
+    ; ---- recibir ----
+    ; a v (hasta n), y de quién (ip, pt); en «trunc», si no cabía todo
+    función recibe(p: puntero a Proceso, fd: nat64, s: puntero a Sock, v: nat64, n: nat64, marcas_: nat64, ref ip: nat32, ref pt: nat32, ref trunc: bool): ent64
+        variable k: arreglo [2048] de byte
+        variable c: arreglo [2] de nat64
+        variable g, lím, m, hecho, total: nat64
+        variable err: ent64
+        trunc := falso
+        ip := 0
+        pt := 0
+        lím := nob nat64(0)
+        si s.rcv_plazo <> 0 entonces lím := ahora_ns() + s.rcv_plazo fin
+        si s.tipo_ <> S_STREAM entonces
+            mientras cierto hacer
+                g := Sondeo64.gen
+                bloquea()
+                si s.rx_n >= 16 entonces
+                    rx_mira(s, 0, nat64(dirección(c[0])), 16)
+                    total := c[0] yb 0xFFFFFFFF
+                    ip := nat32(c[0] >> 32)
+                    pt := nat32(c[1] yb 0xFFFF)
+                    m := total
+                    si m > n entonces
+                        m := n
+                        trunc := cierto
+                    fin
+                    si m > 2048 entonces m := 2048 fin
+                    rx_mira(s, 16, nat64(dirección(k[0])), m)
+                    si marcas_ yb MSG_PEEK = 0 entonces
+                        rx_quita(s, 16 + total)
+                        s.rx_datagramas := s.rx_datagramas - 1
+                    fin
+                    suelta_()
+                    si m > 0 entonces
+                        si no copia_a(p, v, nat64(dirección(k[0])), m) entonces devolver EFAULT fin
+                    fin
+                    devolver ent64(m)
+                fin
+                si s.error <> 0 entonces
+                    err := ent64(s.error)
+                    s.error := 0
+                    suelta_()
+                    devolver err
+                fin
+                si s.marcas yb M_NO_LEE <> 0 entonces
+                    suelta_()
+                    devolver 0
+                fin
+                suelta_()
+                si sin_esperar(p, fd, marcas_) entonces devolver EAGAIN fin
+                si interrumpido(p) entonces devolver ERESTARTSYS fin
+                si ahora_ns() >= lím entonces devolver EAGAIN fin
+                espera_cambio(p, g, lím)
+            fin
+        fin
+        ; TCP
+        hecho := 0
+        mientras cierto hacer
+            g := Sondeo64.gen
+            bloquea()
+            si s.rx_n > 0 entonces
+                m := s.rx_n
+                si m > n - hecho entonces m := n - hecho fin
+                si m > 2048 entonces m := 2048 fin
+                rx_mira(s, 0, nat64(dirección(k[0])), m)
+                si marcas_ yb MSG_PEEK = 0 entonces
+                    rx_quita(s, m)
+                    tcp_leído(s)
+                fin
+                ip := s.r_ip
+                pt := s.r_puerto
+                suelta_()
+                si no copia_a(p, v + hecho, nat64(dirección(k[0])), m) entonces
+                    si hecho > 0 entonces devolver ent64(hecho) fin
+                    devolver EFAULT
+                fin
+                hecho := hecho + m
+                si hecho >= n o marcas_ yb MSG_PEEK <> 0 entonces devolver ent64(hecho) fin
+                ; (MSG_WAITALL: hasta tenerlo todo; si no, lo que haya, sin esperar más)
+                si marcas_ yb MSG_WAITALL = 0 entonces
+                    bloquea()
+                    m := s.rx_n
+                    suelta_()
+                    si m = 0 entonces devolver ent64(hecho) fin
+                fin
+                seguir
+            fin
+            ; nada que leer: ¿se acabó?
+            si s.error <> 0 entonces
+                err := ent64(s.error)
+                s.error := 0
+                suelta_()
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver err
+            fin
+            si s.marcas yb (M_FIN_RECIBIDO ob M_NO_LEE) <> 0 entonces
+                suelta_()
+                devolver ent64(hecho)
+            fin
+            si s.estado = T_CERRADO o s.estado = T_ESCUCHA entonces
+                suelta_()
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver ENOTCONN
+            fin
+            suelta_()
+            si hecho > 0 y marcas_ yb MSG_WAITALL = 0 entonces devolver ent64(hecho) fin
+            si sin_esperar(p, fd, marcas_) entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver EAGAIN
+            fin
+            si interrumpido(p) entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver ERESTARTSYS
+            fin
+            si ahora_ns() >= lím entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver EAGAIN
+            fin
+            espera_cambio(p, g, lím)
+        fin
+        devolver 0
+    fin
+
+    ; sendto: con dirección o sin ella
+    público función sendto_(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64, marcas_: nat64, va: nat64, la: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        si Tcp64.traza entonces
+            err := sendto__(p, fd, v, n, marcas_, va, la)
+            escribir("[send ", fd, " ", n, " -> ", err, "]\n")
+            devolver err
+        fin
+        devolver sendto__(p, fd, v, n, marcas_, va, la)
+    fin
+
+    función sendto__(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64, marcas_: nat64, va: nat64, la: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        variable ip, pt, fam: nat32
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si va <> 0 y s.tipo_ <> S_STREAM entonces
+            ip := 0
+            pt := 0
+            err := lee_dir(p, va, la, ip, pt, fam)
+            si err < 0 entonces devolver err fin
+            si fam <> 2 entonces devolver EAFNOSUPPORT fin
+            devolver envía(p, fd, s, v, n, marcas_, cierto, ip, pt)
+        fin
+        devolver envía(p, fd, s, v, n, marcas_, falso, 0, 0)
+    fin
+
+    público función recvfrom_(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64, marcas_: nat64, va: nat64, lva: nat64): ent64
+        variable s: puntero a Sock
+        variable err, r: ent64
+        variable ip, pt: nat32
+        variable trunc: bool
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        r := recibe(p, fd, s, v, n, marcas_, ip, pt, trunc)
+        si r >= 0 y va <> 0 entonces
+            err := da_dir(p, va, lva, ip, pt)
+            si err < 0 entonces devolver err fin
+        fin
+        devolver r
+    fin
+
+    ; read y write de un socket (de Sistema)
+    público función lee_sock(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
+        devolver recvfrom_(p, fd, v, n, 0, 0, 0)
+    fin
+
+    público función escribe_sock(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
+        devolver sendto_(p, fd, v, n, 0, 0, 0)
+    fin
+
+    ; sendmsg y recvmsg (struct msghdr: name, namelen, iov, iovlen, control, controllen, flags)
+    público función sendmsg_(p: puntero a Proceso, fd: nat64, vm: nat64, marcas_: nat64): ent64
+        variable mh: arreglo [7] de nat64
+        variable iov: arreglo [2] de nat64
+        variable s: puntero a Sock
+        variable err, r, total: ent64
+        variable i, todo: nat64
+        variable k: puntero a byte
+        variable ip, pt, fam: nat32
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si no copia_de(p, nat64(dirección(mh[0])), vm, 56) entonces devolver EFAULT fin
+        si mh[3] > 1024 entonces devolver EMSGSIZE fin
+        si s.tipo_ <> S_STREAM entonces
+            ; un datagrama: los trozos, juntos
+            todo := 0
+            i := 0
+            mientras i < mh[3] hacer
+                si no copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16) entonces devolver EFAULT fin
+                todo := todo + iov[1]
+                i := i + 1
+            fin
+            si todo > MTU entonces devolver EMSGSIZE fin
+            k := reserva(todo + 1)
+            si k = nulo entonces devolver ENOMEM fin
+            todo := 0
+            i := 0
+            mientras i < mh[3] hacer
+                copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16)
+                si iov[1] > 0 entonces
+                    si no copia_de(p, nat64(k) + todo, iov[0], iov[1]) entonces
+                        libera(k)
+                        devolver EFAULT
+                    fin
+                fin
+                todo := todo + iov[1]
+                i := i + 1
+            fin
+            ; (desde el núcleo: se manda como si viniera del programa, con una copia propia)
+            r := envía_k(p, fd, s, k, todo, marcas_, mh[0], mh[1] yb 0xFFFFFFFF)
+            libera(k)
+            devolver r
+        fin
+        total := 0
+        i := 0
+        mientras i < mh[3] hacer
+            si no copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16) entonces
+                si total > 0 entonces devolver total fin
+                devolver EFAULT
+            fin
+            si iov[1] > 0 entonces
+                r := envía(p, fd, s, iov[0], iov[1], marcas_, falso, 0, 0)
+                si r < 0 entonces
+                    si total > 0 entonces devolver total fin
+                    devolver r
+                fin
+                total := total + r
+                si nat64(r) < iov[1] entonces devolver total fin
+            fin
+            i := i + 1
+        fin
+        devolver total
+    fin
+
+    ; (sendmsg de un datagrama) lo de k (núcleo) como si fuera de v: se pasa por un búfer del programa no: aquí
+    función envía_k(p: puntero a Proceso, fd: nat64, s: puntero a Sock, k: puntero a byte, n: nat64, marcas_: nat64, va: nat64, la: nat64): ent64
+        variable ip, pt, fam, yo_, id: nat32
+        variable err: ent64
+        variable bien: bool
+        variable dada: bool
+        ip := 0
+        pt := 0
+        dada := falso
+        si va <> 0 entonces
+            err := lee_dir(p, va, la, ip, pt, fam)
+            si err < 0 entonces devolver err fin
+            si fam <> 2 entonces devolver EAFNOSUPPORT fin
+            dada := cierto
+        fin
+        si no dada entonces
+            si s.marcas yb M_CONECTADO = 0 entonces devolver EDESTADDRREQ fin
+            ip := s.r_ip
+            pt := s.r_puerto
+        fin
+        si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
+        si n > MTU - 28 entonces devolver EMSGSIZE fin
+        bloquea()
+        err := liga_si_no(s)
+        si err = 0 entonces
+            yo_ := s.l_ip
+            si yo_ = 0 entonces yo_ := ip_para(ip) fin
+            si s.proto = 17 entonces
+                bien := udp_envía(yo_, s.l_puerto, ip, pt, nat64(k), nat32(n))
+            sino si s.proto = 1 y s.tipo_ = S_DGRAM y n >= 8 y k[0] = 8 entonces
+                id := s.l_puerto
+                k[4] := byte(id >> 8)
+                k[5] := byte(id yb 0xFF)
+                k[2] := 0
+                k[3] := 0
+                id := plegar(suma(nat64(k), n, 0))
+                k[2] := byte(id >> 8)
+                k[3] := byte(id yb 0xFF)
+                bien := ip_envía(yo_, ip, 1, nat64(k), nat32(n), s.ttl)
+            sino
+                bien := ip_envía(yo_, ip, s.proto, nat64(k), nat32(n), s.ttl)
+            fin
+            si no bien entonces err := ENETUNREACH fin
+        fin
+        suelta_()
+        si err < 0 entonces devolver err fin
+        devolver ent64(n)
+    fin
+
+    público función recvmsg_(p: puntero a Proceso, fd: nat64, vm: nat64, marcas_: nat64): ent64
+        variable mh: arreglo [7] de nat64
+        variable iov: arreglo [2] de nat64
+        variable s: puntero a Sock
+        variable err, r, total: ent64
+        variable i, todo, hecho, m: nat64
+        variable k: puntero a byte
+        variable ip, pt, cero: nat32
+        variable trunc: bool
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si no copia_de(p, nat64(dirección(mh[0])), vm, 56) entonces devolver EFAULT fin
+        si mh[3] > 1024 entonces devolver EMSGSIZE fin
+        todo := 0
+        i := 0
+        mientras i < mh[3] hacer
+            si no copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16) entonces devolver EFAULT fin
+            todo := todo + iov[1]
+            i := i + 1
+        fin
+        si todo > 1048576 entonces todo := 1048576 fin
+        k := reserva(todo + 1)
+        si k = nulo entonces devolver ENOMEM fin
+        ; (a un búfer del núcleo... recibe escribe en el programa: se recibe al primer trozo si hay uno solo)
+        si mh[3] = 1 entonces
+            copia_de(p, nat64(dirección(iov[0])), mh[2], 16)
+            r := recibe(p, fd, s, iov[0], iov[1], marcas_, ip, pt, trunc)
+        sino
+            ; varios trozos: se recibe en el primero que quepa todo, a pelo: trozo a trozo (TCP) o el datagrama al primero y se reparte
+            r := recibe_k(p, fd, s, k, todo, marcas_, ip, pt, trunc)
+            si r > 0 entonces
+                hecho := 0
+                i := 0
+                mientras i < mh[3] y hecho < nat64(r) hacer
+                    copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16)
+                    m := nat64(r) - hecho
+                    si m > iov[1] entonces m := iov[1] fin
+                    si m > 0 entonces
+                        si no copia_a(p, iov[0], nat64(k) + hecho, m) entonces
+                            libera(k)
+                            devolver EFAULT
+                        fin
+                    fin
+                    hecho := hecho + m
+                    i := i + 1
+                fin
+            fin
+        fin
+        libera(k)
+        si r < 0 entonces devolver r fin
+        total := r
+        si mh[0] <> 0 entonces
+            err := da_dir(p, mh[0], vm + 8, ip, pt)
+            si err < 0 entonces devolver err fin
+        fin
+        ; (sin datos de control; y las marcas: MSG_TRUNC)
+        cero := 0
+        si mh[4] <> 0 entonces
+            si no copia_a(p, vm + 40, nat64(dirección(cero)), 4) entonces devolver EFAULT fin
+            si no copia_a(p, vm + 44, nat64(dirección(cero)), 4) entonces devolver EFAULT fin
+        fin
+        si trunc entonces cero := MSG_TRUNC fin
+        si no copia_a(p, vm + 48, nat64(dirección(cero)), 4) entonces devolver EFAULT fin
+        devolver total
+    fin
+
+    ; recibir a un búfer del núcleo (recvmsg con varios trozos): por un hueco del programa no; aquí, directo
+    función recibe_k(p: puntero a Proceso, fd: nat64, s: puntero a Sock, k: puntero a byte, n: nat64, marcas_: nat64, ref ip: nat32, ref pt: nat32, ref trunc: bool): ent64
+        variable c: arreglo [2] de nat64
+        variable g, lím, m, total: nat64
+        variable err: ent64
+        trunc := falso
+        lím := nob nat64(0)
+        si s.rcv_plazo <> 0 entonces lím := ahora_ns() + s.rcv_plazo fin
+        mientras cierto hacer
+            g := Sondeo64.gen
+            bloquea()
+            si s.tipo_ <> S_STREAM y s.rx_n >= 16 entonces
+                rx_mira(s, 0, nat64(dirección(c[0])), 16)
+                total := c[0] yb 0xFFFFFFFF
+                ip := nat32(c[0] >> 32)
+                pt := nat32(c[1] yb 0xFFFF)
+                m := total
+                si m > n entonces
+                    m := n
+                    trunc := cierto
+                fin
+                rx_mira(s, 16, nat64(k), m)
+                si marcas_ yb MSG_PEEK = 0 entonces
+                    rx_quita(s, 16 + total)
+                    s.rx_datagramas := s.rx_datagramas - 1
+                fin
+                suelta_()
+                devolver ent64(m)
+            fin
+            si s.tipo_ = S_STREAM y s.rx_n > 0 entonces
+                m := s.rx_n
+                si m > n entonces m := n fin
+                rx_mira(s, 0, nat64(k), m)
+                si marcas_ yb MSG_PEEK = 0 entonces
+                    rx_quita(s, m)
+                    tcp_leído(s)
+                fin
+                ip := s.r_ip
+                pt := s.r_puerto
+                suelta_()
+                devolver ent64(m)
+            fin
+            si s.error <> 0 entonces
+                err := ent64(s.error)
+                s.error := 0
+                suelta_()
+                devolver err
+            fin
+            si s.marcas yb (M_FIN_RECIBIDO ob M_NO_LEE) <> 0 o (s.tipo_ = S_STREAM y (s.estado = T_CERRADO o s.estado = T_ESCUCHA)) entonces
+                suelta_()
+                devolver 0
+            fin
+            suelta_()
+            si sin_esperar(p, fd, marcas_) entonces devolver EAGAIN fin
+            si interrumpido(p) entonces devolver ERESTARTSYS fin
+            si ahora_ns() >= lím entonces devolver EAGAIN fin
+            espera_cambio(p, g, lím)
+        fin
+        devolver 0
+    fin
+
+    ; ---- shutdown ----
+    público función shutdown_(p: puntero a Proceso, fd: nat64, cómo: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si cómo > 2 entonces devolver EINVAL fin
+        bloquea()
+        si s.tipo_ = S_STREAM y (s.estado = T_CERRADO o s.estado = T_ESCUCHA o s.estado = T_SYN_ENVIADO) y s.marcas yb M_FIN_RECIBIDO = 0 entonces
+            suelta_()
+            devolver ENOTCONN
+        fin
+        si cómo = 0 o cómo = 2 entonces s.marcas := s.marcas ob M_NO_LEE fin
+        si cómo = 1 o cómo = 2 entonces
+            s.marcas := s.marcas ob M_NO_ESCRIBE
+            si s.tipo_ = S_STREAM entonces tcp_fin(s) fin
+        fin
+        suelta_()
+        Sondeo64.avisa()
+        devolver 0
+    fin
+
+    público función nombre_sock(p: puntero a Proceso, fd: nat64, v: nat64, lv: nat64, del_otro: bool): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        variable ip, pt: nat32
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        bloquea()
+        si del_otro entonces
+            si (s.tipo_ = S_STREAM y s.estado <> T_ESTABLECIDO y s.estado <> T_ESPERA_CIERRE y s.estado <> T_FIN_ESPERA1 y s.estado <> T_FIN_ESPERA2) o (s.tipo_ <> S_STREAM y s.marcas yb M_CONECTADO = 0) entonces
+                suelta_()
+                devolver ENOTCONN
+            fin
+            ip := s.r_ip
+            pt := s.r_puerto
+        sino
+            ip := s.l_ip
+            pt := s.l_puerto
+            ; (un UDP conectado sin IP propia: la de salida)
+            si ip = 0 y s.marcas yb M_CONECTADO <> 0 entonces ip := ip_para(s.r_ip) fin
+        fin
+        suelta_()
+        devolver da_dir(p, v, lv, ip, pt)
+    fin
+
+    ; ---- las opciones ----
+    función entero_de(p: puntero a Proceso, v: nat64, l: nat64, ref x: nat32): ent64
+        x := 0
+        si l < 4 entonces devolver EINVAL fin
+        si no copia_de(p, nat64(dirección(x)), v, 4) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    función plazo_de(p: puntero a Proceso, v: nat64, l: nat64, ref ns: nat64): ent64
+        variable tv: arreglo [2] de nat64
+        si l < 16 entonces devolver EINVAL fin
+        si no copia_de(p, nat64(dirección(tv[0])), v, 16) entonces devolver EFAULT fin
+        ns := tv[0] * 1000000000 + tv[1] * 1000
+        devolver 0
+    fin
+
+    función marca(s: puntero a Sock, m: nat32, sí: bool)
+        si sí entonces s.marcas := s.marcas ob m sino s.marcas := s.marcas yb (nob m) fin
+    fin
+
+    público función setsockopt_(p: puntero a Proceso, fd: nat64, nivel: nat64, nombre: nat64, v: nat64, l: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        variable x: nat32
+        variable ns: nat64
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si nivel = 1 entonces
+            según nat16(nombre)
+                caso 20, 21:
+                    err := plazo_de(p, v, l, ns)
+                    si err < 0 entonces devolver err fin
+                    si nombre = 20 entonces s.rcv_plazo := ns sino s.snd_plazo := ns fin
+                    devolver 0
+                caso 13:
+                    devolver 0                      ; SO_LINGER: se acepta (el cierre es el de siempre)
+            fin
+            err := entero_de(p, v, l, x)
+            si err < 0 entonces devolver err fin
+            según nat16(nombre)
+                caso 2: marca(s, M_REUSE, x <> 0)                   ; SO_REUSEADDR
+                caso 15: marca(s, M_REUSE, x <> 0)                  ; SO_REUSEPORT (como REUSEADDR)
+                caso 6: marca(s, M_DIFUSIÓN, x <> 0)                ; SO_BROADCAST
+                caso 9: marca(s, M_KEEPALIVE, x <> 0)               ; SO_KEEPALIVE
+                caso 7: s.sndbuf := nat64(x)                        ; SO_SNDBUF (se apunta; los búferes son de 64 KB)
+                caso 8: s.rcvbuf := nat64(x)                        ; SO_RCVBUF
+                caso 1, 5, 10, 16, 17, 18, 19, 29, 32, 33, 46, 47: x := 0      ; (DEBUG, DONTROUTE, OOBINLINE, PASSCRED, ...: se aceptan)
+                si no: devolver ENOPROTOOPT
+            fin
+            devolver 0
+        fin
+        si nivel = 6 entonces
+            err := entero_de(p, v, l, x)
+            si err < 0 entonces devolver err fin
+            si s.tipo_ <> S_STREAM entonces devolver EOPNOTSUPP fin
+            según nat16(nombre)
+                caso 1: marca(s, M_NODELAY, x <> 0)                 ; TCP_NODELAY
+                caso 2:                                             ; TCP_MAXSEG
+                    si x >= 64 y x < s.mss entonces s.mss := x fin
+                caso 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 18, 23: x := 0       ; (CORK, KEEPIDLE, KEEPINTVL, KEEPCNT, SYNCNT, LINGER2, DEFER_ACCEPT, QUICKACK...)
+                si no: devolver ENOPROTOOPT
+            fin
+            devolver 0
+        fin
+        si nivel = 0 entonces
+            err := entero_de(p, v, l, x)
+            si err < 0 entonces devolver err fin
+            según nat16(nombre)
+                caso 2:                                             ; IP_TTL
+                    si x = 0xFFFFFFFF entonces x := 64 fin
+                    si x < 1 o x > 255 entonces devolver EINVAL fin
+                    s.ttl := x
+                caso 1, 3, 6, 7, 8, 10, 11, 12, 13, 15, 32, 33, 34, 49: x := 0     ; (TOS, HDRINCL, RECVOPTS, PKTINFO, MTU_DISCOVER, RECVERR, RECVTTL...)
+                si no: devolver ENOPROTOOPT
+            fin
+            devolver 0
+        fin
+        si nivel = 17 o nivel = 1 o nivel = 255 entonces devolver 0 fin
+        devolver ENOPROTOOPT
+    fin
+
+    público función getsockopt_(p: puntero a Proceso, fd: nat64, nivel: nat64, nombre: nat64, v: nat64, vl: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        variable x, l: nat32
+        variable tv: arreglo [2] de nat64
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        si no copia_de(p, nat64(dirección(l)), vl, 4) entonces devolver EFAULT fin
+        si ent32(l) < 0 entonces devolver EINVAL fin
+        x := 0
+        si nivel = 1 entonces
+            según nat16(nombre)
+                caso 20, 21:
+                    si nombre = 20 entonces tv[0] := s.rcv_plazo sino tv[0] := s.snd_plazo fin
+                    tv[1] := (tv[0] mod 1000000000) div 1000
+                    tv[0] := tv[0] div 1000000000
+                    si l > 16 entonces l := 16 fin
+                    si no copia_a(p, v, nat64(dirección(tv[0])), nat64(l)) entonces devolver EFAULT fin
+                    si no copia_a(p, vl, nat64(dirección(l)), 4) entonces devolver EFAULT fin
+                    devolver 0
+                caso 2, 15: si s.marcas yb M_REUSE <> 0 entonces x := 1 fin
+                caso 3: x := s.tipo_
+                caso 4:
+                    bloquea()
+                    x := nat32(-s.error)
+                    s.error := 0
+                    suelta_()
+                caso 6: si s.marcas yb M_DIFUSIÓN <> 0 entonces x := 1 fin
+                caso 7: x := nat32(s.tx_tam)
+                caso 8: x := nat32(s.rx_tam)
+                caso 9: si s.marcas yb M_KEEPALIVE <> 0 entonces x := 1 fin
+                caso 30: si s.estado = T_ESCUCHA entonces x := 1 fin
+                caso 38: x := s.proto
+                caso 39: x := 2
+                caso 13, 10, 5, 1: x := 0
+                si no: devolver ENOPROTOOPT
+            fin
+        sino si nivel = 6 entonces
+            según nat16(nombre)
+                caso 1: si s.marcas yb M_NODELAY <> 0 entonces x := 1 fin
+                caso 2: x := s.mss
+                caso 4: x := 7200
+                caso 5: x := 75
+                caso 6: x := 9
+                si no: devolver ENOPROTOOPT
+            fin
+        sino si nivel = 0 entonces
+            según nat16(nombre)
+                caso 2: x := s.ttl
+                caso 14: x := MTU                                   ; IP_MTU
+                caso 1, 10: x := 0
+                si no: devolver ENOPROTOOPT
+            fin
+        sino
+            devolver ENOPROTOOPT
+        fin
+        si l > 4 entonces l := 4 fin
+        si no copia_a(p, v, nat64(dirección(x)), nat64(l)) entonces devolver EFAULT fin
+        si no copia_a(p, vl, nat64(dirección(l)), 4) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; ---- poll ----
+    ; POLLIN 1, POLLPRI 2, POLLOUT 4, POLLERR 8, POLLHUP 0x10, POLLRDNORM 0x40, POLLWRNORM 0x100, POLLRDHUP 0x2000
+    público función listo_sock(d: nat64, ev: nat32): nat32
+        variable s: puntero a Sock
+        variable r: nat32
+        s := sk(d)
+        r := 0
+        bloquea()
+        si s.error <> 0 entonces r := r ob 8 fin
+        si s.tipo_ <> S_STREAM entonces
+            si s.rx_n >= 16 entonces r := r ob 0x41 fin
+            r := r ob 0x104
+            si s.marcas yb M_NO_LEE <> 0 entonces r := r ob 0x41 fin
+        sino si s.estado = T_ESCUCHA entonces
+            si s.cola_n > 0 entonces r := r ob 0x41 fin
+        sino
+            si s.rx_n > 0 entonces r := r ob 0x41 fin
+            si s.marcas yb (M_FIN_RECIBIDO ob M_NO_LEE) <> 0 entonces r := r ob 0x2041 fin
+            si (s.estado = T_ESTABLECIDO o s.estado = T_ESPERA_CIERRE) y s.tx_n < s.tx_tam y s.marcas yb M_NO_ESCRIBE = 0 entonces r := r ob 0x104 fin
+            si s.estado = T_CERRADO entonces
+                ; (acabada, o nunca conectada: colgada; y se puede «escribir» para ver el error)
+                r := r ob 0x10 ob 0x104
+                si s.marcas yb M_FIN_RECIBIDO <> 0 o s.error <> 0 entonces r := r ob 0x41 fin
+            fin
+            si s.marcas yb M_NO_ESCRIBE <> 0 y s.marcas yb M_FIN_RECIBIDO <> 0 entonces r := r ob 0x10 fin
+        fin
+        suelta_()
+        devolver r yb (ev ob 0x18)
+    fin
+
+    ; FIONREAD: lo que se puede leer (TCP) o el largo del próximo datagrama
+    función cuánto(s: puntero a Sock): nat32
+        variable c: arreglo [2] de nat64
+        variable r: nat32
+        bloquea()
+        si s.tipo_ = S_STREAM entonces
+            r := nat32(s.rx_n)
+        sino si s.rx_n >= 16 entonces
+            rx_mira(s, 0, nat64(dirección(c[0])), 16)
+            r := nat32(c[0] yb 0xFFFFFFFF)
+        sino
+            r := 0
+        fin
+        suelta_()
+        devolver r
+    fin
+
+    ; ---- ioctl: FIONREAD y las interfaces (struct ifreq de 40 octetos) ----
+    función pon_ifreq_ip(k: nat64, ip: nat32)
+        ceros_k(k + 16, 16)
+        pon_m8(k + 16, 2)
+        pon_be32(k + 20, ip)
+    fin
+
+    función ifz_de_nombre(k: nat64): nat32
+        variable i, j: nat32
+        variable igual: bool
+        i := 0
+        mientras i < n_ifz hacer
+            igual := cierto
+            j := 0
+            mientras j < 16 hacer
+                si m8(k + j) <> nat32(ifz(i).nombre[j]) entonces
+                    igual := falso
+                    romper
+                fin
+                si ifz(i).nombre[j] = 0 entonces romper fin
+                j := j + 1
+            fin
+            si igual entonces devolver i fin
+            i := i + 1
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    público función ioctl_sock(p: puntero a Proceso, fd: nat64, orden: nat64, arg: nat64): ent64
+        variable s: puntero a Sock
+        variable err: ent64
+        variable x, i, j: nat32
+        variable k: arreglo [40] de byte
+        variable ifc: arreglo [2] de nat64
+        variable f: puntero a Ifz
+        variable n, hecho: nat64
+        s := de_fd(p, fd, err)
+        si s = nulo entonces devolver err fin
+        orden := orden yb 0xFFFFFFFF
+        si orden = 0x541B entonces                                  ; FIONREAD
+            x := cuánto(s)
+            si no copia_a(p, arg, nat64(dirección(x)), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        si orden = 0x5421 entonces                                  ; FIONBIO
+            err := entero_de(p, arg, 4, x)
+            si err < 0 entonces devolver err fin
+            si x <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 sino p.fd_nobloq[nat32(fd)] := 0 fin
+            devolver 0
+        fin
+        si orden = 0x8912 entonces                                  ; SIOCGIFCONF
+            si no copia_de(p, nat64(dirección(ifc[0])), arg, 16) entonces devolver EFAULT fin
+            n := ifc[0] yb 0xFFFFFFFF
+            hecho := 0
+            i := 0
+            mientras i < n_ifz hacer
+                f := ifz(i)
+                si f.ip <> 0 o i = 0 entonces
+                    si ifc[1] <> 0 entonces
+                        si hecho + 40 > n entonces romper fin
+                        ceros_k(nat64(dirección(k[0])), 40)
+                        copia_k(nat64(dirección(k[0])), nat64(dirección(f.nombre[0])), 8)
+                        pon_ifreq_ip(nat64(dirección(k[0])), f.ip)
+                        si no copia_a(p, ifc[1] + hecho, nat64(dirección(k[0])), 40) entonces devolver EFAULT fin
+                    fin
+                    hecho := hecho + 40
+                fin
+                i := i + 1
+            fin
+            ifc[0] := (ifc[0] yb 0xFFFFFFFF00000000) ob hecho
+            si no copia_a(p, arg, nat64(dirección(ifc[0])), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        si orden >= 0x8910 y orden <= 0x8940 entonces
+            si no copia_de(p, nat64(dirección(k[0])), arg, 40) entonces devolver EFAULT fin
+            si orden = 0x8910 entonces                              ; SIOCGIFNAME (por el índice)
+                x := nat32(k[16]) ob (nat32(k[17]) << 8)
+                si x < 1 o x > n_ifz entonces devolver -19 fin       ; ENODEV
+                ceros_k(nat64(dirección(k[0])), 16)
+                copia_k(nat64(dirección(k[0])), nat64(dirección(ifz(x - 1).nombre[0])), 8)
+            sino
+                i := ifz_de_nombre(nat64(dirección(k[0])))
+                si i = 0xFFFFFFFF entonces devolver -19 fin            ; ENODEV
+                f := ifz(i)
+                ceros_k(nat64(dirección(k[16])), 24)
+                según nat16(orden)
+                    caso 0x8913:                                    ; SIOCGIFFLAGS: UP, BROADCAST, LOOPBACK, RUNNING, MULTICAST
+                        x := 0
+                        si f.arriba <> 0 entonces x := x ob 1 fin
+                        si i = 0 entonces x := x ob 8 sino x := x ob 2 ob 0x1000 fin
+                        si f.enlace <> 0 entonces x := x ob 0x40 fin
+                        k[16] := byte(x yb 0xFF)
+                        k[17] := byte(x >> 8)
+                    caso 0x8915: pon_ifreq_ip(nat64(dirección(k[0])), f.ip)          ; SIOCGIFADDR
+                    caso 0x8917: pon_ifreq_ip(nat64(dirección(k[0])), 0)              ; SIOCGIFDSTADDR
+                    caso 0x8919:                                    ; SIOCGIFBRDADDR
+                        si i = 0 entonces pon_ifreq_ip(nat64(dirección(k[0])), 0) sino pon_ifreq_ip(nat64(dirección(k[0])), f.ip ob (nob f.máscara)) fin
+                    caso 0x891B: pon_ifreq_ip(nat64(dirección(k[0])), f.máscara)     ; SIOCGIFNETMASK
+                    caso 0x8921:                                    ; SIOCGIFMTU
+                        k[16] := byte(f.mtu yb 0xFF)
+                        k[17] := byte(f.mtu >> 8)
+                    caso 0x8927:                                    ; SIOCGIFHWADDR
+                        k[16] := 1                              ; ARPHRD_ETHER 1 (y «lo», 772, abajo)
+                        j := 0
+                        mientras j < 6 hacer
+                            k[18 + j] := f.mac[j]
+                            j := j + 1
+                        fin
+                    caso 0x8933:                                    ; SIOCGIFINDEX
+                        k[16] := byte(i + 1)
+                    caso 0x8942: k[16] := 0
+                    si no: devolver ENOTTY
+                fin
+                si orden = 0x8927 y i = 0 entonces
+                    k[16] := byte(772 yb 0xFF)
+                    k[17] := byte(772 >> 8)
+                fin
+            fin
+            si no copia_a(p, arg, nat64(dirección(k[0])), 40) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        si orden >= 0x8900 y orden <= 0x89FF entonces devolver EPERM fin     ; (los SIOCS*: cambiar no se deja)
+        devolver ENOTTY
+    fin
+
+    público función stat_sock(k: nat64, d: nat64)
+        pon_m32(k + 24, 0xC000 ob 0x1FF)                ; S_IFSOCK, 0777
+        pon_m64(k + 8, d >> 4)
+        pon_m64(k + 16, 1)
+        pon_m64(k + 56, 4096)
+    fin
+
+    ; ---- los archivos de texto ----
+    tipo Escrito = estructura
+        d, n, cabe: nat64
+    fin
+
+    función pon(ref e: Escrito, t: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 y e.n < e.cabe hacer
+            pon_m8(e.d + e.n, t[i])
+            e.n := e.n + 1
+            i := i + 1
+        fin
+    fin
+
+    función pon_c(ref e: Escrito, c: nat32)
+        si e.n < e.cabe entonces
+            pon_m8(e.d + e.n, c)
+            e.n := e.n + 1
+        fin
+    fin
+
+    función pon_n(ref e: Escrito, x: nat64, ancho: nat32)
+        variable t: arreglo [24] de byte
+        variable i, k: nat32
+        i := 0
+        repite_cifras(x, dirección(t[0]), i)
+        k := i
+        mientras k < ancho hacer
+            pon_c(e, ' ')
+            k := k + 1
+        fin
+        mientras i > 0 hacer
+            i := i - 1
+            pon_c(e, t[i])
+        fin
+    fin
+
+    función repite_cifras(x: nat64, t: puntero a byte, ref i: nat32)
+        si x = 0 entonces
+            t[0] := '0'
+            i := 1
+            devolver
+        fin
+        mientras x > 0 hacer
+            t[i] := byte('0' + nat32(x mod 10))
+            x := x div 10
+            i := i + 1
+        fin
+    fin
+
+    función pon_ip(ref e: Escrito, ip: nat32)
+        pon_n(e, nat64(ip >> 24), 0)
+        pon_c(e, '.')
+        pon_n(e, nat64((ip >> 16) yb 0xFF), 0)
+        pon_c(e, '.')
+        pon_n(e, nat64((ip >> 8) yb 0xFF), 0)
+        pon_c(e, '.')
+        pon_n(e, nat64(ip yb 0xFF), 0)
+    fin
+
+    ; la IP como la escribe Linux en /proc/net/route (los octetos de la red, como un número de x86, en hexadecimal)
+    función pon_hex_ip(ref e: Escrito, ip: nat32)
+        variable h: puntero a byte
+        variable v: nat32
+        variable i: nat32
+        h := "0123456789ABCDEF"
+        v := ((ip yb 0xFF) << 24) ob (((ip >> 8) yb 0xFF) << 16) ob (((ip >> 16) yb 0xFF) << 8) ob (ip >> 24)
+        i := 0
+        mientras i < 8 hacer
+            pon_c(e, h[(v >> (28 - i * 4)) yb 15])
+            i := i + 1
+        fin
+    fin
+
+    función igual(a: puntero a byte, b: puntero a byte): bool
+        variable i: nat32
+        i := 0
+        mientras a[i] <> 0 y a[i] = b[i] hacer i := i + 1 fin
+        devolver a[i] = b[i]
+    fin
+
+    ; ¿es una de las rutas de texto de la red?
+    público función es_texto_red(t: puntero a byte): bool
+        devolver igual(t, "/etc/resolv.conf") o igual(t, "/etc/hosts") o igual(t, "/etc/hostname") o igual(t, "/etc/services") o igual(t, "/proc/net/route") o igual(t, "/proc/net/dev") o igual(t, "/etc/protocols")
+    fin
+
+    ; hace el texto de la ruta t: el objeto (Objetos64.nuevo_texto), o 0
+    público función texto_red(t: puntero a byte): nat64
+        variable e: Escrito
+        variable i, k: nat32
+        variable f: puntero a Ifz
+        e.cabe := 8192
+        e.n := 0
+        e.d := nat64(reserva(e.cabe))
+        si e.d = 0 entonces devolver 0 fin
+        bloquea()
+        si igual(t, "/etc/resolv.conf") entonces
+            pon(e, "# Hispa-64: los DNS que ha dado DHCP\n")
+            k := 0
+            i := 1
+            mientras i < n_ifz hacer
+                f := ifz(i)
+                si f.ip <> 0 y f.dns <> 0 entonces
+                    pon(e, "nameserver ")
+                    pon_ip(e, f.dns)
+                    pon_c(e, 10)
+                    k := k + 1
+                fin
+                si f.ip <> 0 y f.dns2 <> 0 entonces
+                    pon(e, "nameserver ")
+                    pon_ip(e, f.dns2)
+                    pon_c(e, 10)
+                fin
+                i := i + 1
+            fin
+            pon(e, "options timeout:2 attempts:2\n")
+        sino si igual(t, "/etc/hosts") entonces
+            pon(e, "127.0.0.1\tlocalhost hispa-64.localdomain\n")
+            i := 1
+            mientras i < n_ifz hacer
+                si ifz(i).ip <> 0 entonces
+                    pon_ip(e, ifz(i).ip)
+                    pon(e, "\thispa-64\n")
+                fin
+                i := i + 1
+            fin
+            i := 0
+            mientras i < n_hosts hacer
+                pon_ip(e, hosts_ip[i])
+                pon_c(e, 9)
+                pon(e, dirección(hosts_nombre[i][0]))
+                pon_c(e, 10)
+                i := i + 1
+            fin
+        sino si igual(t, "/etc/hostname") entonces
+            pon(e, "hispa-64\n")
+        sino si igual(t, "/etc/services") entonces
+            pon(e, "ftp\t\t21/tcp\nssh\t\t22/tcp\ntelnet\t\t23/tcp\nsmtp\t\t25/tcp\ndomain\t\t53/tcp\ndomain\t\t53/udp\nbootps\t\t67/udp\nbootpc\t\t68/udp\nhttp\t\t80/tcp\npop3\t\t110/tcp\nntp\t\t123/udp\nimap\t\t143/tcp\nhttps\t\t443/tcp\nsubmission\t587/tcp\nimaps\t\t993/tcp\npop3s\t\t995/tcp\nipp\t\t631/tcp\n")
+        sino si igual(t, "/etc/protocols") entonces
+            pon(e, "ip\t0\tIP\nicmp\t1\tICMP\ntcp\t6\tTCP\nudp\t17\tUDP\n")
+        sino si igual(t, "/proc/net/route") entonces
+            pon(e, "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n")
+            i := 1
+            mientras i < n_ifz hacer
+                f := ifz(i)
+                si f.ip <> 0 entonces
+                    si f.puerta <> 0 entonces
+                        pon(e, dirección(f.nombre[0]))
+                        pon(e, "\t00000000\t")
+                        pon_hex_ip(e, f.puerta)
+                        pon(e, "\t0003\t0\t0\t0\t00000000\t0\t0\t0\n")
+                    fin
+                    pon(e, dirección(f.nombre[0]))
+                    pon_c(e, 9)
+                    pon_hex_ip(e, f.ip yb f.máscara)
+                    pon(e, "\t00000000\t0001\t0\t0\t0\t")
+                    pon_hex_ip(e, f.máscara)
+                    pon(e, "\t0\t0\t0\n")
+                fin
+                i := i + 1
+            fin
+        sino si igual(t, "/proc/net/dev") entonces
+            pon(e, "Inter-|   Receive                                                |  Transmit\n")
+            pon(e, " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n")
+            i := 0
+            mientras i < n_ifz hacer
+                f := ifz(i)
+                k := 0
+                mientras f.nombre[k] <> 0 hacer k := k + 1 fin
+                mientras k < 6 hacer
+                    pon_c(e, ' ')
+                    k := k + 1
+                fin
+                pon(e, dirección(f.nombre[0]))
+                pon_c(e, ':')
+                pon_n(e, f.rx_oct, 8)
+                pon_n(e, f.rx_paq, 8)
+                pon_n(e, f.rx_err, 5)
+                pon_n(e, f.rx_tirados, 5)
+                pon(e, "    0     0          0         0 ")
+                pon_n(e, f.tx_oct, 8)
+                pon_n(e, f.tx_paq, 8)
+                pon_n(e, f.tx_err, 5)
+                pon(e, "    0    0     0       0          0\n")
+                i := i + 1
+            fin
+        fin
+        suelta_()
+        devolver nuevo_texto(e.d, e.n)
+    fin
+
+    ; ---- en marcha ----
+    ; «hosts=nombre:1.2.3.4,otro:5.6.7.8» de la línea del núcleo
+    función lee_hosts(t: puntero a byte)
+        variable i, k, ip, v, n: nat32
+        i := 0
+        mientras t[i] <> 0 y n_hosts < MAX_HOSTS hacer
+            k := 0
+            mientras t[i] <> 0 y t[i] <> ':' y k < 47 hacer
+                hosts_nombre[n_hosts][k] := t[i]
+                k := k + 1
+                i := i + 1
+            fin
+            hosts_nombre[n_hosts][k] := 0
+            si t[i] <> ':' entonces devolver fin
+            i := i + 1
+            ip := 0
+            n := 0
+            mientras n < 4 hacer
+                v := 0
+                mientras t[i] >= '0' y t[i] <= '9' hacer
+                    v := v * 10 + nat32(t[i] - '0')
+                    i := i + 1
+                fin
+                ip := (ip << 8) ob (v yb 0xFF)
+                n := n + 1
+                si n < 4 entonces
+                    si t[i] <> '.' entonces devolver fin
+                    i := i + 1
+                fin
+            fin
+            hosts_ip[n_hosts] := ip
+            n_hosts := n_hosts + 1
+            si t[i] = ',' entonces i := i + 1 fin
+        fin
+    fin
+
+    público función prepara_sockets(hosts: puntero a byte)
+        prepara_tcp()
+        lee_hosts(hosts)
+    fin
+
+    ; lo que dice al arrancar y en las pruebas
+    público función escribe_red()
+        variable i: nat32
+        variable f: puntero a Ifz
+        i := 1
+        mientras i < n_ifz hacer
+            f := ifz(i)
+            escribir("  ", dirección(f.nombre[0]), ": ", dirección(f.tarjeta[0]), ", MAC ")
+            escribe_mac(nat64(dirección(f.mac[0])))
+            si f.enlace <> 0 entonces escribir(", enlace a ", f.velocidad, " Mbit/s") sino escribir(", sin enlace") fin
+            si f.ip <> 0 entonces
+                escribir(", IP ")
+                escribe_ip(f.ip)
+                escribir("/", bits_de(f.máscara))
+            fin
+            escribir("; ", f.rx_paq, " tramas recibidas y ", f.tx_paq, " enviadas, ", f.interrupciones, " interrupciones\n")
+            i := i + 1
+        fin
+    fin
+
+fin Red64.

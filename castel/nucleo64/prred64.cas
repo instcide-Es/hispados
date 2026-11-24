@@ -1,0 +1,135 @@
+; =============================================================================
+;  prred64.cas - Hispa-64, etapa 9: las pruebas de la red de cada arranque
+;  (docs/64/HISPA-64.md, sección 15) y las de pruebas.sh:
+;   - lo que hay: las interfaces, el azar, la hora y la zona;
+;   - si en la unidad en memoria está RED.PRB (lo pone pruebas.sh como un
+;     módulo más), se espera a tener IP por DHCP (15 s como mucho) y se
+;     arranca cada línea suya como un programa, mirando su código: «=N
+;     ORDEN» espera el código N (sin «=», 0); las líneas con «#», nada;
+;   - al acabar, que no quede ningún socket (los de TIME_WAIT se esperan).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo PrRed64
+
+    importar Cifras64, Pant64, Es64, Monton64, Reloj64, Hilos64, Unidad64, Procesos, Azar64, Hora64, Objetos64, Redbase64, Ip64, Tcp64, Red64
+
+    público variable fallos9: nat32
+
+    función mal(qué: puntero a byte)
+        fallos9 := fallos9 + 1
+        pon_color(12, 0)
+        escribir("  MAL: ", qué, "\n")
+        pon_color(7, 0)
+    fin
+
+    función corre(línea: puntero a byte, esperado: nat64)
+        variable p: puntero a Proceso
+        variable r, t0: nat64
+        t0 := ahora_ns()
+        p := lanza(línea)
+        si p = nulo entonces
+            escribir("Programa «", línea, "»: no se ha podido arrancar: ", motivo, "\n")
+            mal("no arranca")
+            devolver
+        fin
+        r := espera_proceso(p)
+        escribir("Programa «", línea, "»: acaba con el código ", r)
+        si r = esperado entonces
+            escribir(", como debe (en ", (ahora_ns() - t0) div 1000000, " ms)\n")
+        sino
+            escribir("\n")
+            mal("no acaba con el código que debe")
+        fin
+    fin
+
+    ; ¿tiene ya IP alguna tarjeta?
+    función con_ip(): bool
+        variable i: nat32
+        i := 1
+        mientras i < n_ifz hacer
+            si ifz(i).ip <> 0 entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; las líneas de RED.PRB, una a una
+    función de_archivo(k: ent32)
+        variable d, n, i: nat64
+        variable t: arreglo [240] de byte
+        variable j: nat32
+        variable esperado: nat64
+        variable c: byte
+        d := dónde(nat32(k))
+        n := cuánto(nat32(k))
+        i := 0
+        mientras i < n hacer
+            j := 0
+            mientras i < n y m8(d + i) <> 10 hacer
+                c := byte(m8(d + i))
+                si c <> 13 y j < 238 entonces
+                    t[j] := c
+                    j := j + 1
+                fin
+                i := i + 1
+            fin
+            i := i + 1
+            t[j] := 0
+            si j > 0 y t[0] <> '#' entonces
+                esperado := 0
+                j := 0
+                si t[0] = '=' entonces
+                    j := 1
+                    mientras t[j] >= '0' y t[j] <= '9' hacer
+                        esperado := esperado * 10 + nat64(t[j] - '0')
+                        j := j + 1
+                    fin
+                    mientras t[j] = ' ' hacer j := j + 1 fin
+                fin
+                corre(dirección(t[j]), esperado)
+            fin
+        fin
+    fin
+
+    público función pruebas_red()
+        variable k: ent32
+        variable t0: nat64
+        variable i: nat32
+        pon_color(14, 0)
+        escribir("Red: ", n_ifz - 1, " tarjetas")
+        pon_color(7, 0)
+        si n_ifz > 1 entonces
+            escribir(" (y «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP), los sockets de POSIX\n")
+        sino
+            escribir(" (solo «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP), los sockets de POSIX\n")
+        fin
+        escribir("  el azar: ChaCha20")
+        si con_hw entonces escribir(" con RDSEED/RDRAND") sino escribir(" con los tiempos (sin RDRAND ni RDSEED)") fin
+        escribir("; la hora: ")
+        escribe_local()
+        escribir(", zona ", dirección(zona_nombre[0]), " (TZ=", dirección(zona_tz[0]), "), el CMOS ")
+        si cmos_local entonces escribir("en hora local\n") sino escribir("en UTC\n") fin
+        k := busca_archivo("RED.PRB")
+        si k < 0 entonces devolver fin
+        si n_ifz > 1 entonces
+            t0 := ahora_ns()
+            mientras no con_ip() y ahora_ns() - t0 < 15000000000 hacer duerme_ms(50) fin
+            si con_ip() entonces
+                escribir("Red: con IP en ", (ahora_ns() - t0) div 1000000, " ms\n")
+            sino
+                mal("sin IP por DHCP en 15 s")
+            fin
+        fin
+        escribe_red()
+        de_archivo(k)
+        ; (que no quede nada: los que están acabando, hasta 8 s)
+        t0 := ahora_ns()
+        mientras (socks_vivos > 0 o vivos > 0) y ahora_ns() - t0 < 8000000000 hacer duerme_ms(20) fin
+        escribe_red()
+        escribir("Después de la red: ", socks_vivos, " sockets (", socks_hechos, " hechos), ", vivos, " procesos; IP ", ip_rx, " recibidos y ", ip_tx, " enviados, ", ip_malos, " malos; TCP: ", tcp_abiertas, " conexiones, ", tcp_retx, " repeticiones, ", tcp_rst_tx, " RST; UDP ", udp_rx, " y ", udp_tx, "; ", eventos_vivos + tempos_vivos + textos_vivos, " objetos\n")
+        si socks_vivos <> 0 entonces mal("quedan sockets") fin
+        si eventos_vivos + tempos_vivos + textos_vivos <> 0 entonces mal("quedan eventfd, timerfd o textos") fin
+        i := 0
+    fin
+
+fin PrRed64.

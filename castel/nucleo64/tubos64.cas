@@ -16,7 +16,7 @@
 ; =============================================================================
 módulo Tubos64
 
-    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Procesos
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Procesos, Sondeo64
 
     público constante F_TUBO_L = 3              ; las clases de archivo abierto (las de Procesos: 1 consola, 2 archivo)
     público constante F_TUBO_E = 4
@@ -109,6 +109,7 @@ módulo Tubos64
         t.usos := t.usos + 1
         suelta(dirección(t.cerrojo), b)
         despierta_todos(esp(t))
+        Sondeo64.avisa()
         b := toma(dirección(t.cerrojo))
         t.usos := t.usos - 1
         suelta_si(t, b)
@@ -160,6 +161,7 @@ módulo Tubos64
         si r > 0 entonces
             suelta_sin(dirección(t.cerrojo))
             despierta_todos(esp(t))
+            Sondeo64.avisa()
             toma_sin(dirección(t.cerrojo))
         fin
         t.usos := t.usos - 1
@@ -219,6 +221,7 @@ módulo Tubos64
                     fin
                     suelta_sin(dirección(t.cerrojo))
                     despierta_todos(esp(t))
+                    Sondeo64.avisa()
                     toma_sin(dirección(t.cerrojo))
                 sino
                     si sin_esperar entonces
@@ -240,6 +243,7 @@ módulo Tubos64
             hecho := hecho + i
         fin
         despierta_todos(esp(t))
+        Sondeo64.avisa()
         b := toma(dirección(t.cerrojo))
         t.usos := t.usos - 1
         suelta_si(t, b)

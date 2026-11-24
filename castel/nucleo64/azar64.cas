@@ -1,0 +1,214 @@
+; =============================================================================
+;  azar64.cas - Hispa-64, etapa 9: el azar del núcleo (docs/64/HISPA-64.md,
+;  sección 15): getrandom, /dev/urandom y /dev/random, los números de
+;  secuencia de TCP, los puertos y los identificadores de DHCP y DNS.
+;  Un generador ChaCha20 (RFC 8439: 20 vueltas) con la clave borrada en cada
+;  pedido («fast key erasure»: el bloque siguiente da la clave nueva, así lo
+;  ya dado no se puede rehacer aunque luego se vea la clave). La clave se
+;  mezcla con lo que haya de entropía: RDSEED y RDRAND si el procesador los
+;  tiene (cada pedido), el TSC y el reloj (cada pedido, y lo que la red y
+;  las interrupciones van echando con echa()); para mezclar, otro bloque de
+;  ChaCha20 con la clave XOR lo nuevo. Sin RDRAND ni RDSEED, lo que dan las
+;  esperas de los temporizadores y de la red: no es criptográfico del todo,
+;  pero no se repite de un arranque a otro.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Azar64
+
+    importar Es64, Cerrojo, Reloj64, Entradas
+
+    variable clave: arreglo [8] de nat32
+    variable cuenta: nat64
+    variable cerrojo_a: nat64
+    variable mezcla: arreglo [8] de nat32     ; lo que se va echando (se junta en el pedido siguiente)
+    variable mezcla_i: nat32
+    público variable pedidos_azar, echados: nat64
+    público variable con_hw: bool
+
+    función rotl(x: nat32, n: nat32): nat32
+        devolver (x << n) ob (x >> (32 - n))
+    fin
+
+    función cuarto(ref s: arreglo [16] de nat32, a: nat32, b: nat32, c: nat32, d: nat32)
+        s[a] := s[a] + s[b]
+        s[d] := rotl(s[d] xob s[a], 16)
+        s[c] := s[c] + s[d]
+        s[b] := rotl(s[b] xob s[c], 12)
+        s[a] := s[a] + s[b]
+        s[d] := rotl(s[d] xob s[a], 8)
+        s[c] := s[c] + s[d]
+        s[b] := rotl(s[b] xob s[c], 7)
+    fin
+
+    ; un bloque de 64 octetos (16 nat32) con la clave y la cuenta de ahora
+    función bloque(ref sal: arreglo [16] de nat32)
+        variable x: arreglo [16] de nat32
+        variable i: nat32
+        x[0] := 0x61707865
+        x[1] := 0x3320646E
+        x[2] := 0x79622D32
+        x[3] := 0x6B206574
+        i := 0
+        mientras i < 8 hacer
+            x[4 + i] := clave[i]
+            i := i + 1
+        fin
+        x[12] := nat32(cuenta yb 0xFFFFFFFF)
+        x[13] := nat32(cuenta >> 32)
+        x[14] := 0x48495350                       ; «HISP»
+        x[15] := 0x41363421                       ; «A64!»
+        i := 0
+        mientras i < 16 hacer
+            sal[i] := x[i]
+            i := i + 1
+        fin
+        i := 0
+        mientras i < 10 hacer
+            cuarto(sal, 0, 4, 8, 12)
+            cuarto(sal, 1, 5, 9, 13)
+            cuarto(sal, 2, 6, 10, 14)
+            cuarto(sal, 3, 7, 11, 15)
+            cuarto(sal, 0, 5, 10, 15)
+            cuarto(sal, 1, 6, 11, 12)
+            cuarto(sal, 2, 7, 8, 13)
+            cuarto(sal, 3, 4, 9, 14)
+            i := i + 1
+        fin
+        i := 0
+        mientras i < 16 hacer
+            sal[i] := sal[i] + x[i]
+            i := i + 1
+        fin
+        cuenta := cuenta + 1
+    fin
+
+    ; RDSEED o RDRAND (64 bits), o 0 si no hay o no da
+    función del_procesador(): nat64
+        variable r, ok_: nat64
+        variable k: nat32
+        r := 0
+        ok_ := 0
+        k := 0
+        si con_rdseed entonces
+            mientras ok_ = 0 y k < 20 hacer
+                ensamblador
+                    xor ecx, ecx
+                    db 0x48, 0x0F, 0xC7, 0xF8       ; rdseed rax
+                    db 0x0F, 0x92, 0xC1             ; setc cl
+                    mov {r}, rax
+                    mov {ok_}, rcx
+                fin
+                k := k + 1
+            fin
+        fin
+        si ok_ = 0 y con_rdrand entonces
+            k := 0
+            mientras ok_ = 0 y k < 10 hacer
+                ensamblador
+                    xor ecx, ecx
+                    db 0x48, 0x0F, 0xC7, 0xF0       ; rdrand rax
+                    db 0x0F, 0x92, 0xC1             ; setc cl
+                    mov {r}, rax
+                    mov {ok_}, rcx
+                fin
+                k := k + 1
+            fin
+        fin
+        si ok_ = 0 entonces devolver 0 fin
+        devolver r
+    fin
+
+    ; (con el cerrojo) lo nuevo a la clave, y un bloque para que se mezcle
+    función mezcla_clave()
+        variable s: arreglo [16] de nat32
+        variable r: nat64
+        variable i: nat32
+        r := del_procesador()
+        clave[0] := clave[0] xob nat32(r yb 0xFFFFFFFF)
+        clave[1] := clave[1] xob nat32(r >> 32)
+        r := del_procesador()
+        clave[2] := clave[2] xob nat32(r yb 0xFFFFFFFF)
+        clave[3] := clave[3] xob nat32(r >> 32)
+        r := tsc()
+        clave[4] := clave[4] xob nat32(r yb 0xFFFFFFFF)
+        clave[5] := clave[5] xob nat32(r >> 32)
+        r := ahora_ns()
+        clave[6] := clave[6] xob nat32(r yb 0xFFFFFFFF)
+        clave[7] := clave[7] xob nat32(r >> 32)
+        i := 0
+        mientras i < 8 hacer
+            clave[i] := clave[i] xob mezcla[i]
+            mezcla[i] := 0
+            i := i + 1
+        fin
+        bloque(s)
+        i := 0
+        mientras i < 8 hacer
+            clave[i] := s[i] xob s[i + 8]
+            i := i + 1
+        fin
+    fin
+
+    ; echa algo de entropía (un tiempo, un contador: lo que sea)
+    público función echa(x: nat64)
+        variable b: nat64
+        b := toma(dirección(cerrojo_a))
+        mezcla[mezcla_i yb 7] := rotl(mezcla[mezcla_i yb 7], 5) xob nat32(x yb 0xFFFFFFFF) xob nat32(x >> 32) xob nat32(tsc() yb 0xFFFFFFFF)
+        mezcla_i := mezcla_i + 1
+        echados := echados + 1
+        suelta(dirección(cerrojo_a), b)
+    fin
+
+    ; n octetos (hasta 4096) en d (memoria del núcleo)
+    público función llena(d: nat64, n: nat64)
+        variable s: arreglo [16] de nat32
+        variable b, hecho, k, i: nat64
+        si n > 4096 entonces n := 4096 fin
+        b := toma(dirección(cerrojo_a))
+        pedidos_azar := pedidos_azar + 1
+        mezcla_clave()
+        hecho := 0
+        mientras hecho < n hacer
+            bloque(s)
+            k := n - hecho
+            si k > 64 entonces k := 64 fin
+            i := 0
+            mientras i < k hacer
+                pon_m8(d + hecho + i, (s[nat32(i >> 2)] >> (nat32(i yb 3) * 8)) yb 0xFF)
+                i := i + 1
+            fin
+            hecho := hecho + k
+        fin
+        ; (la clave de después, de un bloque que no se ha dado)
+        bloque(s)
+        i := 0
+        mientras i < 8 hacer
+            clave[nat32(i)] := s[nat32(i)]
+            i := i + 1
+        fin
+        suelta(dirección(cerrojo_a), b)
+    fin
+
+    público función azar64(): nat64
+        variable x: nat64
+        llena(nat64(dirección(x)), 8)
+        devolver x
+    fin
+
+    público función azar32(): nat32
+        devolver nat32(azar64() yb 0xFFFFFFFF)
+    fin
+
+    público función prepara_azar()
+        variable i: nat32
+        con_hw := con_rdrand o con_rdseed
+        i := 0
+        mientras i < 8 hacer
+            clave[i] := nat32(tsc() yb 0xFFFFFFFF) xob (i * 0x9E3779B9)
+            i := i + 1
+        fin
+        cuenta := tsc()
+        mezcla_clave()
+    fin
+
+fin Azar64.

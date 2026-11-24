@@ -29,7 +29,7 @@
 ; =============================================================================
 módulo Tty64
 
-    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Apic64, Hilos64, Pant64, Procesos
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Apic64, Hilos64, Pant64, Procesos, Sondeo64
 
     constante LARGO_LISTO = 4096                ; lo que ya se puede leer
     constante LARGO_LÍNEA = 1024                ; la línea que se edita
@@ -746,6 +746,7 @@ módulo Tty64
             señala_grupo(primer_plano, SIGINT)
         fin
         despierta_todos(dirección(espera_))
+        Sondeo64.avisa()                    ; [etapa 9] y a poll, select y epoll
     fin
 
     ; ---- lo que leen los programas ----

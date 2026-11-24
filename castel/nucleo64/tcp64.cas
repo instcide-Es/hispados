@@ -1,0 +1,804 @@
+; =============================================================================
+;  tcp64.cas - Hispa-64, etapa 9: TCP (RFC 793, 1122, 5681 y 6298; docs/64/
+;  HISPA-64.md, sección 15), dentro del núcleo, con el cerrojo de la red:
+;   - conectar (SYN, con la MSS), escuchar y aceptar (cada uno que llega es
+;     un Sock nuevo; se da con accept cuando está ESTABLECIDO);
+;   - lo que sale, del búfer de envío (64 KB), en trozos de la MSS, lo que
+;     deje la ventana de la otra punta; lo que llega, al de recibir (64 KB),
+;     en orden (lo que llega desordenado se tira y se contesta con el ACK de
+;     lo que falta: la otra punta lo repite);
+;   - la retransmisión con su plazo medido (Jacobson/Karels: SRTT y RTTVAR,
+;     de 200 ms a 60 s, doblándose en cada repetición; 8 veces y se corta) y
+;     la retransmisión rápida (tres ACK repetidos); la ventana a cero, con la
+;     pregunta de un octeto (persist);
+;   - el cierre bien hecho: FIN en las dos direcciones, FIN_WAIT_1 y 2,
+;     CLOSING, CLOSE_WAIT, LAST_ACK y TIME_WAIT (5 s aquí); RST a lo que no
+;     tiene conexión, y si se cierra con algo sin leer (como Linux);
+;   - la ventana que se anuncia, al día cuando el programa lee.
+;  Sin escala de ventana ni SACK (quedan para la etapa 10, como IPv6).
+;  Lo de Hispa-Pentium (castel/nucleo32/rtcp.cas) es el modelo.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Tcp64
+
+    importar Cifras64, Es64, Monton64, Reloj64, Sondeo64, Azar64, Redbase64, Ip64
+
+    constante F_FIN = 1
+    constante F_SYN = 2
+    constante F_RST = 4
+    constante F_PSH = 8
+    constante F_ACK = 16
+    constante RTO_INI = 1000000000              ; 1 s
+    constante RTO_MÍN = 200000000
+    constante RTO_MÁX = 60000000000
+    constante TIME_WAIT_NS = 5000000000
+    constante FIN2_NS = 30000000000
+    constante MAX_RETX = 8
+    constante MAX_RETX_SYN = 5
+    constante ECONNREFUSED = -111
+    constante ECONNRESET = -104
+    constante ETIMEDOUT = -110
+    constante EHOSTUNREACH = -113
+    público constante TCP_RX = 65536
+    público constante TCP_TX = 65536
+
+    público variable tcp_rst_rx, tcp_rst_tx, tcp_retx, tcp_rápidas, tcp_tirados, tcp_abiertas: nat64
+
+    ; las comparaciones de números de secuencia (que dan la vuelta)
+    función antes(a: nat32, b: nat32): bool
+        devolver ent32(a - b) < 0
+    fin
+
+    función antes_o_igual(a: nat32, b: nat32): bool
+        devolver ent32(a - b) <= 0
+    fin
+
+    función mín(a: nat64, b: nat64): nat64
+        si a < b entonces devolver a fin
+        devolver b
+    fin
+
+    ; la ventana que se anuncia
+    función ventana(s: puntero a Sock): nat32
+        variable v: nat64
+        v := rx_sitio(s)
+        si s.marcas yb M_NO_LEE <> 0 entonces v := s.rx_tam fin
+        si v > 65535 entonces v := 65535 fin
+        devolver nat32(v)
+    fin
+
+    ; ---- mandar un segmento ----
+    ; con las marcas f, la secuencia seq, y n octetos del búfer de envío desde «off»
+    función manda(s: puntero a Sock, f: nat32, seq: nat32, off: nat64, n: nat32)
+        variable u: nat64
+        variable lh, v: nat32
+        u := sitio_datos()
+        lh := 20
+        si f yb F_SYN <> 0 entonces lh := 24 fin
+        pon_be16(u, s.l_puerto)
+        pon_be16(u + 2, s.r_puerto)
+        pon_be32(u + 4, seq)
+        si f yb F_ACK <> 0 entonces pon_be32(u + 8, s.rcv_nxt) sino pon_be32(u + 8, 0) fin
+        pon_m8(u + 12, (lh div 4) << 4)
+        pon_m8(u + 13, f)
+        v := ventana(s)
+        pon_be16(u + 14, v)
+        pon_be16(u + 16, 0)
+        pon_be16(u + 18, 0)
+        si lh = 24 entonces
+            pon_m8(u + 20, 2)
+            pon_m8(u + 21, 4)
+            pon_be16(u + 22, MTU - 40)
+        fin
+        si n > 0 entonces tx_mira(s, off, u + nat64(lh), nat64(n)) fin
+        pon_be16(u + 16, plegar(suma(u, nat64(lh + n), suma_falsa(s.l_ip, s.r_ip, 6, lh + n))))
+        s.rcv_adv := s.rcv_nxt + v
+        s.segs_tx := s.segs_tx + 1
+        ip_envía(s.l_ip, s.r_ip, 6, u, lh + n, s.ttl)
+    fin
+
+    función manda_ack(s: puntero a Sock)
+        manda(s, F_ACK, s.snd_nxt, 0, 0)
+    fin
+
+    ; RST a lo que ha llegado sin conexión (de/a: las IP; d: el segmento)
+    función manda_rst(de: nat32, a: nat32, d: nat64, n: nat32)
+        variable u: nat64
+        variable f, seq, ack, lon: nat32
+        f := m8(d + 13)
+        si f yb F_RST <> 0 entonces devolver fin
+        lon := n - (m8(d + 12) >> 4) * 4
+        si f yb F_SYN <> 0 entonces lon := lon + 1 fin
+        si f yb F_FIN <> 0 entonces lon := lon + 1 fin
+        u := sitio_datos()
+        pon_be16(u, be16(d + 2))
+        pon_be16(u + 2, be16(d))
+        si f yb F_ACK <> 0 entonces
+            seq := be32(d + 8)
+            ack := 0
+            pon_m8(u + 13, F_RST)
+        sino
+            seq := 0
+            ack := be32(d + 4) + lon
+            pon_m8(u + 13, F_RST ob F_ACK)
+        fin
+        pon_be32(u + 4, seq)
+        pon_be32(u + 8, ack)
+        pon_m8(u + 12, 5 << 4)
+        pon_be16(u + 14, 0)
+        pon_be16(u + 16, 0)
+        pon_be16(u + 18, 0)
+        pon_be16(u + 16, plegar(suma(u, 20, suma_falsa(a, de, 6, 20))))
+        tcp_rst_tx := tcp_rst_tx + 1
+        ip_envía(a, de, 6, u, 20, 0)
+    fin
+
+    función manda_rst_de(s: puntero a Sock)
+        manda(s, F_RST ob F_ACK, s.snd_nxt, 0, 0)
+        tcp_rst_tx := tcp_rst_tx + 1
+    fin
+
+    ; lo que está fuera y sin confirmar (octetos de datos, sin el SYN ni el FIN)
+    función en_vuelo(s: puntero a Sock): nat64
+        variable v: nat64
+        v := nat64(s.snd_nxt - s.snd_una)
+        si s.estado = T_SYN_ENVIADO o s.estado = T_SYN_RECIBIDO entonces devolver 0 fin
+        si s.marcas yb M_FIN_ENVIADO <> 0 y v > 0 entonces v := v - 1 fin
+        si v > s.tx_n entonces v := s.tx_n fin
+        devolver v
+    fin
+
+    función pon_retx(s: puntero a Sock)
+        si s.t_retx = 0 entonces s.t_retx := ahora_ns() + s.rto fin
+    fin
+
+    ; manda lo que haya y quepa en la ventana (y el FIN, si toca)
+    público función sale_lo_que_haya(s: puntero a Sock)
+        variable vuelo, libre, ventana_, n, k: nat64
+        si s.estado <> T_ESTABLECIDO y s.estado <> T_ESPERA_CIERRE y s.estado <> T_FIN_ESPERA1 y s.estado <> T_CERRANDO y s.estado <> T_ÚLTIMO_ACK entonces devolver fin
+        k := 0
+        mientras k < 64 hacer
+            vuelo := en_vuelo(s)
+            libre := s.tx_n - vuelo
+            ventana_ := nat64(s.snd_wnd)
+            si ventana_ > vuelo entonces ventana_ := ventana_ - vuelo sino ventana_ := 0 fin
+            si libre = 0 o ventana_ = 0 entonces romper fin
+            n := mín(mín(libre, ventana_), nat64(s.mss))
+            ; (sin Nagle con poco: lo pequeño sale ya; con TCP_NODELAY, igual)
+            manda(s, F_ACK ob F_PSH, s.snd_nxt, vuelo, nat32(n))
+            si s.snd_nxt = s.rtt_seq o s.rtt_t = 0 entonces
+                s.rtt_seq := s.snd_nxt + nat32(n)
+                s.rtt_t := ahora_ns()
+            fin
+            s.snd_nxt := s.snd_nxt + nat32(n)
+            si antes(s.snd_max, s.snd_nxt) entonces s.snd_max := s.snd_nxt fin
+            pon_retx(s)
+            k := k + 1
+        fin
+        ; la ventana a cero con algo por mandar: a preguntar
+        si s.snd_wnd = 0 y s.tx_n > en_vuelo(s) y s.t_persiste = 0 y s.t_retx = 0 entonces s.t_persiste := ahora_ns() + s.rto fin
+        ; el FIN, cuando ya ha salido todo
+        si s.marcas yb M_FIN_PENDIENTE <> 0 y s.marcas yb M_FIN_ENVIADO = 0 y en_vuelo(s) = s.tx_n entonces
+            manda(s, F_FIN ob F_ACK, s.snd_nxt, 0, 0)
+            s.snd_nxt := s.snd_nxt + 1
+            si antes(s.snd_max, s.snd_nxt) entonces s.snd_max := s.snd_nxt fin
+            s.marcas := s.marcas ob M_FIN_ENVIADO
+            si s.estado = T_ESTABLECIDO entonces s.estado := T_FIN_ESPERA1 fin
+            si s.estado = T_ESPERA_CIERRE entonces s.estado := T_ÚLTIMO_ACK fin
+            pon_retx(s)
+        fin
+    fin
+
+    ; ---- abrir ----
+    ; connect: manda el SYN (s ya tiene l_ip, l_puerto, r_ip y r_puerto)
+    público función tcp_conecta(s: puntero a Sock)
+        s.iss := azar32()
+        s.snd_una := s.iss
+        s.snd_nxt := s.iss + 1
+        s.snd_max := s.snd_nxt
+        s.snd_wnd := 1
+        s.mss := 536
+        s.rto := RTO_INI
+        s.srtt := 0
+        s.estado := T_SYN_ENVIADO
+        manda(s, F_SYN, s.iss, 0, 0)
+        s.t_retx := ahora_ns() + s.rto
+        s.retx_n := 0
+        tcp_abiertas := tcp_abiertas + 1
+    fin
+
+    público función tcp_escucha(s: puntero a Sock, máx: nat32)
+        si máx = 0 entonces máx := 1 fin
+        si máx > COLA_ESCUCHA entonces máx := COLA_ESCUCHA fin
+        s.cola_máx := máx
+        s.estado := T_ESCUCHA
+        s.marcas := s.marcas ob M_ESCUCHA
+    fin
+
+    ; el que espera en la cola de uno que escucha (accept): el primero, o nulo
+    público función tcp_acepta(s: puntero a Sock): puntero a Sock
+        variable c: puntero a Sock
+        variable i: nat32
+        si s.cola_n = 0 entonces devolver nulo fin
+        c := puntero(s.cola[0])
+        i := 1
+        mientras i < s.cola_n hacer
+            s.cola[i - 1] := s.cola[i]
+            i := i + 1
+        fin
+        s.cola_n := s.cola_n - 1
+        c.marcas := c.marcas yb (nob nat32(M_EN_COLA))
+        c.padre := 0
+        devolver c
+    fin
+
+    ; la MSS de las opciones de un SYN
+    función mss_de(d: nat64, lh: nat32): nat32
+        variable i, op, l, m: nat32
+        m := 536
+        i := 20
+        mientras i < lh hacer
+            op := m8(d + i)
+            si op = 0 entonces romper fin
+            si op = 1 entonces
+                i := i + 1
+                seguir
+            fin
+            si i + 1 >= lh entonces romper fin
+            l := m8(d + i + 1)
+            si l < 2 entonces romper fin
+            si op = 2 y l = 4 entonces m := be16(d + i + 2) fin
+            i := i + l
+        fin
+        si m > MTU - 40 entonces m := MTU - 40 fin
+        si m < 64 entonces m := 64 fin
+        devolver m
+    fin
+
+    ; ---- buscar la conexión ----
+    función busca(de: nat32, de_p: nat32, a: nat32, a_p: nat32): puntero a Sock
+        variable i: nat32
+        variable s, esc: puntero a Sock
+        esc := nulo
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 entonces
+                s := sock(i)
+                si s.tipo_ = S_STREAM y s.l_puerto = a_p entonces
+                    si s.estado <> T_ESCUCHA y s.estado <> T_CERRADO y s.r_ip = de y s.r_puerto = de_p y s.l_ip = a entonces devolver s fin
+                    si s.estado = T_ESCUCHA y (s.l_ip = 0 o s.l_ip = a) entonces esc := s fin
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver esc
+    fin
+
+    ; ---- cerrar ----
+    ; (la conexión se acaba) a CERRADO; si nadie la tiene, se suelta
+    función acaba(s: puntero a Sock, e: ent32)
+        si e <> 0 y s.error = 0 entonces s.error := e fin
+        s.estado := T_CERRADO
+        s.t_retx := 0
+        s.t_persiste := 0
+        s.t_fin := 0
+        s.marcas := s.marcas ob M_FIN_RECIBIDO
+        Sondeo64.avisa()
+    fin
+
+    ; ¿se puede soltar ya? (cerrada y sin programa que la tenga, ni en una cola)
+    función suelta_si(s: puntero a Sock): bool
+        si s.estado = T_CERRADO y s.marcas yb M_HUÉRFANO <> 0 y s.marcas yb M_EN_COLA = 0 entonces
+            quita_sock(s)
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+    ; shutdown(SHUT_WR) y close: el FIN, cuando salga lo que queda
+    público función tcp_fin(s: puntero a Sock)
+        si s.marcas yb M_FIN_PENDIENTE <> 0 entonces devolver fin
+        s.marcas := s.marcas ob M_FIN_PENDIENTE
+        sale_lo_que_haya(s)
+    fin
+
+    ; el programa ya no la tiene (close del último descriptor)
+    público función tcp_suelta(s: puntero a Sock)
+        variable i: nat32
+        variable c: puntero a Sock
+        s.marcas := s.marcas ob M_HUÉRFANO
+        si s.estado = T_ESCUCHA entonces
+            ; los que esperaban en la cola (y los que estaban llegando), fuera con RST
+            i := 0
+            mientras i < MAX_SOCK hacer
+                si socks[i] <> 0 entonces
+                    c := sock(i)
+                    si c.padre = nat64(s) entonces
+                        manda_rst_de(c)
+                        c.padre := 0
+                        c.marcas := (c.marcas yb (nob nat32(M_EN_COLA))) ob M_HUÉRFANO
+                        acaba(c, 0)
+                        suelta_si(c)
+                    fin
+                fin
+                i := i + 1
+            fin
+            s.cola_n := 0
+            acaba(s, 0)
+        sino si s.estado = T_SYN_ENVIADO o s.estado = T_CERRADO entonces
+            acaba(s, 0)
+        sino si s.rx_n > 0 o s.estado = T_SYN_RECIBIDO entonces
+            ; (con algo sin leer: RST, como Linux)
+            manda_rst_de(s)
+            acaba(s, 0)
+        sino
+            tcp_fin(s)
+            si s.estado = T_FIN_ESPERA2 y s.t_fin = 0 entonces s.t_fin := ahora_ns() + FIN2_NS fin
+        fin
+        suelta_si(s)
+    fin
+
+    ; ---- lo que llega ----
+    ; la RTT medida (ns): SRTT, RTTVAR y el plazo (RFC 6298)
+    función mide(s: puntero a Sock, r: nat64)
+        variable d: nat64
+        si s.srtt = 0 entonces
+            s.srtt := r
+            s.rttvar := r div 2
+        sino
+            si s.srtt > r entonces d := s.srtt - r sino d := r - s.srtt fin
+            s.rttvar := (3 * s.rttvar + d) div 4
+            s.srtt := (7 * s.srtt + r) div 8
+        fin
+        s.rto := s.srtt + 4 * s.rttvar
+        si s.rto < RTO_MÍN entonces s.rto := RTO_MÍN fin
+        si s.rto > RTO_MÁX entonces s.rto := RTO_MÁX fin
+    fin
+
+    ; el ACK de lo enviado
+    función confirma(s: puntero a Sock, ack: nat32, wnd: nat32, seq: nat32, hay_datos: bool)
+        variable n, datos: nat64
+        si antes(s.snd_una, ack) y antes_o_igual(ack, s.snd_max) entonces
+            n := nat64(ack - s.snd_una)
+            datos := n
+            ; (el FIN no está en el búfer)
+            si s.marcas yb M_FIN_ENVIADO <> 0 y ack = s.snd_max entonces datos := datos - 1 fin
+            si datos > s.tx_n entonces datos := s.tx_n fin
+            tx_quita(s, datos)
+            s.snd_una := ack
+            si antes(s.snd_nxt, s.snd_una) entonces s.snd_nxt := s.snd_una fin
+            si s.rtt_t <> 0 y antes_o_igual(s.rtt_seq, ack) entonces
+                si s.retx_n = 0 entonces mide(s, ahora_ns() - s.rtt_t) fin
+                s.rtt_t := 0
+            fin
+            s.retx_n := 0
+            s.dupacks := 0
+            si s.snd_una = s.snd_max entonces s.t_retx := 0 sino s.t_retx := ahora_ns() + s.rto fin
+            Sondeo64.avisa()
+        sino si ack = s.snd_una y s.snd_una <> s.snd_max y no hay_datos y wnd = s.snd_wnd entonces
+            ; un ACK repetido: al tercero, se repite lo primero sin esperar
+            s.dupacks := s.dupacks + 1
+            si s.dupacks = 3 entonces
+                tcp_rápidas := tcp_rápidas + 1
+                s.snd_nxt := s.snd_una
+                s.marcas := s.marcas yb (nob nat32(M_FIN_ENVIADO))
+                s.rtt_t := 0
+            fin
+        fin
+        ; la ventana (RFC 793: si el segmento es más nuevo)
+        si antes(s.snd_wl1, seq) o (s.snd_wl1 = seq y antes_o_igual(s.snd_wl2, ack)) entonces
+            si s.snd_wnd = 0 y wnd > 0 entonces s.t_persiste := 0 fin
+            s.snd_wnd := wnd
+            s.snd_wl1 := seq
+            s.snd_wl2 := ack
+        fin
+    fin
+
+    ; uno que llega a una que escucha: un SYN
+    función llega_syn(esc: puntero a Sock, de: nat32, a: nat32, d: nat64, n: nat32, lh: nat32)
+        variable c: puntero a Sock
+        variable i, pend: nat32
+        ; (los que ya están llegando a ella cuentan para la cola)
+        pend := 0
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 y sock(i).padre = nat64(esc) entonces pend := pend + 1 fin
+            i := i + 1
+        fin
+        si pend >= esc.cola_máx entonces
+            tcp_tirados := tcp_tirados + 1
+            devolver
+        fin
+        c := nuevo_sock(S_STREAM, 6, TCP_RX, TCP_TX)
+        si c = nulo entonces
+            tcp_tirados := tcp_tirados + 1
+            devolver
+        fin
+        c.l_ip := a
+        c.l_puerto := esc.l_puerto
+        c.r_ip := de
+        c.r_puerto := be16(d)
+        c.marcas := M_LIGADO ob (esc.marcas yb (M_NODELAY ob M_KEEPALIVE))
+        c.padre := nat64(esc)
+        c.irs := be32(d + 4)
+        c.rcv_nxt := c.irs + 1
+        c.iss := azar32()
+        c.snd_una := c.iss
+        c.snd_nxt := c.iss + 1
+        c.snd_max := c.snd_nxt
+        c.snd_wnd := be16(d + 14)
+        c.snd_wl1 := c.irs
+        c.snd_wl2 := c.iss
+        c.mss := mss_de(d, lh)
+        c.rto := RTO_INI
+        c.estado := T_SYN_RECIBIDO
+        c.t_vivo := ahora_ns()
+        manda(c, F_SYN ob F_ACK, c.iss, 0, 0)
+        c.t_retx := ahora_ns() + c.rto
+        tcp_abiertas := tcp_abiertas + 1
+    fin
+
+    ; pasa a ESTABLECIDO una que llegó a una que escucha: a su cola
+    función a_la_cola(c: puntero a Sock)
+        variable esc: puntero a Sock
+        esc := puntero(c.padre)
+        si esc = nulo entonces devolver fin
+        si esc.cola_n >= COLA_ESCUCHA entonces
+            manda_rst_de(c)
+            c.padre := 0
+            c.marcas := c.marcas ob M_HUÉRFANO
+            acaba(c, 0)
+            suelta_si(c)
+            devolver
+        fin
+        esc.cola[esc.cola_n] := nat64(c)
+        esc.cola_n := esc.cola_n + 1
+        c.marcas := c.marcas ob M_EN_COLA
+        Sondeo64.avisa()
+    fin
+
+    ; lo que ha llegado (Ip64.ent_*): el segmento
+    función tcp_entra()
+        variable d: nat64
+        variable n, de, a, de_p, a_p, seq, ack, f, lh, wnd, lon, cabe, dentro, k: nat32
+        variable s: puntero a Sock
+        variable fin_aquí: bool
+        d := ent_d
+        n := nat32(ent_n)
+        de := ent_de
+        a := ent_a
+        si n < 20 entonces devolver fin
+        si plegar(suma(d, nat64(n), suma_falsa(de, a, 6, n))) <> 0 entonces
+            ip_malos := ip_malos + 1
+            devolver
+        fin
+        de_p := be16(d)
+        a_p := be16(d + 2)
+        seq := be32(d + 4)
+        ack := be32(d + 8)
+        lh := (m8(d + 12) >> 4) * 4
+        f := m8(d + 13)
+        wnd := be16(d + 14)
+        si lh < 20 o lh > n entonces devolver fin
+        lon := n - lh
+        s := busca(de, de_p, a, a_p)
+        si s = nulo entonces
+            manda_rst(de, a, d, n)
+            devolver
+        fin
+        s.segs_rx := s.segs_rx + 1
+        s.t_vivo := ahora_ns()
+        ; ---- uno que escucha ----
+        si s.estado = T_ESCUCHA entonces
+            si f yb F_RST <> 0 entonces devolver fin
+            si f yb F_ACK <> 0 entonces
+                manda_rst(de, a, d, n)
+                devolver
+            fin
+            si f yb F_SYN <> 0 entonces llega_syn(s, de, a, d, n, lh) fin
+            devolver
+        fin
+        ; ---- el SYN mandado: esperando el SYN+ACK ----
+        si s.estado = T_SYN_ENVIADO entonces
+            si f yb F_ACK <> 0 y (antes_o_igual(ack, s.iss) o antes(s.snd_max, ack)) entonces
+                si f yb F_RST = 0 entonces manda_rst(de, a, d, n) fin
+                devolver
+            fin
+            si f yb F_RST <> 0 entonces
+                si f yb F_ACK <> 0 entonces
+                    tcp_rst_rx := tcp_rst_rx + 1
+                    acaba(s, ECONNREFUSED)
+                    suelta_si(s)
+                fin
+                devolver
+            fin
+            si f yb F_SYN <> 0 y f yb F_ACK <> 0 entonces
+                s.irs := seq
+                s.rcv_nxt := seq + 1
+                s.snd_una := ack
+                s.snd_wnd := wnd
+                s.snd_wl1 := seq
+                s.snd_wl2 := ack
+                s.mss := mss_de(d, lh)
+                si s.retx_n = 0 y s.t_retx <> 0 entonces mide(s, ahora_ns() - (s.t_retx - s.rto)) fin
+                s.t_retx := 0
+                s.retx_n := 0
+                s.estado := T_ESTABLECIDO
+                manda_ack(s)
+                sale_lo_que_haya(s)
+                Sondeo64.avisa()
+            fin
+            devolver
+        fin
+        ; ---- lo demás: ¿está dentro de la ventana? ----
+        dentro := 1
+        si lon = 0 entonces
+            si antes(seq, s.rcv_nxt) y f yb (F_SYN ob F_FIN) = 0 entonces dentro := 0 fin
+        sino
+            si antes_o_igual(seq + lon, s.rcv_nxt) entonces dentro := 0 fin
+        fin
+        si antes(s.rcv_nxt + ventana(s) + 1, seq) entonces dentro := 0 fin
+        si dentro = 0 y f yb F_RST = 0 entonces
+            ; (repetido o fuera: se contesta con lo que se espera)
+            si s.estado <> T_SYN_RECIBIDO entonces manda_ack(s) fin
+            devolver
+        fin
+        si f yb F_RST <> 0 entonces
+            si dentro <> 0 entonces
+                tcp_rst_rx := tcp_rst_rx + 1
+                si s.estado = T_SYN_RECIBIDO entonces
+                    s.marcas := s.marcas ob M_HUÉRFANO
+                    s.padre := 0
+                    acaba(s, 0)
+                sino
+                    acaba(s, ECONNRESET)
+                fin
+                s.marcas := s.marcas ob M_RESETEADO
+                suelta_si(s)
+            fin
+            devolver
+        fin
+        si f yb F_SYN <> 0 y s.estado <> T_SYN_RECIBIDO entonces
+            ; (un SYN dentro de una conexión: se corta)
+            manda_rst_de(s)
+            acaba(s, ECONNRESET)
+            suelta_si(s)
+            devolver
+        fin
+        si f yb F_ACK = 0 entonces devolver fin
+        ; ---- el ACK ----
+        si s.estado = T_SYN_RECIBIDO entonces
+            si antes(s.snd_una, ack) y antes_o_igual(ack, s.snd_max) entonces
+                s.snd_una := ack
+                s.snd_wnd := wnd
+                s.snd_wl1 := seq
+                s.snd_wl2 := ack
+                s.t_retx := 0
+                s.retx_n := 0
+                s.estado := T_ESTABLECIDO
+                a_la_cola(s)
+                si s.estado = T_CERRADO entonces devolver fin
+            sino
+                manda_rst(de, a, d, n)
+                devolver
+            fin
+        fin
+        confirma(s, ack, wnd, seq, lon > 0)
+        ; lo nuestro, confirmado: ¿se acaba algo?
+        si s.marcas yb M_FIN_ENVIADO <> 0 y s.snd_una = s.snd_max entonces
+            si s.estado = T_FIN_ESPERA1 entonces
+                s.estado := T_FIN_ESPERA2
+                si s.marcas yb M_HUÉRFANO <> 0 entonces s.t_fin := ahora_ns() + FIN2_NS fin
+            sino si s.estado = T_CERRANDO entonces
+                s.estado := T_ESPERA_TIEMPO
+                s.t_fin := ahora_ns() + TIME_WAIT_NS
+            sino si s.estado = T_ÚLTIMO_ACK entonces
+                acaba(s, 0)
+                suelta_si(s)
+                devolver
+            fin
+        fin
+        ; ---- los datos ----
+        fin_aquí := falso
+        si lon > 0 o f yb F_FIN <> 0 entonces
+            si s.estado = T_ESTABLECIDO o s.estado = T_FIN_ESPERA1 o s.estado = T_FIN_ESPERA2 entonces
+                si lon > 0 entonces
+                    si seq = s.rcv_nxt entonces
+                        cabe := lon
+                        si s.marcas yb M_NO_LEE <> 0 entonces
+                            ; (shutdown(SHUT_RD): se confirma y se tira)
+                            s.rcv_nxt := s.rcv_nxt + lon
+                        sino
+                            si nat64(cabe) > rx_sitio(s) entonces cabe := nat32(rx_sitio(s)) fin
+                            si cabe > 0 entonces
+                                rx_mete(s, d + lh, nat64(cabe))
+                                s.rcv_nxt := s.rcv_nxt + cabe
+                                Sondeo64.avisa()
+                            fin
+                            si cabe < lon entonces tcp_tirados := tcp_tirados + 1 fin
+                        fin
+                        si cabe = lon y f yb F_FIN <> 0 entonces fin_aquí := cierto fin
+                    sino si antes(seq, s.rcv_nxt) entonces
+                        ; (empieza antes: lo que ya se tenía, fuera)
+                        k := s.rcv_nxt - seq
+                        si k < lon entonces
+                            cabe := lon - k
+                            si nat64(cabe) > rx_sitio(s) entonces cabe := nat32(rx_sitio(s)) fin
+                            si cabe > 0 entonces
+                                rx_mete(s, d + lh + k, nat64(cabe))
+                                s.rcv_nxt := s.rcv_nxt + cabe
+                                Sondeo64.avisa()
+                            fin
+                            si cabe = lon - k y f yb F_FIN <> 0 entonces fin_aquí := cierto fin
+                        fin
+                    sino
+                        tcp_tirados := tcp_tirados + 1          ; (desordenado: fuera)
+                    fin
+                sino si seq = s.rcv_nxt entonces
+                    fin_aquí := cierto
+                fin
+                manda_ack(s)
+            sino si s.estado = T_ESPERA_TIEMPO o s.estado = T_ESPERA_CIERRE o s.estado = T_CERRANDO o s.estado = T_ÚLTIMO_ACK entonces
+                manda_ack(s)
+            fin
+        fin
+        si fin_aquí y s.marcas yb M_FIN_RECIBIDO = 0 entonces
+            s.rcv_nxt := s.rcv_nxt + 1
+            s.marcas := s.marcas ob M_FIN_RECIBIDO
+            manda_ack(s)
+            si s.estado = T_ESTABLECIDO entonces
+                s.estado := T_ESPERA_CIERRE
+            sino si s.estado = T_FIN_ESPERA1 entonces
+                ; (los dos a la vez)
+                s.estado := T_CERRANDO
+            sino si s.estado = T_FIN_ESPERA2 entonces
+                s.estado := T_ESPERA_TIEMPO
+                s.t_fin := ahora_ns() + TIME_WAIT_NS
+            fin
+            Sondeo64.avisa()
+        fin
+        sale_lo_que_haya(s)
+    fin
+
+    ; ICMP «inalcanzable» de una conexión que se está abriendo
+    función tcp_inalcanzable(ip: nat64, l_p: nat64, r_p: nat64)
+        variable i: nat32
+        variable s: puntero a Sock
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 entonces
+                s := sock(i)
+                si s.tipo_ = S_STREAM y s.estado = T_SYN_ENVIADO y s.r_ip = nat32(ip) y s.l_puerto = nat32(l_p) y s.r_puerto = nat32(r_p) entonces
+                    acaba(s, EHOSTUNREACH)
+                    suelta_si(s)
+                    devolver
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    ; ---- los plazos (cada vuelta del hilo «red») ----
+    función tic_de(s: puntero a Sock)
+        variable ahora: nat64
+        ahora := ahora_ns()
+        si s.t_retx <> 0 y ahora >= s.t_retx entonces
+            s.retx_n := s.retx_n + 1
+            si (s.estado = T_SYN_ENVIADO y s.retx_n > MAX_RETX_SYN) o s.retx_n > MAX_RETX entonces
+                acaba(s, ETIMEDOUT)
+                si s.marcas yb M_HUÉRFANO <> 0 o s.padre <> 0 entonces
+                    s.padre := 0
+                    s.marcas := s.marcas ob M_HUÉRFANO
+                fin
+                suelta_si(s)
+                devolver
+            fin
+            tcp_retx := tcp_retx + 1
+            s.retx_total := s.retx_total + 1
+            s.rto := s.rto * 2
+            si s.rto > RTO_MÁX entonces s.rto := RTO_MÁX fin
+            s.t_retx := ahora + s.rto
+            s.rtt_t := 0
+            si s.estado = T_SYN_ENVIADO entonces
+                manda(s, F_SYN, s.iss, 0, 0)
+            sino si s.estado = T_SYN_RECIBIDO entonces
+                manda(s, F_SYN ob F_ACK, s.iss, 0, 0)
+            sino
+                ; (desde lo primero sin confirmar)
+                s.snd_nxt := s.snd_una
+                s.marcas := s.marcas yb (nob nat32(M_FIN_ENVIADO))
+                si s.estado = T_FIN_ESPERA1 entonces s.estado := T_ESTABLECIDO fin
+                si s.estado = T_ÚLTIMO_ACK entonces s.estado := T_ESPERA_CIERRE fin
+                si s.estado = T_CERRANDO entonces s.estado := T_ESPERA_CIERRE fin
+                s.t_retx := 0
+                ; (al menos uno, aunque la ventana esté a cero)
+                si s.snd_wnd = 0 entonces s.snd_wnd := 1 fin
+                sale_lo_que_haya(s)
+                si s.t_retx = 0 entonces s.t_retx := ahora + s.rto fin
+            fin
+        fin
+        si s.t_persiste <> 0 y ahora >= s.t_persiste entonces
+            ; la ventana sigue a cero: un octeto, a ver
+            s.t_persiste := 0
+            si s.snd_wnd = 0 y s.tx_n > en_vuelo(s) entonces
+                s.snd_wnd := 1
+                sale_lo_que_haya(s)
+                s.snd_wnd := 0
+            fin
+        fin
+        si s.t_fin <> 0 y ahora >= s.t_fin entonces
+            acaba(s, 0)
+            si s.marcas yb M_HUÉRFANO = 0 entonces s.t_fin := 0 fin
+            suelta_si(s)
+            devolver
+        fin
+        ; los que llegaban sin padre (el que escuchaba se cerró) se acaban
+        si s.estado = T_CERRADO entonces suelta_si(s) fin
+    fin
+
+    público variable traza: bool
+    variable próxima_traza: nat64
+
+    ; («red=traza») cada 2 s, cómo está cada conexión
+    función escribe_traza()
+        variable i: nat32
+        variable s: puntero a Sock
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 entonces
+                s := sock(i)
+                si s.tipo_ = S_STREAM entonces
+                    escribir("TCP ", s.l_puerto, "->", s.r_puerto, " ", nombre_estado(s.estado), " una=", s.snd_una - s.iss, " nxt=", s.snd_nxt - s.iss, " max=", s.snd_max - s.iss, " wnd=", s.snd_wnd, " tx=", s.tx_n, " rx=", s.rx_n, " rcv=", s.rcv_nxt - s.irs, " adv=", s.rcv_adv - s.irs, " retx=", s.t_retx <> 0, " pers=", s.t_persiste <> 0, " m=")
+                    hex16(nat64(s.marcas))
+                    escribir(" refs=", s.refs, "\n")
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función tcp_tic()
+        variable i: nat32
+        si traza y ahora_ns() >= próxima_traza entonces
+            próxima_traza := ahora_ns() + 2000000000
+            escribe_traza()
+        fin
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 y sock(i).tipo_ = S_STREAM entonces tic_de(sock(i)) fin
+            i := i + 1
+        fin
+    fin
+
+    ; (al leer el programa) si la ventana se ha abierto bastante, se dice
+    público función tcp_leído(s: puntero a Sock)
+        variable nueva: nat32
+        si s.estado <> T_ESTABLECIDO y s.estado <> T_FIN_ESPERA1 y s.estado <> T_FIN_ESPERA2 entonces devolver fin
+        nueva := s.rcv_nxt + ventana(s)
+        si ent32(nueva - s.rcv_adv) >= ent32(2 * s.mss) o (ent32(s.rcv_adv - s.rcv_nxt) < ent32(s.mss) y ventana(s) >= s.mss) entonces manda_ack(s) fin
+    fin
+
+    público función nombre_estado(e: nat32): puntero a byte
+        según nat16(e)
+            caso T_CERRADO: devolver "CLOSED"
+            caso T_ESCUCHA: devolver "LISTEN"
+            caso T_SYN_ENVIADO: devolver "SYN_SENT"
+            caso T_SYN_RECIBIDO: devolver "SYN_RECV"
+            caso T_ESTABLECIDO: devolver "ESTABLISHED"
+            caso T_FIN_ESPERA1: devolver "FIN_WAIT1"
+            caso T_FIN_ESPERA2: devolver "FIN_WAIT2"
+            caso T_CERRANDO: devolver "CLOSING"
+            caso T_ESPERA_CIERRE: devolver "CLOSE_WAIT"
+            caso T_ÚLTIMO_ACK: devolver "LAST_ACK"
+            caso T_ESPERA_TIEMPO: devolver "TIME_WAIT"
+        fin
+        devolver "?"
+    fin
+
+    público función prepara_tcp()
+        al_tcp_entra := nat64(dirección(tcp_entra))
+        al_tcp_tic := nat64(dirección(tcp_tic))
+        al_tcp_inalcanzable := nat64(dirección(tcp_inalcanzable))
+    fin
+
+fin Tcp64.

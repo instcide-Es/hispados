@@ -1,0 +1,475 @@
+; =============================================================================
+;  intel64.cas - Hispa-64, etapa 9: las tarjetas de red de Intel
+;  (docs/64/HISPA-64.md, sección 15), según los manuales de Intel («PCI/PCI-X
+;  Family of Gigabit Ethernet Controllers Software Developer's Manual»,
+;  8254x; «82574 GbE Controller Datasheet»; y lo que hace Linux, e1000 y
+;  e1000e, para las de los portátiles):
+;    - la familia 8254x («e1000»): la 82540EM de QEMU y de VirtualBox (su
+;      «Intel PRO/1000 MT Desktop», la tarjeta de red de VirtualBox por
+;      omisión), 82545EM, 82543GC, 82541, 82547...;
+;    - la 82571/82572/82573/82574/82583 («e1000e»: la 82574L de QEMU con
+;      «-nic model=e1000e»);
+;    - las de los chipsets (ICH8 a ICH10 y PCH: 82566, 82567, 82577, 82578,
+;      82579, I217, I218, I219: la de muchos portátiles), con los mismos
+;      descriptores.
+;  Todas, con los descriptores de siempre («legacy»: 16 octetos), 64 para
+;  recibir y 64 para enviar, cada uno con su búfer de 2 KB (dos por
+;  página). Las interrupciones: MSI si la tarjeta lo tiene (las e1000e y
+;  las de los chipsets); si no (la 82540EM), la patilla INTx por la línea que
+;  dejó el firmware (en QEMU llega al IOAPIC por esa misma), y además el
+;  hilo «red» mira las colas cada 10 ms: así va aunque la interrupción no
+;  llegue (VirtualBox lleva las INTx a otras patillas, que dice el AML).
+;  En las I217/I218/I219 (PCH) se quita además el ahorro de energía del
+;  enlace que las deja sin contestar (K1, EEE), como e1000e.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Intel64
+
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redbase64
+
+    público constante MAX_INTEL = 2
+    constante N_RX = 64
+    constante N_TX = 64
+    ; los registros
+    constante CTRL = 0x0000
+    constante STATUS = 0x0008
+    constante EERD = 0x0014
+    constante CTRL_EXT = 0x0018
+    constante ICR = 0x00C0
+    constante ITR = 0x00C4
+    constante IMS = 0x00D0
+    constante IMC = 0x00D8
+    constante RCTL = 0x0100
+    constante TCTL = 0x0400
+    constante TIPG = 0x0410
+    constante EXTCNF_CTRL = 0x0F00
+    constante FWSM = 0x5B54
+    constante RDBAL = 0x2800
+    constante RDBAH = 0x2804
+    constante RDLEN = 0x2808
+    constante RDH = 0x2810
+    constante RDT = 0x2818
+    constante RDTR = 0x2820
+    constante RXDCTL = 0x2828
+    constante RADV = 0x282C
+    constante TDBAL = 0x3800
+    constante TDBAH = 0x3804
+    constante TDLEN = 0x3808
+    constante TDH = 0x3810
+    constante TDT = 0x3818
+    constante TXDCTL = 0x3828
+    constante RXCSUM = 0x5000
+    constante RFCTL = 0x5008
+    constante MTA = 0x5200
+    constante RAL0 = 0x5400
+    constante RAH0 = 0x5404
+    ; las familias
+    constante CLÁSICA = 1
+    constante E1000E = 2
+    constante PCH = 3
+
+    tipo Tarjeta = estructura
+        aparato, familia, ifz_n, modo: nat32
+        apa: nat32
+        regs: nat64
+        rx_anillo, tx_anillo: nat64         ; (física)
+        rx_buf: arreglo [N_RX] de nat64     ; (física)
+        tx_buf: arreglo [N_TX] de nat64
+        rx_sig, tx_sig, tx_limpio: nat32
+        gsi: nat32
+        mac: arreglo [8] de byte
+    fin
+
+    variable tarjetas: arreglo [MAX_INTEL] de nat64
+    público variable in_n: nat32
+    variable vector: nat32
+    público variable in_interrupciones, in_sin_sitio: nat64
+    público variable in_motivo: puntero a byte
+
+    función tj(i: nat32): puntero a Tarjeta
+        devolver puntero(tarjetas[i])
+    fin
+
+    función r(t: puntero a Tarjeta, reg: nat32): nat32
+        devolver m32(t.regs + reg)
+    fin
+
+    función w(t: puntero a Tarjeta, reg: nat32, v: nat32)
+        pon_m32(t.regs + reg, v)
+    fin
+
+    ; ---- la interrupción ----
+    interrupción función int_intel()
+        variable i: nat32
+        variable c: nat32
+        in_interrupciones := in_interrupciones + 1
+        i := 0
+        mientras i < in_n hacer
+            c := r(tj(i), ICR)                  ; (leerla la borra y baja la patilla)
+            si c <> 0 entonces ifz(tj(i).ifz_n).interrupciones := ifz(tj(i).ifz_n).interrupciones + 1 fin
+            i := i + 1
+        fin
+        avisa_red()
+        eoi()
+    fin
+
+    ; ---- qué es ----
+    función familia_de(a: nat32): nat32
+        según nat16(a)
+            caso 0x1000, 0x1001, 0x1004, 0x1008, 0x1009, 0x100C, 0x100D, 0x100E, 0x100F, 0x1010, 0x1011, 0x1012, 0x1013, 0x1014, 0x1015, 0x1016, 0x1017, 0x1018, 0x1019, 0x101A, 0x101D, 0x101E, 0x1026, 0x1027, 0x1028, 0x1075, 0x1076, 0x1077, 0x1078, 0x1079, 0x107A, 0x107B, 0x107C, 0x108A, 0x1099, 0x10B5:
+                devolver CLÁSICA
+            caso 0x105E, 0x105F, 0x1060, 0x107D, 0x107E, 0x107F, 0x108B, 0x108C, 0x109A, 0x10A4, 0x10A5, 0x10B9, 0x10BC, 0x10D3, 0x10D5, 0x10D9, 0x10DA, 0x10F6, 0x150C, 0x1096, 0x1098, 0x10BA, 0x10BB:
+                devolver E1000E
+            caso 0x1049, 0x104A, 0x104B, 0x104C, 0x104D, 0x10BD, 0x10BF, 0x10C0, 0x10C2, 0x10C3, 0x10C4, 0x10C5, 0x10CB, 0x10CC, 0x10CD, 0x10CE, 0x10DE, 0x10DF, 0x10E5, 0x10EA, 0x10EB, 0x10EF, 0x10F0, 0x10F5, 0x294C, 0x1501, 0x1502, 0x1503:
+                devolver PCH
+            caso 0x153A, 0x153B, 0x1559, 0x155A, 0x15A0, 0x15A1, 0x15A2, 0x15A3, 0x156F, 0x1570, 0x15B7, 0x15B8, 0x15B9, 0x15BB, 0x15BC, 0x15BD, 0x15BE, 0x15D6, 0x15D7, 0x15D8, 0x15DF, 0x15E0, 0x15E1, 0x15E2, 0x15E3, 0x15F9, 0x15FA, 0x15FB, 0x15FC, 0x15F4, 0x15F5, 0x1A1C, 0x1A1D, 0x1A1E, 0x1A1F, 0x0D4C, 0x0D4D, 0x0D4E, 0x0D4F, 0x0D53, 0x0D55, 0x0DC5, 0x0DC6, 0x0DC7, 0x0DC8, 0x550A, 0x550B, 0x550C, 0x550D, 0x550E, 0x550F, 0x5510, 0x5511, 0x57A0, 0x57A1:
+                devolver PCH
+            si no: devolver 0
+        fin
+    fin
+
+    función nombre_de(a: nat32): puntero a byte
+        si a = 0x100E entonces devolver "Intel 82540EM (PRO/1000 MT Desktop, e1000)" fin
+        si a = 0x100F entonces devolver "Intel 82545EM (PRO/1000 MT Server, e1000)" fin
+        si a = 0x1004 entonces devolver "Intel 82543GC (PRO/1000 T Server, e1000)" fin
+        si a = 0x10D3 entonces devolver "Intel 82574L (e1000e)" fin
+        si a = 0x153A o a = 0x153B entonces devolver "Intel I217 (e1000e)" fin
+        si a >= 0x155A y a <= 0x15A3 entonces devolver "Intel I218 (e1000e)" fin
+        si a = 0x1502 o a = 0x1503 entonces devolver "Intel 82579 (e1000e)" fin
+        si familia_de(a) = PCH entonces devolver "Intel I219 o de chipset (e1000e)" fin
+        si familia_de(a) = E1000E entonces devolver "Intel 8257x (e1000e)" fin
+        devolver "Intel PRO/1000 (e1000)"
+    fin
+
+    ; ---- la EEPROM: una palabra ----
+    función eeprom(t: puntero a Tarjeta, n: nat32): nat32
+        variable v, k: nat32
+        si t.familia = CLÁSICA entonces
+            w(t, EERD, (n << 8) ob 1)
+            k := 0
+            mientras k < 100000 hacer
+                v := r(t, EERD)
+                si v yb 0x10 <> 0 entonces devolver v >> 16 fin
+                k := k + 1
+            fin
+        sino
+            w(t, EERD, (n << 2) ob 1)
+            k := 0
+            mientras k < 100000 hacer
+                v := r(t, EERD)
+                si v yb 2 <> 0 entonces devolver v >> 16 fin
+                k := k + 1
+            fin
+        fin
+        devolver 0xFFFF
+    fin
+
+    ; ---- poner en marcha la tarjeta i (de Pci64) ----
+    función pon_tarjeta(i: nat32, fam: nat32): bool
+        variable t: puntero a Tarjeta
+        variable base, tam, f, l, d: nat64
+        variable k, v, ral, rah: nat32
+        variable línea, pin: nat32
+        t := puntero(nat64(reserva(tamaño(Tarjeta))))
+        si t = nulo entonces
+            in_motivo := "no queda memoria"
+            devolver falso
+        fin
+        ceros_mem_(nat64(t), tamaño(Tarjeta))
+        t.aparato := i
+        t.familia := fam
+        t.apa := apa_de(i)
+        base := bar_mem(i, 0)
+        tam := bar_largo(i, 0)
+        si base = 0 o tam < 0x10000 entonces
+            ; (sin dirección: que se la dé Pci64)
+            base := asigna_bar(i, 0)
+            tam := bar_largo(i, 0)
+        fin
+        si base = 0 o tam < 0x10000 entonces
+            in_motivo := "su BAR 0 no es de memoria"
+            libera(puntero(nat64(t)))
+            devolver falso
+        fin
+        pon_d0(i)
+        habilita(i, falso)
+        t.regs := mapea_disp(base, tam, sin_caché())
+        ; sin interrupciones, y a cero
+        w(t, IMC, 0xFFFFFFFF)
+        w(t, RCTL, 0)
+        w(t, TCTL, 0)
+        espera_us(10000)
+        si fam = PCH entonces
+            ; (que el firmware de gestión no se quede con el PHY: EXTCNF_CTRL.SWFLAG)
+            w(t, EXTCNF_CTRL, r(t, EXTCNF_CTRL) ob 0x20)
+            espera_us(1000)
+        fin
+        w(t, CTRL, r(t, CTRL) ob 0x04000000)    ; RST
+        espera_us(20000)
+        k := 0
+        mientras r(t, CTRL) yb 0x04000000 <> 0 y k < 100 hacer
+            espera_us(1000)
+            k := k + 1
+        fin
+        si fam <> CLÁSICA entonces
+            ; (que la NVM se haya leído: EECD.AUTO_RD o STATUS.LAN_INIT_DONE)
+            k := 0
+            mientras r(t, 0x0010) yb 0x200 = 0 y r(t, STATUS) yb 0x200 = 0 y k < 50 hacer
+                espera_us(1000)
+                k := k + 1
+            fin
+        fin
+        w(t, IMC, 0xFFFFFFFF)
+        v := r(t, ICR)
+        ; la MAC: la de RAL/RAH (la deja la EEPROM al arrancar), o de la EEPROM
+        ral := r(t, RAL0)
+        rah := r(t, RAH0)
+        si rah yb 0x80000000 <> 0 y (ral <> 0 o rah yb 0xFFFF <> 0) y ral <> 0xFFFFFFFF entonces
+            k := 0
+            mientras k < 4 hacer
+                t.mac[k] := byte((ral >> (k * 8)) yb 0xFF)
+                k := k + 1
+            fin
+            t.mac[4] := byte(rah yb 0xFF)
+            t.mac[5] := byte((rah >> 8) yb 0xFF)
+        sino
+            k := 0
+            mientras k < 3 hacer
+                v := eeprom(t, k)
+                t.mac[k * 2] := byte(v yb 0xFF)
+                t.mac[k * 2 + 1] := byte(v >> 8)
+                k := k + 1
+            fin
+            w(t, RAL0, nat32(t.mac[0]) ob (nat32(t.mac[1]) << 8) ob (nat32(t.mac[2]) << 16) ob (nat32(t.mac[3]) << 24))
+            w(t, RAH0, nat32(t.mac[4]) ob (nat32(t.mac[5]) << 8) ob 0x80000000)
+        fin
+        ; el enlace: SLU y velocidad automática; sin reiniciar el enlace ni el PHY
+        v := r(t, CTRL)
+        v := (v ob 0x60) yb (nob nat32(0x80000088))     ; + SLU, ASDE; - LRST, ILOS, PHY_RST
+        v := v yb (nob nat32(0x40000000))                ; - VME
+        w(t, CTRL, v)
+        si fam = PCH entonces
+            ; (sin K1, el ahorro del enlace de las PCH que puede dejarlo mudo: FEXTNVM6 y K1 por el PHY no se tocan aquí)
+            w(t, EXTCNF_CTRL, r(t, EXTCNF_CTRL) yb (nob nat32(0x20)))
+        fin
+        ; la tabla de multidifusión, a cero
+        k := 0
+        mientras k < 128 hacer
+            w(t, MTA + k * 4, 0)
+            k := k + 1
+        fin
+        ; los anillos: una página cada uno; los búferes, de 2 KB
+        t.rx_anillo := pide()
+        t.tx_anillo := pide()
+        si t.rx_anillo = 0 o t.tx_anillo = 0 entonces
+            in_motivo := "no queda memoria"
+            devolver falso
+        fin
+        ceros_mem_(virt(t.rx_anillo), 4096)
+        ceros_mem_(virt(t.tx_anillo), 4096)
+        k := 0
+        mientras k < N_RX hacer
+            si k yb 1 = 0 entonces
+                f := pide()
+                si f = 0 entonces
+                    in_motivo := "no queda memoria"
+                    devolver falso
+                fin
+            fin
+            t.rx_buf[k] := f + nat64(k yb 1) * 2048
+            d := virt(t.rx_anillo) + nat64(k) * 16
+            pon_m64(d, t.rx_buf[k])
+            k := k + 1
+        fin
+        k := 0
+        mientras k < N_TX hacer
+            si k yb 1 = 0 entonces
+                f := pide()
+                si f = 0 entonces
+                    in_motivo := "no queda memoria"
+                    devolver falso
+                fin
+            fin
+            t.tx_buf[k] := f + nat64(k yb 1) * 2048
+            k := k + 1
+        fin
+        ; recibir: el anillo, sin retrasos, sin sumas, con difusión, sin CRC, búferes de 2 KB
+        w(t, RXCSUM, 0)
+        si fam <> CLÁSICA entonces w(t, RFCTL, r(t, RFCTL) yb (nob nat32(0x8000))) fin     ; (sin EXSTEN: los descriptores de siempre)
+        w(t, RDBAL, nat32(t.rx_anillo yb 0xFFFFFFFF))
+        w(t, RDBAH, nat32(t.rx_anillo >> 32))
+        w(t, RDLEN, N_RX * 16)
+        w(t, RDH, 0)
+        w(t, RDT, N_RX - 1)
+        w(t, RDTR, 0)
+        w(t, RADV, 0)
+        t.rx_sig := 0
+        w(t, RCTL, 0x04008002)                  ; EN, BAM, SECRC (y BSIZE 00: 2048)
+        ; enviar
+        w(t, TDBAL, nat32(t.tx_anillo yb 0xFFFFFFFF))
+        w(t, TDBAH, nat32(t.tx_anillo >> 32))
+        w(t, TDLEN, N_TX * 16)
+        w(t, TDH, 0)
+        w(t, TDT, 0)
+        t.tx_sig := 0
+        t.tx_limpio := 0
+        si fam <> CLÁSICA entonces
+            w(t, TXDCTL, (r(t, TXDCTL) yb 0xFFC0C0C0) ob 0x01400000 ob 0x1F)      ; GRAN, WTHRESH 1, PTHRESH 31 (como e1000e)
+        fin
+        w(t, TIPG, 0x0060200A)
+        w(t, TCTL, 0x010400FA)                  ; EN, PSP, CT 0x0F, COLD 0x40, RTLC
+        w(t, ITR, 0)
+        ; la interrupción: MSI o la patilla
+        t.modo := 0
+        si fam <> CLÁSICA y vector <> 0 y pon_msi(i, vector) entonces
+            t.modo := 1
+        sino
+            habilita(i, falso)
+            v := conf(i, 0x3C)
+            línea := v yb 0xFF
+            pin := (v >> 8) yb 0xFF
+            si vector <> 0 y pin <> 0 y línea > 0 y línea < 24 entonces
+                ; (por nivel y activa en alto, como QEMU dice de sus enlaces de PCI)
+                si dirige(línea, vector, 1 ob (3 << 2), falso) entonces
+                    t.modo := 3
+                    t.gsi := línea
+                fin
+            fin
+        fin
+        ; RXT0, RXO, RXDMT0, LSC, TXDW
+        w(t, IMS, 0x80 ob 0x40 ob 0x10 ob 0x04 ob 0x01)
+        tarjetas[in_n] := nat64(t)
+        t.ifz_n := alta_ifz(T_E1000, in_n, nat64(dirección(t.mac[0])), nombre_de(t.apa))
+        si t.ifz_n = 0xFFFFFFFF entonces
+            in_motivo := "no caben más interfaces"
+            devolver falso
+        fin
+        ifz(t.ifz_n).modo_int := t.modo
+        ifz(t.ifz_n).pci := i
+        in_n := in_n + 1
+        devolver cierto
+    fin
+
+    función ceros_mem_(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    ; ---- lo que piden la pila y el hilo «red» ----
+    ; ¿hay enlace? (y la velocidad, en Mbit/s)
+    público función in_enlace(n: nat32, ref vel: nat32): bool
+        variable s: nat32
+        s := r(tj(n), STATUS)
+        según nat16((s >> 6) yb 3)
+            caso 0: vel := 10
+            caso 1: vel := 100
+            si no: vel := 1000
+        fin
+        devolver s yb 2 <> 0
+    fin
+
+    ; manda una trama (n octetos, con su cabecera de Ethernet) desde d
+    público función in_envía(n: nat32, d: nat64, l: nat32): bool
+        variable t: puntero a Tarjeta
+        variable x: nat64
+        variable k: nat32
+        t := tj(n)
+        si l > 1518 entonces devolver falso fin
+        ; (lo ya enviado: libre)
+        mientras t.tx_limpio <> t.tx_sig y m8(virt(t.tx_anillo) + nat64(t.tx_limpio) * 16 + 12) yb 1 <> 0 hacer
+            t.tx_limpio := (t.tx_limpio + 1) mod N_TX
+        fin
+        si (t.tx_sig + 1) mod N_TX = t.tx_limpio entonces
+            in_sin_sitio := in_sin_sitio + 1
+            devolver falso
+        fin
+        k := t.tx_sig
+        copia_mem_(virt(t.tx_buf[k]), d, nat64(l))
+        ; (lo más corto que sale son 60 octetos: la tarjeta lo rellena con PSP)
+        x := virt(t.tx_anillo) + nat64(k) * 16
+        pon_m64(x, t.tx_buf[k])
+        pon_m32(x + 8, l ob (0x0B << 24))          ; largo; CMD: EOP, IFCS, RS
+        pon_m32(x + 12, 0)
+        t.tx_sig := (k + 1) mod N_TX
+        w(t, TDT, t.tx_sig)
+        devolver cierto
+    fin
+
+    función copia_mem_(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    ; recoge una trama que haya llegado (a d, 1536 octetos como mucho): su largo, o 0
+    público función in_recoge(n: nat32, d: nat64): nat32
+        variable t: puntero a Tarjeta
+        variable x: nat64
+        variable st, l, k: nat32
+        t := tj(n)
+        mientras cierto hacer
+            k := t.rx_sig
+            x := virt(t.rx_anillo) + nat64(k) * 16
+            st := m8(x + 12)
+            si st yb 1 = 0 entonces devolver 0 fin
+            l := m16(x + 8)
+            ; (las que traen error o no acaban en este búfer, fuera)
+            si st yb 2 <> 0 y m8(x + 13) = 0 y l <= TRAMA y l >= 14 entonces
+                copia_mem_(d, virt(t.rx_buf[k]), nat64(l))
+            sino
+                l := 0
+                ifz(t.ifz_n).rx_err := ifz(t.ifz_n).rx_err + 1
+            fin
+            pon_m8(x + 12, 0)
+            pon_m64(x, t.rx_buf[k])
+            t.rx_sig := (k + 1) mod N_RX
+            w(t, RDT, k)
+            si l > 0 entonces devolver l fin
+        fin
+        devolver 0
+    fin
+
+    ; todas las tarjetas de red de Intel de PCI (clase 02, 00)
+    público función prepara_intel()
+        variable i, fam: nat32
+        vector := pide_vector()
+        si vector <> 0 entonces pon_vector(vector, nat64(dirección(int_intel))) fin
+        i := 0
+        mientras i < pci_n y in_n < MAX_INTEL hacer
+            si fab_de(i) = 0x8086 y clase_de(i) >> 8 = 0x0200 entonces
+                fam := familia_de(apa_de(i))
+                si fam <> 0 entonces
+                    escribir("Red: ")
+                    escribe_bdf(i)
+                    escribir(" 8086:")
+                    hex4(apa_de(i))
+                    escribir(" ", nombre_de(apa_de(i)))
+                    si pon_tarjeta(i, fam) entonces
+                        escribir(", MAC ")
+                        escribe_mac(nat64(dirección(tj(in_n - 1).mac[0])))
+                        escribir(", ")
+                        si tj(in_n - 1).modo = 1 entonces
+                            escribir("MSI")
+                        sino si tj(in_n - 1).modo = 3 entonces
+                            escribir("INTx por la GSI ", tj(in_n - 1).gsi, " (y mirando cada 10 ms)")
+                        sino
+                            escribir("sin interrupciones (mirando cada 10 ms)")
+                        fin
+                        escribir("\n")
+                    sino
+                        escribir(": no se pone en marcha: ", in_motivo, "\n")
+                    fin
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+fin Intel64.

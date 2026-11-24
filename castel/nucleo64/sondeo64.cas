@@ -1,0 +1,65 @@
+; =============================================================================
+;  sondeo64.cas - Hispa-64, etapa 9: despertar a quien espera en poll, select
+;  y epoll (docs/64/HISPA-64.md, sección 15) en vez de mirar de 10 en 10 ms.
+;  Hay un número de «cambios» (gen) y una cola de espera: quien cambia algo
+;  que se puede esperar (una tubería, un socket, un eventfd, la consola, la
+;  pila de red al tratar lo que llega) llama a avisa(), que suma uno y
+;  despierta a todos los que esperan; quien espera toma el número antes de
+;  mirar lo suyo y, si no hay nada, duerme con espera_cambio(g0, límite):
+;  si el número ya no es g0, no duerme (nada se pierde: se mira con el
+;  cerrojo de la cola tomado, el mismo que toma avisa para despertar).
+;  Despertar a todos es lo sencillo: cada uno mira otra vez lo suyo.
+;  avisa() no se llama con un cerrojo de espera activa tomado (despertar toma
+;  el del planificador): el ratón y el teclado (con su cerrojo) siguen
+;  mirándose de 10 en 10 ms.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Sondeo64
+
+    importar Cerrojo, Reloj64, Apic64, Hilos64, Procesos
+
+    público variable gen: nat64                 ; los cambios, desde el arranque
+    público variable avisos, esperas_s: nat64
+    variable cola: Espera
+
+    ; algo ha cambiado: a mirar otra vez
+    público función avisa()
+        suma_atómica(dirección(gen), 1)
+        ; (siempre con el cerrojo de la cola: mirar «primero» sin él podría
+        ; perder a uno que se está poniendo a dormir)
+        si despierta_todos(dirección(cola)) > 0 entonces avisos := avisos + 1 fin
+    fin
+
+    ; el hilo que corre (de p) duerme hasta que haya un cambio después de g0,
+    ; hasta «límite» (ns de ahora_ns; nob 0: sin plazo) o una señal
+    público función espera_cambio(p: puntero a Proceso, g0: nat64, límite: nat64)
+        variable b: nat64
+        si no tic_va entonces
+            mientras gen = g0 y no interrumpido(p) y ahora_ns() < límite hacer cede() fin
+            devolver
+        fin
+        b := toma(dirección(cola.cerrojo))
+        esperas_s := esperas_s + 1
+        si gen = g0 y no interrumpido(p) y (límite = nob nat64(0) o ahora_ns() < límite) entonces
+            espera_interrumpible(dirección(cola))
+            si límite <> nob nat64(0) entonces duerme_en_hasta(dirección(cola), límite) sino duerme_en(dirección(cola)) fin
+            toma_sin(dirección(cola.cerrojo))
+            fin_interrumpible()
+        fin
+        sal_de(dirección(cola))
+        suelta(dirección(cola.cerrojo), b)
+    fin
+
+    ; (para los hilos del núcleo, sin proceso) lo mismo, sin señales
+    público función espera_cambio_n(g0: nat64, límite: nat64)
+        variable b: nat64
+        b := toma(dirección(cola.cerrojo))
+        si gen = g0 y ahora_ns() < límite entonces
+            duerme_en_hasta(dirección(cola), límite)
+            toma_sin(dirección(cola.cerrojo))
+        fin
+        sal_de(dirección(cola))
+        suelta(dirección(cola.cerrojo), b)
+    fin
+
+fin Sondeo64.

@@ -1,0 +1,1102 @@
+; =============================================================================
+;  ip64.cas - Hispa-64, etapa 9: la pila de red, menos TCP (tcp64.cas) y los
+;  sockets (red64.cas) (docs/64/HISPA-64.md, sección 15): Ethernet, ARP,
+;  IPv4, ICMP (contestar a los ping, los «ping sockets» y los RAW de ICMP),
+;  UDP, DHCP (pedir la IP, la máscara, la puerta y los DNS, y renovarla) y la
+;  interfaz «lo» (127.0.0.1, y lo que va a la IP propia).
+;  El hilo «red» lo mueve todo: recoge lo que llega de las tarjetas (lo
+;  despierta su interrupción, o mira cada 10 ms), lo que queda en la cola de
+;  «lo», los plazos (ARP, DHCP, los de TCP) y el enlace (cada medio
+;  segundo); y avisa a los que esperan (Sondeo64). Todo con el cerrojo de la
+;  red (Redbase64.red_m). Los nombres (DNS) los resuelve musl con UDP: aquí,
+;  /etc/resolv.conf con los DNS que dé DHCP (red64.cas).
+;  Lo de Hispa-Pentium (castel/nucleo32/rpila.cas) es el modelo; aquí sin
+;  servicio aparte: en el núcleo.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Ip64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Sondeo64, Azar64, Redbase64, Intel64
+
+    constante MAX_ARP = 32
+    constante LO_N = 256
+    constante DIFUSIÓN = 0xFFFFFFFF
+    constante ETH_IP = 0x0800
+    constante ETH_ARP = 0x0806
+    ; los estados de DHCP
+    constante D_NADA = 0
+    constante D_DESCUBRE = 1
+    constante D_PIDE = 2
+    constante D_HECHO = 3
+    constante D_RENUEVA = 4
+
+    ; ---- ARP ----
+    tipo Vecino = estructura
+        ip, ifz_n, estado, intentos: nat32
+        mac: arreglo [8] de byte
+        cuándo: nat64                           ; la última vez (ns)
+        pend_n: nat32                           ; el paquete IP que espera (con su cabecera de IP)
+    fin
+    variable vecinos: arreglo [MAX_ARP] de Vecino
+    variable pendientes: arreglo [MAX_ARP] de arreglo [TRAMA] de byte
+
+    ; ---- la cola de «lo» (paquetes IP) ----
+    variable lo_cola: nat64                    ; LO_N búferes de TRAMA octetos (del montón)
+    variable lo_largo: arreglo [LO_N] de nat32
+    variable lo_ini, lo_n: nat32
+
+    ; ---- lo que ha entrado (para TCP: al_tcp_entra) ----
+    público variable ent_ifz, ent_de, ent_a: nat32
+    público variable ent_d, ent_n: nat64        ; el segmento (sin la cabecera de IP)
+    público variable al_tcp_entra: nat64        ; f(): lo pone Tcp64
+    público variable al_tcp_tic: nat64          ; f(): cada vuelta del hilo
+    público variable al_tcp_inalcanzable: nat64 ; f(ip, puerto local, puerto remoto)
+
+    variable trama: arreglo [TRAMA + 64] de byte          ; la que se está haciendo
+    variable recibida: arreglo [TRAMA + 64] de byte
+    variable ip_id: nat32
+    público variable ip_rx, ip_tx, ip_malos, ip_trozos, icmp_rx, icmp_tx, udp_rx, udp_tx, udp_sin_puerto, arp_rx, arp_tx: nat64
+    público variable cambios: nat64             ; cuántas veces ha cambiado la configuración (DHCP)
+    público variable vueltas: nat64
+    variable hilo_red: puntero a Hilo
+    variable próximo_enlace: nat64
+    variable puerto_sig: nat32
+    público variable sin_dhcp: bool
+    público variable dice_dhcp: bool            ; decir por la consola lo que da DHCP
+
+    ; ---- las tarjetas, sea cual sea ----
+    función envía_trama(i: nat32, d: nat64, n: nat32): bool
+        variable x: puntero a Ifz
+        variable bien: bool
+        x := ifz(i)
+        si n < 60 entonces
+            ceros_k(d + n, 60 - n)
+            n := 60
+        fin
+        bien := falso
+        según nat16(x.clase)
+            caso T_E1000: bien := in_envía(x.índice, d, n)
+        fin
+        si bien entonces
+            x.tx_paq := x.tx_paq + 1
+            x.tx_oct := x.tx_oct + n
+        sino
+            x.tx_err := x.tx_err + 1
+        fin
+        devolver bien
+    fin
+
+    función recoge_trama(i: nat32, d: nat64): nat32
+        variable x: puntero a Ifz
+        x := ifz(i)
+        según nat16(x.clase)
+            caso T_E1000: devolver in_recoge(x.índice, d)
+        fin
+        devolver 0
+    fin
+
+    función mira_enlace(i: nat32)
+        variable x: puntero a Ifz
+        variable v: nat32
+        variable e: bool
+        x := ifz(i)
+        v := x.velocidad
+        e := falso
+        según nat16(x.clase)
+            caso T_E1000: e := in_enlace(x.índice, v)
+        fin
+        si e y x.enlace = 0 entonces
+            x.enlace := 1
+            x.velocidad := v
+            escribir("Red: ", dirección(x.nombre[0]), ": enlace a ", v, " Mbit/s\n")
+            si x.con_dhcp <> 0 y not_sin_dhcp() entonces dhcp_empieza(i) fin
+            Sondeo64.avisa()
+        sino si no e y x.enlace <> 0 entonces
+            x.enlace := 0
+            escribir("Red: ", dirección(x.nombre[0]), ": sin enlace (el cable)\n")
+            Sondeo64.avisa()
+        fin
+    fin
+
+    función not_sin_dhcp(): bool
+        devolver no sin_dhcp
+    fin
+
+    ; ---- lo de las direcciones ----
+    ; ¿es una IP de este equipo? (la interfaz, o 0xFFFFFFFF)
+    público función ifz_de_ip(ip: nat32): nat32
+        variable i: nat32
+        si ip >> 24 = 127 entonces devolver 0 fin
+        i := 1
+        mientras i < n_ifz hacer
+            si ifz(i).ip <> 0 y ifz(i).ip = ip entonces devolver i fin
+            i := i + 1
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; por dónde sale «a»: la interfaz (o 0xFFFFFFFF: no se llega) y el siguiente salto
+    público función ruta(a: nat32, ref salto: nat32): nat32
+        variable i: nat32
+        variable x: puntero a Ifz
+        salto := a
+        si a >> 24 = 127 o ifz_de_ip(a) <> 0xFFFFFFFF entonces devolver 0 fin
+        i := 1
+        mientras i < n_ifz hacer
+            x := ifz(i)
+            si x.ip <> 0 y x.enlace <> 0 y (a yb x.máscara) = (x.ip yb x.máscara) entonces devolver i fin
+            i := i + 1
+        fin
+        i := 1
+        mientras i < n_ifz hacer
+            x := ifz(i)
+            si x.ip <> 0 y x.enlace <> 0 y x.puerta <> 0 entonces
+                salto := x.puerta
+                devolver i
+            fin
+            i := i + 1
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    ; la IP propia con la que se sale hacia «a» (0 si no hay)
+    público función ip_para(a: nat32): nat32
+        variable s, i: nat32
+        i := ruta(a, s)
+        si i = 0xFFFFFFFF entonces devolver 0 fin
+        si i = 0 entonces
+            si a >> 24 = 127 entonces devolver a fin
+            devolver a
+        fin
+        devolver ifz(i).ip
+    fin
+
+    ; ---- ARP ----
+    función vecino(k: nat32): puntero a Vecino
+        devolver dirección(vecinos[k])
+    fin
+
+    función busca_vecino(ip: nat32, i: nat32): nat32
+        variable k: nat32
+        k := 0
+        mientras k < MAX_ARP hacer
+            si vecinos[k].estado <> 0 y vecinos[k].ip = ip y vecinos[k].ifz_n = i entonces devolver k fin
+            k := k + 1
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    función hueco_vecino(): nat32
+        variable k, viejo: nat32
+        k := 0
+        mientras k < MAX_ARP hacer
+            si vecinos[k].estado = 0 entonces devolver k fin
+            k := k + 1
+        fin
+        ; (el más viejo)
+        viejo := 0
+        k := 1
+        mientras k < MAX_ARP hacer
+            si vecinos[k].cuándo < vecinos[viejo].cuándo entonces viejo := k fin
+            k := k + 1
+        fin
+        devolver viejo
+    fin
+
+    ; manda un ARP (1 pregunta, 2 respuesta) por la interfaz i
+    función manda_arp(i: nat32, op: nat32, ip: nat32, mac: nat64)
+        variable x: puntero a Ifz
+        variable t: nat64
+        x := ifz(i)
+        t := nat64(dirección(trama[0]))
+        si op = 1 entonces
+            pon_be32(t, 0xFFFFFFFF)
+            pon_be16(t + 4, 0xFFFF)
+        sino
+            copia_k(t, mac, 6)
+        fin
+        copia_k(t + 6, nat64(dirección(x.mac[0])), 6)
+        pon_be16(t + 12, ETH_ARP)
+        pon_be16(t + 14, 1)
+        pon_be16(t + 16, 0x0800)
+        pon_m8(t + 18, 6)
+        pon_m8(t + 19, 4)
+        pon_be16(t + 20, op)
+        copia_k(t + 22, nat64(dirección(x.mac[0])), 6)
+        pon_be32(t + 28, x.ip)
+        si op = 1 entonces ceros_k(t + 32, 6) sino copia_k(t + 32, mac, 6) fin
+        pon_be32(t + 38, ip)
+        envía_trama(i, t, 42)
+        arp_tx := arp_tx + 1
+    fin
+
+    ; lo que llega por ARP
+    función entra_arp(i: nat32, d: nat64, n: nat32)
+        variable x: puntero a Ifz
+        variable op, de, a, k: nat32
+        variable v: puntero a Vecino
+        si n < 42 entonces devolver fin
+        arp_rx := arp_rx + 1
+        x := ifz(i)
+        si be16(d + 14) <> 1 o be16(d + 16) <> 0x0800 entonces devolver fin
+        op := be16(d + 20)
+        de := be32(d + 28)
+        a := be32(d + 38)
+        ; (se apunta a quien pregunta o contesta, si va con nosotros o ya estaba)
+        k := busca_vecino(de, i)
+        si k = 0xFFFFFFFF y x.ip <> 0 y a = x.ip y de <> 0 entonces
+            k := hueco_vecino()
+            vecinos[k].estado := 0
+            vecinos[k].pend_n := 0
+        fin
+        si k <> 0xFFFFFFFF y de <> 0 entonces
+            v := vecino(k)
+            v.ip := de
+            v.ifz_n := i
+            copia_k(nat64(dirección(v.mac[0])), d + 22, 6)
+            v.cuándo := ahora_ns()
+            v.intentos := 0
+            si v.estado = 1 y v.pend_n > 0 entonces
+                ; (el que esperaba, a su sitio)
+                v.estado := 2
+                sale_eth(i, ETH_IP, nat64(dirección(v.mac[0])), nat64(dirección(pendientes[k][0])), v.pend_n)
+                v.pend_n := 0
+            fin
+            v.estado := 2
+        fin
+        si op = 1 y x.ip <> 0 y a = x.ip entonces manda_arp(i, 2, de, d + 22) fin
+    fin
+
+    ; manda un paquete (con su cabecera de IP, en d) en una trama de Ethernet a la MAC m
+    función sale_eth(i: nat32, tipo_: nat32, m: nat64, d: nat64, n: nat32)
+        variable x: puntero a Ifz
+        variable t: nat64
+        x := ifz(i)
+        t := nat64(dirección(trama[0]))
+        si t <> d - 14 entonces copia_k(t + 14, d, nat64(n)) fin
+        copia_k(t, m, 6)
+        copia_k(t + 6, nat64(dirección(x.mac[0])), 6)
+        pon_be16(t + 12, tipo_)
+        envía_trama(i, t, n + 14)
+    fin
+
+    ; ---- IPv4: enviar ----
+    ; el paquete IP de d (n octetos, ya con su cabecera) hacia «salto» por i
+    función sale_ip(i: nat32, salto: nat32, d: nat64, n: nat32): bool
+        variable k: nat32
+        variable v: puntero a Vecino
+        variable mac: arreglo [8] de byte
+        si i = 0 entonces
+            ; «lo»: a la cola (lo trata el hilo)
+            si lo_cola = 0 o lo_n >= LO_N o n > TRAMA entonces
+                ifz(0).tx_err := ifz(0).tx_err + 1
+                devolver falso
+            fin
+            k := (lo_ini + lo_n) mod LO_N
+            copia_k(lo_cola + nat64(k) * TRAMA, d, nat64(n))
+            lo_largo[k] := n
+            lo_n := lo_n + 1
+            ifz(0).tx_paq := ifz(0).tx_paq + 1
+            ifz(0).tx_oct := ifz(0).tx_oct + n
+            avisa_red()
+            devolver cierto
+        fin
+        si salto = DIFUSIÓN o salto = (ifz(i).ip ob (nob ifz(i).máscara)) entonces
+            mac[0] := 0xFF
+            mac[1] := 0xFF
+            mac[2] := 0xFF
+            mac[3] := 0xFF
+            mac[4] := 0xFF
+            mac[5] := 0xFF
+            sale_eth(i, ETH_IP, nat64(dirección(mac[0])), d, n)
+            devolver cierto
+        fin
+        k := busca_vecino(salto, i)
+        si k <> 0xFFFFFFFF y vecinos[k].estado = 2 entonces
+            sale_eth(i, ETH_IP, nat64(dirección(vecinos[k].mac[0])), d, n)
+            devolver cierto
+        fin
+        ; sin su MAC: se pregunta, y el paquete espera (uno por vecino: el último)
+        si k = 0xFFFFFFFF entonces
+            k := hueco_vecino()
+            v := vecino(k)
+            v.ip := salto
+            v.ifz_n := i
+            v.intentos := 0
+            v.estado := 1
+        fin
+        v := vecino(k)
+        v.cuándo := ahora_ns()
+        copia_k(nat64(dirección(pendientes[k][0])), d, nat64(n))
+        v.pend_n := n
+        v.intentos := v.intentos + 1
+        manda_arp(i, 1, salto, 0)
+        devolver cierto
+    fin
+
+    ; manda a «a» (desde «de»; 0: la propia) lo de d (n octetos) con el
+    ; protocolo proto; la cabecera de IP la pone aquí (en el sitio de antes de d
+    ; si se da «con_sitio»: 20 octetos libres delante); falso si no se llega
+    público función ip_envía(de: nat32, a: nat32, proto: nat32, d: nat64, n: nat32, ttl: nat32): bool
+        variable i, salto: nat32
+        variable p: nat64
+        si n + 20 > MTU entonces devolver falso fin
+        i := ruta(a, salto)
+        si i = 0xFFFFFFFF entonces devolver falso fin
+        si de = 0 entonces
+            si i = 0 entonces de := a sino de := ifz(i).ip fin
+        fin
+        si ttl = 0 entonces ttl := 64 fin
+        p := nat64(dirección(trama[14]))
+        si d <> p + 20 entonces copia_k(p + 20, d, nat64(n)) fin
+        pon_m8(p, 0x45)
+        pon_m8(p + 1, 0)
+        pon_be16(p + 2, n + 20)
+        ip_id := ip_id + 1
+        pon_be16(p + 4, ip_id yb 0xFFFF)
+        pon_be16(p + 6, 0x4000)                 ; DF
+        pon_m8(p + 8, ttl)
+        pon_m8(p + 9, proto)
+        pon_be16(p + 10, 0)
+        pon_be32(p + 12, de)
+        pon_be32(p + 16, a)
+        pon_be16(p + 10, plegar(suma(p, 20, 0)))
+        ip_tx := ip_tx + 1
+        devolver sale_ip(i, salto, p, n + 20)
+    fin
+
+    ; por una interfaz concreta, a la difusión (DHCP)
+    función ip_difunde(i: nat32, de: nat32, proto: nat32, d: nat64, n: nat32)
+        variable p: nat64
+        p := nat64(dirección(trama[14]))
+        si d <> p + 20 entonces copia_k(p + 20, d, nat64(n)) fin
+        pon_m8(p, 0x45)
+        pon_m8(p + 1, 0x10)
+        pon_be16(p + 2, n + 20)
+        ip_id := ip_id + 1
+        pon_be16(p + 4, ip_id yb 0xFFFF)
+        pon_be16(p + 6, 0)
+        pon_m8(p + 8, 64)
+        pon_m8(p + 9, proto)
+        pon_be16(p + 10, 0)
+        pon_be32(p + 12, de)
+        pon_be32(p + 16, DIFUSIÓN)
+        pon_be16(p + 10, plegar(suma(p, 20, 0)))
+        ip_tx := ip_tx + 1
+        sale_ip(i, DIFUSIÓN, p, n + 20)
+    fin
+
+    ; dónde se pone lo que va detrás de la cabecera de IP (para no copiar dos veces)
+    público función sitio_datos(): nat64
+        devolver nat64(dirección(trama[34]))
+    fin
+
+    ; la suma de la cabecera falsa (UDP y TCP)
+    público función suma_falsa(de: nat32, a: nat32, proto: nat32, n: nat32): nat64
+        devolver nat64(de >> 16) + nat64(de yb 0xFFFF) + nat64(a >> 16) + nat64(a yb 0xFFFF) + nat64(proto) + nat64(n)
+    fin
+
+    ; ---- UDP: enviar ----
+    público función udp_envía(de: nat32, de_p: nat32, a: nat32, a_p: nat32, d: nat64, n: nat32): bool
+        variable u: nat64
+        variable s: nat32
+        si n + 28 > MTU entonces devolver falso fin
+        u := sitio_datos()
+        si d <> u + 8 entonces copia_k(u + 8, d, nat64(n)) fin
+        si de = 0 entonces de := ip_para(a) fin
+        pon_be16(u, de_p)
+        pon_be16(u + 2, a_p)
+        pon_be16(u + 4, n + 8)
+        pon_be16(u + 6, 0)
+        s := plegar(suma(u, nat64(n) + 8, suma_falsa(de, a, 17, n + 8)))
+        si s = 0 entonces s := 0xFFFF fin
+        pon_be16(u + 6, s)
+        udp_tx := udp_tx + 1
+        devolver ip_envía(de, a, 17, u, n + 8, 0)
+    fin
+
+    ; ---- los sockets que miran UDP e ICMP ----
+    ; mete un datagrama (con su cabecera: largo, IP y puerto de quien lo manda)
+    función a_socket(s: puntero a Sock, de: nat32, de_p: nat32, d: nat64, n: nat32): bool
+        variable c: arreglo [2] de nat64
+        si s.marcas yb M_NO_LEE <> 0 entonces devolver falso fin
+        si nat64(n) + 16 > rx_sitio(s) entonces devolver falso fin
+        c[0] := nat64(n) ob (nat64(de) << 32)
+        c[1] := nat64(de_p)
+        rx_mete(s, nat64(dirección(c[0])), 16)
+        rx_mete(s, d, nat64(n))
+        s.rx_datagramas := s.rx_datagramas + 1
+        devolver cierto
+    fin
+
+    ; el socket UDP (o ICMP de ping, proto 1) de ese puerto (o 0)
+    función sock_dgram(proto: nat32, a: nat32, a_p: nat32, de: nat32, de_p: nat32): puntero a Sock
+        variable i: nat32
+        variable s: puntero a Sock
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 entonces
+                s := sock(i)
+                si s.tipo_ = S_DGRAM y s.proto = proto y s.l_puerto = a_p y (s.l_ip = 0 o s.l_ip = a o a = DIFUSIÓN) entonces
+                    si s.marcas yb M_CONECTADO = 0 o (s.r_ip = de y (proto = 1 o s.r_puerto = de_p)) entonces devolver s fin
+                fin
+            fin
+            i := i + 1
+        fin
+        devolver nulo
+    fin
+
+    ; ---- ICMP ----
+    función icmp_envía(de: nat32, a: nat32, tipo_: nat32, código: nat32, resto: nat32, d: nat64, n: nat32)
+        variable u: nat64
+        si n + 28 > MTU entonces n := MTU - 28 fin
+        u := sitio_datos()
+        si d <> u + 8 entonces copia_k(u + 8, d, nat64(n)) fin
+        pon_m8(u, tipo_)
+        pon_m8(u + 1, código)
+        pon_be16(u + 2, 0)
+        pon_be32(u + 4, resto)
+        pon_be16(u + 2, plegar(suma(u, nat64(n) + 8, 0)))
+        icmp_tx := icmp_tx + 1
+        ip_envía(de, a, 1, u, n + 8, 0)
+    fin
+
+    ; (de UDP) «puerto inalcanzable» a quien mandó lo de h (la cabecera de IP y 8 más)
+    función inalcanzable(h: nat64, lh: nat32, de: nat32, a: nat32)
+        variable c: arreglo [64] de byte
+        si a = DIFUSIÓN o a >> 28 = 0xE entonces devolver fin
+        copia_k(nat64(dirección(c[0])), h, nat64(lh + 8))
+        icmp_envía(a, de, 3, 3, 0, nat64(dirección(c[0])), lh + 8)
+    fin
+
+    función entra_icmp(i: nat32, h: nat64, lh: nat32, de: nat32, a: nat32, d: nat64, n: nat32)
+        variable t, k, id: nat32
+        variable s: puntero a Sock
+        variable cuerpo: nat64
+        si n < 8 o plegar(suma(d, nat64(n), 0)) <> 0 entonces
+            ip_malos := ip_malos + 1
+            devolver
+        fin
+        icmp_rx := icmp_rx + 1
+        t := m8(d)
+        ; los RAW de ICMP lo ven todo (con la cabecera de IP, como en Linux)
+        k := 0
+        mientras k < MAX_SOCK hacer
+            si socks[k] <> 0 entonces
+                s := sock(k)
+                si s.tipo_ = S_RAW y s.proto = 1 entonces
+                    si a_socket(s, de, 0, h, lh + n) entonces s.segs_rx := s.segs_rx + 1 fin
+                fin
+            fin
+            k := k + 1
+        fin
+        si t = 8 entonces
+            ; un ping: se contesta con lo mismo
+            si a = DIFUSIÓN entonces devolver fin
+            cuerpo := sitio_datos() + 8
+            copia_k(cuerpo, d + 8, nat64(n) - 8)
+            icmp_envía(a, de, 0, 0, be32(d + 4), cuerpo, n - 8)
+        sino si t = 0 entonces
+            ; la respuesta a un ping: al «ping socket» de ese identificador
+            id := be16(d + 4)
+            s := sock_dgram(1, a, id, de, 0)
+            si s <> nulo entonces a_socket(s, de, 0, d, n) fin
+        sino si t = 3 y n >= 8 + 20 + 8 entonces
+            ; inalcanzable: a TCP (la conexión) o al socket UDP conectado
+            cuerpo := d + 8
+            k := (m8(cuerpo) yb 15) * 4
+            si n >= 8 + k + 4 entonces
+                si m8(cuerpo + 9) = 17 entonces
+                    s := sock_dgram(17, be32(cuerpo + 12), be16(cuerpo + k), be32(cuerpo + 16), be16(cuerpo + k + 2))
+                    si s <> nulo y s.marcas yb M_CONECTADO <> 0 entonces s.error := -111 fin      ; ECONNREFUSED
+                sino si m8(cuerpo + 9) = 6 y al_tcp_inalcanzable <> 0 entonces
+                    llama3(al_tcp_inalcanzable, nat64(be32(cuerpo + 16)), nat64(be16(cuerpo + k)), nat64(be16(cuerpo + k + 2)))
+                fin
+            fin
+        fin
+    fin
+
+    ; ---- UDP: lo que llega ----
+    función entra_udp(i: nat32, h: nat64, lh: nat32, de: nat32, a: nat32, d: nat64, n: nat32)
+        variable de_p, a_p, l: nat32
+        variable s: puntero a Sock
+        si n < 8 entonces devolver fin
+        l := be16(d + 4)
+        si l < 8 o l > n entonces
+            ip_malos := ip_malos + 1
+            devolver
+        fin
+        si be16(d + 6) <> 0 y plegar(suma(d, nat64(l), suma_falsa(de, a, 17, l))) <> 0 entonces
+            ip_malos := ip_malos + 1
+            devolver
+        fin
+        udp_rx := udp_rx + 1
+        de_p := be16(d)
+        a_p := be16(d + 2)
+        si a_p = 68 y i > 0 entonces
+            entra_dhcp(i, d + 8, l - 8)
+            devolver
+        fin
+        s := sock_dgram(17, a, a_p, de, de_p)
+        si s = nulo entonces
+            udp_sin_puerto := udp_sin_puerto + 1
+            inalcanzable(h, lh, de, a)
+            devolver
+        fin
+        a_socket(s, de, de_p, d + 8, l - 8)
+    fin
+
+    ; ---- IPv4: lo que llega ----
+    función entra_ip(i: nat32, h: nat64, n: nat32)
+        variable lh, total, de, a, proto: nat32
+        variable x: puntero a Ifz
+        si n < 20 o m8(h) >> 4 <> 4 entonces
+            ip_malos := ip_malos + 1
+            devolver
+        fin
+        lh := (m8(h) yb 15) * 4
+        total := be16(h + 2)
+        si lh < 20 o total < lh o total > n o plegar(suma(h, nat64(lh), 0)) <> 0 entonces
+            ip_malos := ip_malos + 1
+            devolver
+        fin
+        ; (sin trozos: ni MF ni desplazamiento)
+        si be16(h + 6) yb 0x3FFF <> 0 entonces
+            ip_trozos := ip_trozos + 1
+            devolver
+        fin
+        de := be32(h + 12)
+        a := be32(h + 16)
+        x := ifz(i)
+        si i > 0 entonces
+            ; ¿es para nosotros? (la IP propia, la difusión, o DHCP antes de tener IP)
+            si no (a = x.ip o a = DIFUSIÓN o (x.ip <> 0 y a = (x.ip ob (nob x.máscara))) o (x.ip = 0 y m8(h + 9) = 17)) entonces devolver fin
+        fin
+        ip_rx := ip_rx + 1
+        proto := m8(h + 9)
+        si proto = 1 entonces
+            entra_icmp(i, h, lh, de, a, h + lh, total - lh)
+        sino si proto = 17 entonces
+            entra_udp(i, h, lh, de, a, h + lh, total - lh)
+        sino si proto = 6 entonces
+            si al_tcp_entra <> 0 y a <> DIFUSIÓN entonces
+                ent_ifz := i
+                ent_de := de
+                ent_a := a
+                ent_d := h + lh
+                ent_n := nat64(total - lh)
+                llama0(al_tcp_entra)
+            fin
+        fin
+    fin
+
+    ; una trama de Ethernet que ha llegado por i
+    función entra_trama(i: nat32, d: nat64, n: nat32)
+        variable x: puntero a Ifz
+        variable t: nat32
+        x := ifz(i)
+        x.rx_paq := x.rx_paq + 1
+        x.rx_oct := x.rx_oct + n
+        si n < 14 entonces devolver fin
+        t := be16(d + 12)
+        si t = ETH_ARP entonces
+            entra_arp(i, d, n)
+        sino si t = ETH_IP entonces
+            entra_ip(i, d + 14, n - 14)
+        fin
+    fin
+
+    ; ---- DHCP (RFC 2131) ----
+    ; manda un mensaje DHCP (1 DISCOVER, 3 REQUEST)
+    función dhcp_manda(i: nat32, clase_: nat32)
+        variable x: puntero a Ifz
+        variable u, q: nat64
+        variable n: nat32
+        x := ifz(i)
+        u := sitio_datos() + 8
+        ceros_k(u, 300)
+        pon_m8(u, 1)
+        pon_m8(u + 1, 1)
+        pon_m8(u + 2, 6)
+        pon_be32(u + 4, x.dhcp_xid)
+        pon_be16(u + 8, ((ahora_ns() - x.dhcp_dada) div 1000000000) yb 0xFFFF)
+        si x.dhcp_estado = D_RENUEVA entonces pon_be32(u + 12, x.ip) fin
+        copia_k(u + 28, nat64(dirección(x.mac[0])), 6)
+        pon_be32(u + 236, 0x63825363)
+        q := u + 240
+        pon_m8(q, 53)
+        pon_m8(q + 1, 1)
+        pon_m8(q + 2, clase_)
+        q := q + 3
+        ; el identificador (la MAC)
+        pon_m8(q, 61)
+        pon_m8(q + 1, 7)
+        pon_m8(q + 2, 1)
+        copia_k(q + 3, nat64(dirección(x.mac[0])), 6)
+        q := q + 9
+        si clase_ = 3 y x.dhcp_estado = D_PIDE entonces
+            pon_m8(q, 50)
+            pon_m8(q + 1, 4)
+            pon_be32(q + 2, dhcp_ofrecida)
+            q := q + 6
+            pon_m8(q, 54)
+            pon_m8(q + 1, 4)
+            pon_be32(q + 2, x.dhcp_servidor)
+            q := q + 6
+        fin
+        ; el nombre del equipo
+        pon_m8(q, 12)
+        pon_m8(q + 1, 8)
+        copia_k(q + 2, nat64("hispa-64"), 8)
+        q := q + 10
+        ; lo que se pide: máscara, puerta, DNS, nombre de dominio, concesión, servidor
+        pon_m8(q, 55)
+        pon_m8(q + 1, 6)
+        pon_m8(q + 2, 1)
+        pon_m8(q + 3, 3)
+        pon_m8(q + 4, 6)
+        pon_m8(q + 5, 15)
+        pon_m8(q + 6, 51)
+        pon_m8(q + 7, 54)
+        q := q + 8
+        pon_m8(q, 255)
+        q := q + 1
+        n := nat32(q - u)
+        si n < 300 entonces n := 300 fin
+        ; UDP de 68 a 67
+        u := sitio_datos()
+        pon_be16(u, 68)
+        pon_be16(u + 2, 67)
+        pon_be16(u + 4, n + 8)
+        pon_be16(u + 6, 0)
+        si x.dhcp_estado = D_RENUEVA y x.dhcp_servidor <> 0 entonces
+            pon_be16(u + 6, plegar(suma(u, nat64(n) + 8, suma_falsa(x.ip, x.dhcp_servidor, 17, n + 8))))
+            ip_envía(x.ip, x.dhcp_servidor, 17, u, n + 8, 0)
+        sino
+            pon_be16(u + 6, plegar(suma(u, nat64(n) + 8, suma_falsa(0, DIFUSIÓN, 17, n + 8))))
+            ip_difunde(i, 0, 17, u, n + 8)
+        fin
+    fin
+
+    variable dhcp_ofrecida: nat32
+
+    público función dhcp_empieza(i: nat32)
+        variable x: puntero a Ifz
+        x := ifz(i)
+        x.dhcp_estado := D_DESCUBRE
+        x.dhcp_xid := azar32()
+        x.dhcp_intentos := 1
+        x.dhcp_dada := ahora_ns()
+        x.dhcp_próximo := ahora_ns() + 2000000000
+        dhcp_manda(i, 1)
+    fin
+
+    ; lo que contesta el servidor (d: el mensaje, sin UDP)
+    función entra_dhcp(i: nat32, d: nat64, n: nat32)
+        variable x: puntero a Ifz
+        variable q, fin_: nat64
+        variable op, l, clase_, máscara, puerta, dns, dns2, servidor, ofrecida: nat32
+        variable concesión: nat64
+        variable cambia: bool
+        x := ifz(i)
+        si n < 240 o m8(d) <> 2 o be32(d + 4) <> x.dhcp_xid o be32(d + 236) <> 0x63825363 entonces devolver fin
+        si no misma_mac(d + 28, nat64(dirección(x.mac[0]))) entonces devolver fin
+        ofrecida := be32(d + 16)
+        clase_ := 0
+        máscara := 0xFFFFFF00
+        puerta := 0
+        dns := 0
+        dns2 := 0
+        servidor := 0
+        concesión := 86400
+        q := d + 240
+        fin_ := d + n
+        mientras q < fin_ hacer
+            op := m8(q)
+            si op = 255 entonces romper fin
+            si op = 0 entonces
+                q := q + 1
+                seguir
+            fin
+            si q + 1 >= fin_ entonces romper fin
+            l := m8(q + 1)
+            si q + 2 + l > fin_ entonces romper fin
+            según nat16(op)
+                caso 53: clase_ := m8(q + 2)
+                caso 1: máscara := be32(q + 2)
+                caso 3: puerta := be32(q + 2)
+                caso 6:
+                    dns := be32(q + 2)
+                    si l >= 8 entonces dns2 := be32(q + 6) fin
+                caso 51: concesión := nat64(be32(q + 2))
+                caso 54: servidor := be32(q + 2)
+            fin
+            q := q + 2 + l
+        fin
+        si clase_ = 2 y x.dhcp_estado = D_DESCUBRE entonces
+            ; OFFER: se pide
+            x.dhcp_servidor := servidor
+            dhcp_ofrecida := ofrecida
+            x.dhcp_estado := D_PIDE
+            x.dhcp_intentos := 1
+            x.dhcp_próximo := ahora_ns() + 2000000000
+            dhcp_manda(i, 3)
+        sino si clase_ = 5 y (x.dhcp_estado = D_PIDE o x.dhcp_estado = D_RENUEVA) entonces
+            ; ACK: ya hay IP
+            cambia := x.ip <> ofrecida o x.puerta <> puerta o x.máscara <> máscara o x.dns <> dns
+            x.ip := ofrecida
+            x.máscara := máscara
+            x.puerta := puerta
+            x.dns := dns
+            x.dns2 := dns2
+            si servidor <> 0 entonces x.dhcp_servidor := servidor fin
+            si concesión < 60 entonces concesión := 60 fin
+            si concesión > 0x7FFFFFFF entonces concesión := 0x7FFFFFFF fin
+            x.dhcp_concesión := concesión
+            x.dhcp_dada := ahora_ns()
+            x.dhcp_próximo := ahora_ns() + (concesión div 2) * 1000000000
+            x.dhcp_estado := D_HECHO
+            x.dhcp_veces := x.dhcp_veces + 1
+            si cambia entonces
+                cambios := cambios + 1
+                si dice_dhcp entonces
+                    escribir("Red: ", dirección(x.nombre[0]), ": IP ")
+                    escribe_ip(x.ip)
+                    escribir("/", bits_de(x.máscara), " (DHCP de ")
+                    escribe_ip(x.dhcp_servidor)
+                    escribir(", ", concesión, " s); puerta ")
+                    escribe_ip(x.puerta)
+                    escribir("; DNS ")
+                    escribe_ip(x.dns)
+                    escribir("\n")
+                fin
+                ; (que los vecinos se pregunten otra vez)
+                olvida_vecinos(i)
+            fin
+            Sondeo64.avisa()
+        sino si clase_ = 6 entonces
+            ; NAK: otra vez desde el principio
+            x.ip := 0
+            dhcp_empieza(i)
+        fin
+    fin
+
+    público función bits_de(m: nat32): nat32
+        variable n: nat32
+        n := 0
+        mientras m yb 0x80000000 <> 0 hacer
+            n := n + 1
+            m := m << 1
+        fin
+        devolver n
+    fin
+
+    función olvida_vecinos(i: nat32)
+        variable k: nat32
+        k := 0
+        mientras k < MAX_ARP hacer
+            si vecinos[k].ifz_n = i entonces vecinos[k].estado := 0 fin
+            k := k + 1
+        fin
+    fin
+
+    ; los plazos de DHCP
+    función dhcp_tic(i: nat32)
+        variable x: puntero a Ifz
+        variable ahora, espera: nat64
+        x := ifz(i)
+        si x.dhcp_estado = D_NADA o x.enlace = 0 entonces devolver fin
+        ahora := ahora_ns()
+        si ahora < x.dhcp_próximo entonces devolver fin
+        si x.dhcp_estado = D_HECHO entonces
+            ; a la mitad de la concesión, se renueva
+            x.dhcp_estado := D_RENUEVA
+            x.dhcp_intentos := 1
+            x.dhcp_próximo := ahora + 10000000000
+            dhcp_manda(i, 3)
+            devolver
+        fin
+        si x.dhcp_estado = D_RENUEVA entonces
+            si ahora - x.dhcp_dada >= x.dhcp_concesión * 1000000000 entonces
+                ; se acabó la concesión: sin IP, a empezar
+                x.ip := 0
+                cambios := cambios + 1
+                dhcp_empieza(i)
+                devolver
+            fin
+            x.dhcp_próximo := ahora + 10000000000
+            dhcp_manda(i, 3)
+            devolver
+        fin
+        ; DISCOVER o REQUEST sin respuesta: otra vez (cada vez más espaciado)
+        x.dhcp_intentos := x.dhcp_intentos + 1
+        si x.dhcp_intentos > 6 entonces
+            x.dhcp_estado := D_DESCUBRE
+            x.dhcp_intentos := 1
+        fin
+        espera := nat64(1) << x.dhcp_intentos
+        si espera > 32 entonces espera := 32 fin
+        x.dhcp_próximo := ahora + espera * 1000000000
+        si x.dhcp_estado = D_DESCUBRE entonces dhcp_manda(i, 1) sino dhcp_manda(i, 3) fin
+    fin
+
+    ; los plazos de ARP: preguntar otra vez (hasta 3), y olvidar lo de hace 10 minutos
+    función arp_tic()
+        variable k: nat32
+        variable v: puntero a Vecino
+        variable ahora: nat64
+        ahora := ahora_ns()
+        k := 0
+        mientras k < MAX_ARP hacer
+            v := vecino(k)
+            si v.estado = 1 y ahora - v.cuándo > 1000000000 entonces
+                si v.intentos >= 3 entonces
+                    v.estado := 0
+                    v.pend_n := 0
+                sino
+                    v.intentos := v.intentos + 1
+                    v.cuándo := ahora
+                    manda_arp(v.ifz_n, 1, v.ip, 0)
+                fin
+            sino si v.estado = 2 y ahora - v.cuándo > 600000000000 entonces
+                v.estado := 0
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; ---- los sockets: crear y soltar ----
+    público función nuevo_sock(tipo_: nat32, proto: nat32, rx_tam: nat64, tx_tam: nat64): puntero a Sock
+        variable s: puntero a Sock
+        variable i: nat32
+        i := 0
+        mientras i < MAX_SOCK y socks[i] <> 0 hacer i := i + 1 fin
+        si i >= MAX_SOCK entonces devolver nulo fin
+        s := puntero(nat64(reserva(tamaño(Sock))))
+        si s = nulo entonces devolver nulo fin
+        ceros_k(nat64(s), tamaño(Sock))
+        s.tipo_ := tipo_
+        s.proto := proto
+        s.ttl := 64
+        s.rx_tam := rx_tam
+        s.tx_tam := tx_tam
+        s.rcvbuf := rx_tam
+        s.sndbuf := tx_tam
+        si rx_tam > 0 entonces
+            s.rx := nat64(reserva(rx_tam))
+            si s.rx = 0 entonces
+                libera(puntero(nat64(s)))
+                devolver nulo
+            fin
+        fin
+        si tx_tam > 0 entonces
+            s.tx := nat64(reserva(tx_tam))
+            si s.tx = 0 entonces
+                si s.rx <> 0 entonces libera(puntero(s.rx)) fin
+                libera(puntero(nat64(s)))
+                devolver nulo
+            fin
+        fin
+        socks[i] := nat64(s)
+        socks_vivos := socks_vivos + 1
+        socks_hechos := socks_hechos + 1
+        devolver s
+    fin
+
+    público función quita_sock(s: puntero a Sock)
+        variable i: nat32
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] = nat64(s) entonces
+                socks[i] := 0
+                socks_vivos := socks_vivos - 1
+            fin
+            i := i + 1
+        fin
+        si s.rx <> 0 entonces libera(puntero(s.rx)) fin
+        si s.tx <> 0 entonces libera(puntero(s.tx)) fin
+        libera(puntero(nat64(s)))
+    fin
+
+    ; ¿está en uso el puerto p (de ese protocolo; con la IP l, o cualquiera)?
+    público función puerto_usado(tipo_: nat32, proto: nat32, l: nat32, p: nat32): bool
+        variable i: nat32
+        variable s: puntero a Sock
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 entonces
+                s := sock(i)
+                si s.proto = proto y s.tipo_ = tipo_ y s.l_puerto = p y s.marcas yb M_LIGADO <> 0 y (s.l_ip = 0 o l = 0 o s.l_ip = l) entonces devolver cierto fin
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; un puerto libre (de 49152 a 65535)
+    público función puerto_libre(tipo_: nat32, proto: nat32): nat32
+        variable k, p: nat32
+        si puerto_sig = 0 entonces puerto_sig := azar32() mod 16384 fin
+        k := 0
+        mientras k < 16384 hacer
+            puerto_sig := (puerto_sig + 1) mod 16384
+            p := 49152 + puerto_sig
+            si no puerto_usado(tipo_, proto, 0, p) entonces devolver p fin
+            k := k + 1
+        fin
+        devolver 0
+    fin
+
+    ; ---- el hilo «red» ----
+    función vuelta()
+        variable i, n, l, k: nat32
+        variable algo: bool
+        variable ahora: nat64
+        algo := falso
+        ; lo que ha llegado por las tarjetas (de 32 en 32, soltando el cerrojo entre medias)
+        i := 1
+        mientras i < n_ifz hacer
+            n := 0
+            cierra_mutex(dirección(red_m))
+            mientras n < 32 hacer
+                l := recoge_trama(i, nat64(dirección(recibida[0])))
+                si l = 0 entonces romper fin
+                echa(nat64(l))
+                entra_trama(i, nat64(dirección(recibida[0])), l)
+                n := n + 1
+            fin
+            abre_mutex(dirección(red_m))
+            si n > 0 entonces algo := cierto fin
+            si n = 32 entonces avisa_red() fin           ; (queda más: otra vuelta enseguida)
+            i := i + 1
+        fin
+        ; lo de «lo»
+        cierra_mutex(dirección(red_m))
+        k := 0
+        mientras lo_n > 0 y k < 128 hacer
+            l := lo_largo[lo_ini]
+            copia_k(nat64(dirección(recibida[0])), lo_cola + nat64(lo_ini) * TRAMA, nat64(l))
+            lo_ini := (lo_ini + 1) mod LO_N
+            lo_n := lo_n - 1
+            ifz(0).rx_paq := ifz(0).rx_paq + 1
+            ifz(0).rx_oct := ifz(0).rx_oct + l
+            entra_ip(0, nat64(dirección(recibida[0])), l)
+            k := k + 1
+            algo := cierto
+        fin
+        si lo_n > 0 entonces avisa_red() fin
+        ; los plazos y el enlace
+        ahora := ahora_ns()
+        si ahora >= próximo_enlace entonces
+            próximo_enlace := ahora + 500000000
+            i := 1
+            mientras i < n_ifz hacer
+                mira_enlace(i)
+                i := i + 1
+            fin
+            arp_tic()
+        fin
+        i := 1
+        mientras i < n_ifz hacer
+            dhcp_tic(i)
+            i := i + 1
+        fin
+        si al_tcp_tic <> 0 entonces llama0(al_tcp_tic) fin
+        abre_mutex(dirección(red_m))
+        si algo entonces Sondeo64.avisa() fin
+    fin
+
+    función hilo_de_red(nada: nat64)
+        mientras cierto hacer
+            rearma(dirección(red_suceso))
+            vuelta()
+            vueltas := vueltas + 1
+            espera_plazo(dirección(red_suceso), 10000000)
+        fin
+    fin
+
+    ; ---- en marcha ----
+    ; lee «a.b.c.d» desde t[i]; avanza i
+    función lee_ip(t: puntero a byte, ref i: nat32, ref ip: nat32): bool
+        variable k, v: nat32
+        ip := 0
+        k := 0
+        mientras k < 4 hacer
+            si t[i] < '0' o t[i] > '9' entonces devolver falso fin
+            v := 0
+            mientras t[i] >= '0' y t[i] <= '9' hacer
+                v := v * 10 + nat32(t[i] - '0')
+                i := i + 1
+            fin
+            si v > 255 entonces devolver falso fin
+            ip := (ip << 8) ob v
+            k := k + 1
+            si k < 4 entonces
+                si t[i] <> '.' entonces devolver falso fin
+                i := i + 1
+            fin
+        fin
+        devolver cierto
+    fin
+
+    ; «ip=10.0.2.15/24,10.0.2.2,10.0.2.3»: la primera tarjeta, sin DHCP
+    función ip_fija(t: puntero a byte)
+        variable i, ip, bits, puerta, dns: nat32
+        variable x: puntero a Ifz
+        si n_ifz < 2 entonces devolver fin
+        i := 0
+        si no lee_ip(t, i, ip) entonces devolver fin
+        bits := 24
+        si t[i] = '/' entonces
+            i := i + 1
+            bits := 0
+            mientras t[i] >= '0' y t[i] <= '9' hacer
+                bits := bits * 10 + nat32(t[i] - '0')
+                i := i + 1
+            fin
+        fin
+        puerta := 0
+        dns := 0
+        si t[i] = ',' entonces
+            i := i + 1
+            lee_ip(t, i, puerta)
+            si t[i] = ',' entonces
+                i := i + 1
+                lee_ip(t, i, dns)
+            fin
+        fin
+        x := ifz(1)
+        x.con_dhcp := 0
+        x.ip := ip
+        si bits = 0 entonces x.máscara := 0 sino x.máscara := nob ((nat32(1) << (32 - bits)) - 1) fin
+        si bits >= 32 entonces x.máscara := 0xFFFFFFFF fin
+        x.puerta := puerta
+        x.dns := dns
+    fin
+
+    ; las tarjetas, «lo» y el hilo (con «ip=...» de la línea, o vacío)
+    público función prepara_red(fija: puntero a byte, sin_dhcp_: bool)
+        variable x: puntero a Ifz
+        sin_dhcp := sin_dhcp_
+        dice_dhcp := cierto
+        n_ifz := 1
+        x := ifz(0)
+        x.clase := T_LO
+        x.arriba := 1
+        x.enlace := 1
+        x.mtu := MTU
+        x.ip := ip4(127, 0, 0, 1)
+        x.máscara := 0xFF000000
+        x.nombre[0] := 'l'
+        x.nombre[1] := 'o'
+        x.nombre[2] := 0
+        copia_k(nat64(dirección(x.tarjeta[0])), nat64("la interfaz de este equipo (127.0.0.1)"), 39)
+        prepara_intel()
+        si fija[0] <> 0 entonces ip_fija(fija) fin
+        ip_id := azar32()
+        lo_cola := nat64(reserva(nat64(LO_N) * TRAMA))
+        hilo_red := crea(nat64(dirección(hilo_de_red)), 0, "red", INTERACTIVO, CUALQUIERA)
+        red_va := hilo_red <> nulo
+    fin
+
+fin Ip64.

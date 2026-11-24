@@ -1,0 +1,380 @@
+; =============================================================================
+;  objetos64.cas - Hispa-64, etapa 9: los descriptores que piden la red y
+;  los programas de hoy (docs/64/HISPA-64.md, sección 15), como en Linux:
+;   - eventfd (284, 290): un contador de 64 bits; write suma, read lo da (y
+;     lo pone a 0; con EFD_SEMAPHORE da 1 y resta 1) o espera; EFD_NONBLOCK
+;     y EFD_CLOEXEC; poll: POLLIN si no es 0, POLLOUT si cabe uno más;
+;   - timerfd (283, 286, 287): un temporizador de CLOCK_MONOTONIC,
+;     CLOCK_BOOTTIME o CLOCK_REALTIME (TFD_TIMER_ABSTIME), con o sin
+;     intervalo; read da cuántas veces ha vencido (o espera); poll y epoll
+;     duermen hasta el vencimiento (lo_más_tarde), sin mirar de 10 en 10;
+;   - /dev/urandom y /dev/random: el azar de Azar64 (los dos igual: nunca
+;     esperan, como en Linux desde la 5.6);
+;   - los archivos de texto que hace el núcleo (/etc/resolv.conf,
+;     /etc/hosts, /proc/net/route...): los hace quien los sabe (Red64) y
+;     aquí se leen (y lseek al principio).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Objetos64
+
+    importar Es64, Cerrojo, Monton64, Reloj64, Hilos64, Procesos, Sondeo64, Azar64, Hora64
+
+    público constante F_SOCKET = 11             ; (de Red64) las clases de archivo abierto nuevas
+    público constante F_EVENTO = 12
+    público constante F_TEMPO = 13
+    público constante F_AZAR = 14
+    público constante F_TEXTO = 15
+    constante EAGAIN = -11
+    constante ENOMEM = -12
+    constante EFAULT = -14
+    constante EINVAL = -22
+    constante ERESTARTSYS = -512
+    constante MÁX_EV = 0xFFFFFFFFFFFFFFFE
+
+    público tipo Evento = estructura
+        refs, cuenta, semáforo: nat64
+    fin
+
+    público tipo Tempo = estructura
+        refs, reloj: nat64
+        vence: nat64                ; (ns de ahora_ns) 0: parado
+        intervalo: nat64
+        veces: nat64                ; los vencimientos sin leer
+    fin
+
+    público tipo Texto = estructura
+        refs, n, pos: nat64
+        datos: nat64
+    fin
+
+    público variable eventos_vivos, tempos_vivos, textos_vivos: nat64
+    variable cerrojo_o: nat64
+
+    público función es_objeto(c: nat32): bool
+        devolver c >= F_EVENTO y c <= F_TEXTO
+    fin
+
+    función ev_(d: nat64): puntero a Evento
+        devolver puntero(d)
+    fin
+
+    función tp_(d: nat64): puntero a Tempo
+        devolver puntero(d)
+    fin
+
+    función tx_(d: nat64): puntero a Texto
+        devolver puntero(d)
+    fin
+
+    ; ---- crear ----
+    público función nuevo_evento(inicial: nat64, semáforo: bool): nat64
+        variable e: puntero a Evento
+        e := puntero(nat64(reserva(tamaño(Evento))))
+        si e = nulo entonces devolver 0 fin
+        e.refs := 1
+        e.cuenta := inicial
+        e.semáforo := 0
+        si semáforo entonces e.semáforo := 1 fin
+        suma_atómica(dirección(eventos_vivos), 1)
+        devolver nat64(e)
+    fin
+
+    público función nuevo_tempo(reloj: nat64): nat64
+        variable t: puntero a Tempo
+        t := puntero(nat64(reserva(tamaño(Tempo))))
+        si t = nulo entonces devolver 0 fin
+        t.refs := 1
+        t.reloj := reloj
+        t.vence := 0
+        t.intervalo := 0
+        t.veces := 0
+        suma_atómica(dirección(tempos_vivos), 1)
+        devolver nat64(t)
+    fin
+
+    ; un texto (se queda con los n octetos de d, del montón)
+    público función nuevo_texto(d: nat64, n: nat64): nat64
+        variable t: puntero a Texto
+        t := puntero(nat64(reserva(tamaño(Texto))))
+        si t = nulo entonces
+            libera(puntero(d))
+            devolver 0
+        fin
+        t.refs := 1
+        t.n := n
+        t.pos := 0
+        t.datos := d
+        suma_atómica(dirección(textos_vivos), 1)
+        devolver nat64(t)
+    fin
+
+    ; ---- una referencia más o una menos ----
+    público función otro_objeto(clase: nat64, d: nat64)
+        si d = 0 entonces devolver fin
+        si clase = F_EVENTO entonces suma_atómica(dirección(ev_(d).refs), 1) fin
+        si clase = F_TEMPO entonces suma_atómica(dirección(tp_(d).refs), 1) fin
+        si clase = F_TEXTO entonces suma_atómica(dirección(tx_(d).refs), 1) fin
+    fin
+
+    público función cierra_objeto(clase: nat64, d: nat64)
+        si d = 0 entonces devolver fin
+        si clase = F_EVENTO entonces
+            si suma_atómica(dirección(ev_(d).refs), nob nat64(0)) = 1 entonces
+                libera(puntero(d))
+                suma_atómica(dirección(eventos_vivos), nob nat64(0))
+            fin
+        sino si clase = F_TEMPO entonces
+            si suma_atómica(dirección(tp_(d).refs), nob nat64(0)) = 1 entonces
+                libera(puntero(d))
+                suma_atómica(dirección(tempos_vivos), nob nat64(0))
+            fin
+        sino si clase = F_TEXTO entonces
+            si suma_atómica(dirección(tx_(d).refs), nob nat64(0)) = 1 entonces
+                libera(puntero(tx_(d).datos))
+                libera(puntero(d))
+                suma_atómica(dirección(textos_vivos), nob nat64(0))
+            fin
+        fin
+        Sondeo64.avisa()
+    fin
+
+    ; ---- el temporizador ----
+    ; (con el cerrojo) los vencimientos hasta ahora, a t.veces
+    función al_día(t: puntero a Tempo)
+        variable ahora, n: nat64
+        si t.vence = 0 entonces devolver fin
+        ahora := ahora_ns()
+        si ahora < t.vence entonces devolver fin
+        si t.intervalo = 0 entonces
+            t.veces := t.veces + 1
+            t.vence := 0
+        sino
+            n := (ahora - t.vence) div t.intervalo + 1
+            t.veces := t.veces + n
+            t.vence := t.vence + n * t.intervalo
+        fin
+    fin
+
+    ; cuándo vence (ns de ahora_ns), o nob 0 (para poll)
+    público función vence_de(clase: nat32, d: nat64): nat64
+        variable t: puntero a Tempo
+        si clase <> F_TEMPO entonces devolver nob nat64(0) fin
+        t := tp_(d)
+        si t.vence = 0 entonces devolver nob nat64(0) fin
+        devolver t.vence
+    fin
+
+    ; timerfd_settime: v_nuevo (itimerspec: intervalo y valor, s y ns), marcas (1: ABSTIME)
+    público función tempo_pon(p: puntero a Proceso, d: nat64, marcas_: nat64, v_nuevo: nat64, v_viejo: nat64): ent64
+        variable t: puntero a Tempo
+        variable its: arreglo [4] de nat64
+        variable b, val, int_, ahora: nat64
+        variable r: ent64
+        t := tp_(d)
+        si v_viejo <> 0 entonces
+            r := tempo_lee_hora(p, d, v_viejo)
+            si r < 0 entonces devolver r fin
+        fin
+        si no copia_de(p, nat64(dirección(its[0])), v_nuevo, 32) entonces devolver EFAULT fin
+        si its[1] >= 1000000000 o its[3] >= 1000000000 o ent64(its[0]) < 0 o ent64(its[2]) < 0 entonces devolver EINVAL fin
+        int_ := its[0] * 1000000000 + its[1]
+        val := its[2] * 1000000000 + its[3]
+        b := toma(dirección(cerrojo_o))
+        t.veces := 0
+        t.intervalo := int_
+        si val = 0 entonces
+            t.vence := 0
+        sino si marcas_ yb 1 <> 0 entonces
+            si t.reloj = 0 entonces t.vence := real_a_mono(val) sino t.vence := val fin
+            si t.vence = 0 entonces t.vence := 1 fin
+        sino
+            ahora := ahora_ns()
+            t.vence := ahora + val
+        fin
+        suelta(dirección(cerrojo_o), b)
+        Sondeo64.avisa()
+        devolver 0
+    fin
+
+    ; timerfd_gettime: lo que falta y el intervalo
+    público función tempo_lee_hora(p: puntero a Proceso, d: nat64, v: nat64): ent64
+        variable t: puntero a Tempo
+        variable its: arreglo [4] de nat64
+        variable b, falta: nat64
+        t := tp_(d)
+        b := toma(dirección(cerrojo_o))
+        al_día(t)
+        falta := 0
+        si t.vence <> 0 y t.vence > ahora_ns() entonces falta := t.vence - ahora_ns() fin
+        its[0] := t.intervalo div 1000000000
+        its[1] := t.intervalo mod 1000000000
+        its[2] := falta div 1000000000
+        its[3] := falta mod 1000000000
+        suelta(dirección(cerrojo_o), b)
+        si no copia_a(p, v, nat64(dirección(its[0])), 32) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; ---- leer y escribir ----
+    público función lee_objeto(p: puntero a Proceso, clase: nat32, d: nat64, v: nat64, n: nat64, sin_esperar: bool): ent64
+        variable e: puntero a Evento
+        variable t: puntero a Tempo
+        variable x: puntero a Texto
+        variable b, val, g, lím, k, hecho: nat64
+        variable buf: arreglo [512] de byte
+        si clase = F_AZAR entonces
+            hecho := 0
+            mientras hecho < n hacer
+                k := n - hecho
+                si k > 512 entonces k := 512 fin
+                llena(nat64(dirección(buf[0])), k)
+                si no copia_a(p, v + hecho, nat64(dirección(buf[0])), k) entonces
+                    si hecho = 0 entonces devolver EFAULT fin
+                    devolver ent64(hecho)
+                fin
+                hecho := hecho + k
+                si hecho >= 1048576 entonces romper fin
+            fin
+            devolver ent64(hecho)
+        fin
+        si clase = F_TEXTO entonces
+            x := tx_(d)
+            b := toma(dirección(cerrojo_o))
+            k := 0
+            si x.pos < x.n entonces k := x.n - x.pos fin
+            si k > n entonces k := n fin
+            val := x.pos
+            x.pos := x.pos + k
+            suelta(dirección(cerrojo_o), b)
+            si k > 0 entonces
+                si no copia_a(p, v, x.datos + val, k) entonces devolver EFAULT fin
+            fin
+            devolver ent64(k)
+        fin
+        si n < 8 entonces devolver EINVAL fin
+        mientras cierto hacer
+            g := Sondeo64.gen
+            lím := nob nat64(0)
+            val := 0
+            b := toma(dirección(cerrojo_o))
+            si clase = F_EVENTO entonces
+                e := ev_(d)
+                si e.cuenta > 0 entonces
+                    si e.semáforo <> 0 entonces
+                        val := 1
+                        e.cuenta := e.cuenta - 1
+                    sino
+                        val := e.cuenta
+                        e.cuenta := 0
+                    fin
+                fin
+            sino
+                t := tp_(d)
+                al_día(t)
+                si t.veces > 0 entonces
+                    val := t.veces
+                    t.veces := 0
+                fin
+                si t.vence <> 0 entonces lím := t.vence fin
+            fin
+            suelta(dirección(cerrojo_o), b)
+            si val > 0 entonces
+                si clase = F_EVENTO entonces Sondeo64.avisa() fin
+                si no copia_a(p, v, nat64(dirección(val)), 8) entonces devolver EFAULT fin
+                devolver 8
+            fin
+            si sin_esperar entonces devolver EAGAIN fin
+            si interrumpido(p) entonces devolver ERESTARTSYS fin
+            ; (un temporizador parado espera sin plazo: lo pondrán con settime)
+            espera_cambio(p, g, lím)
+        fin
+        devolver 0
+    fin
+
+    público función escribe_objeto(p: puntero a Proceso, clase: nat32, d: nat64, v: nat64, n: nat64, sin_esperar: bool): ent64
+        variable e: puntero a Evento
+        variable b, x, g: nat64
+        si clase = F_AZAR entonces devolver ent64(n) fin          ; (lo que se escribe en /dev/urandom, como si se mezclara)
+        si clase <> F_EVENTO entonces devolver EINVAL fin
+        si n < 8 entonces devolver EINVAL fin
+        si no copia_de(p, nat64(dirección(x)), v, 8) entonces devolver EFAULT fin
+        si x = nob nat64(0) entonces devolver EINVAL fin
+        e := ev_(d)
+        mientras cierto hacer
+            g := Sondeo64.gen
+            b := toma(dirección(cerrojo_o))
+            si MÁX_EV - e.cuenta >= x entonces
+                e.cuenta := e.cuenta + x
+                suelta(dirección(cerrojo_o), b)
+                Sondeo64.avisa()
+                devolver 8
+            fin
+            suelta(dirección(cerrojo_o), b)
+            si sin_esperar entonces devolver EAGAIN fin
+            si interrumpido(p) entonces devolver ERESTARTSYS fin
+            espera_cambio(p, g, nob nat64(0))
+        fin
+        devolver 0
+    fin
+
+    ; (poll) lo listo: POLLIN 1 (y POLLRDNORM 0x40), POLLOUT 4 (y POLLWRNORM 0x100)
+    público función listo_objeto(clase: nat32, d: nat64, ev: nat32): nat32
+        variable b: nat64
+        variable r: nat32
+        variable e: puntero a Evento
+        variable t: puntero a Tempo
+        r := 0
+        si clase = F_AZAR o clase = F_TEXTO entonces devolver ev yb 0x145 fin
+        b := toma(dirección(cerrojo_o))
+        si clase = F_EVENTO entonces
+            e := ev_(d)
+            si e.cuenta > 0 entonces r := r ob 0x41 fin
+            si e.cuenta < MÁX_EV entonces r := r ob 0x104 fin
+        sino si clase = F_TEMPO entonces
+            t := tp_(d)
+            al_día(t)
+            si t.veces > 0 entonces r := r ob 0x41 fin
+        fin
+        suelta(dirección(cerrojo_o), b)
+        devolver r yb ev
+    fin
+
+    ; lseek de un texto (al principio, o adonde se diga desde el principio)
+    público función sitúa_texto(d: nat64, desp: ent64, de_dónde: nat64): ent64
+        variable x: puntero a Texto
+        x := tx_(d)
+        si de_dónde = 0 y desp >= 0 entonces
+            x.pos := nat64(desp)
+            devolver desp
+        fin
+        si de_dónde = 1 entonces
+            si ent64(x.pos) + desp < 0 entonces devolver EINVAL fin
+            x.pos := nat64(ent64(x.pos) + desp)
+            devolver ent64(x.pos)
+        fin
+        si de_dónde = 2 entonces
+            si ent64(x.n) + desp < 0 entonces devolver EINVAL fin
+            x.pos := nat64(ent64(x.n) + desp)
+            devolver ent64(x.pos)
+        fin
+        devolver EINVAL
+    fin
+
+    ; la «struct stat» (en k, ya a cero)
+    público función stat_objeto(clase: nat32, d: nat64, k: nat64)
+        pon_m64(k + 16, 1)
+        pon_m64(k + 56, 4096)
+        si clase = F_AZAR entonces
+            pon_m32(k + 24, 0x2000 ob 0x1B6)
+            pon_m64(k + 40, (1 << 8) ob 9)
+        sino si clase = F_TEXTO entonces
+            pon_m32(k + 24, 0x8000 ob 0x124)
+            pon_m64(k + 48, tx_(d).n)
+            pon_m64(k + 8, d >> 4)
+        sino
+            pon_m32(k + 24, 0x180)                 ; (anon_inode: sin tipo)
+            pon_m64(k + 8, d >> 4)
+        fin
+    fin
+
+fin Objetos64.

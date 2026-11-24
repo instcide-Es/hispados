@@ -61,7 +61,7 @@
 ; =============================================================================
 módulo Procesos
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Entradas, Espacios, Unidad64, Vfs64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Entradas, Espacios, Unidad64, Vfs64, Hora64
 
     público constante MAX_REG = 256             ; (48 hasta la etapa 6)
     público constante MAX_HILOS = 64            ; [etapa 7] los hilos de un proceso
@@ -1884,7 +1884,7 @@ módulo Procesos
     ; la pila de un programa que arranca el núcleo: los argumentos, las
     ; palabras de su línea (16 como mucho), y el entorno HOME=/ y PATH=/
     función pon_pila(p: puntero a Proceso): bool
-        variable t: arreglo [300] de byte
+        variable t: arreglo [400] de byte
         variable i, k, n: nat32
         variable e: puntero a byte
         n := 0
@@ -1915,7 +1915,20 @@ módulo Procesos
             t[k + i] := e[i]
             i := i + 1
         fin
-        devolver pon_pila_v(p, dirección(t[0]), n, 2)
+        k := k + 7
+        ; [etapa 9] la zona horaria (Hora64): TZ=CET-1CEST,M3.5.0,M10.5.0/3
+        t[k] := 'T'
+        t[k + 1] := 'Z'
+        t[k + 2] := '='
+        k := k + 3
+        i := 0
+        mientras zona_tz[i] <> 0 y i < 60 hacer
+            t[k] := zona_tz[i]
+            k := k + 1
+            i := i + 1
+        fin
+        t[k] := 0
+        devolver pon_pila_v(p, dirección(t[0]), n, 3)
     fin
 
     ; lo que hace el hilo de un programa: entrar en él (no vuelve)

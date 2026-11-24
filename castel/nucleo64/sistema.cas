@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Azar64, Hora64, Objetos64, Redbase64, Red64
 
     constante EPERM = -1
     constante ENOENT = -2
@@ -93,6 +93,11 @@ módulo Sistema
     ; [etapa 8] ¿es de una tubería? (las clases 3 y 4)
     función es_tubo(c: nat32): bool
         devolver c = F_TUBO_L o c = F_TUBO_E
+    fin
+
+    ; [etapa 9] ¿es de las nuevas? (sockets, eventfd, timerfd, /dev/urandom, los textos)
+    función es_nueva(c: nat32): bool
+        devolver c = F_SOCKET o es_objeto(c)
     fin
 
     ; ¿es fd un archivo abierto del programa?
@@ -194,6 +199,12 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver tubo_lee(p, p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0)
         fin
+        ; [etapa 9] los sockets y los objetos
+        si p.fd_clase[nat32(fd)] = F_SOCKET entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            devolver lee_sock(p, fd, v, n)
+        fin
+        si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver lee_objeto(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
         ; [etapa 8] los dispositivos (Disp64)
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver lee_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
         si n = 0 entonces devolver 0 fin
@@ -236,6 +247,11 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver tubo_escribe(p, p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0)
         fin
+        si p.fd_clase[nat32(fd)] = F_SOCKET entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            devolver escribe_sock(p, fd, v, n)
+        fin
+        si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver escribe_objeto(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver escribe_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n) fin
         si n = 0 entonces devolver 0 fin
         k := nat64(reserva(TROZO))
@@ -333,6 +349,28 @@ módulo Sistema
             si marcas_ yb O_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 sino p.fd_nobloq[nat32(fd)] := 0 fin
             devolver ent64(fd)
         fin
+        ; [etapa 9] /dev/urandom, /dev/random y los textos de la red
+        si mismo(t, "/dev/urandom") o mismo(t, "/dev/random") o es_texto_red(t) entonces
+            fd := fd_libre(p, 0)
+            si fd < 0 entonces
+                libera(t)
+                devolver EMFILE
+            fin
+            si es_texto_red(t) entonces
+                dob := texto_red(t)
+                dc := F_TEXTO
+            sino
+                dob := 0
+                dc := F_AZAR
+            fin
+            libera(t)
+            si dc = F_TEXTO y dob = 0 entonces devolver ENOMEM fin
+            p.fd_clase[nat32(fd)] := dc
+            p.fd_obj[nat32(fd)] := dob
+            si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
+            p.fd_nobloq[nat32(fd)] := 0
+            devolver ent64(fd)
+        fin
         base := nulo
         si t[0] <> '/' entonces
             base := base_de(p, dirfd, err)
@@ -408,7 +446,7 @@ módulo Sistema
             devolver 0
         fin
         si orden = 4 entonces                                                            ; F_SETFL
-            si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) entonces p.fd_nobloq[nat32(fd)] := nat32((arg >> 11) yb 1) fin
+            si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) o es_nueva(p.fd_clase[nat32(fd)]) entonces p.fd_nobloq[nat32(fd)] := nat32((arg >> 11) yb 1) fin
             devolver 0
         fin
         si orden = 3 entonces                                                            ; F_GETFL
@@ -416,7 +454,7 @@ módulo Sistema
             si p.fd_clase[nat32(fd)] = F_TUBO_L entonces devolver ent64(nat64(p.fd_nobloq[nat32(fd)]) << 11) fin
             si p.fd_clase[nat32(fd)] = F_TUBO_E entonces devolver ent64(1 ob (nat64(p.fd_nobloq[nat32(fd)]) << 11)) fin
             si p.fd_clase[nat32(fd)] = F_EPOLL entonces devolver 2 fin
-            si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver ent64(2 ob (nat64(p.fd_nobloq[nat32(fd)]) << 11)) fin
+            si es_de_disp(p.fd_clase[nat32(fd)]) o es_nueva(p.fd_clase[nat32(fd)]) entonces devolver ent64(2 ob (nat64(p.fd_nobloq[nat32(fd)]) << 11)) fin
             devolver ent64(abierto(p, fd).marcas yb 0x403)
         fin
         devolver EINVAL
@@ -424,6 +462,7 @@ módulo Sistema
 
     función sitúa(p: puntero a Proceso, fd: nat64, d: ent64, de_dónde: nat64): ent64
         si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_TEXTO entonces devolver sitúa_texto(p.fd_obj[nat32(fd)], d, de_dónde) fin
         si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ESPIPE fin
         devolver vfs_sitúa(abierto(p, fd), d, de_dónde)
     fin
@@ -454,6 +493,14 @@ módulo Sistema
             stat_consola(nat64(dirección(st[0])))
             pon_m32(nat64(dirección(st[0])) + 24, 0x8000 ob 0x180)
             pon_m64(nat64(dirección(st[0])) + 40, 0)
+            r := 0
+        sino si p.fd_clase[nat32(fd)] = F_SOCKET entonces
+            ceros_mem(nat64(dirección(st[0])), 144)
+            stat_sock(nat64(dirección(st[0])), p.fd_obj[nat32(fd)])
+            r := 0
+        sino si es_objeto(p.fd_clase[nat32(fd)]) entonces
+            ceros_mem(nat64(dirección(st[0])), 144)
+            stat_objeto(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], nat64(dirección(st[0])))
             r := 0
         sino si es_de_disp(p.fd_clase[nat32(fd)]) entonces
             ; [etapa 8] un dispositivo (Disp64)
@@ -905,7 +952,7 @@ módulo Sistema
         variable ns: nat64
         ns := ahora_ns()
         según cuál
-            caso 0, 5: ns := época * 1000000000 + (ns - época_ns)      ; REALTIME, REALTIME_COARSE
+            caso 0, 5: ns := real_ns()                                  ; REALTIME, REALTIME_COARSE ([etapa 9] Hora64)
             caso 1, 4, 6, 7: ns := ns                                   ; MONOTONIC, _RAW, _COARSE, BOOTTIME
             caso 2, 3: ns := ns                                         ; [etapa 7] PROCESS_CPUTIME, THREAD_CPUTIME (lo que lleva en marcha)
             si no: devolver EINVAL
@@ -934,8 +981,8 @@ módulo Sistema
         si marcas_ yb 1 <> 0 entonces
             ; TIMER_ABSTIME: hasta esa hora (la de ese reloj)
             si cuál = 0 entonces
-                si d <= época * 1000000000 + (ahora - época_ns) entonces devolver 0 fin
-                límite := ahora + (d - (época * 1000000000 + (ahora - época_ns)))
+                si d <= real_ns() entonces devolver 0 fin
+                límite := real_a_mono(d)
             sino
                 límite := d
             fin
@@ -975,8 +1022,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.8.0")
-        pon_texto(dirección(t[0]), 195, "etapa 8 (gráficos y ventanas)")
+        pon_texto(dirección(t[0]), 130, "0.9.0")
+        pon_texto(dirección(t[0]), 195, "etapa 9 (la red)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -1024,6 +1071,9 @@ módulo Sistema
         si es_tubo(p.fd_clase[nat32(fd)]) entonces
             devolver tubo_listo(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)]) yb (ev ob 0x18)
         fin
+        ; [etapa 9] los sockets y los objetos
+        si p.fd_clase[nat32(fd)] = F_SOCKET entonces devolver listo_sock(p.fd_obj[nat32(fd)], ev) fin
+        si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver listo_objeto(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], ev) fin
         ; [etapa 8] los dispositivos (los sucesos: si hay en su cola)
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver listo_disp(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], ev) fin
         ; (los archivos, siempre listos)
@@ -1032,18 +1082,24 @@ módulo Sistema
 
     ; duerme hasta «límite» (ns de ahora_ns; nob 0: sin límite) o hasta que la
     ; consola tenga algo (si se mira)
-    función espera_hasta(p: puntero a Proceso, límite: nat64, mira_consola: bool)
-        variable ahora, d: nat64
-        si mira_consola entonces
-            espera_datos(p, límite)
-            devolver
-        fin
+    función espera_hasta(p: puntero a Proceso, g0: nat64, límite: nat64, con_disp: bool)
+        variable ahora: nat64
         ahora := ahora_ns()
         si ahora >= límite entonces devolver fin
-        ; ([etapa 7] de 10 en 10 ms: las tuberías no avisan a poll; una señal, sí)
-        d := límite - ahora
-        si d > 10000000 entonces d := 10000000 fin
-        duerme_hasta(p, ahora + d)
+        ; ([etapa 9] lo despierta quien cambia algo —Sondeo64—; los sucesos del
+        ; teclado y del ratón para los programas, de 10 en 10 ms como antes)
+        si con_disp y límite - ahora > 10000000 entonces límite := ahora + 10000000 fin
+        espera_cambio(p, g0, límite)
+    fin
+
+    ; [etapa 9] lo que pide fd a la espera: el plazo de un timerfd, y si es de los que no avisan
+    función mira_espera(p: puntero a Proceso, fd: ent64, ref lt: nat64, ref disp_: bool)
+        variable v: nat64
+        si fd < 0 entonces devolver fin
+        si no fd_bien(p, nat64(fd)) entonces devolver fin
+        si es_de_disp(p.fd_clase[nat32(fd)]) entonces disp_ := cierto fin
+        v := vence_de(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)])
+        si v < lt entonces lt := v fin
     fin
 
     ; el límite de un plazo en ms (negativo: sin límite)
@@ -1071,6 +1127,7 @@ módulo Sistema
 
     ; poll y ppoll
     función sondea(p: puntero a Proceso, v: nat64, n: nat64, límite: nat64): ent64
+        variable g0, lt: nat64
         variable fds: arreglo [64] de nat64
         variable i: nat32
         variable listos: ent64
@@ -1085,21 +1142,23 @@ módulo Sistema
             listos := 0
             consola := falso
             tubos_ := falso
+            g0 := Sondeo64.gen
+            lt := límite
             i := 0
             mientras nat64(i) < n hacer
                 fd := ent64(ent32(nat32(fds[i] yb 0xFFFFFFFF)))
                 ev := nat32((fds[i] >> 32) yb 0xFFFF)
                 rev := listo_de(p, fd, ev)
+                mira_espera(p, fd, lt, tubos_)
                 si fd >= 0 y rev = 0 y fd_bien(p, nat64(fd)) entonces
                     si p.fd_clase[nat32(fd)] = F_CONSOLA y ev yb 0x41 <> 0 entonces consola := cierto fin
-                    si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) entonces tubos_ := cierto fin
                 fin
                 fds[i] := (fds[i] yb 0xFFFFFFFF) ob ((nat64(ev) yb 0xFFFF) << 32) ob (nat64(rev) << 48)
                 si rev <> 0 entonces listos := listos + 1 fin
                 i := i + 1
             fin
             si listos > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
-            espera_hasta(p, límite, consola y no tubos_)
+            espera_hasta(p, g0, lt, tubos_)
         fin
         si n > 0 entonces
             si no copia_a(p, v, nat64(dirección(fds[0])), n * 8) entonces devolver EFAULT fin
@@ -1110,6 +1169,7 @@ módulo Sistema
 
     ; select y pselect6 (los descriptores hasta MAX_FD)
     función selecciona(p: puntero a Proceso, n: nat64, vr: nat64, vw: nat64, ve: nat64, límite: nat64): ent64
+        variable g0, lt: nat64
         variable r, w, e, rr, ww: nat64
         variable largo: nat64
         variable i: nat32
@@ -1150,6 +1210,8 @@ módulo Sistema
             ww := 0
             consola := falso
             tubos_ := falso
+            g0 := Sondeo64.gen
+            lt := límite
             i := 0
             mientras i < MAX_FD hacer
                 si r yb (nat64(1) << i) <> 0 entonces
@@ -1167,11 +1229,11 @@ módulo Sistema
                         listos := listos + 1
                     fin
                 fin
-                si (r ob w) yb (nat64(1) << i) <> 0 y (es_tubo(p.fd_clase[i]) o es_de_disp(p.fd_clase[i])) entonces tubos_ := cierto fin
+                si (r ob w) yb (nat64(1) << i) <> 0 entonces mira_espera(p, ent64(i), lt, tubos_) fin
                 i := i + 1
             fin
             si listos > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
-            espera_hasta(p, límite, consola y no tubos_)
+            espera_hasta(p, g0, lt, tubos_)
         fin
         e := 0
         si largo > 0 entonces
@@ -1350,21 +1412,69 @@ módulo Sistema
         devolver 0
     fin
 
+    ; ---- [etapa 9] eventfd, timerfd, clock_settime ----
+    ; un descriptor nuevo de la clase c con el objeto d (y O_NONBLOCK, O_CLOEXEC de «marcas_»)
+    función fd_de_objeto(p: puntero a Proceso, c: nat32, d: nat64, marcas_: nat64): ent64
+        variable fd: ent32
+        fd := fd_libre(p, 0)
+        si fd < 0 entonces
+            cierra_objeto(nat64(c), d)
+            devolver EMFILE
+        fin
+        p.fd_clase[nat32(fd)] := c
+        p.fd_obj[nat32(fd)] := d
+        p.fd_nobloq[nat32(fd)] := nat32((marcas_ >> 11) yb 1)
+        p.fd_cloexec[nat32(fd)] := nat32((marcas_ >> 19) yb 1)
+        devolver ent64(fd)
+    fin
+
+    función evento_(p: puntero a Proceso, inicial: nat64, marcas_: nat64): ent64
+        variable d: nat64
+        si marcas_ yb (nob nat64(0x80801)) <> 0 entonces devolver EINVAL fin
+        d := nuevo_evento(inicial yb 0xFFFFFFFF, marcas_ yb 1 <> 0)
+        si d = 0 entonces devolver ENOMEM fin
+        devolver fd_de_objeto(p, F_EVENTO, d, marcas_)
+    fin
+
+    función tempo_(p: puntero a Proceso, reloj_: nat64, marcas_: nat64): ent64
+        variable d: nat64
+        si reloj_ <> 0 y reloj_ <> 1 y reloj_ <> 7 entonces devolver EINVAL fin
+        si marcas_ yb (nob nat64(0x80800)) <> 0 entonces devolver EINVAL fin
+        d := nuevo_tempo(reloj_)
+        si d = 0 entonces devolver ENOMEM fin
+        devolver fd_de_objeto(p, F_TEMPO, d, marcas_)
+    fin
+
+    ; timerfd_settime (pon) y timerfd_gettime
+    función con_tempo(p: puntero a Proceso, fd: nat64, marcas_: nat64, v1: nat64, v2: nat64, pon: bool): ent64
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] <> F_TEMPO entonces devolver EINVAL fin
+        si pon entonces devolver tempo_pon(p, p.fd_obj[nat32(fd)], marcas_, v1, v2) fin
+        devolver tempo_lee_hora(p, p.fd_obj[nat32(fd)], v1)
+    fin
+
+    ; clock_settime (timespec, escala 1) y settimeofday (timeval, escala 1000): CLOCK_REALTIME
+    función pon_hora(p: puntero a Proceso, reloj_: nat64, v: nat64, escala: nat64): ent64
+        variable ts: arreglo [2] de nat64
+        si reloj_ <> 0 entonces devolver EINVAL fin
+        si v = 0 entonces devolver 0 fin
+        si no copia_de(p, nat64(dirección(ts[0])), v, 16) entonces devolver EFAULT fin
+        si ts[1] * escala >= 1000000000 o ts[0] >= nat64(1) << 40 entonces devolver EINVAL fin
+        pon_real_ns(ts[0] * 1000000000 + ts[1] * escala)
+        devolver 0
+    fin
+
     ; [etapa 7] getrandom: RDRAND (o RDSEED), o lo del TSC si no hay
     función azar_(p: puntero a Proceso, v: nat64, n: nat64): ent64
-        variable t: arreglo [32] de nat64
+        variable t: arreglo [512] de byte
         variable hecho, trozo: nat64
-        variable i: nat32
+        ; [etapa 9] de Azar64 (ChaCha20 con RDSEED, RDRAND y los tiempos)
         si n > 1048576 entonces n := 1048576 fin
         hecho := 0
         mientras hecho < n hacer
-            i := 0
-            mientras i < 32 hacer
-                t[i] := un_azar()
-                i := i + 1
-            fin
             trozo := n - hecho
-            si trozo > 256 entonces trozo := 256 fin
+            si trozo > 512 entonces trozo := 512 fin
+            llena(nat64(dirección(t[0])), trozo)
             si no copia_a(p, v + hecho, nat64(dirección(t[0])), trozo) entonces
                 si hecho = 0 entonces devolver EFAULT fin
                 devolver ent64(hecho)
@@ -1535,6 +1645,17 @@ módulo Sistema
                     r := EBADF
                 sino si p.fd_clase[nat32(a1)] = F_CONSOLA entonces
                     r := tty_ioctl(p, a2 yb 0xFFFFFFFF, a3)
+                sino si p.fd_clase[nat32(a1)] = F_SOCKET entonces
+                    r := ioctl_sock(p, a1, a2, a3)
+                sino si es_objeto(p.fd_clase[nat32(a1)]) y a2 yb 0xFFFFFFFF = 0x5421 entonces
+                    ; FIONBIO
+                    si copia_de(p, nat64(dirección(lím)), a3, 4) entonces
+                        p.fd_nobloq[nat32(a1)] := 0
+                        si lím yb 0xFFFFFFFF <> 0 entonces p.fd_nobloq[nat32(a1)] := 1 fin
+                        r := 0
+                    sino
+                        r := EFAULT
+                    fin
                 sino si es_de_disp(p.fd_clase[nat32(a1)]) entonces
                     r := ioctl_disp(p, p.fd_clase[nat32(a1)], p.fd_obj[nat32(a1)], a2, a3)
                 sino si p.fd_clase[nat32(a1)] = F_TUBO_L y a2 yb 0xFFFFFFFF = 0x541B entonces
@@ -1609,6 +1730,30 @@ módulo Sistema
                     si copia_a(p, a2, nat64(dirección(h.robusta)), 8) y copia_a(p, a3, nat64(dirección(lím)), 8) entonces r := 0 sino r := EFAULT fin
                 fin
             caso 318: r := azar_(p, a1, a2)
+            ; [etapa 9] la red y lo que pide
+            caso 41: r := socket_(p, a1, a2, a3)
+            caso 42: r := connect_(p, a1, a2, a3)
+            caso 43: r := accept_(p, a1, a2, a3, 0)
+            caso 288: r := accept_(p, a1, a2, a3, a4)
+            caso 44: r := sendto_(p, a1, a2, a3, a4, a5, a6)
+            caso 45: r := recvfrom_(p, a1, a2, a3, a4, a5, a6)
+            caso 46: r := sendmsg_(p, a1, a2, a3)
+            caso 47: r := recvmsg_(p, a1, a2, a3)
+            caso 48: r := shutdown_(p, a1, a2)
+            caso 49: r := bind_(p, a1, a2, a3)
+            caso 50: r := listen_(p, a1, a2)
+            caso 51: r := nombre_sock(p, a1, a2, a3, falso)
+            caso 52: r := nombre_sock(p, a1, a2, a3, cierto)
+            caso 53: r := -95                              ; socketpair (AF_UNIX): EOPNOTSUPP
+            caso 54: r := setsockopt_(p, a1, a2, a3, a4, a5)
+            caso 55: r := getsockopt_(p, a1, a2, a3, a4, a5)
+            caso 284: r := evento_(p, a1, 0)
+            caso 290: r := evento_(p, a1, a2)
+            caso 283: r := tempo_(p, a1, a2)
+            caso 286: r := con_tempo(p, a1, a2, a3, a4, cierto)
+            caso 287: r := con_tempo(p, a1, 0, a2, 0, falso)
+            caso 227: r := pon_hora(p, a1, a2, 1)
+            caso 164: r := pon_hora(p, 0, a1, 1000)
             caso 230: r := duerme_reloj(p, a1, a2, a3, a4)
             caso 229:
                 si a2 <> 0 entonces
@@ -1624,7 +1769,7 @@ módulo Sistema
                 fin
             caso 96: r := hora_del_día(p, a1)
             caso 201:
-                lím := época + (ahora_ns() - época_ns) div 1000000000
+                lím := real_s()
                 r := ent64(lím)
                 si a1 <> 0 entonces
                     si no copia_a(p, a1, nat64(dirección(lím)), 8) entonces r := EFAULT fin
@@ -1719,6 +1864,10 @@ módulo Sistema
         si clase = F_EPOLL entonces
             e := ep_(d)
             suma_atómica(dirección(e.refs), 1)
+        sino si clase = F_SOCKET entonces
+            otro_sock(d)
+        sino si es_objeto(nat32(clase)) entonces
+            otro_objeto(clase, d)
         sino si es_de_disp(nat32(clase)) entonces
             otro_disp(clase, d)
         sino
@@ -1731,6 +1880,10 @@ módulo Sistema
         si clase = F_EPOLL entonces
             e := ep_(d)
             si suma_atómica(dirección(e.refs), nob nat64(0)) = 1 entonces libera(puntero(d)) fin
+        sino si clase = F_SOCKET entonces
+            cierra_sock(d)
+        sino si es_objeto(nat32(clase)) entonces
+            cierra_objeto(clase, d)
         sino si es_de_disp(nat32(clase)) entonces
             cierra_disp(clase, d)
         sino
@@ -1821,6 +1974,7 @@ módulo Sistema
         variable buf: puntero a nat32
         variable consola, tubos_, con_másc: bool
         variable h: puntero a Hilo
+        variable g0, lt: nat64
         e := epoll_de(p, epfd, err)
         si e = nulo entonces devolver err fin
         si ent64(ent32(nat32(máx yb 0xFFFFFFFF))) <= 0 o máx > 1024 entonces devolver EINVAL fin
@@ -1839,6 +1993,8 @@ módulo Sistema
             n := 0
             consola := falso
             tubos_ := falso
+            g0 := Sondeo64.gen
+            lt := límite
             i := 0
             mientras nat64(i) < e.n y nat64(n) < máx hacer
                 fd := e.fd[i]
@@ -1854,13 +2010,13 @@ módulo Sistema
                         si ev yb 0x40000000 <> 0 entonces e.ev[i] := ev yb 0xFFFF0000 fin
                     sino
                         si p.fd_clase[nat32(fd)] = F_CONSOLA entonces consola := cierto fin
-                        si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) entonces tubos_ := cierto fin
+                        mira_espera(p, ent64(fd), lt, tubos_)
                     fin
                 fin
                 i := i + 1
             fin
             si n > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
-            espera_hasta(p, límite, consola y no tubos_)
+            espera_hasta(p, g0, lt, tubos_)
         fin
         si n > 0 entonces
             si no copia_a(p, v_evs, nat64(buf), nat64(n) * 12) entonces n := EFAULT fin
@@ -1877,7 +2033,7 @@ módulo Sistema
         variable tv: arreglo [2] de nat64
         variable ns: nat64
         si v = 0 entonces devolver 0 fin
-        ns := época * 1000000000 + (ahora_ns() - época_ns)
+        ns := real_ns()
         tv[0] := ns div 1000000000
         tv[1] := (ns mod 1000000000) div 1000
         si no copia_a(p, v, nat64(dirección(tv[0])), 16) entonces devolver EFAULT fin
@@ -1894,8 +2050,6 @@ módulo Sistema
 
     ; las llamadas al sistema, en marcha (después de Procesos.prepara_procesos)
     público función prepara_sistema()
-        época := segundos_unix()
-        época_ns := ahora_ns()
         prepara_futex()
         prepara_tubos()
         al_otro_fd := nat64(dirección(otro_obj))
