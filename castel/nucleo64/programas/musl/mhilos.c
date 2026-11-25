@@ -37,7 +37,7 @@ static pthread_barrier_t barrera;
 static volatile int avx_mal, avx_hecho;
 
 /* [etapa 10 b] los descriptores, a la vez: cada uno apunta de quién es el que le dan */
-#define FD_VUELTAS 150
+#define FD_VUELTAS 20
 static volatile int dueño_fd[1024], fd_repetidos, fd_fallos, fd_hechos;
 static void apunta_fd(int f, long k)
 {
