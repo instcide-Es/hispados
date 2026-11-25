@@ -616,15 +616,25 @@ disco_ini:
 .mismo:
         cmp byte [u_bios], 0x80
         jae .m1
-        mov ax, [sector+0x18]
+        mov ax, [sector+0x18]       ; (de 1 a 63 sectores por pista y de 1 a
+        dec ax                      ; 255 caras: con un 0, el paso a CHS
+        cmp ax, 62                  ; dividía por cero)
+        ja .mal
+        inc ax
         mov [spp], ax
         mov ax, [sector+0x1A]
+        dec ax
+        cmp ax, 254
+        ja .mal
+        inc ax
         mov [caras], ax
 .m1:
-        mov al, [sector+0x0D]
-        xor ah, ah
-        test ax, ax
-        jz .mal
+        mov al, [sector+0x0D]       ; de 1 a 64 sectores por grupo (con 128,
+        xor ah, ah                  ; los octetos por grupo daban 0)
+        dec al
+        cmp al, 63
+        ja .mal
+        inc ax
         mov [spc], ax
         mov cl, 9
         shl ax, cl
@@ -634,7 +644,13 @@ disco_ini:
         mov al, [sector+0x10]
         xor ah, ah
         mov [nfat], ax
+        test ax, ax                 ; ni 0 FAT, ni FAT de 0 sectores, ni 0
+        jz .mal                     ; entradas en la raíz (la BPB de un FAT32)
+        cmp word [sector+0x11], 0
+        je .mal
         mov ax, [sector+0x16]
+        test ax, ax
+        jz .mal
         mov [spf], ax
         mul word [nfat]
         add ax, [res_sec]
@@ -667,6 +683,25 @@ disco_ini:
         cmp ax, 0xFFF0
         jae .mal
 .tipo:
+        inc ax                      ; ¿cabe la FAT en sus sectores? (si no,
+        xor dx, dx                  ; se escribía encima de la otra copia o
+        cmp byte [u_fat16], 0       ; de la raíz): FAT16, (n+1)*2 octetos;
+        je .t12                     ; FAT12, (n+1)*3/2
+        add ax, 255
+        adc dl, dh
+        mov al, ah
+        mov ah, dl
+        jmp short .t2
+.t12:
+        mov dx, ax
+        shr dx, 1
+        add ax, dx
+        add ax, 511
+        mov cl, 9
+        shr ax, cl
+.t2:
+        cmp ax, [spf]
+        ja .mal
         mov word [fat_pista], 2
         mov byte [disco_ok], 1
         clc
