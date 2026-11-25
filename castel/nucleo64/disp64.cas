@@ -30,17 +30,23 @@
 ;     procesos que no son padre e hijo; unlink la borra cuando ya nadie la
 ;     tiene abierta; las páginas, cuando ya nadie las tiene puestas).
 ;   - /dev/null y /dev/zero.
+;   - [etapa 11] /dev/dsp: el sonido (Hda64), como OSS: write de muestras de
+;     16 bits (a 48 o 44,1 kHz, mono o estéreo), SNDCTL_DSP_SETFMT, SPEED,
+;     CHANNELS, STEREO, SYNC, RESET, GETOSPACE, GETODELAY, GETBLKSIZE,
+;     GETFMTS y SETFRAGMENT (aceptada); uno a la vez (EBUSY); al cerrar, lo
+;     escrito acaba de sonar.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Disp64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Sinc64, Espacios, Procesos, Pant64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Sinc64, Espacios, Procesos, Pant64, Hda64
 
     público constante F_FB = 6                  ; las clases de archivo abierto (1 consola, 2 archivo, 3 y 4 tuberías, 5 epoll)
     público constante F_SUCESOS = 7
     público constante F_SHM = 8
     público constante F_NULO = 9
     público constante F_CERO = 10
+    público constante F_DSP = 16                ; [etapa 11] /dev/dsp (las 11 a 15 son de Objet64)
     público constante R_DISP = 3                ; (reg_ext) lo de un dispositivo puesto con mmap
     constante EV_SYN = 0
     constante EV_KEY = 1
@@ -157,12 +163,13 @@ módulo Disp64
         si igual(t, "/dev/input/event0") entonces devolver F_SUCESOS fin
         si igual(t, "/dev/null") entonces devolver F_NULO fin
         si igual(t, "/dev/zero") entonces devolver F_CERO fin
+        si igual(t, "/dev/dsp") o igual(t, "/dev/audio") entonces devolver F_DSP fin
         si tras(t, "/dev/shm/") <> nulo entonces devolver F_SHM fin
         devolver 0
     fin
 
     público función es_de_disp(clase: nat32): bool
-        devolver clase >= F_FB y clase <= F_CERO
+        devolver (clase >= F_FB y clase <= F_CERO) o clase = F_DSP
     fin
 
     ; ---- abrir y cerrar ----
@@ -177,6 +184,7 @@ módulo Disp64
             devolver 0
         fin
         si c = F_NULO o c = F_CERO entonces devolver 0 fin
+        si c = F_DSP entonces devolver abre_dsp(obj) fin
         si c = F_SHM entonces devolver abre_shm(tras(t, "/dev/shm/"), marcas_, obj) fin
         ; F_SUCESOS: una cola para este descriptor
         l := puntero(nat64(reserva(tamaño(Lector))))
@@ -209,6 +217,8 @@ módulo Disp64
         si clase = F_SUCESOS y d <> 0 entonces
             l := puntero(d)
             suma_atómica(dirección(l.refs), 1)
+        sino si clase = F_DSP y d <> 0 entonces
+            suma_atómica(puntero(d), 1)
         sino si clase = F_SHM y d <> 0 entonces
             s := puntero(d)
             suma_atómica(dirección(s.refs), 1)
@@ -238,6 +248,11 @@ módulo Disp64
             fin
         sino si clase = F_SHM y d <> 0 entonces
             cierra_shm(puntero(d))
+        sino si clase = F_DSP y d <> 0 entonces
+            si suma_atómica(puntero(d), nob nat64(0)) = 1 entonces
+                libera(puntero(d))
+                hda_cierra()
+            fin
         fin
     fin
 
@@ -290,6 +305,117 @@ módulo Disp64
 
     público función escribe_disp(p: puntero a Proceso, clase: nat32, d: nat64, v: nat64, n: nat64): ent64
         si clase = F_NULO o clase = F_CERO entonces devolver ent64(n) fin
+        si clase = F_DSP entonces devolver escribe_dsp(p, v, n, falso) fin
+        devolver EINVAL
+    fin
+
+    ; ---- [etapa 11] /dev/dsp ----
+    constante EINTR = -4
+    función abre_dsp(ref obj: nat64): ent64
+        variable c: puntero a nat64
+        si no hay_hda entonces devolver ENXIO fin
+        c := puntero(nat64(reserva(8)))
+        si c = nulo entonces devolver ENOMEM fin
+        si no hda_abre() entonces
+            libera(puntero(nat64(c)))
+            devolver EBUSY
+        fin
+        valor(c) := 1
+        obj := nat64(c)
+        ; (como OSS al abrir: 8 bits sin signo a 8 kHz en Linux; aquí, lo de la
+        ; tarjeta: 16 bits, 48 kHz, estéreo; el programa lo pide con ioctl)
+        hda_formato(48000, 2)
+        devolver 0
+    fin
+
+    ; las muestras del programa, al anillo de la tarjeta (esperando, de 5 en
+    ; 5 ms, si está lleno; sin esperar, lo que quepa o EAGAIN)
+    función escribe_dsp(p: puntero a Proceso, v: nat64, n: nat64, sin_esperar: bool): ent64
+        variable b: arreglo [512] de nat64
+        variable hecho, k, x, w: nat64
+        hecho := 0
+        mientras hecho < n hacer
+            x := hda_sitio()
+            si x = 0 entonces
+                si sin_esperar entonces romper fin
+                si interrumpido(p) entonces
+                    si hecho = 0 entonces devolver EINTR fin
+                    romper
+                fin
+                duerme_ms(5)
+                seguir
+            fin
+            k := n - hecho
+            si k > 4096 entonces k := 4096 fin
+            si k > x entonces k := x fin
+            si no copia_de(p, nat64(dirección(b[0])), v + hecho, k) entonces
+                si hecho = 0 entonces devolver EFAULT fin
+                romper
+            fin
+            w := 0
+            mientras w < k hacer
+                x := hda_mete(nat64(dirección(b[0])) + w, k - w)
+                si x = 0 entonces duerme_ms(5) fin
+                w := w + x
+            fin
+            hecho := hecho + k
+        fin
+        si hecho = 0 y n > 0 entonces devolver EAGAIN fin
+        devolver ent64(hecho)
+    fin
+
+    ; los ioctl de OSS (los números de Linux)
+    función ioctl_dsp(p: puntero a Proceso, orden: nat64, arg: nat64): ent64
+        variable x: nat32
+        variable k: arreglo [2] de nat64
+        variable fr, s: nat64
+        si orden = 0x5000 o orden = 0x5001 entonces                     ; SNDCTL_DSP_RESET, SYNC: lo escrito suena
+            hda_espera(3000)
+            devolver 0
+        fin
+        si orden = 0x8004500B entonces                                   ; SNDCTL_DSP_GETFMTS: AFMT_S16_LE
+            x := 0x10
+            si no copia_a(p, arg, nat64(dirección(x)), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        si orden = 0x8010500C entonces                                   ; SNDCTL_DSP_GETOSPACE: audio_buf_info
+            s := hda_sitio()
+            fr := s div 4096
+            k[0] := fr ob (nat64(16) << 32)                              ; fragments, fragstotal
+            k[1] := 4096 ob (s << 32)                                    ; fragsize, bytes
+            si no copia_a(p, arg, nat64(dirección(k[0])), 16) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        si orden = 0x80045017 entonces                                   ; SNDCTL_DSP_GETODELAY
+            s := hda_pendiente()
+            si hda_canales = 1 entonces s := s div 2 fin
+            x := nat32(s)
+            si no copia_a(p, arg, nat64(dirección(x)), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        si orden = 0xC0045004 o orden = 0x80045004 entonces              ; SNDCTL_DSP_GETBLKSIZE
+            x := 4096
+            si no copia_a(p, arg, nat64(dirección(x)), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        si orden = 0xC0045002 o orden = 0xC0045005 o orden = 0xC0045006 o orden = 0xC0045003 o orden = 0xC004500A entonces
+            si no copia_de(p, nat64(dirección(x)), arg, 4) entonces devolver EFAULT fin
+            si orden = 0xC0045002 entonces                               ; SNDCTL_DSP_SPEED
+                hda_formato(x, hda_canales)
+                x := hda_hz
+            sino si orden = 0xC0045005 entonces                          ; SNDCTL_DSP_SETFMT: solo AFMT_S16_LE
+                x := 0x10
+            sino si orden = 0xC0045006 entonces                          ; SNDCTL_DSP_CHANNELS
+                hda_formato(hda_hz, x)
+                x := hda_canales
+            sino si orden = 0xC0045003 entonces                          ; SNDCTL_DSP_STEREO
+                si x <> 0 entonces hda_formato(hda_hz, 2) sino hda_formato(hda_hz, 1) fin
+                x := hda_canales - 1
+            fin
+            ; (SNDCTL_DSP_SETFRAGMENT: aceptada, sin cambiar nada)
+            si no copia_a(p, arg, nat64(dirección(x)), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
         devolver EINVAL
     fin
 
@@ -299,6 +425,11 @@ módulo Disp64
         si clase = F_SUCESOS entonces
             l := puntero(d)
             si l.n > 0 entonces devolver ev yb 0x41 fin
+            devolver 0
+        fin
+        ; [etapa 11] /dev/dsp: se puede escribir si cabe algo
+        si clase = F_DSP entonces
+            si hda_sitio() > 0 entonces devolver ev yb 0x104 fin
             devolver 0
         fin
         devolver ev yb 0x145
@@ -322,6 +453,9 @@ módulo Disp64
             caso F_CERO:
                 pon_m32(k + 24, 0x2000 ob 0x1B6)
                 pon_m64(k + 40, (1 << 8) ob 5)
+            caso F_DSP:
+                pon_m32(k + 24, 0x2000 ob 0x1B6)
+                pon_m64(k + 40, (14 << 8) ob 3)
             caso F_SHM:
                 s := puntero(d)
                 pon_m32(k + 24, 0x8000 ob 0x180)
@@ -544,6 +678,7 @@ módulo Disp64
         variable t: puntero a byte
         variable i, largo: nat32
         orden := orden yb 0xFFFFFFFF
+        si clase = F_DSP entonces devolver ioctl_dsp(p, orden, arg) fin
         si clase = F_FB entonces
             si orden = 0x4600 entonces                                  ; FBIOGET_VSCREENINFO
                 info_var(nat64(dirección(k[0])))

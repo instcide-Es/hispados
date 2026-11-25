@@ -95,6 +95,7 @@ módulo PrMusl64
         si busca_archivo("MRED") >= 0 entonces corre("MRED", 0) fin            ; [etapa 9] los sockets por 127.0.0.1, eventfd, timerfd, el azar
         si busca_archivo("MCXX") >= 0 entonces corre("MCXX", 0) fin            ; [etapa 10] C++ (la libstdc++ con musl)
         si busca_archivo("MTEXTO") >= 0 entonces corre("MTEXTO", 0) fin        ; [etapa 10] HarfBuzz y FreeType
+        si busca_archivo("MSONIDO") >= 0 entonces corre("MSONIDO", 0) fin      ; [etapa 11] el sonido (/dev/dsp)
         si busca_archivo("LUA") >= 0 y busca_archivo("PRUEBA.LUA") >= 0 entonces corre("LUA /PRUEBA.LUA uno dos", 0) fin
         ; (los que quedasen sueltos acaban solos)
         t0 := ahora_ns()

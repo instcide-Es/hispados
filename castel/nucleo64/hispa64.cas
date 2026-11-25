@@ -73,7 +73,7 @@ módulo Hispa64
     importar Tty64, Teclas64
     importar I2chid64
     importar PrMusl64
-    importar Disp64
+    importar Hda64, Disp64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
     constante VERSIÓN = "0.11.0"
@@ -521,6 +521,7 @@ módulo Hispa64
         prepara_nvme(tiene("sinmsix"))
         prepara_ahci(tiene("sinmsi"))
         si no tiene("sinusb") entonces prepara_usb(tiene("sinmsix"), tiene("sinmsi")) fin
+        si no tiene("sinsonido") entonces prepara_hda() fin            ; [etapa 11] el sonido (HD Audio)
         si no prepara_bloques(tiene("escribir")) entonces escribir("  sin memoria para la caché de bloques\n") fin
         escribir("  la caché de bloques: ", cb_n, " bloques de 4 KB (")
         tamaño_legible(nat64(cb_n) * 4096)

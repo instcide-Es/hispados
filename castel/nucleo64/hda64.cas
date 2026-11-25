@@ -1,0 +1,778 @@
+; =============================================================================
+;  hda64.cas - Hispa-64, etapa 11: el sonido, Intel High Definition Audio
+;  (docs/64/HISPA-64.md, sección 17), en el núcleo (como Linux: el programa
+;  escribe en /dev/dsp, Disp64). Lo de Hispa-Pentium (nucleo32/sonido/hda.c,
+;  que viene de HSPSND de Hispa-DOS) es el modelo, en Castel:
+;   - la controladora (clase 04, 03, 00): la memoria y el bus master, TCSEL a
+;     0 en las Intel y el «snoop» de las AMD; el enlace reiniciado (CRST) y
+;     los códecs que contestan (STATESTS);
+;   - las órdenes al códec, inmediatas y, si no contestan, por CORB y RIRB;
+;   - el códec: su grupo de audio en D0, las GPIO a 1, los pines que pueden
+;     sacar sonido (altavoz, auriculares, línea: por su configuración; si
+;     ninguno lo dice, todos) y, desde cada uno, un camino hasta un DAC por
+;     mezcladores y selectores (dos niveles), con todo en D0, los
+;     amplificadores a 0 dB sin silencio y EAPD encendido;
+;   - el flujo de salida 1 sobre un anillo de 64 KB (16 páginas de 4 KB en
+;     la lista de búferes): lo que se escribe va por delante de por dónde va
+;     la tarjeta (LPIB), y lo ya tocado se pone a cero en cuanto se ve (así,
+;     si el programa no da más, suena silencio y no lo de la vuelta
+;     anterior); el hilo «sonido» lo mira cada 10 ms mientras suena;
+;   - 48 kHz o 44,1 kHz (los que tienen todas), 16 bits, estéreo (lo mono se
+;     dobla aquí).
+;  Sin la interrupción de la tarjeta: con el anillo de 341 ms y el hilo que
+;  lo mira cada 10 ms basta, y no hay que compartir la línea (en los
+;  portátiles suele ser de varios), como en Hispa-Pentium.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Hda64
+
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Sinc64, Pci64
+
+    constante ANILLO = 65536
+    constante PÁGINAS = 16
+    constante MARGEN = 4096                     ; lo que no se llena nunca del anillo (lo que está leyendo la tarjeta)
+    constante ADELANTO = 7680                   ; tras quedarse sin datos, se sigue 40 ms por delante (a 48 kHz)
+    constante MAX_PINES = 6
+    constante MAX_DACS = 4
+
+    público variable hay_hda: bool
+    público variable hda_pci: nat32
+    público variable hda_códec: nat32           ; el id del códec (fabricante y aparato)
+    público variable hda_hz, hda_canales: nat32 ; los del programa (los canales: 1 o 2; la tarjeta, siempre 2)
+    público variable hda_octetos, hda_sin_datos, hda_vueltas: nat64     ; lo escrito en el anillo, las veces que se ha quedado sin datos, las del hilo
+    público variable hda_pines_n: nat32
+    público variable hda_pin, hda_dac: arreglo [MAX_PINES] de nat32
+    público variable hda_clase: arreglo [MAX_PINES] de nat32            ; 0 línea, 1 altavoz, 2 auriculares, 3 sin decir
+    público variable hda_por_corb: bool
+    público variable hda_motivo: puntero a byte
+
+    variable r: nat64                           ; sus registros
+    variable sd: nat64                          ; el primer flujo de salida
+    variable cad, afg, w_ini, w_n, fmt, sordo: nat32
+    variable pág: nat64                         ; (física) la lista de búferes (BDL) en +0, CORB en +0x400, RIRB en +0x800
+    variable rirb_lee: nat32
+    variable anillo: arreglo [PÁGINAS] de nat64 ; (físicas) las páginas del anillo
+    variable dacs: arreglo [MAX_DACS] de nat32
+    variable n_dacs: nat32
+    ; lo que suena (con el mutex)
+    variable m: Mutex
+    variable abierto, en_marcha: bool
+    variable escrito, leído: nat64              ; en octetos, desde que empezó a sonar (no dan la vuelta)
+    variable pos_ant: nat64                     ; el LPIB de la última vez
+    variable vacío: bool                        ; se ha quedado sin datos (hasta que llegan más)
+    variable vacío_desde: nat64                 ; desde cuándo
+    variable base_: nat64
+    variable suceso: Suceso                     ; despierta al hilo «sonido»
+
+    ; ---- los registros ----
+    función r8(ofs: nat64): nat32
+        devolver m8(r + ofs)
+    fin
+    función r16(ofs: nat64): nat32
+        devolver m16(r + ofs)
+    fin
+    función r32(ofs: nat64): nat32
+        devolver m32(r + ofs)
+    fin
+    función w8(ofs: nat64, v: nat32)
+        pon_m8(r + ofs, v)
+    fin
+    función w16(ofs: nat64, v: nat32)
+        pon_m16(r + ofs, v)
+    fin
+    función w32(ofs: nat64, v: nat32)
+        pon_m32(r + ofs, v)
+    fin
+
+    ; ---- las órdenes al códec ----
+    función orden_inmediata(c_: nat32): nat32
+        variable i: nat32
+        variable x: nat32
+        i := 0
+        mientras i < 2000 y r16(0x68) yb 1 <> 0 hacer
+            espera_us(1)
+            i := i + 1
+        fin
+        w16(0x68, 2)                            ; IRV a 0
+        w32(0x60, c_)
+        w16(0x68, 1)                            ; ICB: que se mande
+        i := 0
+        mientras i < 4000 hacer
+            si r16(0x68) yb 3 = 2 entonces
+                x := r32(0x64)
+                w16(0x68, 2)
+                devolver x
+            fin
+            espera_us(1)
+            i := i + 1
+        fin
+        w16(0x68, 2)
+        devolver 0xFFFFFFFF
+    fin
+
+    función orden_corb(c_: nat32): nat32
+        variable wp, rp, i: nat32
+        variable d: nat64
+        d := virt(pág)
+        wp := (r16(0x48) + 1) yb 0xFF
+        pon_m32(d + 0x400 + nat64(wp) * 4, c_)
+        w16(0x48, wp)
+        i := 0
+        mientras i < 4000 hacer
+            rp := r16(0x58) yb 0xFF
+            mientras rirb_lee <> rp hacer
+                rirb_lee := (rirb_lee + 1) yb 0xFF
+                ; (no las espontáneas)
+                si m32(d + 0x800 + nat64(rirb_lee) * 8 + 4) yb 0x10 = 0 entonces devolver m32(d + 0x800 + nat64(rirb_lee) * 8) fin
+            fin
+            espera_us(1)
+            i := i + 1
+        fin
+        devolver 0xFFFFFFFF
+    fin
+
+    función manda(nid: nat32, ord_: nat32): nat32
+        variable c: nat32
+        si sordo > 8 entonces devolver 0xFFFFFFFF fin
+        c := (cad << 28) ob ((nid yb 0x7F) << 20) ob (ord_ yb 0xFFFFF)
+        si hda_por_corb entonces c := orden_corb(c) sino c := orden_inmediata(c) fin
+        si c = 0xFFFFFFFF entonces sordo := sordo + 1 fin
+        devolver c
+    fin
+
+    función v12(nid: nat32, verbo: nat32, dato: nat32): nat32
+        devolver manda(nid, (verbo << 8) ob (dato yb 0xFF))
+    fin
+
+    función v4(nid: nat32, verbo: nat32, dato: nat32): nat32
+        devolver manda(nid, (verbo << 16) ob (dato yb 0xFFFF))
+    fin
+
+    función param(nid: nat32, p: nat32): nat32
+        devolver v12(nid, 0xF00, p)
+    fin
+
+    función pon_corb()
+        variable i: nat32
+        variable f: nat64
+        w8(0x4C, 0)
+        w8(0x5C, 0)
+        espera_ms_(1)
+        f := pág + 0x400
+        w32(0x40, nat32(f yb 0xFFFFFFFF))
+        w32(0x44, nat32(f >> 32))
+        w8(0x4E, 2)                             ; 256 entradas
+        w16(0x4A, 0x8000)
+        i := 0
+        mientras i < 1000 y r16(0x4A) yb 0x8000 = 0 hacer
+            espera_us(1)
+            i := i + 1
+        fin
+        w16(0x4A, 0)
+        i := 0
+        mientras i < 1000 y r16(0x4A) yb 0x8000 <> 0 hacer
+            espera_us(1)
+            i := i + 1
+        fin
+        w16(0x48, 0)
+        f := pág + 0x800
+        w32(0x50, nat32(f yb 0xFFFFFFFF))
+        w32(0x54, nat32(f >> 32))
+        w8(0x5E, 2)
+        w16(0x58, 0x8000)
+        w16(0x5A, 0xFF)
+        rirb_lee := 0
+        w8(0x4C, 2)
+        w8(0x5C, 2)
+        espera_ms_(1)
+        hda_por_corb := cierto
+    fin
+
+    función espera_ms_(ms: nat64)
+        si va entonces duerme_ms(ms) sino espera_us(ms * 1000) fin
+    fin
+
+    ; ---- el códec ----
+    función tipo_w(nid: nat32, ref caps: nat32): nat32
+        caps := param(nid, 0x09)
+        si caps = 0xFFFFFFFF entonces devolver 0xFF fin
+        devolver (caps >> 20) yb 0xF
+    fin
+
+    ; la lista de conexiones del nodo (hasta 16)
+    función conexiones(nid: nat32, ref d: arreglo [16] de nat32): nat32
+        variable l, n, i, k, ant, x, j, por, e, rango, v: nat32
+        variable largo: bool
+        l := param(nid, 0x0E)
+        si l = 0xFFFFFFFF entonces devolver 0 fin
+        n := l yb 0x7F
+        largo := l yb 0x80 <> 0
+        si largo entonces por := 2 sino por := 4 fin
+        k := 0
+        ant := 0
+        i := 0
+        mientras i < n y k < 16 hacer
+            x := v12(nid, 0xF02, i)
+            j := 0
+            mientras j < por y i < n y k < 16 hacer
+                si largo entonces
+                    e := (x >> (16 * j)) yb 0xFFFF
+                    rango := e yb 0x8000
+                    v := e yb 0x7FFF
+                sino
+                    e := (x >> (8 * j)) yb 0xFF
+                    rango := e yb 0x80
+                    v := e yb 0x7F
+                fin
+                si rango <> 0 y ant <> 0 entonces
+                    ant := ant + 1
+                    mientras ant < v y k < 16 hacer
+                        d[k] := ant
+                        k := k + 1
+                        ant := ant + 1
+                    fin
+                fin
+                si k < 16 entonces
+                    d[k] := v
+                    k := k + 1
+                fin
+                ant := v
+                j := j + 1
+                i := i + 1
+            fin
+        fin
+        devolver k
+    fin
+
+    función caps_amp(nid: nat32, caps: nat32, salida: bool): nat32
+        variable n: nat32
+        si caps yb 8 <> 0 entonces n := nid sino n := afg fin
+        si salida entonces devolver param(n, 0x12) fin
+        devolver param(n, 0x0D)
+    fin
+
+    ; los amplificadores del nodo a 0 dB y sin silencio (la entrada «ent»; 0xFF: la salida)
+    función abre_amp(nid: nat32, caps: nat32, ent: nat32)
+        variable a: nat32
+        si ent = 0xFF entonces
+            si caps yb 4 = 0 entonces devolver fin
+            a := caps_amp(nid, caps, cierto)
+            v4(nid, 3, 0xB000 ob (a yb 0x7F))
+        sino
+            si caps yb 2 = 0 entonces devolver fin
+            a := caps_amp(nid, caps, falso)
+            v4(nid, 3, 0x7000 ob ((ent yb 0xF) << 8) ob (a yb 0x7F))
+        fin
+    fin
+
+    función es_dac(nid: nat32): bool
+        variable c, t: nat32
+        t := tipo_w(nid, c)
+        devolver t = 0 y c yb 0x200 = 0
+    fin
+
+    función pon_dac(nid: nat32)
+        variable i, c: nat32
+        i := 0
+        mientras i < n_dacs hacer
+            si dacs[i] = nid entonces devolver fin
+            i := i + 1
+        fin
+        si n_dacs >= MAX_DACS entonces devolver fin
+        dacs[n_dacs] := nid
+        n_dacs := n_dacs + 1
+        v12(nid, 0x705, 0)
+        v12(nid, 0x706, 0x10)                   ; el flujo 1, desde el canal 0
+        v4(nid, 2, fmt)
+        c := param(nid, 0x09)
+        abre_amp(nid, c, 0xFF)
+    fin
+
+    ; un camino desde nid hasta un DAC (primero uno conectado directamente,
+    ; luego por mezcladores y selectores, dos niveles); el DAC, en «dac»
+    función camino(nid: nat32, nivel: nat32, ref dac: nat32): bool
+        variable c: arreglo [16] de nat32
+        variable n, i, caps, t, t2, c2: nat32
+        n := conexiones(nid, c)
+        t := tipo_w(nid, caps)
+        i := 0
+        mientras i < n y no es_dac(c[i]) hacer i := i + 1 fin
+        si i = n entonces
+            si nivel >= 2 entonces devolver falso fin
+            i := 0
+            mientras i < n hacer
+                t2 := tipo_w(c[i], c2)
+                si (t2 = 2 o t2 = 3) y camino(c[i], nivel + 1, dac) entonces romper fin
+                i := i + 1
+            fin
+            si i = n entonces devolver falso fin
+        sino
+            pon_dac(c[i])
+            dac := c[i]
+        fin
+        ; este nodo, puesto: encendido, la entrada elegida y sus amplificadores
+        v12(nid, 0x705, 0)
+        si t <> 2 y n > 1 entonces v12(nid, 0x701, i) fin
+        si t <> 4 entonces abre_amp(nid, caps, i) fin
+        abre_amp(nid, caps, 0xFF)
+        devolver cierto
+    fin
+
+    función pon_pin(nid: nat32, clase: nat32, pcaps: nat32)
+        variable i, ctl, e, dac: nat32
+        si hda_pines_n >= MAX_PINES entonces devolver fin
+        i := 0
+        mientras i < hda_pines_n hacer
+            si hda_pin[i] = nid entonces devolver fin
+            i := i + 1
+        fin
+        dac := 0
+        si no camino(nid, 0, dac) entonces devolver fin
+        ctl := 0x40
+        si clase = 2 y pcaps yb 8 <> 0 entonces ctl := 0xC0 fin
+        v12(nid, 0x707, ctl)
+        si pcaps yb 0x10000 <> 0 entonces
+            ; EAPD
+            e := v12(nid, 0xF0C, 0) yb 5
+            v12(nid, 0x70C, e ob 2)
+        fin
+        hda_pin[hda_pines_n] := nid
+        hda_dac[hda_pines_n] := dac
+        hda_clase[hda_pines_n] := clase
+        hda_pines_n := hda_pines_n + 1
+    fin
+
+    función prepara_códec(): bool
+        variable x, i, n, gp, clase, nid, caps, pc, cfg, dev, k: nat32
+        hda_códec := param(0, 0)
+        si hda_códec = 0xFFFFFFFF o hda_códec = 0 entonces devolver falso fin
+        x := param(0, 0x04)
+        afg := 0
+        n := x yb 0xFF
+        i := 0
+        mientras i < n hacer
+            si param(((x >> 16) yb 0xFF) + i, 0x05) yb 0xFF = 1 entonces afg := ((x >> 16) yb 0xFF) + i fin
+            i := i + 1
+        fin
+        si afg = 0 entonces devolver falso fin
+        v12(afg, 0x705, 0)
+        espera_ms_(2)
+        x := param(afg, 0x04)
+        w_ini := (x >> 16) yb 0xFF
+        w_n := x yb 0xFF
+        gp := param(afg, 0x11) yb 0xFF
+        si gp >= 8 entonces gp := 0xFF sino gp := (nat32(1) << gp) - 1 fin
+        hda_pines_n := 0
+        n_dacs := 0
+        ; las GPIO, todas a 1 (lo que enciende el amplificador de los altavoces en muchos portátiles)
+        si gp <> 0 entonces
+            v12(afg, 0x716, gp)
+            v12(afg, 0x717, gp)
+            v12(afg, 0x715, gp)
+        fin
+        ; por su configuración: los altavoces, los auriculares y la línea; si
+        ; ninguno, todos los que pueden sacar sonido
+        clase := 0
+        mientras clase <= 3 y hda_pines_n < MAX_PINES hacer
+            si clase = 3 y hda_pines_n > 0 entonces romper fin
+            i := 0
+            mientras i < w_n hacer
+                nid := w_ini + i
+                si tipo_w(nid, caps) = 4 y caps yb 0x200 = 0 entonces
+                    pc := param(nid, 0x0C)
+                    si pc yb 0x10 <> 0 entonces
+                        cfg := v12(nid, 0xF1C, 0)
+                        dev := (cfg >> 20) yb 0xF
+                        si dev = 1 entonces k := 1 sino si dev = 2 entonces k := 2 sino si dev = 0 entonces k := 0 sino k := 9 fin
+                        si clase < 3 entonces
+                            si (cfg >> 30) <> 1 y cfg <> 0 y k = (clase + 1) mod 3 entonces pon_pin(nid, k, pc) fin
+                        sino si k <> 9 o cfg = 0 entonces
+                            pon_pin(nid, 3, pc)
+                        fin
+                    fin
+                fin
+                i := i + 1
+            fin
+            clase := clase + 1
+        fin
+        devolver hda_pines_n > 0
+    fin
+
+    ; ---- la tarjeta ----
+    público función prepara_hda()
+        variable i, k, id, x: nat32
+        i := 0
+        mientras i < pci_n y no hay_hda hacer
+            si clase_de(i) yb 0xFFFF00 = 0x040300 entonces
+                id := conf(i, 0)
+                escribir("Sonido: ")
+                escribe_bdf(i)
+                escribir(" ")
+                hex4(fab_de(i))
+                escribir(":")
+                hex4(apa_de(i))
+                si prepara_ctl(i, id) entonces
+                    escribir(", HD Audio (GCAP ")
+                    hex4(r16(0))
+                    escribir("), el códec ")
+                    hex4(hda_códec >> 16)
+                    escribir(":")
+                    hex4(hda_códec yb 0xFFFF)
+                    si hda_por_corb entonces escribir(" (por CORB y RIRB)") sino escribir(" (con las órdenes inmediatas)") fin
+                    escribir("; ")
+                    k := 0
+                    mientras k < hda_pines_n hacer
+                        si k > 0 entonces escribir(", ") fin
+                        escribir("el pin ", hda_pin[k], " (")
+                        x := hda_clase[k]
+                        si x = 1 entonces escribir("altavoz") sino si x = 2 entonces escribir("auriculares") sino si x = 0 entonces escribir("línea") sino escribir("sin decir") fin
+                        escribir(") desde el DAC ", hda_dac[k])
+                        k := k + 1
+                    fin
+                    escribir("; /dev/dsp\n")
+                sino
+                    escribir(": no se puede usar (", hda_motivo, ")\n")
+                fin
+            fin
+            i := i + 1
+        fin
+    fin
+
+    función prepara_ctl(i: nat32, id: nat32): bool
+        variable k, gcap, st: nat32
+        base_ := bar_mem(i, 0)
+        si base_ = 0 o bar_largo(i, 0) < 0x100 entonces
+            hda_motivo := "su BAR 0 no es de memoria"
+            devolver falso
+        fin
+        pon_conf(i, 4, (conf(i, 4) yb 0xFFFF) ob 6)
+        si id yb 0xFFFF = 0x8086 entonces pon_conf(i, 0x44, conf(i, 0x44) yb 0xFFFFFFF8) fin      ; TCSEL
+        si id yb 0xFFFF = 0x1002 o id yb 0xFFFF = 0x1022 entonces pon_conf(i, 0x40, (conf(i, 0x40) yb 0xFFF8FFFF) ob 0x20000) fin   ; el «snoop»
+        r := mapea_disp(base_, 0x4000, sin_caché())
+        pág := pide()
+        si pág = 0 entonces
+            hda_motivo := "no queda memoria"
+            devolver falso
+        fin
+        ceros_k(virt(pág), 4096)
+        k := 0
+        mientras k < PÁGINAS hacer
+            anillo[k] := pide()
+            si anillo[k] = 0 entonces
+                hda_motivo := "no queda memoria"
+                devolver falso
+            fin
+            ceros_k(virt(anillo[k]), 4096)
+            k := k + 1
+        fin
+        ; el enlace, reiniciado
+        w8(0x4C, 0)
+        w8(0x5C, 0)
+        w32(0x08, 0)
+        k := 0
+        mientras k < 100 y r32(0x08) yb 1 <> 0 hacer
+            espera_us(10)
+            k := k + 1
+        fin
+        espera_ms_(1)
+        w32(0x08, 1)
+        k := 0
+        mientras k < 100 y r32(0x08) yb 1 = 0 hacer
+            espera_ms_(1)
+            k := k + 1
+        fin
+        si r32(0x08) yb 1 = 0 entonces
+            hda_motivo := "el enlace no sale del reinicio"
+            devolver falso
+        fin
+        espera_ms_(3)
+        st := r16(0x0E)
+        gcap := r16(0x00)
+        sd := 0x80 + nat64((gcap >> 8) yb 0xF) * 0x20
+        si (gcap >> 12) yb 0xF = 0 entonces
+            hda_motivo := "no tiene flujos de salida"
+            devolver falso
+        fin
+        hda_hz := 48000
+        hda_canales := 2
+        fmt := 0x0011                           ; 48 kHz, 16 bits, estéreo
+        cad := 0
+        mientras cad < 15 hacer
+            si (st >> cad) yb 1 <> 0 entonces
+                hda_por_corb := falso
+                sordo := 0
+                si param(0, 0) = 0xFFFFFFFF entonces
+                    pon_corb()
+                    sordo := 0
+                fin
+                si prepara_códec() entonces romper fin
+            fin
+            cad := cad + 1
+        fin
+        si cad >= 15 entonces
+            hda_motivo := "ningún códec con una salida"
+            devolver falso
+        fin
+        hda_pci := i
+        hay_hda := cierto
+        crea(nat64(dirección(hilo_sonido)), 0, "sonido", INTERACTIVO, CUALQUIERA)
+        devolver cierto
+    fin
+
+    función ceros_k(d: nat64, n: nat64)
+        ensamblador
+            mov rdi, {d}
+            mov rcx, {n}
+            xor eax, eax
+            rep stosb
+        fin
+    fin
+
+    ; ---- el flujo ----
+    función para_flujo()
+        variable i: nat32
+        w8(sd, 0)
+        i := 0
+        mientras i < 1000 y r8(sd) yb 2 <> 0 hacer
+            espera_us(1)
+            i := i + 1
+        fin
+        en_marcha := falso
+    fin
+
+    función empieza_flujo(): bool
+        variable i: nat32
+        variable b: nat64
+        para_flujo()
+        w8(sd, 1)                               ; SRST
+        i := 0
+        mientras i < 1000 y r8(sd) yb 1 = 0 hacer
+            espera_us(1)
+            i := i + 1
+        fin
+        w8(sd, 0)
+        i := 0
+        mientras i < 1000 y r8(sd) yb 1 <> 0 hacer
+            espera_us(1)
+            i := i + 1
+        fin
+        b := virt(pág)
+        i := 0
+        mientras i < PÁGINAS hacer
+            ceros_k(virt(anillo[i]), 4096)
+            pon_m32(b + nat64(i) * 16, nat32(anillo[i] yb 0xFFFFFFFF))
+            pon_m32(b + nat64(i) * 16 + 4, nat32(anillo[i] >> 32))
+            pon_m32(b + nat64(i) * 16 + 8, 4096)
+            pon_m32(b + nat64(i) * 16 + 12, 0)
+            i := i + 1
+        fin
+        w32(sd + 0x18, nat32(pág yb 0xFFFFFFFF))
+        w32(sd + 0x1C, nat32(pág >> 32))
+        w32(sd + 0x08, ANILLO)
+        w16(sd + 0x0C, PÁGINAS - 1)
+        w16(sd + 0x12, fmt)
+        w8(sd + 3, 0x1C)                        ; (los avisos de estado, borrados)
+        w8(sd + 2, 0x10)                        ; el flujo número 1
+        escrito := ADELANTO
+        leído := 0
+        pos_ant := 0
+        vacío := falso
+        w8(sd, 2)                               ; RUN
+        espera_ms_(2)
+        si r8(sd) yb 2 = 0 o r8(sd + 3) yb 0x10 <> 0 entonces
+            hda_motivo := "el flujo no anda"
+            devolver falso
+        fin
+        en_marcha := cierto
+        señala(dirección(suceso))
+        devolver cierto
+    fin
+
+    ; el octeto «o» del anillo (física, por páginas) como dirección del núcleo
+    función en_anillo(ofs: nat64): nat64
+        ofs := ofs mod ANILLO
+        devolver virt(anillo[ofs >> 12]) + (ofs yb 4095)
+    fin
+
+    ; (con el mutex) por dónde va la tarjeta; lo ya tocado, a cero
+    función al_día()
+        variable p, n, x, k: nat64
+        si no en_marcha entonces devolver fin
+        si r8(sd + 3) yb 0x1C <> 0 entonces w8(sd + 3, 0x1C) fin
+        p := nat64(r32(sd + 4)) mod ANILLO
+        n := (p + ANILLO - pos_ant) mod ANILLO
+        pos_ant := p
+        ; (lo tocado: [leído, leído + n), a cero, por trozos de página)
+        x := leído
+        mientras x < leído + n hacer
+            k := 4096 - (x yb 4095)
+            si k > leído + n - x entonces k := leído + n - x fin
+            ceros_k(en_anillo(x), k)
+            x := x + k
+        fin
+        leído := leído + n
+        si escrito < leído + 64 entonces
+            ; (se ha quedado sin datos: se sigue un poco por delante de ella)
+            si no vacío entonces
+                hda_sin_datos := hda_sin_datos + 1
+                vacío_desde := ahora_ns()
+            fin
+            vacío := cierto
+            escrito := leído + ADELANTO
+        fin
+    fin
+
+    función hilo_sonido(nada: nat64)
+        mientras cierto hacer
+            si en_marcha entonces
+                cierra_mutex(dirección(m))
+                al_día()
+                ; (cerrada y en silencio medio segundo: se para; antes, no: lo
+                ; que la tarjeta ya ha leído aún tiene que salir de ella —la
+                ; de QEMU lo guarda unos 30 ms—)
+                si no abierto y vacío y ahora_ns() - vacío_desde > 500000000 entonces para_flujo() fin
+                abre_mutex(dirección(m))
+                hda_vueltas := hda_vueltas + 1
+                duerme_ms(10)
+            sino
+                rearma(dirección(suceso))
+                si no en_marcha entonces espera_plazo(dirección(suceso), 1000000000) fin
+            fin
+        fin
+    fin
+
+    ; ---- lo de /dev/dsp (Disp64) ----
+    ; abrirla: solo uno a la vez (como OSS sin mezcla)
+    público función hda_abre(): bool
+        cierra_mutex(dirección(m))
+        si abierto entonces
+            abre_mutex(dirección(m))
+            devolver falso
+        fin
+        abierto := cierto
+        abre_mutex(dirección(m))
+        devolver cierto
+    fin
+
+    ; lo que queda por sonar de lo escrito (octetos de la tarjeta)
+    público función hda_pendiente(): nat64
+        variable x: nat64
+        cierra_mutex(dirección(m))
+        al_día()
+        si en_marcha y escrito > leído entonces x := escrito - leído sino x := 0 fin
+        abre_mutex(dirección(m))
+        devolver x
+    fin
+
+    ; espera a que suene todo lo escrito (hasta que la tarjeta se queda sin
+    ; datos), como mucho «ms»
+    público función hda_espera(ms: nat64)
+        variable t0: nat64
+        t0 := ahora_ns()
+        mientras hda_pendiente() > 0 y en_marcha y no vacío y ahora_ns() - t0 < ms * 1000000 hacer duerme_ms(5) fin
+    fin
+
+    ; cerrarla: lo que quede, que suene (hasta 3 s); el flujo lo para el
+    ; hilo «sonido» tras medio segundo de silencio
+    público función hda_cierra()
+        hda_espera(3000)
+        cierra_mutex(dirección(m))
+        abierto := falso
+        abre_mutex(dirección(m))
+    fin
+
+    ; la frecuencia (48000 o 44100: la más cercana) y los canales (1 o 2);
+    ; si ya suena, lo escrito suena antes y el flujo vuelve a empezar
+    público función hda_formato(hz: nat32, canales: nat32)
+        variable f: nat32
+        variable i: nat32
+        si hz < 46050 entonces hz := 44100 sino hz := 48000 fin
+        si canales < 1 entonces canales := 1 fin
+        si canales > 2 entonces canales := 2 fin
+        hda_canales := canales
+        si hz = hda_hz entonces devolver fin
+        hda_espera(3000)
+        ; (y lo que ya ha leído la tarjeta, que salga: 60 ms de silencio)
+        mientras en_marcha y vacío y ahora_ns() - vacío_desde < 60000000 hacer duerme_ms(5) fin
+        cierra_mutex(dirección(m))
+        para_flujo()
+        hda_hz := hz
+        si hz = 44100 entonces fmt := 0x4011 sino fmt := 0x0011 fin
+        i := 0
+        mientras i < n_dacs hacer
+            v4(dacs[i], 2, fmt)
+            i := i + 1
+        fin
+        abre_mutex(dirección(m))
+    fin
+
+    ; lo que cabe ahora en el anillo (octetos del programa)
+    público función hda_sitio(): nat64
+        variable x: nat64
+        cierra_mutex(dirección(m))
+        si en_marcha entonces
+            al_día()
+            x := ANILLO - MARGEN - (escrito - leído)
+        sino
+            x := ANILLO - MARGEN - ADELANTO
+        fin
+        abre_mutex(dirección(m))
+        si hda_canales = 1 entonces x := x div 2 fin
+        devolver x yb (nob nat64(3))
+    fin
+
+    ; mete hasta n octetos de d (del núcleo: muestras de 16 bits, con los
+    ; canales del programa) en el anillo; los que han entrado
+    público función hda_mete(d: nat64, n: nat64): nat64
+        variable libre, k, i, hecho, tr: nat64
+        variable s: nat32
+        cierra_mutex(dirección(m))
+        si no en_marcha entonces
+            si no empieza_flujo() entonces
+                abre_mutex(dirección(m))
+                devolver 0
+            fin
+        fin
+        al_día()
+        libre := ANILLO - MARGEN - (escrito - leído)
+        hecho := 0
+        si hda_canales = 2 entonces
+            k := n yb (nob nat64(3))
+            si k > libre entonces k := libre yb (nob nat64(3)) fin
+            mientras hecho < k hacer
+                tr := 4096 - ((escrito + hecho) yb 4095)
+                si tr > k - hecho entonces tr := k - hecho fin
+                copia_mem(en_anillo(escrito + hecho), d + hecho, tr)
+                hecho := hecho + tr
+            fin
+            escrito := escrito + hecho
+        sino
+            ; (mono: cada muestra, a los dos canales)
+            k := n yb (nob nat64(1))
+            si k * 2 > libre entonces k := (libre div 2) yb (nob nat64(1)) fin
+            i := 0
+            mientras i < k hacer
+                s := m16(d + i)
+                pon_m16(en_anillo(escrito), s)
+                pon_m16(en_anillo(escrito + 2), s)
+                escrito := escrito + 4
+                i := i + 2
+            fin
+            hecho := k
+        fin
+        hda_octetos := hda_octetos + hecho
+        si hecho > 0 entonces vacío := falso fin
+        abre_mutex(dirección(m))
+        devolver hecho
+    fin
+
+    función copia_mem(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+fin Hda64.

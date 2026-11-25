@@ -56,14 +56,15 @@ for p in mhilos msenales mprocesos mmapa; do
 done
 "$M" $CF -static -o "$S/MBUCLE" "$P/mbucle.c"
 "$M" $CF -static -o "$S/MDISP" "$P/mdisp.c"          # [etapa 8] los dispositivos
+"$M" $CF -static -o "$S/MSONIDO" "$P/msonido.c" -lm  # [etapa 11] el sonido (/dev/dsp)
 cp "$T/libsaludo.so" "$S/libsaludo.so"
 cp "$B/musl/lib/libc.so" "$S/ld-musl-x86_64.so.1"
 cp "$B/lua-obj/lua" "$S/LUA"
 cp "$P/prueba.lua" "$S/PRUEBA.LUA"
 rm -rf "$T"
-for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP LUA libsaludo.so ld-musl-x86_64.so.1; do
+for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO LUA libsaludo.so ld-musl-x86_64.so.1; do
   strip --strip-unneeded "$S/$f"
 done
 RED=$("$AQUI/hazred.sh" "$S"); RED=${RED##*hechos: }   # [etapa 9] los programas de red (programas/red/)
 CXX=$("$AQUI/cxx/hazcxx.sh" "$S"); CXX=${CXX##*hechos: }   # [etapa 10] los de C++ (programas/cxx/)
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CXX"
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CXX"
