@@ -15,7 +15,7 @@
 #   4. el modo ACPI: una SSDT de prueba (tests/acpi/hazsdhci.py) dice la
 #      controladora (80860F16, con su _CRS) y la SDIO (INT33BB, la del Wi-Fi:
 #      el núcleo no la toca; ACPI.BIN la apunta en \SDIO.TXT, lo de la parte
-#      55); con «sdhcisinpci», el núcleo solo la conoce por ACPI.BIN (la
+#      57); con «sdhcisinpci», el núcleo solo la conoce por ACPI.BIN (la
 #      llamada 160) y la tarjeta sale como disco nuevo (y, como QEMU no deja
 #      el DMA sin el PCI, se ve el paso de ADMA2 a PIO); dada a mano
 #      («sdhci=XXXXXXXX»); y aprendida: \SDHCI.TXT en la memoria USB, que vale

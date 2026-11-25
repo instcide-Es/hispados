@@ -493,6 +493,48 @@ módulo Semilla
         lanza(palabra1, args)
     fin
 
+    ; (RTL8723BS, 0.8.12) ¿una tableta con el Wi-Fi por SDIO? Su Wi-Fi no es
+    ; una tarjeta de red del PCI (la clase 02), así que el escritorio no
+    ; ponía en marcha RED.BIN (ni WIFI.BIN) sin que un programa pidiera la
+    ; red. Como busca_tarjeta de rwifi.cas: la controladora SDIO de Bay
+    ; Trail (8086:0F15) o de Cherry Trail (8086:2295) en el PCI; o, con el
+    ; puente de Bay Trail (8086:0F00) o de Cherry Trail (8086:2280), lo
+    ; aprendido de ACPI (\SDIO.TXT en la unidad del sistema o en la X:) o
+    ; ninguna controladora SD en el PCI («modo ACPI», el Acer One 10)
+    función wifi_por_sdio(): bool
+        variable a, id, u, m: nat32
+        variable sd: bool
+        sd := falso
+        a := pci_busca(0x080500, 0xFFFF00, NO_HAY_PCI)
+        mientras a <> NO_HAY_PCI hacer
+            id := pci_leer(a, 0)
+            si id = 0x0F158086 o id = 0x22958086 entonces
+                apunta0("arranque: la controladora SDIO de una tableta en el PCI: la red (RED.BIN) se pone en marcha con el escritorio (el Wi-Fi por SDIO)\n")
+                devolver cierto
+            fin
+            sd := cierto
+            a := pci_busca(0x080500, 0xFFFF00, a)
+        fin
+        si no hay_pci() entonces devolver falso fin
+        id := pci_leer(0, 0)
+        si id <> 0x0F008086 y id <> 0x22808086 entonces devolver falso fin
+        u := del_sistema
+        si u = NINGUNA o unidades[u].clase <> U_FAT entonces u := por_letra('X') fin
+        si u <> NINGUNA y unidades[u].clase = U_FAT entonces
+            m := abrir_archivo(u, "\\SDIO.TXT", PARA_LEER)
+            si m < PRIMER_ERROR entonces
+                cerrar_archivo(m)
+                apunta0("arranque: \\SDIO.TXT (lo aprendido de ACPI): la red (RED.BIN) se pone en marcha con el escritorio (el Wi-Fi por SDIO)\n")
+                devolver cierto
+            fin
+        fin
+        si no sd entonces
+            apunta0("arranque: Bay Trail/Cherry Trail sin controladoras SD en el PCI (modo ACPI): la red (RED.BIN) se pone en marcha con el escritorio (el Wi-Fi por SDIO)\n")
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
     ; «quitar W»: quitar con seguridad la memoria USB de la unidad W:
     ; (MÓVIL) una tarea del núcleo (usbmovil.cas la crea al llegar un móvil
     ; por USB): pone en marcha el servicio de red si no lo está
@@ -1250,8 +1292,8 @@ módulo Semilla
             apagada := cierto
         sino si buscar(línea_del_cargador(), "conred") <> nulo entonces
             lanza_red()
-        sino si buscar(línea_del_cargador(), "escritorio") <> nulo y buscar(línea_del_cargador(), "instalar") = nulo y (pci_busca(0x020000, 0xFF0000, NO_HAY_PCI) <> NO_HAY_PCI o Usbmovil.aparato <> Usb.NINGUNO) entonces
-            lanza_red()                         ; ((MÓVIL) o un móvil por USB)
+        sino si buscar(línea_del_cargador(), "escritorio") <> nulo y buscar(línea_del_cargador(), "instalar") = nulo y (pci_busca(0x020000, 0xFF0000, NO_HAY_PCI) <> NO_HAY_PCI o Usbmovil.aparato <> Usb.NINGUNO o wifi_por_sdio()) entonces
+            lanza_red()                         ; ((MÓVIL) o un móvil por USB; (RTL8723BS) o una tableta con el Wi-Fi por SDIO)
         fin
         ; (MÓVIL) el móvil que se enchufe (o active el anclaje) en marcha pone
         ; en marcha el servicio de red, si no lo está (salvo con «sinred»)
