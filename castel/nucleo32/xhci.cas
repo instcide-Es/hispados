@@ -775,6 +775,14 @@ módulo Xhci
         timbre(c, xhcis[c].tubos[t].ranura, xhcis[c].tubos[t].extremo)
     fin
 
+    ; (MÓVIL) lo mismo, a otro búfer (dirección física; hasta 64 K sin
+    ; cruzar una frontera de 64 K): las tuberías a granel de usb.cas
+    público función tubo_pide_en(c: nat32, t: nat32, datos: nat32, n: nat32)
+        xhcis[c].tubos[t].hecho := falso
+        al_anillo(xhcis[c].tubos[t].anillo, datos, 0, n, (TRB_NORMAL << 10) ob 0x24)
+        timbre(c, xhcis[c].tubos[t].ranura, xhcis[c].tubos[t].extremo)
+    fin
+
     público función tubo_mira(c: nat32, t: nat32, n: nat32): ent32
         variable código: nat32
         mira_sucesos(c)

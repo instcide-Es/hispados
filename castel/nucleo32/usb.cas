@@ -40,6 +40,7 @@ módulo Usb
         usado: bool
         aparato: nat32
         suyo: nat32                             ; su número para su controladora
+        granel: bool                            ; (MÓVIL) es de un extremo a granel (granel_abre)
     fin
 
     público variable aparatos: arreglo [MAX_APARATOS] de Aparato
@@ -169,6 +170,7 @@ módulo Usb
             tubos[t].usado := cierto
             tubos[t].aparato := i
             tubos[t].suyo := s
+            tubos[t].granel := falso
             si t = n_tubos entonces n_tubos := t + 1 fin
         sino si s <> 0xFFFFFFFF entonces
             cierra_suyo(i, s)
@@ -227,6 +229,93 @@ módulo Usb
         devolver Uhci.tubo_datos(aparatos[i].hc, tubos[t].suyo)
     fin
 
+    ; -------------------------------------------------------------------------
+    ;  (MÓVIL) Recibir a granel sin esperar (la red por el móvil, usbmovil.cas)
+    ; -------------------------------------------------------------------------
+    ; una tubería para el extremo a granel de entrada e del aparato i: lo que
+    ; se pide por ella (granel_pide) llega mientras tanto, y se mira luego
+    ; (granel_mira). En el xHCI es el anillo del extremo (como las de
+    ; interrupción); en el EHCI, una cola propia en la lista asíncrona (una
+    ; por controladora). En la UHCI no hay: NINGUNO (y se usa granel() con
+    ; poca espera). Se cierra sola cuando el aparato se va (quita).
+    público función granel_abre(i: nat32, e: nat32): nat32
+        variable t, s: nat32
+        si i >= MAX_APARATOS entonces devolver NINGUNO fin
+        si no aparatos[i].usado o aparatos[i].ido o e >= aparatos[i].n_extremos entonces devolver NINGUNO fin
+        si aparatos[i].extremos[e].clase <> 2 o aparatos[i].extremos[e].número yb 0x80 = 0 entonces devolver NINGUNO fin
+        si aparatos[i].hc_clase <> HC_XHCI y aparatos[i].hc_clase <> HC_EHCI entonces devolver NINGUNO fin
+        tomar(cerrojo)
+        si aparatos[i].hc_clase = HC_XHCI entonces
+            s := Xhci.tubo_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
+        sino
+            s := Ehci.asinc_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
+        fin
+        t := 0
+        mientras t < n_tubos y tubos[t].usado hacer t := t + 1 fin
+        si t >= MAX_TUBOS entonces t := NINGUNO fin
+        si s <> 0xFFFFFFFF y t <> NINGUNO entonces
+            tubos[t].usado := cierto
+            tubos[t].aparato := i
+            tubos[t].suyo := s
+            tubos[t].granel := cierto
+            si t = n_tubos entonces n_tubos := t + 1 fin
+        sino si s <> 0xFFFFFFFF entonces
+            cierra_de(i, s, cierto)
+            t := NINGUNO
+        fin
+        soltar(cerrojo)
+        devolver t
+    fin
+
+    ; pide n octetos (hasta 16 K, en «datos», dirección física de una zona
+    ; seguida que no cruce una frontera de 64 K) por la tubería a granel t
+    público función granel_pide(t: nat32, datos: nat32, n: nat32): bool
+        variable i: nat32
+        si t >= n_tubos entonces devolver falso fin
+        si no tubos[t].usado o no tubos[t].granel entonces devolver falso fin
+        i := tubos[t].aparato
+        si aparatos[i].ido entonces devolver falso fin
+        tomar(cerrojo)
+        si aparatos[i].hc_clase = HC_XHCI entonces
+            Xhci.tubo_pide_en(aparatos[i].hc, tubos[t].suyo, datos, n)
+        sino
+            Ehci.asinc_pide(aparatos[i].hc, tubos[t].suyo, datos, n)
+        fin
+        soltar(cerrojo)
+        devolver cierto
+    fin
+
+    ; ¿ha llegado lo pedido por la tubería a granel t? Los octetos (de los n
+    ; pedidos; un paquete corto acaba antes), T_ESPERA si aún no, o T_FALLO
+    público función granel_mira(t: nat32, n: nat32): ent32
+        variable i: nat32
+        variable r: ent32
+        si t >= n_tubos entonces devolver T_FALLO fin
+        si no tubos[t].usado o no tubos[t].granel entonces devolver T_FALLO fin
+        i := tubos[t].aparato
+        si aparatos[i].ido entonces devolver T_FALLO fin
+        tomar(cerrojo)
+        si aparatos[i].hc_clase = HC_XHCI entonces
+            r := Xhci.tubo_mira(aparatos[i].hc, tubos[t].suyo, n)
+        sino
+            r := Ehci.asinc_mira(aparatos[i].hc, tubos[t].suyo, n)
+        fin
+        soltar(cerrojo)
+        devolver r
+    fin
+
+    ; cierra la tubería número s (de interrupción o, con «de_granel», a
+    ; granel) de la controladora del aparato i
+    función cierra_de(i: nat32, s: nat32, de_granel: bool)
+        si de_granel y aparatos[i].hc_clase = HC_EHCI entonces
+            Ehci.asinc_cierra(aparatos[i].hc, s)
+        sino si de_granel y aparatos[i].hc_clase = HC_XHCI entonces
+            Xhci.tubo_cierra(aparatos[i].hc, s)
+        sino
+            cierra_suyo(i, s)
+        fin
+    fin
+
     ; cierra la tubería número s de la controladora del aparato i
     función cierra_suyo(i: nat32, s: nat32)
         si aparatos[i].hc_clase = HC_XHCI entonces
@@ -265,7 +354,7 @@ módulo Usb
     ; apunta sus interfaces y sus extremos a granel y de interrupción
     función lee_configuración(ref a: Aparato, largo: nat32)
         variable p: puntero a byte
-        variable d, n, clase, interfaz: nat32
+        variable d, n, clase, interfaz, ext_ini: nat32
         variable vale: bool
         p := puntero(página + DATOS)
         a.configuración := p[5]
@@ -274,6 +363,7 @@ módulo Usb
         d := 0
         interfaz := 0
         vale := falso
+        ext_ini := 0
         mientras d + 2 <= largo y p[d] >= 2 y d + p[d] <= largo hacer
             si p[d + 1] = 4 y p[d] >= 9 entonces
                 ; una interfaz (solo su primera variante)
@@ -284,8 +374,20 @@ módulo Usb
                     a.interfaces[n].clase := p[d + 5]
                     a.interfaces[n].subclase := p[d + 6]
                     a.interfaces[n].protocolo := p[d + 7]
+                    a.interfaces[n].alterna := 0
                     interfaz := n
                     a.n_interfaces := n + 1
+                    ext_ini := a.n_extremos
+                sino si p[d + 3] = 1 y p[d + 5] = 0x0A y a.n_interfaces > 0 entonces
+                    ; (MÓVIL) la variante 1 de una interfaz de datos CDC (0Ah)
+                    ; cuya variante 0 no tiene extremos (la de NCM, la de ECM:
+                    ; se pasa a ella con SET_INTERFACE): sus extremos, sí
+                    n := a.n_interfaces - 1
+                    si a.interfaces[n].número = p[d + 2] y a.interfaces[n].clase = 0x0A y a.interfaces[n].alterna = 0 y a.n_extremos = ext_ini entonces
+                        vale := cierto
+                        a.interfaces[n].alterna := 1
+                        interfaz := n
+                    fin
                 fin
             sino si p[d + 1] = 5 y p[d] >= 7 y vale y a.n_extremos < MAX_EXTREMOS entonces
                 clase := p[d + 3] yb 3
@@ -777,7 +879,7 @@ módulo Usb
         variable t: nat32
         para t desde 1 hasta n_tubos hacer
             si tubos[t - 1].usado y tubos[t - 1].aparato = i entonces
-                cierra_suyo(i, tubos[t - 1].suyo)
+                cierra_de(i, tubos[t - 1].suyo, tubos[t - 1].granel)     ; (MÓVIL)
                 tubos[t - 1].usado := falso
             fin
         fin

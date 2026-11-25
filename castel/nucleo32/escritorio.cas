@@ -1283,8 +1283,10 @@ módulo Escritorio
                 d[2] := (ip_red >> 16) yb 0xFF
                 d[3] := ip_red >> 24
                 formatear(t, 80, "La red: conectada, con la IP %u.%u.%u.%u.", d)
+                si por_movil entonces formatear(t, 80, "La red: por el móvil por USB (Android), con la IP %u.%u.%u.%u.", d) fin    ; (MÓVIL)
                 aviso(t)
-            caso RED_BUSCANDO: aviso("La red: hay cable; pidiendo la IP (DHCP)...")
+            caso RED_BUSCANDO:
+                si por_movil entonces aviso("La red: el móvil por USB; pidiendo la IP (DHCP)...") sino aviso("La red: hay cable; pidiendo la IP (DHCP)...") fin
             caso RED_SIN_CABLE: aviso("La red: la tarjeta no tiene enlace (¿el cable?).")
             si no: aviso("La red: no hay tarjeta de red que se sepa llevar.")
         fin

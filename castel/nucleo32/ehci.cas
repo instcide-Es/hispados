@@ -54,6 +54,7 @@ módulo Ehci
     constante D_CABECERA = 0x000
     constante D_TRABAJO = 0x060
     constante D_QTD = 0x100                     ; tres, de 0x40
+    constante D_ASINC = 0x200                   ; (MÓVIL) la cola a granel que no espera (y su qTD, en +0x80)
     constante D_TUBOS = 0x400                   ; cada tubería, 0x100: cola, qTD (+0x80) y búfer (+0xC0)
 
     ; ---- el testigo de un qTD ----
@@ -73,6 +74,7 @@ módulo Ehci
         primera: nat32                          ; el enlace a la primera tubería de la cadena (1: ninguna)
         tubos: nat32                            ; las que están en uso: un bit cada una
         cedidos: nat32                          ; puertos cedidos a las compañeras
+        asinc: bool                             ; (MÓVIL) la cola a granel que no espera, en uso
     fin
 
     público variable ehcis: arreglo [MAX_EHCI] de Controladora
@@ -180,6 +182,7 @@ módulo Ehci
         ehcis[c].primera := 1
         ehcis[c].tubos := 0
         ehcis[c].cedidos := 0
+        ehcis[c].asinc := falso
         pon(c, ASYNCLISTADDR, ehcis[c].mem + D_CABECERA)
         pon(c, USBCMD, 0x00080021)              ; en marcha, con la lista asíncrona
         pon(c, CONFIGFLAG, 1)                   ; los puertos, para el EHCI
@@ -413,6 +416,70 @@ módulo Ehci
         si r <> 0 entonces devolver r fin
         e.alterna := t[2] >> 31                 ; el testigo siguiente queda en el qTD
         devolver ent32(n - ((t[2] >> 16) yb 0x7FFF))
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (MÓVIL) A granel sin esperar: una cola propia en la lista asíncrona
+    ; -------------------------------------------------------------------------
+    ; Para recibir de un extremo a granel mientras se hace otra cosa (la red
+    ; por el móvil): una tercera cola en el anillo de la lista asíncrona
+    ; (cabecera, trabajo y esta), con la alternancia en la cola (no en el
+    ; qTD: así sigue sola de una petición a otra). Una por controladora. Da 0,
+    ; o NINGUNA si ya está en uso.
+    público función asinc_abre(c: nat32, ref a: Aparato, ref e: Extremo): nat32
+        variable q, w: puntero a nat32
+        si ehcis[c].asinc entonces devolver NINGUNA fin
+        llenar(puntero(ehcis[c].mem + D_ASINC), 0x100, 0)
+        q := puntero(ehcis[c].mem + D_ASINC)
+        pon_cola(q, a, e.número, e.paquete, falso, falso)
+        q[3] := 0
+        q[4] := 1
+        q[5] := 1
+        q[6] := 0
+        ; detrás de la de trabajo, y luego otra vez la cabecera
+        q[0] := (ehcis[c].mem + D_CABECERA) ob 2
+        w := puntero(ehcis[c].mem + D_TRABAJO)
+        w[0] := (ehcis[c].mem + D_ASINC) ob 2
+        ehcis[c].asinc := cierto
+        devolver 0
+    fin
+
+    ; pide n octetos (hasta 16 K, en «datos», física y seguida) por la cola
+    público función asinc_pide(c: nat32, s: nat32, datos: nat32, n: nat32)
+        variable q, d: puntero a nat32
+        q := puntero(ehcis[c].mem + D_ASINC)
+        d := puntero(ehcis[c].mem + D_ASINC + 0x80)
+        pon_qtd(d, PID_ENTRA, 0, datos, n, 1)
+        si q[6] yb PARADO <> 0 entonces q[6] := q[6] yb 0x80000000 fin     ; parada por un error: se reanuda
+        q[4] := ehcis[c].mem + D_ASINC + 0x80
+    fin
+
+    ; ¿ha llegado? Los octetos (de los n pedidos), T_ESPERA o T_FALLO
+    público función asinc_mira(c: nat32, s: nat32, n: nat32): ent32
+        variable d: puntero a nat32
+        variable e: nat32
+        d := puntero(ehcis[c].mem + D_ASINC + 0x80)
+        e := d[2]
+        si e yb ACTIVO <> 0 entonces devolver T_ESPERA fin
+        si e yb PARADO <> 0 entonces devolver T_FALLO fin
+        devolver ent32(n - ((e >> 16) yb 0x7FFF))
+    fin
+
+    ; la cola sale del anillo (su aparato se ha ido): la de trabajo vuelve a
+    ; apuntar a la cabecera, y se espera a que la controladora lo confirme
+    ; (el timbre de avance de la lista asíncrona)
+    público función asinc_cierra(c: nat32, s: nat32)
+        variable w, q: puntero a nat32
+        si no ehcis[c].asinc entonces devolver fin
+        w := puntero(ehcis[c].mem + D_TRABAJO)
+        w[0] := (ehcis[c].mem + D_CABECERA) ob 2
+        pon(c, USBCMD, lee(c, USBCMD) ob 0x40)
+        espera(c, USBSTS, 0x20, 0x20, 5)
+        pon(c, USBSTS, 0x20)
+        q := puntero(ehcis[c].mem + D_ASINC)
+        q[4] := 1
+        q[6] := 0
+        ehcis[c].asinc := falso
     fin
 
     ; -------------------------------------------------------------------------

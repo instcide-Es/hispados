@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Sdacpi, Usb, Usbhid, I2c, I2chid, Usbalm, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Sdacpi, Usb, Usbhid, I2c, I2chid, Usbalm, Usbmovil, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -494,6 +494,12 @@ módulo Semilla
     fin
 
     ; «quitar W»: quitar con seguridad la memoria USB de la unidad W:
+    ; (MÓVIL) una tarea del núcleo (usbmovil.cas la crea al llegar un móvil
+    ; por USB): pone en marcha el servicio de red si no lo está
+    función lanza_red_movil(nada: nat32)
+        lanza_red()
+    fin
+
     función orden_quitar()
         si no palabra(línea, 1, palabra1, 40) entonces
             escribir("¿qué unidad? (quitar W: quitar con seguridad la memoria USB de la unidad W:)\n")
@@ -684,6 +690,7 @@ módulo Semilla
                 Usbhid.prepara()
                 enseña_descriptor()
                 si Usbalm.prepara() <> 0 entonces busca_usb() fin
+                Usbmovil.prepara()                     ; (MÓVIL) el anclaje de USB de un móvil
                 ; («1 ratón», «2 ratones»: en singular o en plural)
                 dd[0] := teclados
                 si teclados = 1 entonces dd[1] := nat32("teclado") sino dd[1] := nat32("teclados") fin
@@ -1241,9 +1248,12 @@ módulo Semilla
             apagada := cierto
         sino si buscar(línea_del_cargador(), "conred") <> nulo entonces
             lanza_red()
-        sino si buscar(línea_del_cargador(), "escritorio") <> nulo y buscar(línea_del_cargador(), "instalar") = nulo y pci_busca(0x020000, 0xFF0000, NO_HAY_PCI) <> NO_HAY_PCI entonces
-            lanza_red()
+        sino si buscar(línea_del_cargador(), "escritorio") <> nulo y buscar(línea_del_cargador(), "instalar") = nulo y (pci_busca(0x020000, 0xFF0000, NO_HAY_PCI) <> NO_HAY_PCI o Usbmovil.aparato <> Usb.NINGUNO) entonces
+            lanza_red()                         ; ((MÓVIL) o un móvil por USB)
         fin
+        ; (MÓVIL) el móvil que se enchufe (o active el anclaje) en marcha pone
+        ; en marcha el servicio de red, si no lo está (salvo con «sinred»)
+        si no apagada y buscar(línea_del_cargador(), "instalar") = nulo entonces Usbmovil.lanzador := nat32(dirección(lanza_red_movil)) fin
         si buscar(línea_del_cargador(), "instalar") <> nulo entonces
             ; el programa que instala el sistema en el disco duro (la
             ; pantalla es suya: esta consola espera a que acabe)
