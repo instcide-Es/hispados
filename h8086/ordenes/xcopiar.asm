@@ -47,15 +47,18 @@ inicio:
 .ruta:
         mov di, o_ruta              ; la primera, el origen; la segunda, el
         cmp byte [o_ruta], 0        ; destino
-        je .r
+        je .r0
         mov di, d_ruta
+.r0:
+        mov cx, 64                  ; (con tope: se salía de o_ruta y d_ruta)
 .r:
         lodsb
         cmp al, ' '
         jbe .rf
         call mayus
         stosb
-        jmp .r
+        loop .r
+        jmp .uso
 .rf:
         mov byte [di], 0
         dec si
@@ -128,6 +131,9 @@ inicio:
         stosb
         mov byte [di], 0
 .listo:
+        mov si, d_ruta              ; (el destino, para no meterse en él)
+        mov di, d_top
+        call copia_txt
         mov di, o_ruta
         call al_final
         mov [o_fin], di
@@ -187,8 +193,12 @@ copia:
         jz .sig
         cmp byte [bp+30], '.'
         je .sig
-        mov di, [d_fin]             ; (que quepa la ruta)
+        mov di, [d_fin]             ; (que quepan las dos rutas)
         sub di, d_ruta
+        cmp di, 60
+        ja .sig
+        mov di, [o_fin]
+        sub di, o_ruta
         cmp di, 60
         ja .sig
         lea si, [bp+30]             ; el directorio, en las dos rutas
@@ -197,6 +207,19 @@ copia:
         mov ax, '\'
         stosw
         dec di
+        push di                     ; ¿es el destino? (XCOPIAR DOCS DOCS\COPIA
+        mov si, o_ruta              ; /S se metía en COPIA\COPIA\...): se salta
+        mov di, d_top
+.igual:
+        lodsb
+        scasb
+        jne .otro
+        test al, al
+        jnz .igual
+        pop di
+        jmp short .sig
+.otro:
+        pop di
         mov [o_fin], di
         lea si, [bp+30]
         mov di, [d_fin]
@@ -341,5 +364,6 @@ d_fin       resw 1
 h1          resw 1
 h2          resw 1
 patron      resb 16
+d_top       resb 100                ; el destino de arriba
 dta         resb 44
 buf         resb BUF_TAM

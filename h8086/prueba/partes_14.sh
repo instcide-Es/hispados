@@ -302,3 +302,37 @@ esta y1 "No se ha podido copiar el sistema: ¿está lleno el disco?" "n.º 17: n
 apaga
 if cmp -s <(dd if=$T/b.img bs=512 count=1 2> /dev/null) $T/arr0.bin; then ok "n.º 17: el sector de arranque sigue como estaba"; else ko "n.º 17: el sector de arranque ha cambiado aunque no cabía el sistema"; fi
 }
+
+# ---- n.º 18: XCOPIAR /S con el destino dentro del origen ----
+p_auditoria_xcopiar() {
+echo "== Hispa-8086: auditoría 1, XCOPIAR /S con el destino dentro del origen =="
+cp $IMG/hispa8086-360.img $T/a.img
+mmd -i $T/a.img ::DOCS ::DOCS/SUB; mcopy -i $T/a.img build/HOLA.COM ::DOCS/UNO.COM; mcopy -i $T/a.img build/HOLA.COM ::DOCS/SUB/DOS.COM
+arranca $T/a.img 486
+escribe "limpiar"; escribe "xcopiar docs docs\\copia /s"; sleep 8
+pantalla j1
+esta j1 "2 archivos copiados." "n.º 18: copia lo de DOCS (UNO.COM y SUB\\DOS.COM) y no se mete en COPIA: "
+apaga
+if mdir -i $T/a.img ::DOCS/COPIA/SUB/DOS.COM > /dev/null 2>&1 && ! mdir -i $T/a.img ::DOCS/COPIA/COPIA > /dev/null 2>&1 && fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "n.º 18: DOCS\\COPIA tiene lo de DOCS, sin COPIA\\COPIA, y fsck.fat no encuentra errores"; else ko "n.º 18: XCOPIAR se ha metido en el destino"; mdir -/ -i $T/a.img ::DOCS | head -30; fi
+}
+
+# ---- n.º 19: CUENTAS con archivos malformados ----
+p_auditoria_cuentas2() {
+echo "== Hispa-8086: auditoría 1, CUENTAS con archivos malformados =="
+cp $IMG/hispa8086-360.img $T/a.img
+cp $IMG/oficina8086-360.img $T/b.img
+printf 'HCTA\001\001\000\120' > $T/ANCHO.CTA; printf '\377\377' >> $T/ANCHO.CTA      # la columna A, de 80
+printf '=SUMA(1;2;fila1\r\n7;8\r\n9;10\r\n' > $T/PAR.CSV
+python3 -c "import sys; sys.stdout.write(';'.join(str(i) for i in range(1, 301)) + '\r\n')" > $T/ANCHA.CSV
+mcopy -i $T/b.img $T/ANCHO.CTA $T/PAR.CSV $T/ANCHA.CSV ::
+QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
+escribe "limpiar"; escribe "b:cuentas b:ancho.cta"; sleep 4; tecla slash s; sleep 2
+escribe "b:cuentas b:par.csv /g b:par2.csv"; sleep 4
+escribe "b:cuentas b:ancha.csv /g b:ancha2.csv"; sleep 6
+escribe "eco sigue vivo"
+pantalla m1
+esta m1 "sigue vivo" "n.º 19: un .CTA con una columna de 80 de ancho no cuelga: "
+apaga
+if [ "$(mtype -i $T/b.img ::PAR2.CSV | sed -n 2p | tr -d '\r')" = "7;8" ]; then ok "n.º 19: una fórmula sin cerrar el paréntesis no se traga las líneas de detrás"; else ko "n.º 19: CSV con paréntesis sin cerrar: $(mtype -i $T/b.img ::PAR2.CSV | head -3 | tr '\r\n' '  ')"; fi
+if [ "$(mtype -i $T/b.img ::ANCHA2.CSV | head -1 | tr -d '\r' | cut -d';' -f1)" = 1 ] && [ "$(mtype -i $T/b.img ::ANCHA2.CSV | head -1 | tr -d '\r' | awk -F';' '{print $256}')" = 256 ]; then ok "n.º 19: un CSV de 300 columnas: la A sigue siendo la 1 y la última, la 256"; else ko "n.º 19: CSV de 300 columnas: $(mtype -i $T/b.img ::ANCHA2.CSV | head -c 60)"; fi
+}

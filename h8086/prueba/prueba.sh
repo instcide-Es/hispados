@@ -10,7 +10,7 @@ set -u
 cd "$(dirname "$0")/.."
 # (las fechas que se ponen con touch y se leen con mtools, en la misma zona
 # horaria pase lo que pase en el equipo: con la de Madrid, 09:30 salía 11:30)
-export TZ=UTC
+export TZ=${TZ_P:-UTC}
 T=$(mktemp -d)
 fail=0
 # MODO=alto ./prueba/prueba.sh pasa TODA la prueba con el núcleo en la memoria
@@ -740,7 +740,7 @@ PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasm
 PARTES="$PARTES pluma pluma_grande pluma_oficina"     # (PLUMA, del disquete de Oficina)
 PARTES="$PARTES cuentas cuentas_pantalla cuentas_ordenar cuentas_grande fat_sectores"     # (CUENTAS, del disquete de Oficina)
 PARTES="$PARTES derribo marcianos"     # (los juegos, del disquete de Juegos)
-PARTES="$PARTES auditoria1 auditoria_cuentas auditoria_editar auditoria_pasar auditoria_entorno auditoria_pluma auditoria_basic auditoria_revisar auditoria_bpb auditoria_ruta auditoria_sistema"     # (los arreglos de la auditoría de la 0.14)
+PARTES="$PARTES auditoria1 auditoria_cuentas auditoria_editar auditoria_pasar auditoria_entorno auditoria_pluma auditoria_basic auditoria_revisar auditoria_bpb auditoria_ruta auditoria_sistema auditoria_xcopiar auditoria_cuentas2"     # (los arreglos de la auditoría de la 0.14)
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)
