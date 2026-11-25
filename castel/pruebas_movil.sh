@@ -8,12 +8,13 @@
 # pone el núcleo) y CDC-ECM en la segunda: hace de móvil Android con el
 # anclaje (con -netdev user: DHCP, la puerta 10.0.2.2 y el DNS 10.0.2.3). Es
 # de velocidad plena (USB 1.1): en el xHCI va por su anillo (recibir sin
-# esperar); detrás de un EHCI con compañeras, por la UHCI (que espera).
+# esperar); detrás de un EHCI con compañeras, por la UHCI (su fila de TD).
 #  1. xHCI, el móvil enchufado al arrancar: el núcleo lo reconoce (RNDIS,
 #     02/02/FF), RED.BIN lo pone en marcha (INITIALIZE, la MAC, el filtro),
 #     «la red va por el móvil por USB», DHCP, IPCONFIG («el móvil por USB»),
 #     PING y DESCARGAR (400 K, el SHA-256 igual que el del servidor).
-#  2. EHCI con sus UHCI compañeras: lo mismo por la UHCI.
+#  2. EHCI con sus UHCI compañeras: lo mismo por la UHCI (con un teclado USB
+#     en la misma UHCI, que sigue tecleando bien).
 #  3. En caliente (xHCI): sin tarjeta; se enchufa (device_add): el núcleo
 #     pone en marcha RED.BIN solo (no hay programa que lo pida), DHCP y
 #     PING; se quita (device_del): «se ha ido», sin tarjeta; vuelve con
@@ -66,7 +67,8 @@ for hc in xhci ehci; do
   if grep -q "tiempo=[0-9]\{4,\} ms" $S; then ko "$que: un PING con un tiempo imposible: $(grep -m1 "tiempo=" $S)"; fi
   if saca $K/$hc.img GRANDE.BIN $K/g.bin && [ "$(sha256sum < $K/g.bin)" = "$(sha256sum < $K/srv/grande.bin)" ]; then ok "$que: lo descargado por el móvil, con el mismo SHA-256 que lo del servidor"
   else ko "$que: lo descargado no es igual"; fi
-  if [ $hc = ehci ]; then mira "$que: en la UHCI se recibe esperando (sin la cola a granel)" "^usb: el móvil por USB: se recibe esperando (sin la cola a granel: la UHCI)$"; fi
+  # (en la UHCI, con la red en marcha, el teclado USB de la misma controladora sigue: antes, recibiendo con granel() esperando, se quedaba una tecla pulsada)
+  if grep -q "AAAAAAAA" $S; then ko "$que: el teclado USB se queda con una tecla pulsada mientras va la red"; else ok "$que: el teclado USB sigue bien con la red por el móvil"; fi
 done
 # 3. en caliente: sin tarjeta; el núcleo pone RED.BIN en marcha al llegar el móvil
 cp $K/d.img $K/cal.img
@@ -76,7 +78,7 @@ ESCRIBE=1 DISCO=$K/cal.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-device qemu-xhci
 tr -d '\r' < $K/cal.sal > $K/cal.txt
 S=$K/cal.txt
 mira "en caliente: el móvil que se enchufa (o activa el anclaje) en marcha pone en marcha el servicio de red, sin que nadie lo pida, y la red va" \
-  "^usb: se enchufa el aparato 0, 0525:A4A2, velocidad plena, en el puerto [0-9]* (xHCI); interfaz 02/02/FF; interfaz 0A/00/00$" "^usb: aviso: Móvil conectado por USB: la red va por él$" \
+  "usb: se enchufa el aparato 0, 0525:A4A2, velocidad plena, en el puerto [0-9]* (xHCI); interfaz 02/02/FF; interfaz 0A/00/00$" "^usb: aviso: Móvil conectado por USB: la red va por él$" \
   "^red: Hispa-Pentium 0.8: el servicio de red (RED.BIN)$" "^red: la red va por el móvil por USB$" "^red: DHCP: IP 10.0.2.15"
 mira "en caliente: al quitarlo, la red lo sabe («se ha ido», sin tarjeta); y vuelve con otra cara (otra MAC): otra vez en marcha, otra IP y PING" \
   "^usb: el móvil por USB (aparato 0) ya no está$" "^usb: aviso: El móvil por USB se ha desconectado$" "^red: móvil por USB: se ha ido" \
@@ -90,7 +92,7 @@ ESCRIBE=1 DISCO=$K/pri.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-device qemu-xhci
 tr -d '\r' < $K/pri.sal > $K/pri.txt
 S=$K/pri.txt
 mira "cable y móvil: con enlace, el cable; sin enlace (set_link off), el móvil (y PING va); con enlace otra vez, el cable" \
-  "^red: móvil por USB: en marcha; MAC 40:54:00:12$" "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000)" "^red: la red va por el móvil por USB$" \
+  "^red: móvil por USB: en marcha; MAC 40:54:00:12$" "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000)" "red: la red va por el móvil por USB$" \
   "^  Tarjeta . . . . . . . : el móvil por USB (Android, RNDIS) (USB 0525:A4A2)$" "^    Paquetes: enviados = 2, recibidos = 2, perdidos = 0" "^red: la red va por el cable$"
 [ "$(grep -c "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000)" $S)" = 2 ] && ok "cable y móvil: IPCONFIG dice el cable antes y después" || ko "cable y móvil: IPCONFIG no dice el cable las dos veces"
 # 5. NCM y RNDIS con datos grabados
@@ -115,7 +117,7 @@ for hc in ehci xhci; do
     ":pausa 1" "copy x:\\azar.bin c:\\azar.bin" ":pausa 3" "copy c:\\azar.bin x:\\copia.bin" ":pausa 3" "dir x:" ":pausa 1" > $K/asi$hc.sal 2>&1
   tr -d '\r' < $K/asi$hc.sal > $K/asi$hc.txt
   S=$K/asi$hc.txt
-  if saca $K/asi.img AZAR.BIN $K/a1.bin && cmp -s $K/a1.bin $K/AZAR.BIN && saca $K/mem.img COPIA.BIN $K/a2.bin && cmp -s $K/a2.bin $K/AZAR.BIN && sano $K/mem.img && grep -q "velocidad alta, en el puerto [0-9]* ($nom); almacenamiento" $S; then
+  if saca $K/asi.img AZAR.BIN $K/a1.bin && cmp -s $K/a1.bin $K/AZAR.BIN && saca $K/mem.img COPIA.BIN $K/a2.bin && cmp -s $K/a2.bin $K/AZAR.BIN && sano $K/mem.img && grep -q "velocidad [a-zú]*, en el puerto [0-9]* ($nom); almacenamiento" $S; then
     ok "recibir a granel sin esperar ($que; con «usbasinc», una memoria USB de alta velocidad): 300 K leídos y escritos, iguales, y la memoria sana"
   else ko "recibir a granel sin esperar ($que) no va:"; grep -i "usb\|copia\|disco" $S | head -8 | sed 's/^/        /'; fi
 done

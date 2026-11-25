@@ -11501,7 +11501,7 @@ red en los Android de ahora) y sale por sus datos o su Wi-Fi.
      xhci.cas      el anillo del extremo (como las tuberías de interrupción, a otro búfer)
      ehci.cas      una tercera cola en la lista asíncrona (cabecera, trabajo y ésta),
                    con la alternancia en la cola
-     (uhci.cas     no hay cola: se recibe con granel() esperando 2 centésimas)
+     uhci.cas      una tubería de la cadena con una fila de TD a granel (64 paquetes)
 ```
 
 **Lo que hace el núcleo** (`usbmovil.cas`, «(MÓVIL)» en `usb.cas`,
@@ -11529,9 +11529,13 @@ red en los Android de ahora) y sale por sus datos o su Wi-Fi.
   otra cosa; cuando lo recoge, se pide lo siguiente en el acto. En el xHCI es
   el anillo del extremo (`Xhci.tubo_pide_en`); en el EHCI, una cola propia en
   la lista asíncrona (`Ehci.asinc_*`; una por controladora), que sale de ella
-  (con el timbre de avance) cuando el aparato se va. En la UHCI (un móvil en
-  un USB 1.1: los PC de antes del 2002) se recibe con `granel()` esperando 2
-  centésimas (lo que no llega a tiempo se tira; TCP lo repite).
+  (con el timbre de avance) cuando el aparato se va. En la UHCI (el móvil en
+  un USB 1.1, o lo de velocidad plena detrás de un EHCI con compañeras), una
+  tubería de la cadena, como las de interrupción, con una fila de hasta 64
+  TD a granel en una página propia (`Uhci.asinc_*`). (La primera prueba,
+  recibiendo con `granel()` esperando 2 centésimas en la UHCI, dejaba el
+  teclado USB de la misma controladora con una tecla pulsada: el cerrojo del
+  USB, casi siempre ocupado.)
 - **La llamada 101** (solo el servicio de red; `red.cas` mira que los punteros
   sean suyos): EBX = op + generación << 8; ECX, el puntero; EDX, cuántos.
 
@@ -11608,8 +11612,8 @@ QEMU_MAS="-device qemu-xhci,id=u -netdev user,id=n0 -device usb-net,netdev=n0,bu
 1. xHCI, el móvil enchufado al arrancar (y un teclado USB a la vez): RNDIS en
    marcha, DHCP (10.0.2.15), IPCONFIG, PING 3 de 3 y DESCARGAR de 400 K con el
    SHA-256 igual (en QEMU, unos 600 K/s).
-2. EHCI con sus UHCI compañeras (el usb-net va a la UHCI): lo mismo, esperando
-   (unos 60 K/s).
+2. EHCI con sus UHCI compañeras (el usb-net va a la UHCI): lo mismo, con un
+   teclado USB en la misma UHCI que sigue tecleando bien.
 3. En caliente: sin tarjeta; `device_add`: RED.BIN se pone en marcha solo,
    DHCP y PING; `device_del`: «se ha ido», sin tarjeta; otra vez con otra MAC
    (otra generación): otra IP y PING.

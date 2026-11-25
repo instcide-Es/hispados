@@ -235,20 +235,21 @@ módulo Usb
     ; una tubería para el extremo a granel de entrada e del aparato i: lo que
     ; se pide por ella (granel_pide) llega mientras tanto, y se mira luego
     ; (granel_mira). En el xHCI es el anillo del extremo (como las de
-    ; interrupción); en el EHCI, una cola propia en la lista asíncrona (una
-    ; por controladora). En la UHCI no hay: NINGUNO (y se usa granel() con
-    ; poca espera). Se cierra sola cuando el aparato se va (quita).
+    ; interrupción); en el EHCI, una cola propia en la lista asíncrona; en la
+    ; UHCI, una tubería de la cadena con una fila de TD a granel (una por
+    ; controladora en las dos). Se cierra sola cuando el aparato se va (quita).
     público función granel_abre(i: nat32, e: nat32): nat32
         variable t, s: nat32
         si i >= MAX_APARATOS entonces devolver NINGUNO fin
         si no aparatos[i].usado o aparatos[i].ido o e >= aparatos[i].n_extremos entonces devolver NINGUNO fin
         si aparatos[i].extremos[e].clase <> 2 o aparatos[i].extremos[e].número yb 0x80 = 0 entonces devolver NINGUNO fin
-        si aparatos[i].hc_clase <> HC_XHCI y aparatos[i].hc_clase <> HC_EHCI entonces devolver NINGUNO fin
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             s := Xhci.tubo_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
-        sino
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
             s := Ehci.asinc_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
+        sino
+            s := Uhci.asinc_abre(aparatos[i].hc, aparatos[i], aparatos[i].extremos[e])
         fin
         t := 0
         mientras t < n_tubos y tubos[t].usado hacer t := t + 1 fin
@@ -278,8 +279,10 @@ módulo Usb
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             Xhci.tubo_pide_en(aparatos[i].hc, tubos[t].suyo, datos, n)
-        sino
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
             Ehci.asinc_pide(aparatos[i].hc, tubos[t].suyo, datos, n)
+        sino
+            Uhci.asinc_pide(aparatos[i].hc, tubos[t].suyo, datos, n)
         fin
         soltar(cerrojo)
         devolver cierto
@@ -297,8 +300,10 @@ módulo Usb
         tomar(cerrojo)
         si aparatos[i].hc_clase = HC_XHCI entonces
             r := Xhci.tubo_mira(aparatos[i].hc, tubos[t].suyo, n)
-        sino
+        sino si aparatos[i].hc_clase = HC_EHCI entonces
             r := Ehci.asinc_mira(aparatos[i].hc, tubos[t].suyo, n)
+        sino
+            r := Uhci.asinc_mira(aparatos[i].hc, tubos[t].suyo, n)
         fin
         soltar(cerrojo)
         devolver r
@@ -311,6 +316,8 @@ módulo Usb
             Ehci.asinc_cierra(aparatos[i].hc, s)
         sino si de_granel y aparatos[i].hc_clase = HC_XHCI entonces
             Xhci.tubo_cierra(aparatos[i].hc, s)
+        sino si de_granel y aparatos[i].hc_clase = HC_UHCI entonces
+            Uhci.asinc_cierra(aparatos[i].hc, s)
         sino
             cierra_suyo(i, s)
         fin

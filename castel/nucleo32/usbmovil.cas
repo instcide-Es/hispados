@@ -252,7 +252,7 @@ módulo Usbmovil
             tubo := granel_abre(a, e_entra)
             si tubo = NINGUNO entonces
                 sin_asinc := cierto
-                apunta0("usb: el móvil por USB: se recibe esperando (sin la cola a granel: la UHCI)\n")
+                apunta0("usb: el móvil por USB: sin la cola a granel (¿no quedan tuberías?): se recibe esperando\n")
             fin
         fin
         si sin_asinc entonces
