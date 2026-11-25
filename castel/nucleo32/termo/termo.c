@@ -1431,10 +1431,21 @@ static void bmp_trozo(void)
 	/* (abriendo, añadiendo y cerrando cada trozo, como el .LOG: si se va la
 	 * luz a medias, la FAT queda sana y la imagen, cortada) */
 	k = bmp_total - bmp_hecho > 32768 ? 32768 : bmp_total - bmp_hecho;
-	if (!escribe(bmp_ruta, bmp_pend + bmp_hecho, k, 0))
-		bmp_hecho = bmp_total;
-	else
-		bmp_hecho += k;
+	if (!escribe(bmp_ruta, bmp_pend + bmp_hecho, k, 0)) {
+		/* (TERMO) no cabe (una pantalla de 1920 x 1080 son 6 MB): lo
+		 * escrito de ella, fuera, para que el .LOG, el .CSV y el
+		 * INFORME.TXT, que importan más, sigan teniendo sitio (en la
+		 * memoria de 32 MB de las pruebas, la media pantalla de F12 y luego
+		 * INFORME.BMP la llenaban: ni INFORME.TXT ni la prueba de escritura) */
+		sc(SC_BORRAR, (u32)bmp_ruta, 0, 0);
+		free(bmp_pend);
+		bmp_pend = 0;
+		serie("termo: captura en %s: no cabe en la memoria (%s): borrada\n", bmp_ruta, motivo_error(ult_error));
+		suceso_log("la pantalla no cabe en la memoria (%s): no se guarda; lo demás, sí", motivo_error(ult_error));
+		snprintf(aviso_archivo, sizeof aviso_archivo, "La pantalla no cabe en la memoria: no se guarda (lo demás, sí).");
+		return;
+	}
+	bmp_hecho += k;
 	if (bmp_hecho >= bmp_total) {
 		free(bmp_pend);
 		bmp_pend = 0;
