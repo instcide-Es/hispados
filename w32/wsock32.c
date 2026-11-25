@@ -52,6 +52,8 @@ int WINAPI CloseHandle(HANDLE);
 HANDLE WINAPI GetProcessHeap(void);
 void *WINAPI HeapAlloc(HANDLE, u32, u32);
 int WINAPI HeapFree(HANDLE, u32, void *);
+u32 WINAPI GetModuleFileNameA(HANDLE, char *, u32);
+u32 WINAPI GetTickCount(void);
 /* MSVCRT */
 void *memcpy(void *, const void *, u32);
 void *memset(void *, int, u32);
@@ -129,7 +131,7 @@ static HRED red;
 static int abierta, iniciada, ult_error, dentro;
 static u32 mi_ip, mi_masc, mi_gw, mi_dns;
 static volatile u32 *bios_tics;
-static u32 tic_ant, tic_dias, semilla, p_sig;
+static u32 tic_ant, tic_dias, p_sig;
 static u8 trama[1514];
 static u8 pend[1514];          /* una trama que espera a que ARP conteste */
 static u32 pend_ip, pend_n, pend_t;
@@ -157,10 +159,126 @@ static u32 ahora(void) {
   tic_ant = t;
   return (tic_dias + t) * 55;
 }
+/* ---- el azar de la red (el número inicial de TCP, el de las preguntas de
+ * DNS y su puerto, el de DHCP): ChaCha20 (RFC 8439) como generador, con
+ * «borrado de la clave» (cada bloque da la clave del siguiente y 8 palabras
+ * para fuera: lo que sale no deja saber ni lo de antes ni lo de después).
+ * La semilla, como la de HSPTLS (w32/tls/hsptls.c): TSC si lo hay, PIT,
+ * los tics, la hora, la MAC y HSPTLS.SEM (solo se lee: la escribe HSPTLS);
+ * y luego el momento en que llega cada trama. Antes era un xorshift de 32
+ * bits que daba su estado entero: con un número inicial de TCP se sabía el
+ * de la siguiente pregunta de DNS y su puerto ---- */
+#define ROTL(v, n) ((v) << (n) | (v) >> (32 - (n)))
+#define QR(a, b, c, d) (a += b, d ^= a, d = ROTL(d, 16), c += d, b ^= c, b = ROTL(b, 12), \
+                        a += b, d ^= a, d = ROTL(d, 8), c += d, b ^= c, b = ROTL(b, 7))
+/* un bloque de ChaCha20: clave k (8 palabras), contador y nonce (3) */
+static void chacha_bloque(const u32 *k, u32 cont, const u32 *nonce, u32 *sal) {
+  u32 x[16], i;
+  x[0] = 0x61707865; x[1] = 0x3320646e; x[2] = 0x79622d32; x[3] = 0x6b206574;
+  for (i = 0; i < 8; i++) x[4 + i] = k[i];
+  x[12] = cont; x[13] = nonce[0]; x[14] = nonce[1]; x[15] = nonce[2];
+  for (i = 0; i < 16; i++) sal[i] = x[i];
+  for (i = 0; i < 10; i++) {
+    QR(sal[0], sal[4], sal[8], sal[12]); QR(sal[1], sal[5], sal[9], sal[13]);
+    QR(sal[2], sal[6], sal[10], sal[14]); QR(sal[3], sal[7], sal[11], sal[15]);
+    QR(sal[0], sal[5], sal[10], sal[15]); QR(sal[1], sal[6], sal[11], sal[12]);
+    QR(sal[2], sal[7], sal[8], sal[13]); QR(sal[3], sal[4], sal[9], sal[14]);
+  }
+  for (i = 0; i < 16; i++) sal[i] += x[i];
+}
+static u32 az_clave[8], az_sal[8], az_ruido[4], isn_clave[8];
+static int az_quedan, az_listo, hay_tsc;
+#ifdef WSOCK_ANFITRION
+/* (la prueba en el anfitrión, tests/red32/azar.c: sin puertos ni CPUID) */
+static u32 pit(void) { return 0; }
+static int cpuid_tsc(void) { return 0; }
+#else
+static u32 pit(void) {
+  u8 a, b;
+  __asm__ volatile("outb %%al, $0x43" : : "a"(0));
+  __asm__ volatile("inb $0x40, %%al" : "=a"(a));
+  __asm__ volatile("inb $0x40, %%al" : "=a"(b));
+  return a | b << 8;
+}
+static int cpuid_tsc(void) {
+  u32 a, b, c, d, f1, f2;
+  __asm__ volatile("pushfl; popl %0; movl %0, %1; xorl $0x200000, %0; pushl %0; popfl; pushfl; popl %0; pushl %1; popfl"
+                   : "=&r"(f1), "=&r"(f2));
+  if (!((f1 ^ f2) & 0x200000)) return 0;       /* un 486 sin CPUID */
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0));
+  if (a < 1) return 0;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
+  return (d >> 4) & 1;
+}
+#endif
+/* un poco de ruido (el reloj fino de ahora) al pozo: se mezcla en la clave
+ * la próxima vez que se rehace */
+static void az_ruido_pon(u32 v) {
+  u32 lo = 0, hi = 0;
+#ifndef WSOCK_ANFITRION
+  if (hay_tsc) __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+#endif
+  az_ruido[0] += v; az_ruido[1] ^= pit() | (bios_tics ? *bios_tics : 0) << 16;
+  az_ruido[2] += lo; az_ruido[3] ^= hi + GetTickCount();
+  az_ruido[0] = ROTL(az_ruido[0], 7) ^ az_ruido[2];
+}
+/* lo siguiente: un bloque cada 8 palabras; el bloque da la clave nueva */
+static void az_inicia(const u8 *mac);
 static u32 azar(void) {
-  semilla ^= bios_tics ? *bios_tics : 0;
-  semilla ^= semilla << 13; semilla ^= semilla >> 17; semilla ^= semilla << 5;
-  return semilla;
+  if (!az_listo) az_inicia(NULL);
+  if (!az_quedan) {
+    static const u32 n0[3] = { 0x48535052, 0x45442d41, 0x5a415221 };   /* «HSPRED-AZAR!» */
+    u32 b[16], k;
+    for (k = 0; k < 4; k++) az_clave[k] ^= az_ruido[k];
+    az_ruido[0] = az_ruido[1] = az_ruido[2] = az_ruido[3] = 0;
+    chacha_bloque(az_clave, 0, n0, b);
+    for (k = 0; k < 8; k++) { az_clave[k] = b[k]; az_sal[k] = b[8 + k]; }
+    memset(b, 0, sizeof b);
+    az_quedan = 8;
+  }
+  return az_sal[--az_quedan];
+}
+/* la semilla: una vez, al abrir la red */
+static void az_inicia(const u8 *mac) {
+  ST st;
+  char ruta[170];
+  u8 sem[32];
+  u32 n, k;
+  HANDLE h;
+  hay_tsc = cpuid_tsc();
+  GetLocalTime(&st);
+  memcpy(az_clave, &st, sizeof st);            /* 16 octetos: las 4 primeras palabras */
+  az_clave[4] ^= GetTickCount();
+  if (mac) { az_clave[5] ^= mac[0] | mac[1] << 8 | mac[2] << 16 | (u32)mac[3] << 24; az_clave[6] ^= mac[4] | mac[5] << 8; }
+  az_ruido_pon(0x9E3779B9u);
+  /* la semilla de HSPTLS (junto al programa): no se escribe aquí */
+  n = GetModuleFileNameA(NULL, ruta, sizeof ruta - 12);
+  if (n >= sizeof ruta - 12) n = 0;
+  for (k = n; k > 0 && ruta[k - 1] != '\\' && ruta[k - 1] != ':'; k--) ;
+  memcpy(ruta + k, "HSPTLS.SEM", 11);
+  h = CreateFileA(ruta, 0x80000000u, 1, NULL, 3, 0, NULL);
+  if (h != (HANDLE)-1) {
+    n = 0;
+    if (ReadFile(h, sem, sizeof sem, &n, NULL) && n)
+      for (k = 0; k < n && k < 32; k++) ((u8 *)az_clave)[k] ^= sem[k];
+    CloseHandle(h);
+    memset(sem, 0, sizeof sem);
+  }
+  az_ruido_pon(0x7F4A7C15u);
+  az_quedan = 0;
+  az_listo = 1;
+  /* la clave del número inicial de TCP (RFC 6528), aparte */
+  for (k = 0; k < 8; k++) isn_clave[k] = azar();
+  az_quedan = 0;                               /* (lo que quedaba del bloque, fuera) */
+}
+/* el número inicial de una conexión TCP (RFC 6528): un reloj de 4 µs más
+ * una función con clave de las dos direcciones y los dos puertos; así no
+ * dice nada de las demás conexiones ni del generador */
+static u32 isn_de(u32 ip_loc, u16 p_loc, u32 ip_rem, u16 p_rem, u32 ms) {
+  u32 nonce[3], b[16];
+  nonce[0] = ip_loc; nonce[1] = ip_rem; nonce[2] = (u32)p_loc << 16 | p_rem;
+  chacha_bloque(isn_clave, 0x6528, nonce, b);
+  return ms * 250 + b[0];
 }
 static u32 suma(const u8 *p, int n, u32 s) {
   for (; n > 1; n -= 2, p += 2) s += (u32)p[0] << 8 | p[1];
@@ -316,7 +434,9 @@ static void udp_in(u32 de, u32 a, const u8 *u, int n) {
   pde = be16(u); pa = be16(u + 2);
   l -= 8;
   if (pa == 68 && pde == 67) { dhcp_in(u + 8, l); return; }
-  if (dns_puerto && pa == dns_puerto && pde == 53) { dns_in(u + 8, l); return; }
+  /* (la respuesta de DNS: del servidor al que se preguntó, desde el 53 y al
+   * puerto de la pregunta; la de otro, no vale) */
+  if (dns_puerto && pa == dns_puerto) { if (pde == 53 && de == mi_dns) dns_in(u + 8, l); return; }
   for (k = 0; k < N_SOCK; k++) {
     SOCK *s = &socks[k];
     if (s->uso != 2 || s->p_loc != pa) continue;
@@ -523,6 +643,7 @@ static void sondear(void) {
   while (an[0] != an[1]) {
     const u8 *r = red.ranuras + an[0] * red.t_ran;
     int n = r[0] | r[1] << 8;
+    az_ruido_pon((u32)n << 16 | an[0]);          /* (cuándo llega cada trama: algo de azar) */
     if (n >= 14 && n <= 1514) {
       u16 tipo = be16(r + 14);
       if (tipo == 0x0800) ip_in(r + 16, n - 14);
@@ -665,13 +786,10 @@ static int configurar(void) {
 }
 /* abre la red la primera vez que hace falta: 0 si no se puede */
 static int red_lista(void) {
-  ST st;
   if (abierta) return mi_ip != 0;
   if (HispaRedAbrir(&red)) return 0;
   bios_tics = (volatile u32 *)(red.anillo - red.lineal + 0x46C);
-  GetLocalTime(&st);
-  semilla = *bios_tics * 2654435761u ^ ip_de(red.mac + 2) ^ (st.seg << 24 | st.min << 16 | st.ms);
-  if (!semilla) semilla = 1;
+  az_inicia(red.mac);
   p_sig = 49152 + azar() % 12000;
   abierta = 1;
   if (!configurar()) { abierta = 0; HispaRedCerrar(); return 0; }
@@ -707,8 +825,9 @@ static int dns_busca(const char *nombre, u32 *ip) {
   }
   *p++ = 0; p16(p, 1); p16(p + 2, 1); p += 4;
   for (vez = 0; vez < 3; vez++) {
+    /* (de dos llamadas distintas al generador) */
     dns_id = (u16)azar(); p16(q, dns_id);
-    dns_puerto = (u16)(50000 + azar() % 10000);
+    { u32 r = azar(); dns_puerto = (u16)(50000 + r % 10000); }
     dns_estado = 1;
     udp_enviar(mi_ip, mi_dns, dns_puerto, 53, q, p - q);
     for (t = ahora(); dns_estado == 1 && ahora() - t < 2500; ) cede();
@@ -833,7 +952,7 @@ int WINAPI connect(SOCKET h, const struct sockaddr_in *a, int n) {
   if (s->estuvo || s->error) return falla(WSAEINVAL);
   s->ip_rem = a->sin_addr.s_addr; s->p_rem = ntohs(a->sin_port);
   if (!s->p_loc) s->p_loc = puerto_nuevo();
-  s->snd_una = azar();
+  s->snd_una = isn_de(mi_ip, s->p_loc, s->ip_rem, s->p_rem, ahora());
   s->rto = RTO0 * 2; s->reintentos = 0; s->t_rtx = 0;
   s->estado = E_SYN;
   tcp_salida(s, 0);

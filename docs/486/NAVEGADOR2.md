@@ -330,7 +330,10 @@ medidas de las cajas.
   el lector de fragmentos de hubbub; dentro de una tabla o de un `<select>`,
   en el suyo), eventos con captura y burbuja, `setTimeout`/`setInterval`,
   promesas, `fetch` y `XMLHttpRequest` (con las galletas, la misma conexión
-  que las páginas, las redirecciones), `localStorage` (en `NAVEGA2.ALM`),
+  que las páginas, las redirecciones; a otro origen, con CORS y SameSite como
+  el Navegador propio: NAVEGADOR.md, «Lo que puede pedir una página»; lo
+  decide `w32/surf/guion.c` con `w32/navega/cors.h`), `localStorage` (en
+  `NAVEGA2.ALM`, por el origen que saca C de la dirección),
   `document.cookie`, `alert`/`confirm` (los cuadros de Hispa Ventanas),
   `console` (a `SURFJS.LOG`).
 - **Las medidas de verdad** (`surf.js`): `getBoundingClientRect`,

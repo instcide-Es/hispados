@@ -4,12 +4,14 @@
  *  direcciones https://). Con WSOCK32.DLL y HSPTLS.DLL (docs/RED.md).
  *  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
  *
- *     HTTPS [/V] [/N] dirección [archivo]
+ *     HTTPS [/V] [/N] [/I] dirección [archivo]
  *
  *  Sin archivo, lo guarda con el último trozo de la ruta en 8.3 (INDEX.HTM si
  *  no hay). /N: no guarda nada (dice los octetos y su suma). /V: enseña las
  *  cabeceras, el cifrado y lo que tarda el apretón de manos de TLS. Sigue
- *  hasta 5 redirecciones. Sale con 0 si todo va bien.
+ *  hasta 5 redirecciones, pero no de https:// a http:// (lo de después ya no
+ *  iría cifrado ni comprobado), salvo con /I. Una redirección que no cabe
+ *  (más de 1000 letras) no se sigue. Sale con 0 si todo va bien.
  *  (Los textos, en la página 437 de la consola.)
  * ============================================================================= */
 typedef unsigned int u32;
@@ -45,6 +47,7 @@ u32 WINAPI GetTickCount(void);
 typedef struct FILE FILE;
 int printf(const char *, ...);
 int sprintf(char *, const char *, ...);
+int snprintf(char *, u32, const char *, ...);
 FILE *fopen(const char *, const char *);
 u32 fwrite(const void *, u32, u32, FILE *);
 int fclose(FILE *);
@@ -59,8 +62,8 @@ void *memcpy(void *, const void *, u32);
 void *memmove(void *, const void *, u32);
 int memcmp(const void *, const void *, u32);
 
-static char dir[1024], servidor[256], ruta[1024], buf[4096], cab[4096], pet[1400];
-static int verboso, sin_guardar;
+static char dir[1024], servidor[256], ruta[1024], buf[4096], cab[4096], pet[1600];
+static int verboso, sin_guardar, inseguro;
 
 /* la página 1252 (los textos de HSPTLS) a la 437 de la consola */
 static void di1252(const char *t) {
@@ -86,9 +89,9 @@ static int parte(const char *d, int *seguro, int *puerto) {
   *puerto = *seguro ? 443 : 80;
   if (*f == ':') { *puerto = atoi(f + 1); while (*f && *f != '/' && *f != '?') f++; }
   if (*puerto < 1 || *puerto > 65535) return 0;
+  if (strlen(f) + 2 > sizeof ruta) return 0;           /* (no cabe) */
   if (*f == '/') strcpy(ruta, f);
   else { ruta[0] = '/'; strcpy(ruta + 1, f); }
-  n = strlen(ruta);
   if (strchr(ruta, '#')) *strchr(ruta, '#') = 0;
   return 1;
 }
@@ -141,12 +144,14 @@ int main(int argc, char **argv) {
   for (k = 1; k < argc; k++) {
     if (argv[k][0] == '/' && (argv[k][1] == 'V' || argv[k][1] == 'v') && !argv[k][2]) verboso = 1;
     else if (argv[k][0] == '/' && (argv[k][1] == 'N' || argv[k][1] == 'n') && !argv[k][2]) sin_guardar = 1;
+    else if (argv[k][0] == '/' && (argv[k][1] == 'I' || argv[k][1] == 'i') && !argv[k][2]) inseguro = 1;
     else if (!d) d = argv[k];
     else if (!archivo) archivo = argv[k];
   }
   if (!d || strlen(d) > 1000) {
-    printf("Descarga un archivo por HTTP o HTTPS.\n\nHTTPS [/V] [/N] direcci\242n [archivo]\n\n"
-           "  /V  ense\244a las cabeceras y el cifrado\n  /N  no guarda nada: dice los octetos y su suma\n");
+    printf("Descarga un archivo por HTTP o HTTPS.\n\nHTTPS [/V] [/N] [/I] direcci\242n [archivo]\n\n"
+           "  /V  ense\244a las cabeceras y el cifrado\n  /N  no guarda nada: dice los octetos y su suma\n"
+           "  /I  sigue tambi\202n una redirecci\242n de https a http (sin cifrar)\n");
     return 1;
   }
   strcpy(dir, d);
@@ -184,7 +189,8 @@ int main(int argc, char **argv) {
         printf("Conexi\242n segura: %s (%u ms; %u miles de ciclos de c\240lculo)\n", buf, GetTickCount() - t0, TlsCiclos(t));
       }
     }
-    n = sprintf(pet, "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: Hispa-486 (HTTPS.EXE)\r\nAccept: */*\r\n\r\n", ruta, servidor);
+    n = snprintf(pet, sizeof pet, "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: Hispa-486 (HTTPS.EXE)\r\nAccept: */*\r\n\r\n", ruta, servidor);
+    if (n < 0 || n >= (int)sizeof pet) { printf("La direcci\242n es demasiado larga.\n"); return 1; }
     if ((t ? TlsEscribir(t, pet, n) : send(s, pet, n, 0)) != n) { printf("No se ha podido enviar la petici\242n.\n"); return 5; }
     cab[0] = '\n';
     ncab = 1;
@@ -221,17 +227,37 @@ int main(int argc, char **argv) {
     if (mal) return 7;
     loc = cabecera("Location");
     if (estado >= 301 && estado <= 308 && loc) {
-      char nueva[1024];
-      for (k = 0; loc[k] && loc[k] != '\r' && loc[k] != '\n' && k < 1000; k++) nueva[k] = loc[k];
+      char nueva[1024], *q;
+      const char *esq = seguro ? "https" : "http";
+      int m;
+      for (k = 0; loc[k] && loc[k] != '\r' && loc[k] != '\n' && k < 1001; k++) nueva[k] = loc[k];
       nueva[k] = 0;
-      if (nueva[0] == '/') sprintf(dir, "%s://%s:%d%s", seguro ? "https" : "http", servidor, puerto, nueva);
-      else strcpy(dir, nueva);
+      if (k > 1000) { printf("La redirecci\242n es demasiado larga: no se sigue.\n"); return 10; }
+      /* contra la dirección de ahora (RFC 3986): «//servidor/...», «/ruta» o
+       * «ruta» (junto a la de ahora); si no cabe, no se sigue */
+      if (nueva[0] == '/' && nueva[1] == '/') m = snprintf(dir, sizeof dir, "%s:%s", esq, nueva);
+      else if (nueva[0] == '/') m = snprintf(dir, sizeof dir, "%s://%s:%d%s", esq, servidor, puerto, nueva);
+      else if (strchr(nueva, ':') && (q = strchr(nueva, ':'))[1] == '/' && q[2] == '/') m = snprintf(dir, sizeof dir, "%s", nueva);
+      else {
+        if ((q = strchr(ruta, '?'))) *q = 0;
+        if ((q = strrchr(ruta, '/'))) q[1] = 0;
+        m = snprintf(dir, sizeof dir, "%s://%s:%d%s%s", esq, servidor, puerto, ruta, nueva);
+      }
+      if (m < 0 || m >= (int)sizeof dir) { printf("La redirecci\242n es demasiado larga: no se sigue.\n"); return 10; }
+      if (seguro && !_strnicmp(dir, "http://", 7) && !inseguro) {
+        printf("La redirecci\242n lleva de https a http (sin cifrar): no se sigue.\n%s\n"
+               "(Con /I se sigue igualmente.)\n", dir);
+        return 11;
+      }
       printf("Redirigido a %s\n", dir);
       continue;
     }
     if (estado != 200) {
-      *strchr(cab + 1, '\r' ) = 0;
-      printf("El servidor responde: %s\n", cab + 1);
+      char *fin = cab + 1;
+      while (*fin && *fin != '\r' && *fin != '\n') fin++;
+      *fin = 0;                                 /* (la primera línea; puede no haber \r) */
+      if (!estado) printf("El servidor no responde como se espera (HTTP).\n");
+      else printf("El servidor responde: %s\n", cab + 1);
       return 8;
     }
     if (f) printf("Guardado en %s (%u octetos).\n", archivo, total);
