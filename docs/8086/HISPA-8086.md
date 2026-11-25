@@ -17,7 +17,46 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 ## Dónde estamos
 
 **Etapas 0 a 4 y 6 hechas, y la 5 casi** (`h8086/`, noviembre de 2026).
-Versión 0.13.
+Versión 0.14.
+
+**Lo nuevo en la 0.14**: los arreglos de la primera auditoría (25-11-2026),
+que buscó fallos en todo Hispa-8086. Ninguno era nuevo de la 0.13; los más
+graves:
+
+- **Copiar un archivo sobre sí mismo lo destrozaba.** `COPIAR X .`,
+  `COPIAR \X X` o `XCOPIAR *.*` en su propio directorio dejaban el archivo en
+  1 K, diciendo «copiado». Ahora dicen «No se puede copiar un archivo sobre sí
+  mismo» y el archivo no se toca: el sistema ya no vacía un archivo que alguien
+  tiene abierto.
+- **Guardar con el disco lleno ya no pierde lo que había.** CUENTAS, EDITAR,
+  el SAVE de BASIC y PASAR RECIBIR escriben primero en un archivo aparte
+  (NOMBRE.$$$) y solo cuando está entero quitan el viejo, como ya hacía PLUMA.
+  Antes, con el disco lleno (o sin cable, en PASAR), el archivo de antes se
+  quedaba cortado o desaparecía.
+- **Lo que no cabe en la memoria, se dice.** EDITAR y PLUMA avisan cuando un
+  archivo no ha cabido entero, y no lo guardan encima del bueno (EDITAR no lo
+  guarda; PLUMA pide otro nombre).
+- **Cosas que colgaban el equipo**: lanzar un programa con una ruta larga
+  (`.\.\.\...\PROGRAMA` desde un directorio hondo), un DRAW de BASIC muy
+  grande (ahora da «Desbordamiento»), un disquete con las medidas mal
+  apuntadas, REVISAR con un directorio que da la vuelta, y PLUMA con poca
+  memoria (ahora dice que necesita 64 K).
+- **El disco, más protegido**: «BORRARDIR X\.» ya no suelta el sitio de X,
+  un fallo al leer la FAT ya no hace que se escriba donde no debe, los
+  números de grupo que vienen estropeados del disco no se usan, y una ruta de
+  más de 79 letras da «No existe esa ruta» en vez de cortarse y tocar otro
+  archivo.
+- **REVISAR /F** ya no recorta los archivos cruzados, corta bien las cadenas
+  que dan la vuelta y no repite el nombre FILE0000.CHK; **SISTEMA** copia el
+  sistema antes de cambiar el arranque (si no cabe, el disquete se queda como
+  estaba); **XCOPIAR /S** no se mete en su propio destino; **CUENTAS** no se
+  cuelga con archivos raros; `IF ERRORLEVEL 10` mira las dos cifras.
+- **La batería de pruebas**, más fiable en un equipo cargado y fuera del
+  servidor: espera a que QEMU conteste, va en la hora UTC y dice qué falta
+  cuando se salta algo. Cada arreglo tiene su prueba (`prueba/partes_14.sh`).
+
+El núcleo ha pasado de 15.236 a 15.472 octetos (la regla es menos de 16 K;
+el Makefile ya no hace los disquetes si se pasa).
 
 **Lo nuevo en la 0.13**:
 
@@ -39,7 +78,7 @@ Versión 0.13.
 
 - **Arranque, de disquete o de disco duro**: un solo sector de arranque para
   FAT12 y FAT16, disquetes y particiones, y un sector de particiones (MBR)
-  propio. El núcleo ocupa 14,9 K en el disco. En memoria, el núcleo con
+  propio. El núcleo ocupa 15,1 K en el disco. En memoria, el núcleo con
   sus variables, su pila, la tabla de archivos y la reserva de sectores son
   unos 17 K, y el intérprete de órdenes con su entorno, otros
   13 K: en una máquina de 640 K quedan 607 K para los

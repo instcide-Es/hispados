@@ -1,4 +1,4 @@
-Hispa-8086 0.13
+Hispa-8086 0.14
 El sistema de la familia Hispa para los PC, XT y AT: 8086, 8088, V20,
 80186 y 286. Software libre (GPL-2.0 o posterior), hecho desde cero y
 en español.
