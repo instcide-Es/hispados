@@ -987,6 +987,13 @@ módulo Sistema
     fin
 
     ; ---- el tiempo ----
+    ; [etapa 11] el tiempo de procesador del hilo que corre (ns)
+    función tiempo_hilo(): nat64
+        variable h: puntero a Hilo
+        h := actual()
+        devolver h.t_usuario + h.t_sistema
+    fin
+
     función reloj(p: puntero a Proceso, cuál: nat64, v: nat64): ent64
         variable ts: arreglo [2] de nat64
         variable ns: nat64
@@ -994,7 +1001,8 @@ módulo Sistema
         según cuál
             caso 0, 5: ns := real_ns()                                  ; REALTIME, REALTIME_COARSE ([etapa 9] Hora64)
             caso 1, 4, 6, 7: ns := ns                                   ; MONOTONIC, _RAW, _COARSE, BOOTTIME
-            caso 2, 3: ns := ns                                         ; [etapa 7] PROCESS_CPUTIME, THREAD_CPUTIME (lo que lleva en marcha)
+            caso 2: ns := p.cpu_u + p.cpu_s                             ; [etapa 11] PROCESS_CPUTIME: el tiempo de procesador (de 10 en 10 ms)
+            caso 3: ns := tiempo_hilo()                                 ; THREAD_CPUTIME
             si no: devolver EINVAL
         fin
         ts[0] := ns div 1000000000
@@ -1165,126 +1173,157 @@ módulo Sistema
         devolver ahora_ns() + ts[0] * 1000000000 + ts[1] * escala
     fin
 
-    ; poll y ppoll
+    ; poll y ppoll. [etapa 11] Hasta 1024 entradas (eran 64), mirándolas de 64
+    ; en 64: cada vuelta copia cada trozo, lo mira y deja ya sus revents
+    constante POLL_MÁX = 1024
     función sondea(p: puntero a Proceso, v: nat64, n: nat64, límite: nat64): ent64
-        variable g0, lt: nat64
+        variable g0, lt, k, m: nat64
         variable fds: arreglo [64] de nat64
         variable i: nat32
         variable listos: ent64
         variable fd: ent64
         variable ev, rev: nat32
         variable consola, tubos_: bool
-        si n > 64 entonces devolver EINVAL fin
-        si n > 0 entonces
-            si no copia_de(p, nat64(dirección(fds[0])), v, n * 8) entonces devolver EFAULT fin
-        fin
+        si n > POLL_MÁX entonces devolver EINVAL fin
         mientras cierto hacer
             listos := 0
             consola := falso
             tubos_ := falso
             g0 := Sondeo64.gen
             lt := límite
-            i := 0
-            mientras nat64(i) < n hacer
-                fd := ent64(ent32(nat32(fds[i] yb 0xFFFFFFFF)))
-                ev := nat32((fds[i] >> 32) yb 0xFFFF)
-                rev := listo_de(p, fd, ev)
-                mira_espera(p, fd, lt, tubos_)
-                si fd >= 0 y rev = 0 y fd_bien(p, nat64(fd)) entonces
-                    si p.fd_clase[nat32(fd)] = F_CONSOLA y ev yb 0x41 <> 0 entonces consola := cierto fin
+            k := 0
+            mientras k < n hacer
+                m := n - k
+                si m > 64 entonces m := 64 fin
+                si no copia_de(p, nat64(dirección(fds[0])), v + k * 8, m * 8) entonces devolver EFAULT fin
+                i := 0
+                mientras nat64(i) < m hacer
+                    fd := ent64(ent32(nat32(fds[i] yb 0xFFFFFFFF)))
+                    ev := nat32((fds[i] >> 32) yb 0xFFFF)
+                    rev := listo_de(p, fd, ev)
+                    mira_espera(p, fd, lt, tubos_)
+                    si fd >= 0 y rev = 0 y fd_bien(p, nat64(fd)) entonces
+                        si p.fd_clase[nat32(fd)] = F_CONSOLA y ev yb 0x41 <> 0 entonces consola := cierto fin
+                    fin
+                    fds[i] := (fds[i] yb 0xFFFFFFFF) ob ((nat64(ev) yb 0xFFFF) << 32) ob (nat64(rev) << 48)
+                    si rev <> 0 entonces listos := listos + 1 fin
+                    i := i + 1
                 fin
-                fds[i] := (fds[i] yb 0xFFFFFFFF) ob ((nat64(ev) yb 0xFFFF) << 32) ob (nat64(rev) << 48)
-                si rev <> 0 entonces listos := listos + 1 fin
-                i := i + 1
+                si no copia_a(p, v + k * 8, nat64(dirección(fds[0])), m * 8) entonces devolver EFAULT fin
+                k := k + m
             fin
             si listos > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
             espera_hasta(p, g0, lt, tubos_)
-        fin
-        si n > 0 entonces
-            si no copia_a(p, v, nat64(dirección(fds[0])), n * 8) entonces devolver EFAULT fin
         fin
         si listos = 0 y interrumpido(p) entonces devolver ERESTARTNOHAND fin
         devolver listos
     fin
 
-    ; select y pselect6 (los descriptores hasta el 63: lo demás, con poll)
+    ; select y pselect6. [etapa 11] Los fd_set de hasta 1024 (FD_SETSIZE:
+    ; 16 palabras); los descriptores abiertos llegan hasta MAX_FD (256): uno
+    ; más alto pedido, EBADF. (Hasta la 10, solo hasta el 63.)
+    constante SEL_PAL = 16
+    función bit_(ref c: arreglo [SEL_PAL] de nat64, i: nat32): bool
+        devolver (c[i >> 6] >> (i yb 63)) yb 1 <> 0
+    fin
+
     función selecciona(p: puntero a Proceso, n: nat64, vr: nat64, vw: nat64, ve: nat64, límite: nat64): ent64
         variable g0, lt: nat64
-        variable r, w, e, rr, ww: nat64
+        variable r, w, e, rr, ww: arreglo [SEL_PAL] de nat64
         variable largo: nat64
-        variable i: nat32
+        variable i, k: nat32
         variable listos: ent64
         variable consola, tubos_: bool
         si n > 1024 entonces devolver EINVAL fin
         largo := ((n + 63) div 64) * 8
-        si largo > 8 entonces largo := 8 fin
-        r := 0
-        w := 0
-        e := 0
+        k := 0
+        mientras k < SEL_PAL hacer
+            r[k] := 0
+            w[k] := 0
+            e[k] := 0
+            rr[k] := 0
+            ww[k] := 0
+            k := k + 1
+        fin
         si largo > 0 entonces
             si vr <> 0 entonces
-                si no copia_de(p, nat64(dirección(r)), vr, largo) entonces devolver EFAULT fin
+                si no copia_de(p, nat64(dirección(r[0])), vr, largo) entonces devolver EFAULT fin
             fin
             si vw <> 0 entonces
-                si no copia_de(p, nat64(dirección(w)), vw, largo) entonces devolver EFAULT fin
+                si no copia_de(p, nat64(dirección(w[0])), vw, largo) entonces devolver EFAULT fin
             fin
             si ve <> 0 entonces
-                si no copia_de(p, nat64(dirección(e)), ve, largo) entonces devolver EFAULT fin
+                si no copia_de(p, nat64(dirección(e[0])), ve, largo) entonces devolver EFAULT fin
             fin
         fin
-        si n < 64 entonces
-            r := r yb ((nat64(1) << n) - 1)
-            w := w yb ((nat64(1) << n) - 1)
-            e := e yb ((nat64(1) << n) - 1)
+        ; (lo de más allá de n, fuera)
+        si n mod 64 <> 0 entonces
+            k := nat32(n div 64)
+            r[k] := r[k] yb ((nat64(1) << (n mod 64)) - 1)
+            w[k] := w[k] yb ((nat64(1) << (n mod 64)) - 1)
+            e[k] := e[k] yb ((nat64(1) << (n mod 64)) - 1)
         fin
         i := 0
-        mientras i < 64 hacer
-            si (r ob w ob e) yb (nat64(1) << i) <> 0 entonces
+        mientras nat64(i) < n hacer
+            si bit_(r, i) o bit_(w, i) o bit_(e, i) entonces
                 si no fd_bien(p, nat64(i)) entonces devolver EBADF fin
             fin
             i := i + 1
         fin
         mientras cierto hacer
             listos := 0
-            rr := 0
-            ww := 0
+            k := 0
+            mientras k < SEL_PAL hacer
+                rr[k] := 0
+                ww[k] := 0
+                k := k + 1
+            fin
             consola := falso
             tubos_ := falso
             g0 := Sondeo64.gen
             lt := límite
             i := 0
-            mientras i < 64 hacer
-                si r yb (nat64(1) << i) <> 0 entonces
+            mientras nat64(i) < n hacer
+                ; (de 64 en 64: las palabras vacías, de una vez)
+                si i yb 63 = 0 y (r[i >> 6] ob w[i >> 6]) = 0 entonces
+                    i := i + 64
+                    seguir
+                fin
+                si bit_(r, i) entonces
                     si listo_de(p, ent64(i), 1) <> 0 entonces
-                        rr := rr ob (nat64(1) << i)
+                        rr[i >> 6] := rr[i >> 6] ob (nat64(1) << (i yb 63))
                         listos := listos + 1
                     sino
                         consola := cierto
                     fin
                 fin
-                si w yb (nat64(1) << i) <> 0 entonces
+                si bit_(w, i) entonces
                     ; ([etapa 7] una tubería llena no está lista)
                     si listo_de(p, ent64(i), 4) <> 0 entonces
-                        ww := ww ob (nat64(1) << i)
+                        ww[i >> 6] := ww[i >> 6] ob (nat64(1) << (i yb 63))
                         listos := listos + 1
                     fin
                 fin
-                si (r ob w) yb (nat64(1) << i) <> 0 entonces mira_espera(p, ent64(i), lt, tubos_) fin
+                si bit_(r, i) o bit_(w, i) entonces mira_espera(p, ent64(i), lt, tubos_) fin
                 i := i + 1
             fin
             si listos > 0 o ahora_ns() >= límite o interrumpido(p) entonces romper fin
             espera_hasta(p, g0, lt, tubos_)
         fin
-        e := 0
+        k := 0
+        mientras k < SEL_PAL hacer
+            e[k] := 0
+            k := k + 1
+        fin
         si largo > 0 entonces
             si vr <> 0 entonces
-                si no copia_a(p, vr, nat64(dirección(rr)), largo) entonces devolver EFAULT fin
+                si no copia_a(p, vr, nat64(dirección(rr[0])), largo) entonces devolver EFAULT fin
             fin
             si vw <> 0 entonces
-                si no copia_a(p, vw, nat64(dirección(ww)), largo) entonces devolver EFAULT fin
+                si no copia_a(p, vw, nat64(dirección(ww[0])), largo) entonces devolver EFAULT fin
             fin
             si ve <> 0 entonces
-                si no copia_a(p, ve, nat64(dirección(e)), largo) entonces devolver EFAULT fin
+                si no copia_a(p, ve, nat64(dirección(e[0])), largo) entonces devolver EFAULT fin
             fin
         fin
         si listos = 0 y interrumpido(p) entonces devolver ERESTARTNOHAND fin
@@ -1824,7 +1863,7 @@ módulo Sistema
             caso 204: r := afinidad_(p, a2, a3)
             caso 99: r := sysinfo_(p, a1)
             caso 95: r := 18                                 ; umask: 022
-            caso 98: r := uso_(p, a2)
+            caso 98: r := uso_(p, a1, a2)
             caso 213:
                 si ent64(ent32(nat32(a1 yb 0xFFFFFFFF))) <= 0 entonces r := EINVAL sino r := epoll_crea(p, 0) fin
             caso 291: r := epoll_crea(p, a1)
@@ -1879,6 +1918,8 @@ módulo Sistema
         ; [etapa 11] si durante la llamada se ha despertado a uno que pasa por
         ; delante, ahora le toca (con la llamada acabada: Hilos64.expropia_aquí)
         expropia_aquí(cierto)
+        ; [etapa 11] ITIMER_VIRTUAL y PROF vencidas: sus señales
+        mira_itimers(p)
         ; [etapa 7] las señales (Ctrl+C, kill...), que el proceso acabe, y
         ; repetir lo interrumpido
         antes_de_volver(m, cierto, n)
@@ -2087,18 +2128,24 @@ módulo Sistema
     fin
 
     ; [etapa 10] setitimer (nuevo <> 0) y getitimer (nuevo = 0, viejo): el
-    ; itimerval de Linux (it_interval y it_value, timeval); solo ITIMER_REAL
-    ; (las de tiempo de procesador, ITIMER_VIRTUAL y ITIMER_PROF, dan EINVAL)
+    ; itimerval de Linux (it_interval y it_value, timeval): ITIMER_REAL (0);
+    ; [etapa 11] y las de tiempo de procesador, ITIMER_VIRTUAL (1: el del
+    ; programa, SIGVTALRM) e ITIMER_PROF (2: el del programa y el del núcleo
+    ; por él, SIGPROF), contadas por el tic
     función itimer_(p: puntero a Proceso, cuál: nat64, nuevo: nat64, viejo: nat64): ent64
         variable v: arreglo [4] de nat64
         variable queda, int_: nat64
-        si cuál <> 0 entonces devolver EINVAL fin
+        si cuál > 2 entonces devolver EINVAL fin
         si nuevo <> 0 entonces
             si no copia_de(p, nat64(dirección(v[0])), nuevo, 32) entonces devolver EFAULT fin
             si v[1] >= 1000000 o v[3] >= 1000000 o v[0] >= nat64(1) << 40 o v[2] >= nat64(1) << 40 entonces devolver EINVAL fin
         fin
-        alarma_de(p, queda, int_)
-        si nuevo <> 0 entonces pon_alarma(p, v[2] * 1000000000 + v[3] * 1000, v[0] * 1000000000 + v[1] * 1000) fin
+        si cuál = 0 entonces
+            alarma_de(p, queda, int_)
+            si nuevo <> 0 entonces pon_alarma(p, v[2] * 1000000000 + v[3] * 1000, v[0] * 1000000000 + v[1] * 1000) fin
+        sino
+            itimer_cpu(p, nat32(cuál - 1), queda, int_, nuevo <> 0, v[2] * 1000000000 + v[3] * 1000, v[0] * 1000000000 + v[1] * 1000)
+        fin
         si viejo <> 0 entonces
             v[0] := int_ div 1000000000
             v[1] := (int_ mod 1000000000 + 999) div 1000
@@ -2126,10 +2173,22 @@ módulo Sistema
         devolver ent64((queda + 999999999) div 1000000000)
     fin
 
-    ; [etapa 7] getrusage: a cero
-    función uso_(p: puntero a Proceso, v: nat64): ent64
+    ; [etapa 7] getrusage; [etapa 11] con el tiempo de procesador (RUSAGE_SELF
+    ; 0, RUSAGE_CHILDREN -1: los recogidos, RUSAGE_THREAD 1); lo demás, a cero
+    función uso_(p: puntero a Proceso, quién: nat64, v: nat64): ent64
         variable ru: arreglo [18] de nat64
+        variable h: puntero a Hilo
         ceros_mem(nat64(dirección(ru[0])), 144)
+        si quién = 0 entonces
+            pon_tiempo_ru(nat64(dirección(ru[0])), p.cpu_u, p.cpu_s)
+        sino si quién = nob nat64(0) entonces
+            pon_tiempo_ru(nat64(dirección(ru[0])), p.hijos_u, p.hijos_s)
+        sino si quién = 1 entonces
+            h := actual()
+            pon_tiempo_ru(nat64(dirección(ru[0])), h.t_usuario, h.t_sistema)
+        sino
+            devolver EINVAL
+        fin
         si no copia_a(p, v, nat64(dirección(ru[0])), 144) entonces devolver EFAULT fin
         devolver 0
     fin

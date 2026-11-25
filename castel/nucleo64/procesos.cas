@@ -169,6 +169,13 @@ módulo Procesos
         ini_fpu: nat64              ; el bloque de los registros del primer hilo
         ; [etapa 10] setitimer (ITIMER_REAL) y alarm: cuándo se le manda SIGALRM (ns de ahora_ns; 0: nunca) y cada cuánto
         alarma, alarma_int: nat64
+        ; [etapa 11] el tiempo de procesador (ns: en el programa y en el
+        ; núcleo; el de los hijos recogidos), y ITIMER_VIRTUAL (0) y
+        ; ITIMER_PROF (1): lo que les queda (ns; 0: nada) y su intervalo; las
+        ; que han vencido, por mandar (bit 0, SIGVTALRM; bit 1, SIGPROF)
+        cpu_u, cpu_s, hijos_u, hijos_s: nat64
+        itv, itv_int: arreglo [2] de nat64
+        itv_pend: nat64
     fin
 
     ; [etapa 7] lo que arranca un hilo nuevo (clone con CLONE_THREAD)
@@ -1370,6 +1377,8 @@ módulo Procesos
         h := actual()
         si h.usuario = 0 o h.proceso = 0 entonces devolver fin
         si l64(m + 128) yb 3 <> 3 entonces devolver fin
+        ; [etapa 11] ITIMER_VIRTUAL y PROF vencidas en el tic: sus señales
+        mira_itimers(puntero(h.proceso))
         ; [etapa 11] si la interrupción ha despertado a uno que pasa por
         ; delante (y no lo ha hecho ya el tic), le toca antes de volver al programa
         si hay_que_expropiar() entonces
@@ -2045,6 +2054,15 @@ módulo Procesos
         q.ini_fpu := 0
         q.alarma := 0                   ; (fork: las alarmas no se heredan; execve las guarda)
         q.alarma_int := 0
+        q.cpu_u := 0                    ; [etapa 11] ni el tiempo ni ITIMER_VIRTUAL y PROF
+        q.cpu_s := 0
+        q.hijos_u := 0
+        q.hijos_s := 0
+        q.itv[0] := 0
+        q.itv[1] := 0
+        q.itv_int[0] := 0
+        q.itv_int[1] := 0
+        q.itv_pend := 0
     fin
 
     ; arranca el programa de la línea («HOLA uno dos»: el archivo HOLA de la
@@ -2731,13 +2749,17 @@ módulo Procesos
         fin
         si z.señal <> 0 entonces est := z.señal sino est := (z.código yb 255) << 8 fin
         id := z.id
+        ; [etapa 11] su tiempo, a los de los hijos (getrusage RUSAGE_CHILDREN), y el de wait4
+        suma_atómica(dirección(p.hijos_u), z.cpu_u + z.hijos_u)
+        suma_atómica(dirección(p.hijos_s), z.cpu_s + z.hijos_s)
+        ceros_mem(nat64(dirección(ru[0])), 144)
+        pon_tiempo_ru(nat64(dirección(ru[0])), z.cpu_u, z.cpu_s)
         libera(puntero(nat64(z)))
         suma_atómica(dirección(zombis_recogidos), 1)
         si v_est <> 0 entonces
             si no copia_a(p, v_est, nat64(dirección(est)), 4) entonces devolver -14 fin
         fin
         si v_uso <> 0 entonces
-            ceros_mem(nat64(dirección(ru[0])), 144)
             si no copia_a(p, v_uso, nat64(dirección(ru[0])), 144) entonces devolver -14 fin
         fin
         devolver ent64(id)
@@ -2853,7 +2875,7 @@ módulo Procesos
     público función prepara_procesos()
         variable c: puntero a Cpu
         c := yo()
-        si nat64(dirección(c.pila_sys)) - nat64(c) <> CPU_PILA_SIS o nat64(dirección(c.rsp_usuario)) - nat64(c) <> CPU_RSP_USUARIO entonces
+        si nat64(dirección(c.pila_sys)) - nat64(c) <> CPU_PILA_SIS o nat64(dirección(c.rsp_usuario)) - nat64(c) <> CPU_RSP_USUARIO o nat64(dirección(c.desde_usuario)) - nat64(c) <> CPU_DESDE_USUARIO entonces
             detén_ini("el bloque del procesador no es como lo espera la entrada de syscall")
             detén_fin()
         fin
@@ -2873,6 +2895,74 @@ módulo Procesos
         ; ([etapa 11] INTERACTIVO: en la 10 iba NORMAL por un fallo del
         ; planificador, el de despierta_todos, arreglado: sección 17)
         al_hilo := crea(nat64(dirección(hilo_alarmas)), 0, "alarmas", INTERACTIVO, CUALQUIERA)
+        al_tic_proceso := nat64(dirección(al_tic_))
+    fin
+
+    ; ---- [etapa 11] el tiempo de procesador; ITIMER_VIRTUAL y ITIMER_PROF ----
+    público constante SIGVTALRM = 26
+    público constante SIGPROF = 27
+
+    ; (en el tic, sin interrupciones) un tic del hilo h (en el programa, u = 1)
+    función al_tic_(dh: nat64, u: nat64)
+        variable h: puntero a Hilo
+        variable p: puntero a Proceso
+        variable b: nat64
+        h := puntero(dh)
+        p := puntero(h.proceso)
+        si u <> 0 entonces suma_atómica(dirección(p.cpu_u), TIC_NS) sino suma_atómica(dirección(p.cpu_s), TIC_NS) fin
+        si p.itv[0] = 0 y p.itv[1] = 0 entonces devolver fin
+        b := toma(dirección(p.h_cerrojo))
+        si u <> 0 entonces cuenta_itv(p, 0) fin
+        cuenta_itv(p, 1)
+        suelta(dirección(p.h_cerrojo), b)
+    fin
+
+    ; (con h_cerrojo) un tic menos para la k; al vencer, su señal por mandar
+    función cuenta_itv(p: puntero a Proceso, k: nat32)
+        si p.itv[k] = 0 entonces devolver fin
+        si p.itv[k] > TIC_NS entonces
+            p.itv[k] := p.itv[k] - TIC_NS
+            devolver
+        fin
+        p.itv_pend := p.itv_pend ob (nat64(1) << k)
+        p.itv[k] := p.itv_int[k]
+    fin
+
+    ; (al volver al programa) las señales de las que han vencido
+    público función mira_itimers(p: puntero a Proceso)
+        variable b, pend: nat64
+        si p.itv_pend = 0 entonces devolver fin
+        b := toma(dirección(p.h_cerrojo))
+        pend := p.itv_pend
+        p.itv_pend := 0
+        suelta(dirección(p.h_cerrojo), b)
+        si pend yb 1 <> 0 entonces señala_proceso_(p, SIGVTALRM, 0x80, 0) fin
+        si pend yb 2 <> 0 entonces señala_proceso_(p, SIGPROF, 0x80, 0) fin
+    fin
+
+    ; setitimer y getitimer de ITIMER_VIRTUAL (k = 0) y ITIMER_PROF (1): lo
+    ; que le queda y el intervalo (ns), y, si nuevo, los nuevos (0: quitarla)
+    público función itimer_cpu(p: puntero a Proceso, k: nat32, ref queda: nat64, ref int_: nat64, nuevo: bool, en: nat64, cada: nat64)
+        variable b: nat64
+        b := toma(dirección(p.h_cerrojo))
+        queda := p.itv[k]
+        int_ := p.itv_int[k]
+        si nuevo entonces
+            ; (como Linux: lo pedido, en tics enteros hacia arriba)
+            si en > 0 y en < TIC_NS entonces en := TIC_NS fin
+            p.itv[k] := en
+            si en = 0 entonces p.itv_int[k] := 0 sino p.itv_int[k] := cada fin
+            p.itv_pend := p.itv_pend yb (nob (nat64(1) << k))
+        fin
+        suelta(dirección(p.h_cerrojo), b)
+    fin
+
+    ; un struct rusage (en d): ru_utime y ru_stime (timeval) de u y s (ns)
+    público función pon_tiempo_ru(d: nat64, u: nat64, s: nat64)
+        p64(d, u div 1000000000)
+        p64(d + 8, (u mod 1000000000) div 1000)
+        p64(d + 16, s div 1000000000)
+        p64(d + 24, (s mod 1000000000) div 1000)
     fin
 
 fin Procesos.

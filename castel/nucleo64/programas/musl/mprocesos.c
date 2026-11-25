@@ -5,7 +5,8 @@
  * con la salida por una tubería (dup2), posix_spawn (clone con CLONE_VM y
  * CLONE_VFORK), wait de varios, tuberías (100 KB, el fin de archivo, poll,
  * O_CLOEXEC al hacer execve), fork con varios hilos y execve con varios
- * hilos. Estático (MPROCESOS) y dinámico (MPROCESOSD). */
+ * hilos; [etapa 11] select y poll de 100 tuberías (descriptores más allá
+ * del 200). Estático (MPROCESOS) y dinámico (MPROCESOSD). */
 #include "comun.h"
 #include <stdlib.h>
 #include <unistd.h>
@@ -16,6 +17,7 @@
 #include <spawn.h>
 #include <pthread.h>
 #include <sys/wait.h>
+#include <sys/select.h>
 
 extern char **environ;
 #define GRANDE (16 << 20)
@@ -101,6 +103,36 @@ int main(int argc, char **argv)
 	MIRA(poll(&pf, 1, 50) == 1 && (pf.revents & POLLIN), "poll: POLLIN cuando hay algo");
 	close(t[0]);
 	close(t[1]);
+	/* [etapa 11] select y poll con muchos descriptores: 100 tuberías (200
+	 * descriptores, hasta más allá del 200), algo en la última */
+	{
+		int tt[100][2], k, hechas = 0, alto = 0, bien_sel, bien_pol;
+		fd_set rs;
+		struct timeval tv = { 0, 50000 };
+		struct pollfd *pp = calloc(100, sizeof *pp);
+		for (k = 0; k < 100; k++) {
+			if (pipe(tt[k]) != 0) break;
+			hechas++;
+			if (tt[k][0] > alto) alto = tt[k][0];
+		}
+		MIRA(hechas == 100 && alto > 200, "100 tuberías a la vez (descriptores hasta más allá del 200)");
+		if (hechas == 100) {
+			write(tt[99][1], "z", 1);
+			FD_ZERO(&rs);
+			for (k = 0; k < 100; k++) FD_SET(tt[k][0], &rs);
+			bien_sel = select(alto + 1, &rs, 0, 0, &tv) == 1 && FD_ISSET(tt[99][0], &rs) && !FD_ISSET(tt[0][0], &rs);
+			MIRA(bien_sel, "select de 100 descriptores (hasta más allá del 200): solo el que tiene algo");
+			for (k = 0; k < 100; k++) { pp[k].fd = tt[k][0]; pp[k].events = POLLIN; }
+			bien_pol = poll(pp, 100, 50) == 1 && (pp[99].revents & POLLIN) && pp[0].revents == 0;
+			MIRA(bien_pol, "poll de 100 descriptores: solo el que tiene algo");
+			FD_ZERO(&rs);
+			FD_SET(250, &rs);
+			MIRA(select(251, &rs, 0, 0, &tv) == -1 && errno == EBADF, "select de uno sin abrir (el 250): EBADF");
+			printf("  select y poll de 100 tuberías (descriptores hasta el %d)\n", alto);
+		}
+		for (k = 0; k < hechas; k++) { close(tt[k][0]); close(tt[k][1]); }
+		free(pp);
+	}
 	/* epoll de una tubería */
 	{
 		int ep = epoll_create1(EPOLL_CLOEXEC);

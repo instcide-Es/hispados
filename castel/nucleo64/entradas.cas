@@ -46,6 +46,7 @@ módulo Entradas
     ; Procesos al empezar
     público constante CPU_PILA_SIS = 184
     público constante CPU_RSP_USUARIO = 192
+    público constante CPU_DESDE_USUARIO = 172    ; [etapa 11] la interrupción ha llegado en el anillo 3 (el tic cuenta el tiempo del programa)
 
     público variable manejadores: arreglo [256] de nat64   ; la función de Castel de cada vector
     público variable al_sistema: nat64          ; la función de las llamadas al sistema: al_sistema(marco)
@@ -96,6 +97,7 @@ módulo Entradas
             and eax, 3
             jz E64_nucleo
             db 0x0F, 0x01, 0xF8         ; swapgs
+            db 0x65, 0xC7, 0x04, 0x25, 0xAC, 0, 0, 0, 1, 0, 0, 0    ; [etapa 11] mov dword [gs:172], 1
             mov rax, rsp
             add rax, 16
             push 0x10
@@ -123,6 +125,7 @@ módulo Entradas
             and eax, 3
             jz E64_nucleo
             db 0x0F, 0x01, 0xF8         ; swapgs
+            db 0x65, 0xC7, 0x04, 0x25, 0xAC, 0, 0, 0, 1, 0, 0, 0    ; [etapa 11] mov dword [gs:172], 1
             mov rax, rsp
             add rax, 24
             push 0x10
@@ -160,6 +163,7 @@ módulo Entradas
         ; haya que entregar (Ctrl+C a un programa que no llama al sistema, un
         ; kill, la de un fallo) cambian el marco
         E64_salida:
+            db 0x65, 0xC7, 0x04, 0x25, 0xAC, 0, 0, 0, 0, 0, 0, 0    ; [etapa 11] mov dword [gs:172], 0 (ya se ha atendido)
             push rax
             push rcx
             push rdx

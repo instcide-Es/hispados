@@ -9,7 +9,8 @@
  * pthread_kill (tgkill) y un hijo que no llama al sistema cerrado con kill
  * (SIGTERM y SIGINT: le llega en el tic); [etapa 10] alarm y setitimer
  * (SIGALRM: una vez y con intervalo, getitimer, lo que quedaba, quitarla,
- * y que el hijo de fork no la hereda). Estático y dinámico. */
+ * y que el hijo de fork no la hereda); [etapa 11] ITIMER_VIRTUAL e
+ * ITIMER_PROF, getrusage y CLOCK_PROCESS_CPUTIME_ID. Estático y dinámico. */
 #include "comun.h"
 #include <stdlib.h>
 #include <signal.h>
@@ -21,6 +22,7 @@
 #include <sys/wait.h>
 #include <sys/syscall.h>
 #include <sys/time.h>
+#include <sys/resource.h>
 
 static volatile sig_atomic_t veces, último, código_, pid_;
 static volatile void *dir_;
@@ -256,7 +258,55 @@ int main(void)
 		veces = 0;
 		usleep(100000);
 		MIRA(veces == 0, "quitada: no llega ninguna más");
-		MIRA(setitimer(ITIMER_VIRTUAL, &it, 0) == -1 && errno == EINVAL, "ITIMER_VIRTUAL: EINVAL (aún no)");
+		/* [etapa 11] las de tiempo de procesador: ITIMER_VIRTUAL (el del
+		 * programa) e ITIMER_PROF; dormir no cuenta; getrusage y
+		 * CLOCK_PROCESS_CPUTIME_ID, con lo gastado */
+		{
+			struct timespec c0, c1, w0, w1;
+			struct rusage ru;
+			long cpu_ms, vueltas = 0, j;
+			volatile unsigned long k = 0;
+			pon(SIGVTALRM, atiende, 0);
+			pon(SIGPROF, atiende, 0);
+			memset(&it, 0, sizeof it);
+			it.it_value.tv_usec = 50000;
+			veces = 0;
+			MIRA(setitimer(ITIMER_VIRTUAL, &it, 0) == 0, "setitimer ITIMER_VIRTUAL: 50 ms del programa");
+			usleep(150000);
+			MIRA(veces == 0, "ITIMER_VIRTUAL: durmiendo no cuenta");
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &c0);
+			clock_gettime(CLOCK_MONOTONIC, &w0);
+			/* (el trabajo, en el programa: el reloj, de vez en cuando) */
+			do {
+				for (j = 0; j < 100000 && !veces; j++) k++;
+				clock_gettime(CLOCK_MONOTONIC, &w1);
+			} while (!veces && w1.tv_sec - w0.tv_sec < 20);
+			clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &c1);
+			cpu_ms = (c1.tv_sec - c0.tv_sec) * 1000 + (c1.tv_nsec - c0.tv_nsec) / 1000000;
+			MIRA(veces == 1 && último == SIGVTALRM && código_ == SI_KERNEL, "ITIMER_VIRTUAL: SIGVTALRM al gastar 50 ms");
+			MIRA(cpu_ms >= 30 && cpu_ms <= 2000, "CLOCK_PROCESS_CPUTIME_ID: lo gastado (unos 50 ms)");
+			memset(&it, 0, sizeof it);
+			it.it_value.tv_usec = 30000;
+			it.it_interval.tv_usec = 30000;
+			veces = 0;
+			MIRA(setitimer(ITIMER_PROF, &it, 0) == 0, "setitimer ITIMER_PROF: 30 ms y luego cada 30");
+			MIRA(getitimer(ITIMER_PROF, &vi) == 0 && vi.it_interval.tv_usec == 30000 && vi.it_value.tv_usec > 0 && vi.it_value.tv_usec <= 30000, "getitimer ITIMER_PROF");
+			clock_gettime(CLOCK_MONOTONIC, &w0);
+			do {
+				for (j = 0; j < 100000 && veces < 3; j++) k++;
+				getppid();      /* (también lo del núcleo por él) */
+				clock_gettime(CLOCK_MONOTONIC, &w1);
+			} while (veces < 3 && w1.tv_sec - w0.tv_sec < 20);
+			MIRA(veces >= 3 && último == SIGPROF, "ITIMER_PROF: tres SIGPROF, una cada 30 ms gastados");
+			memset(&it, 0, sizeof it);
+			MIRA(setitimer(ITIMER_PROF, &it, &vi) == 0 && vi.it_interval.tv_usec == 30000, "ITIMER_PROF quitada");
+			vueltas = veces;
+			usleep(50000);
+			MIRA(veces == vueltas, "quitada: ninguna más");
+			MIRA(getrusage(RUSAGE_SELF, &ru) == 0 && ru.ru_utime.tv_sec * 1000 + ru.ru_utime.tv_usec / 1000 >= 80, "getrusage: el tiempo del programa (más de 80 ms)");
+			MIRA(setitimer(3, &it, 0) == -1 && errno == EINVAL, "setitimer de una que no hay: EINVAL");
+			printf("  ITIMER_VIRTUAL y ITIMER_PROF: SIGVTALRM y SIGPROF al gastar el procesador (%ld ms medidos con CLOCK_PROCESS_CPUTIME_ID)\n", cpu_ms);
+		}
 		alarm(10);
 		h = fork();
 		if (h == 0) _exit(alarm(0) == 0 ? 0 : 1);

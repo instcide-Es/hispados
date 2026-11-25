@@ -44,7 +44,7 @@ módulo PorCpu64
         parado: nat32               ; 1: se ha parado por el pánico de otro
         expropiar: nat32            ; hay que replanificar en cuanto se pueda
         cuanto: nat32               ; los tics que lleva el hilo que corre
-        nada2: nat32
+        desde_usuario: nat32        ; [etapa 11] 1: la interrupción que se atiende ha llegado en el anillo 3 (lo pone la entrada: Entradas)
         ocioso: nat64               ; 1: en reposo (hlt o mwait), sin nada que hacer
         ; [etapa 4] (pila_sys y rsp_usuario en 184 y 192: los usa la entrada de syscall)
         pila_sys: nat64             ; lo alto de la pila del núcleo del hilo de un programa que corre

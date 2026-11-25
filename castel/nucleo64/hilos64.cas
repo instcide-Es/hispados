@@ -99,6 +99,7 @@ módulo Hilos64
         forzada: nat64              ; la señal de un fallo del procesador, para entregarla al volver
         f_dir, f_cód, f_err, f_trap: nat64      ; lo de esa señal (si_addr, si_code, el error y la excepción)
         interrumpible: nat64        ; la Espera de la que le saca una señal (o 0)
+        t_usuario, t_sistema: nat64 ; [etapa 11] el tiempo de procesador, en el programa y en el núcleo (ns, de 10 en 10 ms: el tic)
         s_info: arreglo [64] de nat64           ; de cada pendiente suya: el código (abajo) y quién (arriba)
     fin
 
@@ -125,6 +126,10 @@ módulo Hilos64
     público variable con_mwait: bool
     público variable pista_mwait: nat32
     público variable reposo: puntero a byte     ; por qué hlt o mwait (lo que se dice)
+    ; [etapa 11] lo de cada tic para el proceso del hilo que corre:
+    ; al_tic_proceso(hilo, en_usuario), de Procesos (su tiempo y ITIMER_VIRTUAL y PROF)
+    público variable al_tic_proceso: nat64
+    público constante TIC_NS = 10000000
     ; [etapa 4] lo que se hace al cambiar de hilo cuando uno de los dos es de un
     ; programa o lleva otro espacio de direcciones: al_cambiar(de, a), de Procesos
     ; (CR3, TSS.RSP0, FS y GS del programa)
@@ -356,6 +361,7 @@ módulo Hilos64
         n.cpu := c.número
         si c.número < 64 entonces n.cpus_vistas := n.cpus_vistas ob (nat64(1) << c.número) fin
         n.rodajas := n.rodajas + 1
+        c.desde_usuario := 0
         c.cuanto := 0
         c.cambios := c.cambios + 1
         c.anterior := nat64(h)
@@ -922,8 +928,21 @@ módulo Hilos64
     ; ---- lo que hace cada tic (Apic64.al_tic: con las interrupciones quitadas) ----
     función tic_hilos()
         variable c: puntero a Cpu
+        variable h: puntero a Hilo
+        variable u: bool
         c := yo()
         c.cuanto := c.cuanto + 1
+        ; [etapa 11] el tiempo de procesador del que corre (en el programa si
+        ; el tic ha llegado en el anillo 3), y lo de su proceso
+        u := c.desde_usuario <> 0
+        c.desde_usuario := 0
+        si c.hilo <> c.ociosa y c.hilo <> 0 entonces
+            h := hilo(c.hilo)
+            si u entonces h.t_usuario := h.t_usuario + TIC_NS sino h.t_sistema := h.t_sistema + TIC_NS fin
+            si al_tic_proceso <> 0 y h.proceso <> 0 entonces
+                si u entonces llama2(al_tic_proceso, nat64(h), 1) sino llama2(al_tic_proceso, nat64(h), 0) fin
+            fin
+        fin
         ; (el reloj de ACPI se va sumando: hay que leerlo antes de que dé la vuelta)
         si c.número = 0 y c.tics yb 63 = 0 entonces ahora_ns() fin
         si reloj_prim <> 0 entonces despierta_vencidos() fin
