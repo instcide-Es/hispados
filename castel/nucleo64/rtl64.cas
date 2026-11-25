@@ -22,7 +22,7 @@
 ; =============================================================================
 módulo Rtl64
 
-    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redbase64
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64
 
     constante G_VIEJA = 0
     constante G_EVL = 1

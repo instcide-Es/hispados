@@ -8,7 +8,7 @@
 ;  despierta su interrupción, o mira cada 10 ms), lo que queda en la cola de
 ;  «lo», los plazos (ARP, DHCP, los de TCP) y el enlace (cada medio
 ;  segundo); y avisa a los que esperan (Sondeo64). Todo con el cerrojo de la
-;  red (Redbase64.red_m). Los nombres (DNS) los resuelve musl con UDP: aquí,
+;  red (Redcom64.red_m). Los nombres (DNS) los resuelve musl con UDP: aquí,
 ;  /etc/resolv.conf con los DNS que dé DHCP (red64.cas).
 ;  Lo de Hispa-Pentium (castel/nucleo32/rpila.cas) es el modelo; aquí sin
 ;  servicio aparte: en el núcleo.
@@ -16,7 +16,7 @@
 ; =============================================================================
 módulo Ip64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Sondeo64, Azar64, Redbase64, Intel64, Rtl64, Virtio64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Sondeo64, Azar64, Redcom64, Intel64, Rtl64, Virtio64
 
     constante MAX_ARP = 32
     constante LO_N = 256

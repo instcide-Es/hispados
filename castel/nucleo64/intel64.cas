@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo Intel64
 
-    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redbase64
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64
 
     público constante MAX_INTEL = 2
     constante N_RX = 64

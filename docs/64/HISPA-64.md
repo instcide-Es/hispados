@@ -2396,7 +2396,7 @@ para 40 s, saca los registros por el monitor (los procesadores, todos en
   Hispa-Pentium (`castel/nucleo32/rpila.cas` y `rtcp.cas`), escrita otra vez
   para 64 bits y para un núcleo con varios procesadores. Todo lo de los
   protocolos y los sockets se toca con **un mutex, el de la red**
-  (`Redbase64.red_m`); lo mueve **un hilo del núcleo, «red»**: lo despierta
+  (`Redcom64.red_m`); lo mueve **un hilo del núcleo, «red»**: lo despierta
   la interrupción de la tarjeta (o mira cada 10 ms si no llega), recoge lo
   que haya llegado (de 32 en 32 tramas, soltando el cerrojo entre medias), lo
   que queda en la cola de `lo`, los plazos (ARP, DHCP, los de TCP) y el enlace
@@ -2478,12 +2478,12 @@ Hispa-64 0.9.0. Los módulos y programas nuevos y lo que cambia:
 
 | Archivo | Qué |
 |---|---|
-| `redbase64.cas` | las interfaces (Ifz), los sockets (Sock: TCP dentro), el mutex de la red, el suceso del hilo, el orden de los octetos, la suma de IP, los anillos de los búferes |
+| `redcom64.cas` | las interfaces (Ifz), los sockets (Sock: TCP dentro), el mutex de la red, el suceso del hilo, el orden de los octetos, la suma de IP, los anillos de los búferes |
 | `ip64.cas` | Ethernet, ARP (32 vecinos, con el paquete que espera), IPv4, ICMP, UDP, DHCP (con renovación), `lo` (127.0.0.1 y la IP propia), las rutas, `ip=` (IP fija), el hilo «red» |
 | `tcp64.cas` | TCP: conectar, escuchar y aceptar, la ventana, la retransmisión con su plazo medido (de 200 ms a 60 s), la rápida (tres ACK repetidos), la ventana a cero (persist), el cierre en las dos direcciones, RST; `red=traza` dice cada 2 s cómo está cada conexión |
 | `red64.cas` | los sockets de POSIX, sus opciones, FIONREAD, FIONBIO y los SIOCGIF*, poll; los archivos de texto de la red |
 | `sondeo64.cas` | la espera que despierta (arriba) |
-| `objetos64.cas` | eventfd (284, 290), timerfd (283, 286, 287), `/dev/urandom`, `/dev/random` y los textos |
+| `objet64.cas` | eventfd (284, 290), timerfd (283, 286, 287), `/dev/urandom`, `/dev/random` y los textos |
 | `azar64.cas` | ChaCha20 (arriba) |
 | `hora64.cas` | la hora y la zona (arriba) |
 | `intel64.cas`, `rtl64.cas`, `virtio64.cas` | los drivers (arriba) |
@@ -2518,7 +2518,9 @@ Después de la red: 0 sockets (15 hechos), 0 procesos; IP 4750 recibidos y 6965 
 
 ### Cómo se ha probado
 
-(Las cifras de la batería, al final de esta sección.)
+`castel/nucleo64/pruebas.sh`: **110 pruebas, todas bien** (eran 105), unos
+55 minutos con el servidor (de ellos, unos 20 de ensambla.py, que con el
+núcleo de la etapa 9 —119.600 líneas— da muchas más pasadas). Lo de la etapa 9:
 
 - **MRED en cada arranque** (con las demás de musl): 123 pruebas de las
   llamadas por 127.0.0.1, sin tarjeta: socket, bind (y el puerto que da),

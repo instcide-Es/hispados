@@ -22,7 +22,7 @@
 ; =============================================================================
 módulo Red64
 
-    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64, Procesos, Sondeo64, Azar64, Objetos64, Redbase64, Ip64, Tcp64
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64, Procesos, Sondeo64, Azar64, Objet64, Redcom64, Ip64, Tcp64
 
     constante EPERM = -1
     constante EINTR = -4
@@ -1439,7 +1439,7 @@ módulo Red64
         devolver igual(t, "/etc/resolv.conf") o igual(t, "/etc/hosts") o igual(t, "/etc/hostname") o igual(t, "/etc/services") o igual(t, "/proc/net/route") o igual(t, "/proc/net/dev") o igual(t, "/etc/protocols")
     fin
 
-    ; hace el texto de la ruta t: el objeto (Objetos64.nuevo_texto), o 0
+    ; hace el texto de la ruta t: el objeto (Objet64.nuevo_texto), o 0
     público función texto_red(t: puntero a byte): nat64
         variable e: Escrito
         variable i, k: nat32

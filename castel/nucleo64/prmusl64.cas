@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo PrMusl64
 
-    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redbase64
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redcom64
 
     público variable fallos7: nat32
 

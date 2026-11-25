@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Azar64, Hora64, Objetos64, Redbase64, Red64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Azar64, Hora64, Objet64, Redcom64, Red64
 
     constante EPERM = -1
     constante ENOENT = -2

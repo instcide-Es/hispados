@@ -21,7 +21,7 @@
 ; =============================================================================
 módulo Tcp64
 
-    importar Cifras64, Es64, Monton64, Reloj64, Sondeo64, Azar64, Redbase64, Ip64
+    importar Cifras64, Es64, Monton64, Reloj64, Sondeo64, Azar64, Redcom64, Ip64
 
     constante F_FIN = 1
     constante F_SYN = 2

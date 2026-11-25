@@ -1,5 +1,5 @@
 ; =============================================================================
-;  objetos64.cas - Hispa-64, etapa 9: los descriptores que piden la red y
+;  objet64.cas - Hispa-64, etapa 9: los descriptores que piden la red y
 ;  los programas de hoy (docs/64/HISPA-64.md, sección 15), como en Linux:
 ;   - eventfd (284, 290): un contador de 64 bits; write suma, read lo da (y
 ;     lo pone a 0; con EFD_SEMAPHORE da 1 y resta 1) o espera; EFD_NONBLOCK
@@ -15,7 +15,7 @@
 ;     aquí se leen (y lseek al principio).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo Objetos64
+módulo Objet64
 
     importar Es64, Cerrojo, Monton64, Reloj64, Hilos64, Procesos, Sondeo64, Azar64, Hora64
 
@@ -377,4 +377,4 @@ módulo Objetos64
         fin
     fin
 
-fin Objetos64.
+fin Objet64.

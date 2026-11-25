@@ -1,5 +1,5 @@
 ; =============================================================================
-;  redbase64.cas - Hispa-64, etapa 9: lo de base de la red (docs/64/
+;  redcom64.cas - Hispa-64, etapa 9: lo de base de la red (docs/64/
 ;  HISPA-64.md, sección 15), lo que comparten los drivers de las tarjetas
 ;  (intel64, rtl64, virtio64, usbred64), la pila TCP/IP (ip64, tcp64) y los
 ;  sockets (red64):
@@ -17,7 +17,7 @@
 ;  leen en la red octeto a octeto.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo Redbase64
+módulo Redcom64
 
     importar Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64
 
@@ -383,4 +383,4 @@ módulo Redbase64
         escribir(dirección(t[0]))
     fin
 
-fin Redbase64.
+fin Redcom64.
