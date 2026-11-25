@@ -13,6 +13,21 @@
 ;    Instaladas (n)    todo lo instalado y, al final, los programas sueltos
 ;                      (.EXE, .BIN y .HVP copiados a mano, sin paquete)
 ;    Sin instalar (n)  lo del catálogo que no está instalado: «Instalar»
+;    Grupos (n)        (GRUPOS, 25/11/2026) los grupos del catálogo («Toda la
+;                      Oficina», «Todo Internet y redes»...): cada uno, con
+;                      lo que lleva debajo ([+] / [-]) y su botón: «Instalar
+;                      todo (N paquetes, X MB)», «Faltan 3 de 7: instalar lo
+;                      que falta» o «Ya está todo» (PAQUETES INSTALA
+;                      GRUPO=..., con su barra y, al final, el resumen:
+;                      instalados, ya estaban y los fallos con su motivo); y
+;                      «Quitar grupo...» (solo un administrador, con
+;                      confirmación: lo del sistema, lo imprescindible y lo
+;                      que necesite otro programa o grupo entero se queda).
+;                      Sin ser administrador, el botón lo dice.
+;
+;  (RUEDA, 25/11/2026) La rueda del ratón desplaza la lista que hay debajo
+;  de la flecha (tres renglones por paso, como el Bloc o Mi equipo); en
+;  otra parte de la ventana, el árbol. Ctrl+rueda: la letra.
 ;
 ;  Arriba, una búsqueda (con su lupa) para todas las pestañas: filtra al
 ;  escribir por nombre, descripción o tipo, sin mirar tildes ni mayúsculas.
@@ -39,7 +54,7 @@
 ;  mandado a C:\HISPA\PAQUETES\PROGRAMA.TXT. ACTUALIZ.BIN (el menú Inicio,
 ;  «Actualizar», el dock y el aviso de la bandeja) abre esta ventana.
 ;
-;    PROGRAMA [/PENDIENTES | /ALDIA | /INSTALADAS | /SININSTALAR]   la ventana, en esa pestaña
+;    PROGRAMA [/PENDIENTES | /ALDIA | /INSTALADAS | /SININSTALAR | /GRUPOS]   la ventana, en esa pestaña
 ;    PROGRAMA /LENTO     (las pruebas) PAQUETES va despacio al quitar: se ve la barra
 ;
 ;  Con el teclado: las flechas andan por el árbol (izquierda y derecha cierran
@@ -78,6 +93,10 @@ módulo UProgram
     constante ES_CATEGORÍA = 0x10000
     constante ES_SUELTO = 0x20000
     constante ES_CATÁLOGO = 0x30000             ; uno del catálogo que no está instalado
+    constante ES_GRUPO = 0x40000                ; (GRUPOS) un grupo
+    constante ES_GRUPO_P = 0x50000              ; (GRUPOS) un paquete de un grupo: + grupo * 256 + cuál
+    constante ID_GRUPO_B = 16                   ; (GRUPOS) el botón grande de la ficha del grupo
+    constante MAX_G = 16
     constante MENÚS = "&Programa|&Ver|A&yuda"
     constante TECLA_F5 = 0x13F
     constante CTRL_F = 6
@@ -86,12 +105,15 @@ módulo UProgram
     constante V_AL_DÍA = 1
     constante V_INSTALADAS = 2
     constante V_SIN_INSTALAR = 3
+    constante V_GRUPOS = 4                      ; (GRUPOS)
+    constante N_VISTAS = 5
     ; lo que se pregunta
     constante PR_NADA = 0
     constante PR_QUITAR = 1
     constante PR_NO_SE_PUEDE = 2
     constante PR_BORRAR = 3
     constante PR_REINICIAR = 4
+    constante PR_RESUMEN = 5                    ; (GRUPOS) lo que ha pasado al instalar un grupo
 
     ; ---- lo instalado (PAQUETES FICHAS) ----
     variable p_n: nat32
@@ -123,6 +145,16 @@ módulo UProgram
     variable d_letra: byte
     variable d_total_k, d_libre_k: nat32
     variable abierta: arreglo [N_CAT] de bool
+    ; ---- (GRUPOS) los grupos (/CATALOGO: «g|código|nombre|descripción|p1,p2...|lo que sale al quitarlo») ----
+    variable g_n: nat32
+    variable g_código: arreglo [MAX_G] de arreglo [16] de byte
+    variable g_nombre: arreglo [MAX_G] de arreglo [48] de byte
+    variable g_desc: arreglo [MAX_G] de arreglo [200] de byte
+    variable g_lista: arreglo [MAX_G] de arreglo [256] de byte
+    variable g_quita: arreglo [MAX_G] de arreglo [256] de byte
+    variable g_abierto: arreglo [MAX_G] de bool
+    variable admin: bool                        ; ¿es administrador quien la usa? (instalar, quitar)
+    variable res_texto: arreglo [700] de byte   ; el resumen de un grupo instalado
 
     ; ---- la ventana ----
     variable vista: nat32
@@ -425,6 +457,7 @@ módulo UProgram
         p_n := 0
         s_n := 0
         c_n := 0
+        g_n := 0
         origen[0] := 0
         firmado := falso
         p := salida
@@ -463,6 +496,13 @@ módulo UProgram
                 trozo(p, 6, x, 16)
                 c_nuevo[c_n] := iguales(x, "nuevo")
                 c_n := c_n + 1
+            sino si iguales(x, "g") y g_n < MAX_G entonces
+                trozo(p, 1, g_código[g_n], 16)
+                trozo(p, 2, g_nombre[g_n], 48)
+                trozo(p, 3, g_desc[g_n], 200)
+                trozo(p, 4, g_lista[g_n], 256)
+                trozo(p, 5, g_quita[g_n], 256)
+                si g_código[g_n][0] <> 0 entonces g_n := g_n + 1 fin
             sino si iguales(x, "o") entonces
                 trozo(p, 1, origen, 120)
                 trozo(p, 2, x, 16)
@@ -501,7 +541,17 @@ módulo UProgram
     fin
 
     función es_nuevo(id: nat32): bool
-        devolver id >= ES_CATÁLOGO
+        devolver id >= ES_CATÁLOGO y id < ES_GRUPO
+    fin
+
+    ; (GRUPOS) un grupo, o un paquete de un grupo; y qué grupo
+    función es_grupo(id: nat32): bool
+        devolver id >= ES_GRUPO
+    fin
+
+    función grupo_del(id: nat32): nat32
+        si id < ES_GRUPO_P entonces devolver id - ES_GRUPO fin
+        devolver (id - ES_GRUPO_P) >> 8
     fin
 
     ; ¿lo encuentra la búsqueda? (nombre, descripción o tipo; sin tildes ni mayúsculas)
@@ -514,7 +564,7 @@ módulo UProgram
 
     ; ¿sale el instalado i en la pestaña v?
     función sale_p(i: nat32, v: nat32): bool
-        si v = V_SIN_INSTALAR entonces devolver falso fin
+        si v = V_SIN_INSTALAR o v = V_GRUPOS entonces devolver falso fin
         si v = V_PENDIENTES y p_nueva[i][0] = 0 entonces devolver falso fin
         si v = V_AL_DÍA y p_nueva[i][0] <> 0 entonces devolver falso fin
         devolver casa(p_nombre[i], p_desc[i], p_tipo[i])
@@ -533,6 +583,10 @@ módulo UProgram
     función cuántos(v: nat32): nat32
         variable i, n: nat32
         n := 0
+        si v = V_GRUPOS entonces
+            para i desde 1 hasta g_n hacer si sale_g(i - 1) entonces n := n + 1 fin fin
+            devolver n
+        fin
         para i desde 1 hasta p_n hacer si sale_p(i - 1, v) entonces n := n + 1 fin fin
         para i desde 1 hasta s_n hacer si sale_s(i - 1, v) entonces n := n + 1 fin fin
         para i desde 1 hasta c_n hacer si sale_c(i - 1, v) entonces n := n + 1 fin fin
@@ -544,6 +598,10 @@ módulo UProgram
         variable c, i, h, antes, total: nat32
         variable r: ent32
         variable x: arreglo [24] de byte
+        si vista = V_GRUPOS entonces
+            llena_grupos()                      ; (GRUPOS)
+            devolver
+        fin
         antes := rejilla_id(g)
         rejilla_vaciar(g)
         para c desde 0 hasta N_CAT - 1 hacer
@@ -630,6 +688,298 @@ módulo UProgram
         si rejilla_id(g) = 0 entonces rejilla_ir(g, 0) fin
     fin
 
+    ; =========================================================================
+    ;  (GRUPOS) Los grupos
+    ; =========================================================================
+    ; el k-ésimo de una lista con comas (falso si no hay tantos)
+    función de_lista(lista: puntero a byte, k: nat32, destino: puntero a byte): bool
+        variable i: nat32
+        mientras k > 0 y valor(lista) <> 0 hacer
+            si valor(lista) = ',' entonces k := k - 1 fin
+            lista := lista + 1
+        fin
+        i := 0
+        mientras valor(lista) <> 0 y valor(lista) <> ',' y i < 11 hacer
+            destino[i] := valor(lista)
+            i := i + 1
+            lista := lista + 1
+        fin
+        destino[i] := 0
+        devolver i > 0
+    fin
+
+    ; el del catálogo de ese nombre (MAX_C si no está)
+    función del_catálogo(n: puntero a byte): nat32
+        variable j: nat32
+        para j desde 1 hasta c_n hacer
+            si iguales(c_nombre[j - 1], n) entonces devolver j - 1 fin
+        fin
+        devolver MAX_C
+    fin
+
+    ; cuántos tiene el grupo (de los que hay: instalados o en el catálogo),
+    ; cuántos están instalados, y lo que se trae de los que faltan
+    variable gt_total, gt_hay, gt_oct: nat32
+    función cuenta_g(gi: nat32)
+        variable k: nat32
+        variable n: arreglo [12] de byte
+        gt_total := 0
+        gt_hay := 0
+        gt_oct := 0
+        k := 0
+        mientras de_lista(g_lista[gi], k, n) hacer
+            k := k + 1
+            si está_instalado(n) entonces
+                gt_total := gt_total + 1
+                gt_hay := gt_hay + 1
+            sino si del_catálogo(n) < MAX_C entonces
+                gt_total := gt_total + 1
+                gt_oct := gt_oct + c_octetos[del_catálogo(n)]
+            fin
+        fin
+    fin
+
+    ; lo que dice el botón del grupo (largo: con cuántos y cuánto)
+    función estado_g(gi: nat32, destino: puntero a byte)
+        variable x: arreglo [24] de byte
+        cuenta_g(gi)
+        tamaño_texto(gt_oct, x)
+        si gt_total > 0 y gt_hay = gt_total entonces
+            Textos32.copiar(destino, "Ya está todo")
+        sino si gt_hay = 0 entonces
+            dd[0] := gt_total
+            dd[1] := nat32(dirección(x[0]))
+            formatear(destino, 120, "Instalar todo (%u paquetes, %s)", dd)
+        sino
+            dd[0] := gt_total - gt_hay
+            dd[1] := gt_total
+            dd[2] := nat32(dirección(x[0]))
+            formatear(destino, 120, "Faltan %u de %u: instalar lo que falta (%s)", dd)
+        fin
+    fin
+
+    ; ¿lo encuentra la búsqueda? (su nombre, lo que es o alguno de los suyos)
+    función sale_g(gi: nat32): bool
+        si filtro[0] = 0 entonces devolver cierto fin
+        devolver contiene(g_nombre[gi], filtro) o contiene(g_desc[gi], filtro) o contiene(g_lista[gi], filtro)
+    fin
+
+    ; el árbol de la pestaña Grupos: cada grupo y, si está abierto, lo que lleva
+    función llena_grupos()
+        variable gi, k, c, antes: nat32
+        variable r: ent32
+        variable n: arreglo [12] de byte
+        variable x: arreglo [24] de byte
+        antes := rejilla_id(g)
+        rejilla_vaciar(g)
+        para gi desde 0 hasta g_n hacer
+            si gi < g_n y sale_g(gi) entonces
+                r := renglón_nuevo(g, R_NORMAL, ES_GRUPO + gi)
+                dd[0] := nat32("[-]")
+                si no g_abierto[gi] entonces dd[0] := nat32("[+]") fin
+                dd[1] := nat32(dirección(g_nombre[gi][0]))
+                formatear(t, 200, "%s %s", dd)
+                celda(g, r, 0, t)
+                cuenta_g(gi)
+                dd[0] := gt_hay
+                dd[1] := gt_total
+                formatear(t, 200, "%u de %u", dd)
+                celda(g, r, 1, t)
+                si gt_oct > 0 entonces
+                    tamaño_corto(gt_oct, x)
+                    celda(g, r, 3, x)
+                fin
+                estado_g(gi, t)
+                celda(g, r, 4, t)
+                si g_abierto[gi] entonces
+                    k := 0
+                    mientras de_lista(g_lista[gi], k, n) y k < 256 hacer
+                        r := renglón_nuevo(g, R_NORMAL, ES_GRUPO_P + gi * 256 + k)
+                        une(t, "    ", n)
+                        celda(g, r, 0, t)
+                        c := del_catálogo(n)
+                        si está_instalado(n) entonces
+                            celda(g, r, 1, p_versión[de_nombre(n)])
+                            celda(g, r, 2, p_nueva[de_nombre(n)])
+                            tamaño_corto(p_octetos[de_nombre(n)], x)
+                            celda(g, r, 3, x)
+                            celda(g, r, 4, p_desc[de_nombre(n)])
+                        sino si c < MAX_C entonces
+                            celda(g, r, 1, "-")
+                            celda(g, r, 2, c_versión[c])
+                            tamaño_corto(c_octetos[c], x)
+                            celda(g, r, 3, x)
+                            celda(g, r, 4, c_desc[c])
+                        sino
+                            celda(g, r, 1, "-")
+                            celda(g, r, 4, "(no está en el catálogo)")
+                        fin
+                        k := k + 1
+                    fin
+                fin
+            fin
+        fin
+        rejilla_lista(g)
+        si antes <> 0 entonces rejilla_elegir_id(g, antes) fin
+        si rejilla_id(g) = 0 entonces rejilla_ir(g, 0) fin
+    fin
+
+    ; la ficha de un grupo: qué es, lo que lleva, lo que falta y su botón grande
+    función ficha_g(gi: nat32, x: ent32, yy: ent32, an: ent32, límite: ent32)
+        variable k, h: nat32
+        variable n: arreglo [12] de byte
+        variable x2: arreglo [24] de byte
+        variable lleva: arreglo [400] de byte
+        variable falta: arreglo [300] de byte
+        variable bt: arreglo [120] de byte
+        texto_corto(x, yy, g_nombre[gi], an, C_TINTA, cierto)
+        yy := yy + LT + 4 * E
+        si g_desc[gi][0] <> 0 entonces fila(x, yy, an, "Qué es:", g_desc[gi], C_TINTA, límite) fin
+        lleva[0] := 0
+        falta[0] := 0
+        h := 0
+        k := 0
+        mientras de_lista(g_lista[gi], k, n) hacer
+            si k > 0 entonces concatenar(lleva, ", ") fin
+            concatenar(lleva, n)
+            si está_instalado(n) entonces
+                concatenar(lleva, " (sí)")
+            sino si del_catálogo(n) < MAX_C entonces
+                si h > 0 entonces concatenar(falta, ", ") fin
+                concatenar(falta, n)
+                h := h + 1
+            sino
+                concatenar(lleva, " (no está en el catálogo)")
+            fin
+            k := k + 1
+        fin
+        fila(x, yy, an, "Lleva:", lleva, C_TINTA, límite)
+        cuenta_g(gi)
+        dd[0] := gt_hay
+        dd[1] := gt_total
+        formatear(t, 200, "%u de %u", dd)
+        fila(x, yy, an, "Instalados:", t, C_TINTA, límite)
+        si h > 0 entonces
+            tamaño_texto(gt_oct, x2)
+            une(t, falta, " (")
+            concatenar(t, x2)
+            concatenar(t, ")")
+            fila(x, yy, an, "Falta:", t, C_TINTA, límite)
+        fin
+        ; el botón: instalar (o lo que falta); sin ser administrador, lo dice
+        estado_g(gi, bt)
+        si yy + alto_botón() <= límite entonces
+            si no admin y h > 0 entonces
+                Textos32.copiar(bt, "Instalar: solo un administrador")
+            fin
+            botón(ID_GRUPO_B, x, yy, bt, h > 0 y admin, h = 0 o no admin o ocupado)
+            yy := yy + alto_botón() + 3 * E
+        fin
+        si no admin entonces
+            párrafo(x, yy, an, "Instalar o quitar programas es cosa de un administrador: entre con su usuario. Un usuario normal puede poner al día lo instalado (Pendientes).", C_NARANJA, falso, cierto)
+        sino si g_quita[gi][0] <> 0 entonces
+            fila(x, yy, an, "Al quitarlo:", g_quita[gi], C_SUAVE, límite)
+        fin
+    fin
+
+    ; Instalar el grupo (lo que falta): PAQUETES INSTALA GRUPO=..., y el resumen
+    función instala_grupo()
+        variable id, gi: nat32
+        variable p: puntero a byte
+        variable x: arreglo [200] de byte
+        id := rejilla_id(g)
+        si no es_grupo(id) entonces devolver fin
+        gi := grupo_del(id)
+        si gi >= g_n entonces devolver fin
+        si no admin entonces
+            Textos32.copiar(aviso, "Instalar un grupo es cosa de un administrador: entre con su usuario.")
+            devolver
+        fin
+        cuenta_g(gi)
+        si gt_total > 0 y gt_hay = gt_total entonces
+            une(aviso, g_nombre[gi], ": ya está todo instalado.")
+            devolver
+        fin
+        une(t, "instala grupo=", g_código[gi])
+        une(hecho_txt, g_nombre[gi], ": instalado.")
+        paquetes(t)
+        ; el resumen: «Grupo x: N instalados, N ya estaban, N fallos.» y los «  fallo x: por qué»
+        res_texto[0] := 0
+        p := salida
+        mientras valor(p) <> 0 hacer
+            trozo(p, 0, x, 200)
+            si empieza_por(x, "Grupo ") y buscar(x, " instalados, ") <> nulo entonces
+                une(res_texto, g_nombre[gi], ": ")
+                concatenar(res_texto, buscar(x, ": ") + 2)
+            fin
+            p := siguiente_línea(p)
+        fin
+        si res_texto[0] = 0 entonces
+            ; (PAQUETES no ha llegado a decirlo: lo último que ha dicho)
+            aviso_de_salida()
+            une(res_texto, g_nombre[gi], ": no se ha instalado. ")
+            concatenar(res_texto, aviso)
+        fin
+        p := salida
+        mientras valor(p) <> 0 hacer
+            trozo(p, 0, x, 200)
+            si empieza_por(x, "  fallo ") y longitud(res_texto) + longitud(x) + 4 < 690 entonces
+                concatenar(res_texto, " ")
+                concatenar(res_texto, dirección(x[8]))
+                concatenar(res_texto, ".")
+            fin
+            p := siguiente_línea(p)
+        fin
+        tras_instalar()
+        si pregunta = PR_NADA entonces
+            Textos32.copiar(preg_texto, res_texto)
+            pregunta := PR_RESUMEN
+            foco := ID_NO
+        sino
+            res_texto[199] := 0
+            Textos32.copiar(aviso, res_texto)
+        fin
+    fin
+
+    ; Quitar el grupo: lo que sale (lo dice PAQUETES en FICHAS), y que se confirme
+    función pide_quitar_grupo()
+        variable id, gi: nat32
+        id := rejilla_id(g)
+        si no es_grupo(id) o no admin entonces devolver fin
+        gi := grupo_del(id)
+        si gi >= g_n entonces devolver fin
+        aviso[0] := 0
+        si g_quita[gi][0] = 0 entonces
+            une(preg_texto, g_nombre[gi], ": no hay nada que quitar. Lo que tiene instalado es del sistema, o es imprescindible, o lo necesita otro programa, o es de otro grupo que está entero.")
+            pregunta := PR_NO_SE_PUEDE
+            foco := ID_NO
+            devolver
+        fin
+        dd[0] := nat32(dirección(g_nombre[gi][0]))
+        dd[1] := nat32(dirección(g_quita[gi][0]))
+        formatear(preg_texto, 700, "¿Quitar el grupo «%s»? Se quitan: %s. Lo del sistema, lo imprescindible y lo que necesiten otros programas o grupos enteros se queda. Si se corta a mitad, la próxima vez queda como estaba.", dd)
+        Textos32.copiar(preg_sí, "Quitar el grupo")
+        une(preg_orden, "quita grupo=", g_código[gi])
+        pregunta := PR_QUITAR
+        foco := ID_NO
+    fin
+
+    ; la rueda: la lista que hay debajo de la flecha; si no hay ninguna, el árbol
+    función rueda_programa(ref s: Suceso): bool
+        variable gb: puntero a Rejilla
+        variable k: ent32
+        k := rueda_letra(s)
+        si k <> 0 entonces
+            si k > 0 entonces tamaño_ := T_GRANDE sino tamaño_ := T_NORMAL fin
+            nuevo_tamaño(ancho, alto, tamaño_)
+            devolver cierto
+        fin
+        si s.c yb CON_CONTROL <> 0 entonces devolver falso fin
+        gb := rejilla_bajo(ent32(s.a), ent32(s.b))
+        si gb <> nulo entonces devolver rejilla_rueda(valor(gb), pasos_rueda(s.c)) fin
+        devolver rejilla_rueda(g, pasos_rueda(s.c))
+    fin
+
     ; lo que ocupan todos (octetos)
     función total_programas(): nat32
         variable i, n: nat32
@@ -661,7 +1011,15 @@ módulo UProgram
         variable id, i, c, h, total: nat32
         variable x2: arreglo [40] de byte
         id := rejilla_id(g)
+        si es_grupo(id) entonces
+            si grupo_del(id) < g_n entonces ficha_g(grupo_del(id), x, yy, an, límite) fin
+            devolver
+        fin
         si id = 0 entonces
+            si vista = V_GRUPOS entonces
+                párrafo(x, yy, an, "Elija un grupo: lleva varios programas que se instalan juntos.", C_SUAVE, falso, cierto)
+                devolver
+            fin
             si vista = V_PENDIENTES y filtro[0] = 0 entonces
                 párrafo(x, yy, an, "Todo está al día: no hay versiones nuevas de lo instalado.", C_VERDE, cierto, cierto)
             sino
@@ -773,14 +1131,16 @@ módulo UProgram
         caja(x + 4 * E, yy + 4 * E, an, al, 0x9CA3AF)
         caja(x, yy, an, al, C_BORDE)
         caja(x + 2 * E, yy + 2 * E, an - 4 * E, al - 4 * E, C_PAPEL)
-        si pregunta = PR_NO_SE_PUEDE entonces
+        si pregunta = PR_RESUMEN entonces
+            caja(x + 2 * E, yy + 2 * E, an - 4 * E, 4 * E, C_VERDE)
+        sino si pregunta = PR_NO_SE_PUEDE entonces
             caja(x + 2 * E, yy + 2 * E, an - 4 * E, 4 * E, C_NARANJA)
         sino
             caja(x + 2 * E, yy + 2 * E, an - 4 * E, 4 * E, C_ROJO)
         fin
         párrafo(x + 2 * LA, yy + LT div 2 + 6 * E, an - 4 * LA, preg_texto, C_TINTA, falso, cierto)
         bx := x + an - 2 * LA
-        si pregunta = PR_NO_SE_PUEDE entonces
+        si pregunta = PR_NO_SE_PUEDE o pregunta = PR_RESUMEN entonces
             bx := bx - ancho_botón("Entendido")
             botón(ID_NO, bx, yy + al - alto_botón() - 6 * E, "Entendido", cierto, falso)
         sino
@@ -869,6 +1229,10 @@ módulo UProgram
         id := rejilla_id(g)
         aviso[0] := 0
         si id = 0 o es_cat(id) o es_nuevo(id) entonces devolver fin
+        si es_grupo(id) entonces
+            pide_quitar_grupo()                 ; (GRUPOS)
+            devolver
+        fin
         si es_suelto(id) entonces
             i := id - ES_SUELTO
             une(preg_texto, "¿Borrar ", s_ruta[i])
@@ -1103,6 +1467,28 @@ módulo UProgram
             b_sí[1] := hay_pendientes()
             Textos32.copiar(b_lab[2], "Ver archivos")
             b_sí[2] := inst
+        sino si vista = V_GRUPOS entonces
+            ; (GRUPOS) instalar lo que falta; quitar el grupo (solo un administrador)
+            b_sí[0] := falso
+            Textos32.copiar(b_lab[0], "Instalar el grupo")
+            b_ve[1] := admin
+            Textos32.copiar(b_lab[1], "Quitar grupo...")
+            b_sí[1] := falso
+            b_ve[2] := falso
+            si es_grupo(id) y grupo_del(id) < g_n entonces
+                cuenta_g(grupo_del(id))
+                si gt_total > 0 y gt_hay = gt_total entonces
+                    Textos32.copiar(b_lab[0], "Ya está todo")
+                sino si gt_hay > 0 entonces
+                    Textos32.copiar(b_lab[0], "Completar grupo")
+                sino
+                    Textos32.copiar(b_lab[0], "Instalar todo")
+                fin
+                b_sí[0] := admin y gt_hay < gt_total
+                b_sí[1] := g_quita[grupo_del(id)][0] <> 0
+            fin
+            si no admin entonces Textos32.copiar(b_lab[0], "Solo administrador") fin
+            b_pri := cierto
         sino si vista = V_SIN_INSTALAR entonces
             Textos32.copiar(b_lab[0], "Instalar")
             b_sí[0] := nuevo
@@ -1160,7 +1546,8 @@ módulo UProgram
             dd[1] := cuántos(V_AL_DÍA)
             dd[2] := cuántos(V_INSTALADAS)
             dd[3] := cuántos(V_SIN_INSTALAR)
-            formatear(pes, 120, "Pendientes (%u)|Al día (%u)|Instaladas (%u)|Sin instalar (%u)", dd)
+            dd[4] := cuántos(V_GRUPOS)
+            formatear(pes, 120, "Pendientes (%u)|Al día (%u)|Instaladas (%u)|Sin instalar (%u)|Grupos (%u)", dd)
             yy := yy + pestañas(ID_VISTA, LA div 2, yy, ancho - LA, pes, vista, 0)
             ; el árbol
             límite := alto - alto_estado() - 4 * E
@@ -1170,6 +1557,10 @@ módulo UProgram
                 concatenar(t, "» en esta pestaña.")
             sino si vista = V_PENDIENTES entonces
                 Textos32.copiar(t, "Todo está al día: no hay versiones nuevas de lo instalado.")
+            sino si vista = V_GRUPOS y origen[0] = 0 entonces
+                Textos32.copiar(t, "No hay catálogo a la vista: sin él no se saben los grupos. «Buscar novedades» lo vuelve a mirar.")
+            sino si vista = V_GRUPOS entonces
+                Textos32.copiar(t, "El catálogo no trae grupos (es de antes de la 1.9 de PAQUETES).")
             sino si vista = V_SIN_INSTALAR y origen[0] = 0 entonces
                 Textos32.copiar(t, "No hay catálogo a la vista (ni memoria USB con \\PAQUETES ni red): «Buscar novedades» lo vuelve a mirar.")
             sino si vista = V_SIN_INSTALAR entonces
@@ -1325,10 +1716,12 @@ módulo UProgram
     fin
 
     función hace(id: nat32)
-        si id = ID_B1 entonces
-            si vista = V_PENDIENTES entonces actualiza(falso) sino si vista = V_SIN_INSTALAR entonces instala() sino pide_quitar() fin
+        si id = ID_GRUPO_B entonces
+            instala_grupo()
+        sino si id = ID_B1 entonces
+            si vista = V_GRUPOS entonces instala_grupo() sino si vista = V_PENDIENTES entonces actualiza(falso) sino si vista = V_SIN_INSTALAR entonces instala() sino pide_quitar() fin
         sino si id = ID_B2 entonces
-            si vista = V_PENDIENTES entonces actualiza(cierto) sino repara() fin
+            si vista = V_GRUPOS entonces pide_quitar_grupo() sino si vista = V_PENDIENTES entonces actualiza(cierto) sino repara() fin
         sino si id = ID_B3 entonces ver_archivos()
         sino si id = ID_TODO entonces actualiza(cierto)
         sino si id = ID_NOVEDADES entonces novedades()
@@ -1343,6 +1736,11 @@ módulo UProgram
 
     ; un tipo: abrirlo o cerrarlo
     función abre_cierra(id: nat32)
+        si es_grupo(id) y id < ES_GRUPO_P y id - ES_GRUPO < g_n entonces
+            g_abierto[id - ES_GRUPO] := no g_abierto[id - ES_GRUPO]
+            llena_árbol()
+            devolver
+        fin
         si es_cat(id) entonces
             abierta[id - ES_CATEGORÍA] := no abierta[id - ES_CATEGORÍA]
             llena_árbol()
@@ -1352,6 +1750,7 @@ módulo UProgram
     función todas(sí: bool)
         variable c: nat32
         para c desde 0 hasta N_CAT - 1 hacer abierta[c] := sí fin
+        para c desde 0 hasta MAX_G - 1 hacer g_abierto[c] := sí fin     ; (GRUPOS)
         llena_árbol()
     fin
 
@@ -1359,7 +1758,7 @@ módulo UProgram
         abierto_m := ent32(k)
         según k
             caso 0: abrir_menú_barra(0, "Instalar|Actualizar|Actualizar todo|Desinstalar...|Reparar|Ver archivos|-|Buscar novedades|-|Cerrar", 0)
-            caso 1: abrir_menú_barra(1, "Pendientes|Al día|Instaladas|Sin instalar|-|Buscar...|Abrir todos|Cerrar todos|-|Letra normal|Letra grande", 0)
+            caso 1: abrir_menú_barra(1, "Pendientes|Al día|Instaladas|Sin instalar|Grupos|-|Buscar...|Abrir todos|Cerrar todos|-|Letra normal|Letra grande", 0)
             si no: abrir_menú_barra(2, "Acerca de Programas y actualizaciones", 0)
         fin
     fin
@@ -1375,7 +1774,7 @@ módulo UProgram
         si op = SIN_ELEGIR entonces devolver falso fin
         si cuál = 0 entonces
             según nat16(op)
-                caso 0: instala()
+                caso 0: si vista = V_GRUPOS entonces instala_grupo() sino instala() fin
                 caso 1: actualiza(falso)
                 caso 2: actualiza(cierto)
                 caso 3: pide_quitar()
@@ -1386,14 +1785,14 @@ módulo UProgram
             fin
         sino si cuál = 1 entonces
             según nat16(op)
-                caso 0..3: a_vista(op)
-                caso 5: a_buscar()
-                caso 6: todas(cierto)
-                caso 7: todas(falso)
-                caso 9:
+                caso 0..4: a_vista(op)
+                caso 6: a_buscar()
+                caso 7: todas(cierto)
+                caso 8: todas(falso)
+                caso 10:
                     tamaño_ := T_NORMAL
                     nuevo_tamaño(ancho, alto, tamaño_)
-                caso 10:
+                caso 11:
                     tamaño_ := T_GRANDE
                     nuevo_tamaño(ancho, alto, tamaño_)
             fin
@@ -1414,7 +1813,7 @@ módulo UProgram
                 pregunta := PR_NADA
                 foco := ID_ÁRBOL
             sino si c = '\t' o c = TECLA_MAYÚS_TAB o c = TECLA_IZQUIERDA o c = TECLA_DERECHA entonces
-                si pregunta = PR_NO_SE_PUEDE entonces foco := ID_NO sino si foco = ID_SÍ entonces foco := ID_NO sino foco := ID_SÍ fin
+                si pregunta = PR_NO_SE_PUEDE o pregunta = PR_RESUMEN entonces foco := ID_NO sino si foco = ID_SÍ entonces foco := ID_NO sino foco := ID_SÍ fin
             sino si c = '\n' o c = ' ' entonces
                 hace(foco)
             fin
@@ -1428,7 +1827,7 @@ módulo UProgram
         fin
         id := rejilla_id(g)
         si c = TECLA_CTRL_TAB o c = TECLA_CTRL_MAYÚS_TAB entonces
-            a_vista(otra_pestaña(vista, 4, 0, c = TECLA_CTRL_TAB))
+            a_vista(otra_pestaña(vista, N_VISTAS, 0, c = TECLA_CTRL_TAB))
         sino si c = CTRL_F o c = TECLA_F3 entonces
             a_buscar()
         sino si c = '\t' o c = TECLA_MAYÚS_TAB entonces
@@ -1447,18 +1846,21 @@ módulo UProgram
             fin
         sino si c = '\n' entonces
             si foco = ID_ÁRBOL o foco = ID_ARCHIVOS o foco = ID_PESTAÑAS o foco = ID_VISTA entonces
-                si es_cat(id) entonces abre_cierra(id) sino si id <> 0 y id <= MAX_P entonces ver_archivos() sino si es_nuevo(id) entonces instala() fin
+                si es_cat(id) o (es_grupo(id) y id < ES_GRUPO_P) entonces abre_cierra(id) sino si id <> 0 y id <= MAX_P entonces ver_archivos() sino si es_nuevo(id) entonces instala() fin
             sino
                 hace(foco)
             fin
         sino si c = ' ' y foco >= ID_B1 entonces
             hace(foco)
         sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y foco = ID_VISTA entonces
-            a_vista(otra_pestaña(vista, 4, 0, c = TECLA_DERECHA))
+            a_vista(otra_pestaña(vista, N_VISTAS, 0, c = TECLA_DERECHA))
         sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y foco = ID_PESTAÑAS entonces
             pestaña := 1 - pestaña
         sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y es_cat(id) entonces
             abierta[id - ES_CATEGORÍA] := c = TECLA_DERECHA
+            llena_árbol()
+        sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y es_grupo(id) y id < ES_GRUPO_P y id - ES_GRUPO < g_n entonces
+            g_abierto[id - ES_GRUPO] := c = TECLA_DERECHA        ; (GRUPOS)
             llena_árbol()
         sino si c = TECLA_SUPR entonces
             si vista = V_AL_DÍA o vista = V_INSTALADAS entonces pide_quitar() fin
@@ -1511,6 +1913,7 @@ módulo UProgram
             fin
             si r < 0 entonces devolver fin
             si rejilla_id(g) <> antes entonces ga_de[0] := 0 fin
+            si derecho y vista = V_GRUPOS entonces devolver fin
             si derecho entonces
                 pon_botones()
                 si b_ve[1] y no es_cat(rejilla_id(g)) entonces
@@ -1526,6 +1929,12 @@ módulo UProgram
                 fin
                 devolver
             fin
+            si es_grupo(rejilla_id(g)) y rejilla_id(g) < ES_GRUPO_P entonces
+                ; (GRUPOS) un clic en [+] / [-] (o dos en el grupo): lo que lleva
+                si x < g.col_x[0] + 3 * LA o veces_ >= 2 entonces abre_cierra(rejilla_id(g)) fin
+                devolver
+            fin
+            si es_grupo(rejilla_id(g)) entonces devolver fin
             si es_cat(rejilla_id(g)) y (x < g.col_x[0] + 3 * LA o veces_ >= 2) entonces
                 abre_cierra(rejilla_id(g))
             sino si veces_ >= 2 y rejilla_id(g) <= MAX_P entonces
@@ -1581,6 +1990,8 @@ módulo UProgram
         si buscar(a, "/ALDIA") <> nulo entonces vista := V_AL_DÍA fin
         si buscar(a, "/INSTALADAS") <> nulo entonces vista := V_INSTALADAS fin
         si buscar(a, "/SININSTALAR") <> nulo entonces vista := V_SIN_INSTALAR fin
+        si buscar(a, "/GRUPOS") <> nulo entonces vista := V_GRUPOS fin
+        admin := soy_administrador()            ; (GRUPOS)
         si no preparar_medida("Programas y actualizaciones", 784, 560, tamaño_) entonces
             escribir("programa: no hay escritorio: PAQUETES LISTA /TIPO lo dice en texto\n")
             devolver 1
@@ -1615,6 +2026,9 @@ módulo UProgram
             sino si s.clase = EV_TAMAÑO entonces
                 nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
                 pinta()
+            sino si s.clase = EV_RUEDA entonces
+                ; (RUEDA) no la atendía: la lista bajo la flecha (o el árbol)
+                si pregunta = PR_NADA y rueda_programa(s) entonces pinta() fin
             fin
             si pide_salir entonces devolver 0 fin     ; (CORTES) se cerró mientras trabajaba
         fin

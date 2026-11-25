@@ -1053,6 +1053,8 @@ módulo UReloj
                     ; (AGENDA) dos clics en un día del calendario: la Agenda, en ese día
                     si Llamadas.veces(s.c) >= 2 y pestaña = 0 y control_en(ent32(s.a), ent32(s.b)) = ID_CAL entonces abre_agenda() fin
                     pinta()
+                sino si s.clase = EV_RUEDA entonces
+                    si rueda(s) entonces pinta() fin    ; (RUEDA) las vueltas del cronómetro, bajo la flecha
                 sino si s.clase = EV_MENÚ entonces
                     abierto := -1
                     si s.b = 0 y s.a = 0 entonces devolver 0 fin
