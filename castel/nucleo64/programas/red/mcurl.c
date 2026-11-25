@@ -213,7 +213,7 @@ static CURL *nuevo(const char *ruta, struct bajada *b)
 	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, escribe);
 	curl_easy_setopt(c, CURLOPT_WRITEDATA, b);
 	curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
-	curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 20000L);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 120000L);   /* (con TCG y el anfitrión cargado, 16 a la vez llegan a 25 s) */
 	empieza(b);
 	return c;
 }
@@ -372,8 +372,9 @@ static int pruebas(void)
 					curl_easy_getinfo(msg->easy_handle, CURLINFO_PRIVATE, (char **)&i);
 					if (msg->data.result == CURLE_OK && código(msg->easy_handle) == 200
 					    && bb[i].n == (size_t)(100000 + i * 12345) && bb[i].iguales) bien++;
+					else printf("  curl_multi: la %ld, %s (%zu octetos)\n", i, curl_easy_strerror(msg->data.result), bb[i].n);
 				}
-		} while (corriendo && ms_ahora() - t0 < 60000);
+		} while (corriendo && ms_ahora() - t0 < 150000);
 		t = ms_ahora() - t0;
 		MIRA(bien == N, "16 a la vez con curl_multi (8 conexiones como mucho)");
 		size_t total = 0;
