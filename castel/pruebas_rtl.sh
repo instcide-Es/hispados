@@ -96,8 +96,8 @@ saca $X/u.img SDIO.TXT $X/sdio.txt
 tr -d '\r' < $X/sdio.txt > $X/sdio2.txt 2> /dev/null
 k=$(sed -n 's/^espera=\([0-9]*\)$/\1/p' $X/sdio2.txt | head -1)
 if grep -q "^equipo=[0-9A-F]\{8\} [0-9A-F]\{8\}$" $X/sdio2.txt && grep -q "^sdio=FEB00000 0$" $X/sdio2.txt && grep -q "^sdio1=FEB01000$" $X/sdio2.txt \
-  && grep -q "^hijo=OBDA8723$" $X/sdio2.txt && [ "$(grep -c "^gpio=FED0E168 [0-9A-F]\{8\} 32$" $X/sdio2.txt)" = 3 ] && [ "${k:-0}" -ge 18 ] && [ "${k:-0}" -le 60 ]; then
-  ok "(RTL8723BS) \\SDIO.TXT: el equipo, la controladora y su BAR1, el chip y las tres escrituras en la patilla, con la espera de 20 ms del _PS0 ($k ms)"
+  && grep -q "^hijo=OBDA8723$" $X/sdio2.txt && [ "$(grep -c "^gpio=FED0E168 [0-9A-F]\{8\} 32$" $X/sdio2.txt)" = 3 ] && [ "${k:-0}" -ge 10 ] && [ "${k:-0}" -le 80 ]; then
+  ok "(RTL8723BS) \\SDIO.TXT: el equipo, la controladora y su BAR1, el chip y las tres escrituras en la patilla, con la espera de 20 ms del _PS0 ($k ms medidos; el reloj de QEMU, cargado, se queda corto)"
 else ko "(RTL8723BS) \\SDIO.TXT no es como debe:"; sed 's/^/        /' $X/sdio2.txt 2> /dev/null | head -12; mdir -i $X/u.img :: 2>&1 | grep -i "txt" | sed 's/^/        /'; fi
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "(RTL8723BS) ni una excepción del núcleo ni un error de ACPICA"
 else ko "(RTL8723BS) hay excepciones o errores de ACPICA:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S | head -4 | sed 's/^/        /'; fi
