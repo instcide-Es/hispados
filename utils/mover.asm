@@ -174,6 +174,7 @@ one:
         mov si, msg_same
         jmp puts
 .nsame:
+        mov byte [had_old], 0
         ; ¿existe el destino?
         mov dx, fdst
         mov ax, 0x4300
@@ -188,12 +189,25 @@ one:
         call ask_yes
         jc .skip
 .over:
+        ; el destino viejo no se borra todavía: se aparta (MOVER$$$.TMP en
+        ; su carpeta) y solo se borra cuando el nuevo ya está en su sitio;
+        ; si el movimiento falla, vuelve (antes se perdía)
         mov dx, fdst
         mov ax, 0x4301
         xor cx, cx
         int 0x21
+        call tmp_name
+        mov dx, tn1                 ; (uno que quedara de otra vez)
         mov ah, 0x41
         int 0x21
+        mov dx, fdst
+        mov di, tn1
+        push ds
+        pop es
+        mov ah, 0x56
+        int 0x21
+        jc .fail
+        mov byte [had_old], 1
 .go:
         ; misma unidad: renombrar
         call same_drive
@@ -204,17 +218,23 @@ one:
         pop es
         mov ah, 0x56
         int 0x21
-        jc .fail
-        jmp .ok
+        jc .undo
+        jmp .okd
 .copy:
         test byte [dta+0x15], 0x10
-        jnz .fail                   ; una carpeta no se mueve a otra unidad
+        jnz .undo                   ; una carpeta no se mueve a otra unidad
         call copy_file
-        jc .fail
+        jc .undo
         mov dx, fsrc
         mov ax, 0x4301
         xor cx, cx
         int 0x21
+        mov ah, 0x41
+        int 0x21
+.okd:
+        cmp byte [had_old], 0       ; ya está: fuera el viejo
+        je .ok
+        mov dx, tn1
         mov ah, 0x41
         int 0x21
 .ok:
@@ -223,10 +243,47 @@ one:
 .skip:
         mov si, msg_skip
         jmp puts
+.undo:
+        cmp byte [had_old], 0       ; el viejo, otra vez en su sitio
+        je .fail
+        mov dx, tn1
+        mov di, fdst
+        push ds
+        pop es
+        mov ah, 0x56
+        int 0x21
 .fail:
         mov byte [errors], 1
         mov si, msg_fail
         jmp puts
+
+; tn1 = la carpeta de fdst + MOVER$$$.TMP
+tmp_name:
+        mov si, fdst
+        mov di, tn1
+        mov bx, tn1                 ; BX = tras la última «\» o «:»
+.c:
+        lodsb
+        mov [di], al
+        inc di
+        cmp al, '\'
+        je .s
+        cmp al, ':'
+        jne .n
+.s:
+        mov bx, di
+.n:
+        test al, al
+        jnz .c
+        mov di, bx
+        mov si, s_tmp
+.t:
+        lodsb
+        mov [di], al
+        inc di
+        test al, al
+        jnz .t
+        ret
 
 ; ¿fsrc y fdst en la misma unidad? -> ZF
 same_drive:
@@ -415,6 +472,7 @@ msg_nf      db "No se encontró el archivo.", 13, 10, 0
 msg_arrow   db " => ", 0
 msg_ok      db " [correcto]", 13, 10, 0
 msg_fail    db " [error]", 13, 10, 0
+s_tmp       db "MOVER$$$.TMP", 0
 msg_skip    db " [no se mueve]", 13, 10, 0
 msg_same    db " [es el mismo archivo: no se mueve]", 13, 10, 0
 msg_ask     db 13, 10, "El archivo ya existe. ¿Sobrescribir? (S/N) ", 0
@@ -426,6 +484,7 @@ opt_y       resb 1
 wild        resb 1
 dst_isdir   resb 1
 errors      resb 1
+had_old     resb 1
 count       resw 1
 hs          resw 1
 hd          resw 1

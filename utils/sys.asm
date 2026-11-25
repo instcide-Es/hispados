@@ -351,8 +351,63 @@ cperr:
         mov ax, 0x4C04
         int 0x21
 
-; SI = origen, DI = destino (si existe se sustituye, aunque sea de sistema)
+; SI = origen, DI = destino (si existe se sustituye, aunque sea de sistema).
+; Primero a un temporal (X.$$$ en la misma carpeta) y, ya entero, el viejo
+; fuera y el temporal a su nombre: si la copia falla, el KERNEL.SYS de antes
+; sigue (antes quedaba a medias y el disco ya no arrancaba). Si el temporal
+; no cabe (disco casi lleno), encima del viejo, como antes.
 copy_file:
+        push si
+        push di
+        mov [cf_src], si
+        mov [cf_dst], di
+        mov si, di                  ; cf_tmp = destino con la extensión $$$
+        mov di, cf_tmp
+        mov bx, 0
+.n:
+        lodsb
+        mov [di], al
+        cmp al, '.'
+        jne .n1
+        mov bx, di
+.n1:
+        inc di
+        test al, al
+        jnz .n
+        test bx, bx
+        jz .direct
+        mov dword [bx+1], '$$$'
+        mov si, [cf_src]
+        mov di, cf_tmp
+        call copy_raw
+        jc .tfail
+        mov dx, [cf_dst]
+        mov ax, 0x4301
+        xor cx, cx
+        int 0x21
+        mov ah, 0x41
+        int 0x21
+        mov dx, cf_tmp
+        mov di, [cf_dst]
+        push ds
+        pop es
+        mov ah, 0x56
+        int 0x21
+        jmp .r
+.tfail:
+        mov dx, cf_tmp
+        mov ah, 0x41
+        int 0x21
+.direct:
+        mov si, [cf_src]
+        mov di, [cf_dst]
+        call copy_raw
+.r:
+        pop di
+        pop si
+        ret
+
+copy_raw:
         mov dx, di
         mov ax, 0x4301
         xor cx, cx
@@ -438,6 +493,9 @@ drv         db 0
 junk        dw 0
 hsrc        dw 0
 hdst        dw 0
+cf_src      dw 0
+cf_dst      dw 0
+cf_tmp      times 84 db 0
 packet:
 pk_sec      dd 0
 pk_cnt      dw 0
