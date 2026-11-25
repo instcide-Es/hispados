@@ -535,6 +535,17 @@ t_e_cant    db "La cantidad no vale. Escriba un número, como 2 o 1,5.", 0
 t_e_pre     db "El precio no vale. Escriba un número, como 12,50.", 0
 t_e_imp     db "El importe de la línea es demasiado grande", 10, "(como mucho, 999.999,99).", 0
 t_e_guardar db "No se han podido guardar los datos en el disco.", 0
+; [0.9.31] FACTURAS.DAT que no se entiende (más corto de lo que dice su
+; cabecera, o de otra cosa): no se toma por «sin facturas» ni se guarda encima
+t_e_danado  db "El archivo de las facturas (FACTURAS.DAT) está dañado:", 10
+            db "es más corto de lo que dice su cabecera, o no es de Facturas.", 10
+            db "Para no perder lo que tenga, Facturas no guardará nada encima.", 10
+            db "Cópielo aparte y luego bórrelo o cámbielo de nombre", 10
+            db "para empezar de nuevo.", 0
+t_e_encima  db "No se guarda: FACTURAS.DAT está dañado", 10
+            db "y se perdería lo que tenga (Facturas no escribe encima).", 0
+t_q_salir   db "Los cambios no se han guardado (FACTURAS.DAT está dañado).", 10
+            db "¿Cerrar Facturas igualmente?", 0
 t_e_texto   db "No se ha podido guardar el archivo de texto.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
             db "Compruebe que la impresora (la del puerto paralelo, LPT1)", 10
@@ -590,6 +601,11 @@ entrada:
         HV ven_crear
         test eax, eax
         jz .x
+        cmp byte [dat_malo], 0      ; [0.9.31] el archivo no vale: se dice
+        je .bucle
+        mov esi, t_e_danado
+        call aviso
+.bucle:
         HV app_bucle
 .x:
         ret
@@ -629,7 +645,30 @@ fac_proc:
         je .crear
         cmp eax, WM_DESTROY
         je .destruir
+        cmp eax, WM_CLOSE           ; [0.9.31] con cambios que no se han
+        je .cerrar                  ; podido guardar, se pregunta
+        cmp eax, WM_QUERYENDSESSION
+        je .fin_sesion
         HVJ ven_defecto
+.cerrar:
+        call .sin_guardar
+        jne hecho
+        HVJ ven_defecto
+.fin_sesion:
+        call .sin_guardar
+        sete al                     ; (EAX=0: no se sale de Hispa Ventanas)
+        movzx eax, al
+        ret
+; (interna) ZF=1 si se puede cerrar: todo guardado, o se acepta perderlo
+.sin_guardar:
+        cmp byte [sin_guardar], 0
+        je .sg
+        push esi
+        mov esi, t_q_salir
+        call pregunta
+        pop esi
+.sg:
+        ret
 .crear:
         mov [ven], ebp
         mov dword [ebp+V_MENU], fac_menu
@@ -2704,6 +2743,13 @@ hoy_leer:
 ; =============================================================================
 guardar:
         pushad
+        cmp byte [dat_malo], 0      ; [0.9.31] encima de uno dañado, no
+        je .g
+        mov byte [sin_guardar], 1
+        mov esi, t_e_encima
+        call aviso
+        jmp .x
+.g:
         mov dword [cab], 'HFAC'
         mov dword [cab+4], 1
         mov eax, [n_fac]
@@ -2712,10 +2758,14 @@ guardar:
         add ecx, CAB_TAM
         mov esi, ruta_dat
         mov edx, cab
-        call hvl_escribir
-        jnc .x
+        call hvl_escribir           ; (en un temporal: si falla, el de antes
+        jnc .bien                   ; queda entero; guardar.inc)
+        mov byte [sin_guardar], 1
         mov esi, t_e_guardar
         call aviso
+        jmp .x
+.bien:
+        mov byte [sin_guardar], 0
 .x:
         popad
         ret
@@ -2745,7 +2795,8 @@ cargar:
         mov byte [cab+E_NOTA-1], 0
         mov byte [cab+CAB_TAM-1], 0
         mov ebx, facs
-        jecxz .x
+        test ecx, ecx
+        jz .x
 .f:
         and byte [ebx+F_TIPO], 1
         and byte [ebx+F_INCL], 1
@@ -2776,6 +2827,8 @@ cargar:
         loop .f
         jmp .x
 .nada:
+        test eax, eax               ; [0.9.31] había algo, pero no vale: que
+        setnz [dat_malo]            ; no se guarde encima (se dice al abrir)
         mov edi, cab
         mov ecx, CAB_TAM / 4
         xor eax, eax
@@ -4096,6 +4149,8 @@ fv_max      resd 1
 desp        resd 1
 hoy         resd 1                  ; aaaammdd
 n_fac       resd 1
+dat_malo    resb 1                  ; [0.9.31] FACTURAS.DAT dañado: no se escribe encima
+sin_guardar resb 1                  ; hay cambios que no han llegado al disco
 n_ord       resd 1
 cli_an      resd 1
 cli_al      resd 1

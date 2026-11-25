@@ -696,7 +696,7 @@ $(B)/VENTANAS.COM: $(VENSRC) lib/wifi_ids.inc ventanas/fuente.txt tools/mkfuente
 # juegos, en juegos/ (HVPS: van a \HISPADOS\JUEGOS), y los accesorios, en
 # programas/ (HVPA: a \HISPADOS\PROGS). tools/mkhvp.py los ensambla y
 # saca las reubicaciones.
-HVPDEP = ventanas/hvp.inc ventanas/hvplib.inc ventanas/defs.inc ventanas/api.inc ventanas/hvpmez.inc \
+HVPDEP = ventanas/hvp.inc ventanas/hvplib.inc ventanas/guardar.inc ventanas/defs.inc ventanas/api.inc ventanas/hvpmez.inc \
          tools/mkhvp.py tools/icopack.py tools/cp437.py tools/hispa437.py
 HVPS = $(B)/CULEBRA.HVP $(B)/MINAS.HVP \
        $(B)/BLOQUES.HVP $(B)/SOLITARI.HVP $(B)/TRAGABOL.HVP $(B)/ALMACEN.HVP \

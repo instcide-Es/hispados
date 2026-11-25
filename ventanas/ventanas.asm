@@ -2163,6 +2163,7 @@ alto_ini:
 %include "barra.inc"                ; [BARRA] Hispa-486: barra de tareas y menú Inicio
 %include "wifi.inc"                 ; [WIFI] el icono de red de la barra y su ventanita
 %include "fondo.inc"                ; [FONDO] la imagen de fondo del escritorio
+%include "guardar.inc"              ; guardar sin vaciar el de antes (el Bloc, CENTRO.INI)
 %ifdef CON_PROGRAMAS
 %include "mezvol.inc"               ; [MEZCLADOR] HSPSND por fuentes y abrir el Mezclador
 %include "tareas_api.inc"           ; [TAREAS] lo que pide el Administrador de tareas
@@ -2199,6 +2200,9 @@ pila_fin:
 %include "bssbarra.inc"             ; [BARRA]
 %include "bsswifi.inc"              ; [WIFI]
 %include "bssfondo.inc"             ; [FONDO]
+gua_ruta    resb GUA_RUTA               ; (guardar.inc)
+gua_tmp     resb GUA_RUTA
+gua_bak     resb GUA_RUTA
 %ifdef CON_PROGRAMAS
 %define TAREAS_BSS                  ; [TAREAS] las variables del Administrador de tareas
 %include "tareas_api.inc"

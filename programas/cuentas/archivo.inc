@@ -41,10 +41,12 @@ ESC_TAM     equ 8192                ; el búfer de escribir
 TROZO       equ 16384               ; lo que se lee de una vez
 
 ; ---- escribir ----
-; abre para escribir el archivo ESI; CF=1 si no se puede
+; abre para escribir el archivo ESI; CF=1 si no se puede. [0.9.31] Se
+; escribe en un temporal y, al cerrar, toma su nombre: si algo falla, el de
+; antes queda entero (guardar.inc)
 esc_abre:
         push eax
-        HV dos_crear
+        call gua_crear
         jc .x
         mov [esc_h], eax
         mov dword [esc_n], 0
@@ -130,13 +132,14 @@ esc_vuelca:
         ret
 ; cierra; CF=1 si algo no se ha podido escribir (el disco lleno...)
 esc_cierra:
+        push eax
         push ebx
         call esc_vuelca
         mov ebx, [esc_h]
-        HV dos_cerrar
+        mov al, [esc_mal]
+        call gua_cerrar             ; (CF=1 si no se ha guardado)
         pop ebx
-        cmp byte [esc_mal], 1
-        cmc                         ; (CF=1 si esc_mal vale 1)
+        pop eax
         ret
 
 ; ¿el nombre del archivo acaba en .CSV? -> ZF=1 si sí
