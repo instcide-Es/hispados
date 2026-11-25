@@ -352,7 +352,9 @@ lanza:
         push cs
         pop es
         mov bx, cx
-        add bx, 2 + 2 + RUTA_MAX + 8 + 15
+        add bx, 1 + 2 + 3 + DIR_MAX + 1 + RUTA_MAX + 15  ; 0, el 1, «X:\»,
+        ; el directorio, «\», la ruta con su 0 (y el redondeo): eran 107, y
+        ; con una ruta relativa larga se escribían hasta 150 (se pisaba el MCB)
         mov cl, 4
         shr bx, cl
         mov dx, 0xFFFF              ; (el dueño se pone luego)

@@ -135,3 +135,23 @@ if cmp -s <(mtype -i $T/a.img ::LEEME.TXT) build/LEEME.TXT; then ok "n.º 7: tra
 if cmp -s <(mtype -i $T/a.img ::HOLA.COM) $T/nuevo.bin; then ok "n.º 7: y lo recibido encima ha sustituido al que había"; else ko "n.º 7: HOLA.COM no es lo recibido"; fi
 if ! mdir -i $T/a.img '::*.$$$' > /dev/null 2>&1 && fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "n.º 7: no quedan temporales y fsck.fat no encuentra errores"; else ko "n.º 7: quedan temporales o hay errores"; mdir -i $T/a.img ::; cat $T/fsck.txt; fi
 }
+
+# ---- n.º 8: el bloque de entorno de 4Bh, con una ruta relativa larga ----
+p_auditoria_entorno() {
+echo "== Hispa-8086: auditoría 1, lanzar un programa con una ruta relativa larga (4Bh) =="
+cp $IMG/hispa8086-360.img $T/a.img
+local d="AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE/FFFFFFFF"
+mmd -i $T/a.img ::AAAAAAAA ::AAAAAAAA/BBBBBBBB ::AAAAAAAA/BBBBBBBB/CCCCCCCC ::AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD ::AAAAAAAA/BBBBBBBB/CCCCCCCC/DDDDDDDD/EEEEEEEE ::$d
+mcopy -i $T/a.img build/HOLA.COM ::$d/HOLA.COM
+arranca $T/a.img 486
+escribe "cd \\${d//\//\\}"; escribe "limpiar"
+escribe ".\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\hola uno"; sleep 2
+escribe ".\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\.\\hola dos"; sleep 2
+escribe "a:\\hola tres"; sleep 2; escribe "memoria"; sleep 1
+pantalla n1
+esta n1 "Parametros: uno" "n.º 8: con 9 + 53 + 52 letras de entorno: "
+esta n1 "Parametros: dos" "n.º 8: y otra vez: "
+esta n1 "Parametros: tres" "n.º 8: y después, otro programa: "
+esta n1 "Libre para los programas: " "n.º 8: la cadena de la memoria sigue bien (MEMORIA): "
+apaga
+}
