@@ -29,7 +29,7 @@
 ;  interrupciones (el de iretq y los quince registros: RAX en +112, RIP en
 ;  +120) y la función de Castel al_sistema(marco) (Sistema), con las
 ;  interrupciones puestas. Vuelve con sysret (RCX y R11 del marco).
-;  STAR: el núcleo, 0x08 (y 0x10); el anillo 3, desde 0x10: los datos en
+;  STAR: el núcleo, 0x08 (y 0x10); el anillo 3, desde 0x13 (0x10 con RPL 3): los datos en
 ;  0x18 | 3 y el código de 64 bits en 0x20 | 3 (gdt64.cas). SFMASK quita IF,
 ;  TF, DF, AC y NT al entrar.
 ;
@@ -1432,7 +1432,12 @@ módulo Entradas
         variable b: nat64
         mira_cpu()
         pon_msr(0xC0000080, lee_msr(0xC0000080) ob 1)
-        pon_msr(0xC0000081, (nat64(0x10) << 48) ob (nat64(0x08) << 32))
+        ; ([etapa 11] el del anillo 3 ya con RPL 3, 0x13, como Linux: sysret
+        ; pone en SS ese + 8 y, en los AMD, tal cual, sin el RPL 3; con 0x10,
+        ; SS quedaba 0x18 y el iretq de vuelta de la primera interrupción daba
+        ; #GP(0x18) —con KVM en un AMD: el TCG de QEMU no lo mira—, y de ahí
+        ; los fallos encadenados hasta el doble fallo)
+        pon_msr(0xC0000081, (nat64(0x13) << 48) ob (nat64(0x08) << 32))
         pon_msr(0xC0000082, dir_sistema())
         pon_msr(0xC0000084, 0x47700)
         pon_msr(0xC0000102, 0)

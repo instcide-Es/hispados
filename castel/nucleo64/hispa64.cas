@@ -654,14 +654,17 @@ módulo Hispa64
     función etapa9()
         variable v: arreglo [210] de byte
         variable h: arreglo [210] de byte
-        si tiene("sinred") entonces
-            escribir("(sinred: sin la red)\n")
-            devolver
-        fin
         valor_de("ip=", dirección(v[0]))
         valor_de("hosts=", dirección(h[0]))
+        si tiene("sinred") entonces
+            ; ([etapa 11] con «lo»: los programas que usan 127.0.0.1 siguen yendo)
+            escribir("(sinred: sin las tarjetas de red; solo «lo», 127.0.0.1)\n")
+            prepara_red(dirección(v[0]), cierto, falso, cierto)
+            prepara_sockets(dirección(h[0]))
+            devolver
+        fin
         escribe_prt(tiene("prueba=prt"))        ; [etapa 10] las rutas de las INTx (_PRT), antes de las tarjetas
-        prepara_red(dirección(v[0]), tiene("sindhcp"), tiene("realtek=ensayo"))
+        prepara_red(dirección(v[0]), tiene("sindhcp"), tiene("realtek=ensayo"), falso)
         prepara_sockets(dirección(h[0]))
         Tcp64.traza := tiene("red=traza")
         si tiene("red=pierde") entonces Tcp64.pierde_cada := 23 fin       ; [etapa 10] (para probar lo desordenado y SACK)

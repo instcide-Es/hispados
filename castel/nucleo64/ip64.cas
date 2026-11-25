@@ -1112,7 +1112,9 @@ módulo Ip64
     fin
 
     ; las tarjetas, «lo» y el hilo (con «ip=...» de la línea, o vacío)
-    público función prepara_red(fija: puntero a byte, sin_dhcp_: bool, realtek_ensayo: bool)
+    ; ([etapa 11] solo_lo: «sinred», sin las tarjetas, pero con «lo» y el hilo
+    ; «red»: antes, sin él, un connect a 127.0.0.1 esperaba para siempre)
+    público función prepara_red(fija: puntero a byte, sin_dhcp_: bool, realtek_ensayo: bool, solo_lo: bool)
         variable x: puntero a Ifz
         sin_dhcp := sin_dhcp_
         dice_dhcp := cierto
@@ -1128,11 +1130,13 @@ módulo Ip64
         x.nombre[1] := 'o'
         x.nombre[2] := 0
         copia_k(nat64(dirección(x.tarjeta[0])), nat64("la interfaz de este equipo (127.0.0.1)"), 39)
-        prepara_intel()
-        prepara_rtl(realtek_ensayo)
-        prepara_virtio()
-        prepara_usbred()                    ; [etapa 10] la red por USB (CDC-ECM)
-        si fija[0] <> 0 entonces ip_fija(fija) fin
+        si no solo_lo entonces
+            prepara_intel()
+            prepara_rtl(realtek_ensayo)
+            prepara_virtio()
+            prepara_usbred()                    ; [etapa 10] la red por USB (CDC-ECM)
+            si fija[0] <> 0 entonces ip_fija(fija) fin
+        fin
         ip_id := azar32()
         lo_cola := nat64(reserva(nat64(LO_N) * TRAMA))
         hilo_red := crea(nat64(dirección(hilo_de_red)), 0, "red", INTERACTIVO, CUALQUIERA)

@@ -270,6 +270,11 @@ void dlg_guardar_cambios(int orden)
 {
 	P.pendiente = orden;
 	fmt(pregunta, sizeof pregunta, "¿Guardar los cambios de %s?", P.ruta[0] ? sin_carpeta(P.ruta) : "Documento1");
+	/* (U y H, antes de medir el cuadro: nuevo_cuadro los pone, pero sus
+	 * argumentos se calculan antes; con los de otro cuadro, o a 0, los
+	 * botones tapaban la pregunta) */
+	U = lz_ui_alto();
+	H = ui_alto_control();
 	nuevo_cuadro("Pluma", lz_ui_ancho(pregunta) + 60 < 420 ? 420 : lz_ui_ancho(pregunta) + 60, U * 2 + H + 40);
 	texto(20, 16, Q.an - 40, U, pregunta);
 	boton(B_ACEPTAR, 12, Q.al - H - 12, 120, "&Guardar", 1);
