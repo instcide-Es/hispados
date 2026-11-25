@@ -98,5 +98,10 @@ $(O)/X87.BIN: $(O)/entrada.o $(AQUI)/prueba_x87.c $(AQUI)/pentium.h $(AQUI)/pent
 	$(CC32) -Wall -c $(AQUI)/prueba_x87.c -o $(O)/prueba_x87.o
 	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $(AQUI)/pentium.ld -o $(O)/x87.elf $(O)/entrada.o $(O)/prueba_x87.o
 	objcopy -O binary $(O)/x87.elf $@
+# (TERMO-FUERTE, 0.8.12) XMM.BIN: la de que cada programa tiene su SSE (prueba_xmm.c)
+$(O)/XMM.BIN: $(O)/entrada.o $(AQUI)/prueba_xmm.c $(AQUI)/pentium.h $(AQUI)/pentium.ld
+	$(CC32) -Wall -c $(AQUI)/prueba_xmm.c -o $(O)/prueba_xmm.o
+	ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $(AQUI)/pentium.ld -o $(O)/xmm.elf $(O)/entrada.o $(O)/prueba_xmm.o
+	objcopy -O binary $(O)/xmm.elf $@
 navega: $(O)/NAVEGA.BIN
 .PHONY: navega

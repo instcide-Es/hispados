@@ -66,7 +66,7 @@ módulo Tareas
         matar: bool                             ; hay que acabarla (Ctrl+C) en cuanto vuelva al anillo 3
         corte: bool                             ; se ha pulsado Ctrl+C (para las que lo atienden)
         terminal: nat32                         ; el terminal por el que escribe y lee (terminal.cas), o 0: la consola
-        x87: arreglo [108] de byte              ; (NAVEGADOR) su coma flotante, guardada (fnsave) mientras la usa otra
+        x87: arreglo [108] de byte              ; (NAVEGADOR) su coma flotante, guardada (fnsave) mientras corre otra (sin FXSAVE; con él, en fx_zona)
         x87_usado: bool                         ; (NAVEGADOR) la ha usado alguna vez
         ; (PROTEGE) quién es, para lo que puede tocar del sistema (permisos.cas):
         ; lo pone el núcleo al cargarla, por la ruta de la que la carga (la
@@ -122,12 +122,34 @@ módulo Tareas
     público variable eoi_apic: nat32
     público variable cambios: nat32             ; las veces que ha cambiado de tarea
     ; (NAVEGADOR, 21/11) la coma flotante (el x87): la de quién está ahora en
-    ; el procesador. Al cambiar de tarea no se guarda: se enciende CR0.TS y,
-    ; si la nueva la usa, la excepción 7 (sin_x87) guarda la de esta y pone la
-    ; suya (o una a estrenar). Así cada programa tiene la suya (el Navegador
-    ; y QuickJS cuentan con doble precisión, HVPRUN con lo suyo) y lo que no
-    ; usa coma flotante (casi todo, y el núcleo) no paga nada.
+    ; el procesador. Cada programa tiene la suya (el Navegador y QuickJS
+    ; cuentan con doble precisión, HVPRUN con lo suyo) y lo que no usa coma
+    ; flotante (casi todo, y el núcleo) no paga nada. (Hasta la 0.8.10, al
+    ; cambiar de tarea no se guardaba: CR0.TS y la excepción 7 lo hacían
+    ; cuando otra la usaba. Desde la 0.8.12, abajo: se guarda al salir.)
     público variable dueño_x87: puntero a Tarea
+    ; (TERMO-FUERTE, 0.8.12) el SSE (de Pentium III en adelante; SSE2, de
+    ; Pentium 4): si el procesador tiene FXSAVE (CPUID 1, EDX bit 24), se
+    ; encienden CR4.OSFXSR y, con SSE, CR4.OSXMMEXCPT, y la coma flotante de
+    ; cada tarea es lo que guarda FXSAVE (512 octetos, alineados a 16: el x87,
+    ; el MMX, los 8 XMM y el MXCSR); sin FXSAVE (el Pentium y el Pentium MMX),
+    ; lo de siempre, fnsave y frstor (108 octetos, en «x87»). Ya NO se deja en
+    ; el procesador la de una tarea mientras corre otra (lo de la 0.8.3 era
+    ; «perezoso»: hasta que otra la usaba): al cambiar de tarea, la de la que
+    ; sale se guarda y, si la que entra tiene la suya, se pone; si no, se
+    ; pone una limpia (o se queda como la deja fnsave, que la reinicia) y
+    ; CR0.TS avisa (la excepción 7) cuando la use por primera vez. Así un
+    ; programa nunca puede leer los registros de otro, ni de verdad ni por
+    ; ejecución especulativa (LazyFP, CVE-2018-3665), y lo que no usa coma
+    ; flotante (el núcleo, casi todos los servicios) sigue sin pagar nada.
+    ; AVX no: necesita XSAVE (CR4.OSXSAVE, XCR0) y más estado (YMM): para
+    ; después (docs/PENTIUM.md)
+    público variable sse: nat32                 ; 1: FXSAVE; 2: SSE encendido; 4: SSE2; 0: solo x87 (fnsave)
+    público constante SSE_FXSR = 1
+    público constante SSE_SSE = 2
+    público constante SSE_SSE2 = 4
+    variable fx_zona: arreglo [(MAX_TAREAS + 1) * 512 + 16] de byte   ; la de cada tarea y, al final, la limpia
+    variable fx_base: nat32                     ; fx_zona, alineada a 16
     variable teb_puesta: nat32                  ; (JUEGOS) la TEB del descriptor 0x43 (cpu.cas, pon_teb)
     variable pantalla: puntero a nat16 = puntero(0xB8000)
     público variable sin_segundos: bool         ; no se enseñan los segundos (la pantalla es de un programa: INSTALAR)
@@ -237,8 +259,8 @@ módulo Tareas
         ; x87 de cada tarea de la 0.8.3, con CR0.TS, más abajo)
         si t <> actual entonces cambios := cambios + 1 fin
         actual := t
-        ; (NAVEGADOR) el x87: si no es el suyo, que avise al usarlo
-        si t = dueño_x87 entonces quita_ts() sino pon_ts() fin
+        ; (NAVEGADOR) el x87 (TERMO-FUERTE: y el SSE): el de la que sale, guardado; el de la que entra, puesto
+        cambia_coma(t)
         pon_pila_núcleo(t.pila_tope)
         si leer_cr3() <> t.cr3 entonces poner_cr3(t.cr3) fin
         ; (JUEGOS) la TEB de cada hilo de Windows (FS): su descriptor, si cambia
@@ -265,34 +287,156 @@ módulo Tareas
         fin
     fin
 
-    ; (NAVEGADOR) la excepción 7: la tarea que corre usa la coma flotante y
-    ; la que está en el procesador es de otra (o de nadie): se guarda la de
-    ; aquella (fnsave) y se pone la suya (frstor) o, la primera vez, una a
-    ; estrenar (fninit). Con las interrupciones tapadas (puerta del núcleo)
-    interrupción función sin_x87()
+    ; (TERMO-FUERTE) dónde guarda FXSAVE la coma flotante de t (512 octetos,
+    ; alineados a 16: los de su ficha en fx_zona); con t nulo, la limpia
+    función zona_fx(t: puntero a Tarea): nat32
+        si t = nulo entonces devolver fx_base + MAX_TAREAS * 512 fin
+        devolver fx_base + ((nat32(t) - nat32(dirección(tareas[0]))) div tamaño(Tarea)) * 512
+    fin
+
+    ; (TERMO-FUERTE) la coma flotante del procesador, a la ficha de t (con
+    ; CR0.TS apagada): fxsave o, sin él, fnsave (que además la reinicia)
+    función guarda_coma(t: puntero a Tarea)
         variable p: nat32
-        quita_ts()
-        si dueño_x87 = actual entonces devolver fin
-        si dueño_x87 <> nulo entonces
-            p := nat32(dirección(dueño_x87.x87[0]))
+        si sse yb SSE_FXSR <> 0 entonces
+            p := zona_fx(t)
+            ensamblador
+                mov eax, {p}
+                db 0x0F, 0xAE, 0x00             ; fxsave [eax]
+            fin
+        sino
+            p := nat32(dirección(t.x87[0]))
             ensamblador
                 mov eax, {p}
                 db 0xDD, 0x30                   ; fnsave [eax]
             fin
         fin
-        si actual.x87_usado entonces
-            p := nat32(dirección(actual.x87[0]))
+    fin
+
+    ; (TERMO-FUERTE) la de t, al procesador (t nulo: la limpia; sin FXSAVE, fninit)
+    función repone_coma(t: puntero a Tarea)
+        variable p: nat32
+        si sse yb SSE_FXSR <> 0 entonces
+            p := zona_fx(t)
+            ensamblador
+                mov eax, {p}
+                db 0x0F, 0xAE, 0x08             ; fxrstor [eax]
+            fin
+        sino si t = nulo entonces
+            ensamblador
+                db 0xDB, 0xE3                   ; fninit
+            fin
+        sino
+            p := nat32(dirección(t.x87[0]))
             ensamblador
                 mov eax, {p}
                 db 0xDD, 0x20                   ; frstor [eax]
             fin
-        sino
-            ensamblador
-                db 0xDB, 0xE3                   ; fninit
+        fin
+    fin
+
+    ; (TERMO-FUERTE) al cambiar a t (con las interrupciones tapadas): la de
+    ; la que estaba en el procesador se guarda en su ficha; si t ya ha usado
+    ; la coma flotante, se pone la suya; si no, se deja una limpia (que no
+    ; quede nada de la otra) y CR0.TS, para que la excepción 7 se la dé
+    ; cuando la use
+    función cambia_coma(t: puntero a Tarea)
+        si t <> dueño_x87 entonces
+            si dueño_x87 <> nulo entonces
+                quita_ts()
+                guarda_coma(dueño_x87)
+                dueño_x87 := nulo
+                si no t.x87_usado y sse yb SSE_FXSR <> 0 entonces repone_coma(nulo) fin
             fin
+            si t.x87_usado entonces
+                quita_ts()
+                repone_coma(t)
+                dueño_x87 := t
+            fin
+        fin
+        si t = dueño_x87 entonces quita_ts() sino pon_ts() fin
+    fin
+
+    ; (NAVEGADOR) la excepción 7: la tarea que corre usa la coma flotante por
+    ; primera vez (TERMO-FUERTE: al cambiar de tarea ya se pone la suya, si la
+    ; tiene; esto queda por si acaso): si la del procesador es de otra, se
+    ; guarda; se pone la suya o, la primera vez, una a estrenar (la limpia:
+    ; el x87 como tras fninit, los XMM a 0 y MXCSR = 1F80h). Con las
+    ; interrupciones tapadas (puerta del núcleo)
+    interrupción función sin_x87()
+        quita_ts()
+        si dueño_x87 = actual entonces devolver fin
+        si dueño_x87 <> nulo entonces guarda_coma(dueño_x87) fin
+        si actual.x87_usado entonces
+            repone_coma(actual)
+        sino
+            repone_coma(nulo)
             actual.x87_usado := cierto
         fin
         dueño_x87 := actual
+    fin
+
+    ; (TERMO-FUERTE) al arrancar (con CR0.TS apagada): ¿hay CPUID, FXSAVE,
+    ; SSE y SSE2? Con FXSAVE, CR4.OSFXSR (y CR4.OSXMMEXCPT con SSE) y la
+    ; plantilla limpia (fninit, fxsave, MXCSR = 1F80h y los registros a 0)
+    función prepara_sse()
+        variable ed, c4, p, i: nat32
+        variable f: puntero a nat32
+        sse := 0
+        fx_base := (nat32(dirección(fx_zona[0])) + 15) yb 0xFFFFFFF0
+        ed := 0
+        ensamblador
+            pushfd
+            pop eax
+            mov ecx, eax
+            xor eax, 0x200000
+            push eax
+            popfd
+            pushfd
+            pop eax
+            push ecx
+            popfd
+            xor eax, ecx
+            and eax, 0x200000
+            jz .sin_cpuid
+            push ebx
+            xor eax, eax
+            xor ecx, ecx
+            db 0x0F, 0xA2                       ; cpuid
+            pop ebx
+            cmp eax, 1
+            jb .sin_cpuid
+            push ebx
+            mov eax, 1
+            xor ecx, ecx
+            db 0x0F, 0xA2                       ; cpuid
+            pop ebx
+            mov {ed}, edx
+        .sin_cpuid:
+        fin
+        si ed yb 0x1000000 = 0 entonces devolver fin       ; sin FXSAVE: fnsave
+        sse := SSE_FXSR
+        c4 := 0x200                                         ; OSFXSR
+        si ed yb 0x2000000 <> 0 entonces
+            sse := sse ob SSE_SSE
+            c4 := 0x600                                     ; y OSXMMEXCPT
+            si ed yb 0x4000000 <> 0 entonces sse := sse ob SSE_SSE2 fin
+        fin
+        p := zona_fx(nulo)
+        ensamblador
+            mov ecx, {c4}
+            db 0x0F, 0x20, 0xE0                 ; mov eax, cr4
+            or eax, ecx
+            db 0x0F, 0x22, 0xE0                 ; mov cr4, eax
+            db 0xDB, 0xE3                       ; fninit
+            mov eax, {p}
+            db 0x0F, 0xAE, 0x00                 ; fxsave [eax]
+        fin
+        ; lo de después de FIP/FDP (los registros ST/MM y XMM y lo reservado), a 0
+        f := puntero(p)
+        para i desde 8 hasta 127 hacer f[i] := 0 fin
+        si sse yb SSE_SSE <> 0 entonces f[6] := 0x1F80 fin  ; MXCSR: todo enmascarado, redondeo al más cercano
+        repone_coma(nulo)
     fin
 
     ; el reloj: cuenta el tic, despierta a las dormidas a las que les toca,
@@ -560,13 +704,17 @@ módulo Tareas
         pon_puerta(0x30, nat32(dirección(cambio)), PUERTA_NÚCLEO)
         ; (NAVEGADOR) la coma flotante: el x87 de verdad (CR0.EM apagada, MP
         ; encendida), de nadie aún, y la excepción 7 para repartirlo
+        ; (TERMO-FUERTE) y el SSE si lo tiene (prepara_sse; con CR0.TS
+        ; apagada mientras tanto)
         dueño_x87 := nulo
         ensamblador
             mov eax, cr0
-            and eax, 0xFFFFFFFB
-            or eax, 0x0000000A
+            and eax, 0xFFFFFFF3
+            or eax, 0x00000002
             mov cr0, eax
         fin
+        prepara_sse()
+        pon_ts()
         pon_puerta(7, nat32(dirección(sin_x87)), PUERTA_NÚCLEO)
     fin
 

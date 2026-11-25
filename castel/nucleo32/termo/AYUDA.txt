@@ -1,5 +1,5 @@
-Termómetro de Hispa-Pentium 1.1.1
-=================================
+Termómetro de Hispa-Pentium 1.2
+===============================
 
 Mide la temperatura del procesador (Intel y AMD) y la de las zonas térmicas
 de la BIOS (ACPI), hace una prueba de esfuerzo («Calentar», 5, 10 o 15
@@ -15,10 +15,34 @@ LibreOffice), MMDDHHMM.LOG (todo lo que pasa, a prueba de apagones),
 MMDDHHMM.TXT (el resumen de cada prueba) y, con F12, la pantalla en .BMP. Si
 el equipo se apagó solo la vez anterior, lo dice al abrirlo.
 
-Teclas: C calentar; 1, 2 y 3 los minutos; Esc parar; R rendimiento; M la
-memoria RAM; P la lista de las pruebas de este arranque, con su resultado;
-F12 guardar la pantalla. Se pueden hacer varias pruebas seguidas: INFORME.TXT
-las lleva todas, cada una con su parte, y compara las de Calentar.
+Teclas: C calentar; 1, 2 y 3 los minutos; F la carga (ligera o fuerte); Esc
+parar; R rendimiento; M la memoria RAM; P la lista de las pruebas de este
+arranque, con su resultado; E enviar a Carlos (si la memoria está
+preparada); F12 guardar la pantalla. Se pueden hacer varias pruebas
+seguidas: INFORME.TXT las lleva todas, cada una con su parte, y compara las
+de Calentar.
+
+La carga: la ligera (x87, la de siempre) calienta, pero en un procesador de
+hoy no llega a los vatios que deja la BIOS (PL1 y PL2). La fuerte (SSE2, en
+todos los núcleos, con la caché encendida) sí se acerca, y sirve para ver si
+el cargador o la fuente frenan al equipo: compare una prueba enchufado y otra
+con la batería, las dos con la misma carga. La fuerte calienta más deprisa;
+la parada de seguridad (el límite menos 10 °C, o 95 °C, también de las
+gráficas) es la misma. Necesita Hispa-Pentium 0.8.12 y un procesador con
+SSE2; con «cargafuerte» en la línea del cargador, empieza ya en fuerte.
+
+La alimentación de cada prueba (enchufado o con la batería) se decide con
+todas las lecturas de la carga, no con la primera; si se ha enchufado o
+desenchufado en medio, se dice cuánto tiempo fue de cada. Si ACPI aún no ha
+leído la batería ni las zonas, Calentar espera a su primera lectura (15 s
+como mucho) y lo dice.
+
+Enviar a Carlos (E): sube la carpeta TERMO por HTTPS. La pantalla dice cómo
+va («Enviando... (archivo 3 de 9)») y cómo ha ido: «ENVIADO: ...» o «NO
+ENVIADO: ...» con el motivo (sin red, no se encuentra el servidor, no se
+puede conectar, el certificado, la memoria no reconocida, el tope del día) y
+qué hacer. Lo mismo queda en el .LOG y en INFORME.TXT. Si no hay manera, los
+archivos siguen en la carpeta TERMO de la memoria: se pueden subir al FTP.
 
 Lo que no se puede leer, se dice: la gráfica dedicada (sin su controlador),
 un sensor que no se mueve («sin lectura fiable») o uno que da algo imposible

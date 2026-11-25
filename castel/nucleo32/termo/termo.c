@@ -18,6 +18,7 @@
  *    el color), la gráfica de los últimos 10 minutos (cada sensor con su
  *    trazo y su marca), la frecuencia (APERF/MPERF, o la del TSC).
  *  - «Calentar»: el procesador al 100 % (un programa hijo, TERMO.BIN /CARGA,
+ *    con /FUERTE la carga fuerte, SSE2: TERMO 1.2,
  *    con cuentas de coma flotante; Hispa-Pentium usa un solo núcleo: se dice)
  *    5, 10 o 15 minutos; se para sola si un sensor llega a su límite menos
  *    10 °C (o a 95 °C si no tiene límite), o con Esc. Luego mide cómo
@@ -410,6 +411,8 @@ static const char *vatios(char *t, int mw)
 	return t;
 }
 
+static u32 t_inicio;
+static int acpi_tarde;
 static void lee_zonas(void)
 {
 	u32 i;
@@ -418,6 +421,11 @@ static void lee_zonas(void)
 	 * que da antes de la primera lectura, a cero): en el ThinkPad E14 salía
 	 * «0 zonas térmicas, equipo  , placa  , BIOS » y luego llegaba la zona */
 	if (sc(SC_ZONAS, (u32)&za, 0, 0) != 1 || za.t.version != TA_VERSION || za.t.lecturas == 0)
+		return;
+	/* (TERMO 1.2, solo las pruebas) «acpitarde» en la línea del cargador:
+	 * lo de ACPI no se mira hasta 10 s después de abrir (como el ASUS
+	 * GL553VD, recién arrancado): Calentar tiene que esperar a ello */
+	if (acpi_tarde && (!t_inicio || (int)(jg_tics() - t_inicio) < 10 * (int)jg_hz))
 		return;
 	if (!hay_zonas) {
 		hay_zonas = 1;
@@ -554,7 +562,6 @@ static int en_memoria, arranque_auto;
 static int sin_llamadas;	/* el núcleo no tiene las llamadas 220-224 (antes de la 0.8.9) */
 static char ruta_csv[64], ruta_txt[64], aviso_archivo[160];
 static int csv_listo, csv_malo;
-static u32 t_inicio;
 
 /* (TERMO) la hora del registro no va hacia atrás: en el Monovate 14.1 (el
  * 8254 parado, el tic del HPET) las primeras líneas salían con 13:59:24 y
@@ -1571,9 +1578,23 @@ static struct ve_prueba VP;	/* (veredicto.c) con qué sensor se mide y qué ha p
 static int hubo_prueba;
 static char resumen[1200], motivo[160];
 static int hija = -1, solo_aqui;
+static u32 espera_acpi;	/* (TERMO 1.2) Calentar pedido, esperando a ACPI: desde cuándo (0: no) */
+/* (TERMO 1.2) la carga: la ligera (x87, la de siempre) o la fuerte (SSE2,
+ * para llegar a los vatios que deja la BIOS, PL1 y PL2, y ver si la fuente o
+ * el cargador frenan al equipo); la fuerte, solo si el núcleo ha encendido el
+ * SSE2 (la 224 con EBX = 8: la base 0.8.12) */
+static int carga_fuerte, fuerte_puede, sse_nucleo;
+static int ap_fuertes, ap_cache_apagada;	/* (de los demás procesadores: los que hacen la fuerte; los que llegaron con la caché apagada, CR0.CD) */
 static int puede_enviar, puede_terminal, enviando;	/* (TERMO) */
 static u32 t_envio;
 static char aviso_envio[420];
+/* (TERMO 1.2) «Enviar a Carlos» (tecla E): cómo ha ido, en un cartel con
+ * letras («ENVIANDO», «ENVIADO», «NO ENVIADO»: nunca solo el color) hasta la
+ * siguiente tecla; y en el .LOG y en INFORME.TXT. envio_ok: -1 sin enviar
+ * en este arranque, 1 enviado, 0 no */
+static char envio_fin[460], envio_hora[6];
+static int envio_ok = -1, envio_cartel;
+static void envio_acaba(const char *t);
 
 /* ---------------------------------------------------------------- (TERMO 1.1.1) las pruebas de este arranque
  * Carlos, 25/11/2026, en un ASUS GL553VD (Calentar enchufado, Rendimiento,
@@ -1592,6 +1613,11 @@ static char aviso_envio[420];
 enum { PR_CALENTAR, PR_RENDIMIENTO, PR_RAM, PR_DISCOS };
 struct hecha {
 	int tipo, en_marcha, num;
+	int fuerte;		/* (TERMO 1.2, Calentar) con la carga fuerte (SSE2) */
+	/* (TERMO 1.2) la alimentación, con TODAS las lecturas de la carga (cada
+	 * 2 s): los segundos enchufado (1) y con la batería (0); la última vista */
+	int seg_ca[2], ca_ult;
+	char dura[12];
 	int ca, ca_cambio;	/* (Calentar) 1 enchufado, 0 con la batería, -1 no se sabe; si ha cambiado en medio */
 	char hora[6], hora_fin[6], hms[10];
 	char nombre[56];
@@ -1781,7 +1807,7 @@ static void temperaturas(int *t)
  * otros procesadores») y cada uno carga y lee su propio 19Ch. Aquí: cuántos,
  * por qué no si no, y un sensor por cada núcleo (los hilos de un mismo
  * núcleo, juntos: lo más caliente) que solo vale mientras se carga. */
-struct ap_ficha { u32 apic, estado, vueltas, msr, lecturas, latido, tsc, z; };
+struct ap_ficha { u32 apic, estado, vueltas, msr, lecturas, latido, tsc, z; };	/* (z, TERMO 1.2: su CR0 al llegar; bit 31, hace la fuerte) */
 struct ap_tabla { u32 n, motivo, base, r; struct ap_ficha e[16]; };
 static struct ap_tabla apt;
 static int smt_bits, nucleo_bsp, nucleos_vistos = 1, hilos_vistos = 1;	/* (cuántos núcleos y hilos de verdad: los vistos en la carga) */
@@ -1847,6 +1873,13 @@ static void ap_sensores(void)
 		return;
 	}
 	ap_cargados = (int)apt.n;
+	ap_fuertes = ap_cache_apagada = 0;
+	for (i = 0; i < apt.n && i < 16; i++) {	/* (TERMO 1.2) +28: su CR0 al llegar; el bit 31, la fuerte */
+		if (apt.e[i].z & 0x80000000u)
+			ap_fuertes++;
+		if (apt.e[i].z & 0x40000000u)
+			ap_cache_apagada++;
+	}
 	for (i = 0; i < apt.n && i < 16; i++) {
 		int nucleo = (int)apt.e[i].apic >> smt_bits;
 		char n[48], c[24];
@@ -1954,7 +1987,7 @@ static void lanza_hija(int segundos)
 	char a[40];
 	int i;
 
-	snprintf(a, sizeof a, "/CARGA=%d", segundos);
+	snprintf(a, sizeof a, "/CARGA=%d%s", segundos, carga_fuerte ? " /FUERTE" : "");
 	hija = -1;
 	for (i = 0; i < 3 && hija < 0; i++) {
 		u32 r = sc(SC_LANZAR_SUELTO, (u32)donde[i], (u32)a, 0);
@@ -1988,9 +2021,12 @@ static void empieza(void)
 			snprintf(dm, sizeof dm, "%d s", dura_s);
 		else
 			snprintf(dm, sizeof dm, "%d min", dura_s / 60);
-		snprintf(nm, sizeof nm, "Calentar%s (%s)", ca == 1 ? " enchufado" : ca == 0 ? " con batería" : "", dm);
+		snprintf(nm, sizeof nm, "Calentar%s%s (%s)", carga_fuerte ? " fuerte" : "", ca == 1 ? " enchufado" : ca == 0 ? " con batería" : "", dm);
 		he_cal = he_nueva(PR_CALENTAR, nm, 1);
 		HE[he_cal].ca = ca;
+		HE[he_cal].ca_ult = ca;
+		snprintf(HE[he_cal].dura, sizeof HE[he_cal].dura, "%s", dm);
+		HE[he_cal].fuerte = carga_fuerte;
 		HE[he_cal].bat_ini = hay_bateria && en.pct <= 100 ? (int)en.pct : -1;
 		reinicia_durante();
 	}
@@ -2013,7 +2049,7 @@ static void empieza(void)
 	}
 	carga_on = 1;
 	disco_pausa(carpeta, 1);	/* (TERMO) la lectura de los discos espera (disco.c) */
-	sc(SC_CARGA, 1, 1, 0);
+	sc(SC_CARGA, 1, carga_fuerte ? 3 : 1, 0);	/* (TERMO 1.2) ECX bit 1: la fuerte, también en los demás */
 	/* (TERMO) los demás procesadores: sus núcleos, y otra vez la foto de
 	 * empezar, ya con ellos */
 	ap_sensores();
@@ -2044,13 +2080,45 @@ static void empieza(void)
 		char g[24];
 
 		/* (lo de los demás procesadores ya está: ap_sensores, al pedir la carga) */
+		const char *cg = carga_fuerte ? "fuerte (SSE2)" : "de coma flotante (x87)";
+
 		if (ap_cargados > 0)
-			suceso_log("EMPIEZA la prueba de esfuerzo: %d s, carga de coma flotante (x87) en %d procesadores (este, %s, y %d más, del núcleo); el más caliente, a %s",
-				   dura_s, ap_cargados + 1, solo_aqui ? "en la tarea del Termómetro, unos 8 ms de cada 10" : "con la tarea hija TERMO.BIN /CARGA al 100 %", ap_cargados, grados(g, t_ini));
+			suceso_log("EMPIEZA la prueba de esfuerzo: %d s, carga %s en %d procesadores (este, %s, y %d más, del núcleo); el más caliente, a %s",
+				   dura_s, cg, ap_cargados + 1, solo_aqui ? "en la tarea del Termómetro, unos 8 ms de cada 10" : "con la tarea hija TERMO.BIN /CARGA al 100 %", ap_cargados, grados(g, t_ini));
 		else
-			suceso_log("EMPIEZA la prueba de esfuerzo: %d s, carga de coma flotante (x87) en 1 procesador (%s); el más caliente, a %s",
-				   dura_s, solo_aqui ? "en la tarea del Termómetro, unos 8 ms de cada 10" : "tarea hija TERMO.BIN /CARGA, al 100 %", grados(g, t_ini));
+			suceso_log("EMPIEZA la prueba de esfuerzo: %d s, carga %s en 1 procesador (%s); el más caliente, a %s",
+				   dura_s, cg, solo_aqui ? "en la tarea del Termómetro, unos 8 ms de cada 10" : "tarea hija TERMO.BIN /CARGA, al 100 %", grados(g, t_ini));
+		if (carga_fuerte)
+			serie("termo: carga fuerte (SSE2): %s y %d de los %d procesadores más\n", solo_aqui ? "este (en la tarea del Termómetro, con x87: sin tarea hija)" : "este (la tarea hija)",
+			      ap_fuertes, ap_cargados);
+		if (ap_cache_apagada)
+			suceso_log("AVISO: %d de los demás procesadores llegaron con la caché apagada (CR0.CD, como los dejó la BIOS)%s", ap_cache_apagada,
+				   carga_fuerte ? "; la carga fuerte la enciende" : "; la ligera los deja así (como hasta ahora): cargan menos de lo que podrían");
 	}
+}
+
+/* (TERMO 1.2) la alimentación de la prueba, con todas las lecturas de la
+ * carga (el ASUS GL553VD: la primera decía «no se sabe» porque ACPI aún no
+ * había leído la batería, y otra, «enchufado» por la primera lectura,
+ * cuando casi toda fue sin enchufar): lo que ha sido la mayor parte del
+ * tiempo; «no se sabe» solo sin ninguna lectura; si ha habido de las dos
+ * (4 s o más de cada), el cambio. Y su nombre, con lo que de verdad ha sido */
+static void decide_alimentacion(struct hecha *h)
+{
+	int a = h->seg_ca[1], b = h->seg_ca[0], ca;
+	char nm[56];
+
+	if (a + b == 0)
+		ca = h->ca;
+	else
+		ca = b > a ? 0 : 1;
+	h->ca_cambio = a >= 4 && b >= 4;
+	if (ca != h->ca && h->tipo == PR_CALENTAR) {
+		snprintf(nm, sizeof nm, "Calentar%s%s (%s)", h->fuerte ? " fuerte" : "", ca == 1 ? " enchufado" : ca == 0 ? " con batería" : "", h->dura);
+		suceso_log("la prueba %d, «%s», ha sido en realidad «%s» (%d s enchufado, %d s con la batería)", h->num, h->nombre, nm, a, b);
+		snprintf(h->nombre, sizeof h->nombre, "%s", nm);
+	}
+	h->ca = ca;
 }
 
 static void para_carga(int seguridad, int esc)
@@ -2071,6 +2139,8 @@ static void para_carga(int seguridad, int esc)
 	}
 	sc(SC_CARGA, 1, 0, 0);
 	seg_carga = (int)((jg_tics() - t_fase) / jg_hz);
+	if (he_cal >= 0 && he_cal < nhechas)
+		decide_alimentacion(&HE[he_cal]);
 	por_seguridad = seguridad;
 	por_esc = esc;
 	{
@@ -2325,7 +2395,7 @@ static void mira_carga(void)
 	carga_vueltas++;
 	if (r != 1) {
 		/* el núcleo la ha parado y ha dormido a los demás: otra vez, y la hija */
-		sc(SC_CARGA, 1, 1, 0);
+		sc(SC_CARGA, 1, carga_fuerte ? 3 : 1, 0);
 		if (!solo_aqui) {
 			lanza_hija(dura_s - seg + 60);
 			if (hija < 0)
@@ -2468,10 +2538,15 @@ static void mira_alimentacion(void)
 		int ca = en.ca == 1 ? 1 : en.ca == 0 ? 0 : -1;
 
 		h->bat_fin = (int)en.pct;
-		if (ca >= 0 && h->ca >= 0 && ca != h->ca && !h->ca_cambio) {
-			h->ca_cambio = 1;
+		/* (TERMO 1.2) _PSR (en.ca); si no lo dice, _BST (descargando: con la batería) */
+		if (ca < 0 && hay_zonas && (za.t.bat_estado & 3))
+			ca = za.t.bat_estado & 1 ? 0 : 1;
+		if (fase == F_CARGA && ca >= 0)
+			h->seg_ca[ca] += 2;
+		if (ca >= 0 && h->ca_ult >= 0 && ca != h->ca_ult)
 			suceso_log("OJO: durante la prueba de esfuerzo se ha %s el cargador: esta prueba no compara bien con las demás", ca ? "enchufado" : "desenchufado");
-		}
+		if (ca >= 0)
+			h->ca_ult = ca;
 		if (fase == F_CARGA && ca == 0 && hay_zonas && za.t.bat_mw != NO && (za.t.bat_estado & 1) && (int)za.t.bat_mw > h->bat_mw)
 			h->bat_mw = (int)za.t.bat_mw;
 	}
@@ -2545,7 +2620,7 @@ static void informe_autonomia(char *b, size_t cabe)
  * cargador puesto, la batería no ha bajado» */
 static int bloque_calentar(char *t, int cabe, const struct hecha *h, const char *fin)
 {
-	char g1[24], g2[24], g3[24], c1[120], w[16];
+	char g1[24], g2[24], g3[24], c1[120], w[16], cambio_txt[200], t1[24], t2[24];
 	int n = 0, k;
 #define IN(...) (n += snprintf(t + n, (size_t)(cabe - n), __VA_ARGS__), n = n < cabe ? n : cabe - 1)
 
@@ -2554,11 +2629,21 @@ static int bloque_calentar(char *t, int cabe, const struct hecha *h, const char 
 	IN("=====================================================================\r\n");
 	IN("Alimentación: %s%s\r\n", h->ca == 1 ? "enchufado a la corriente" : h->ca == 0 ? "con la batería (sin enchufar)" :
 	   hay_bateria ? "no se sabe si estaba enchufado" : "a la corriente (no se ve batería)",
-	   h->ca_cambio ? "; OJO: se ha enchufado o desenchufado durante la prueba (no compara bien con las demás)" : "");
+	   h->ca_cambio ? (snprintf(cambio_txt, sizeof cambio_txt, "; OJO: se ha enchufado o desenchufado durante la prueba: %s enchufado y %s con la batería (no compara bien con las demás)",
+				    tiempo(t1, h->seg_ca[1]), tiempo(t2, h->seg_ca[0])), cambio_txt) : "");
 	IN("Prueba de esfuerzo: %s, %d s; carga de coma flotante en %d %s\r\n", por_seguridad ? "PARADA DE SEGURIDAD" : por_esc ? "parada a mano (Esc)" :
 	   VP.carga_cortada ? "con la carga rota (ver abajo)" : "completa", seg_carga, 1 + ap_cargados, ap_cargados ? "procesadores (hilos)" : "núcleo (Hispa-Pentium usa uno)");
-	IN("Carga usada: x87 (la coma flotante de siempre, raíz y seno, en cada procesador): es ligera; en un procesador de hoy no llega a los vatios que deja la BIOS (PL1), "
-	   "así que no dice si la fuente o el cargador darían para el máximo.\r\n");
+	if (h->fuerte)
+		IN("Carga usada: FUERTE, SSE2 (multiplicaciones y sumas de dobles en paralelo, sobre un bloque que cabe en la caché L1: sin depender de la memoria) en %s y en %d de los %d procesadores más%s: "
+		   "es la que se acerca a los vatios que deja la BIOS (PL1 y PL2) sin AVX; si el paquete se queda muy por debajo de PL1 enchufado, lo frena otra cosa (la fuente, el cargador o la placa).\r\n",
+		   solo_aqui ? "este (en la tarea del Termómetro, con x87: sin tarea hija)" : "este", ap_fuertes, ap_cargados,
+		   ap_fuertes < ap_cargados ? " (los demás, con la ligera: sin SSE2)" : "");
+	else
+		IN("Carga usada: ligera, x87 (la coma flotante de siempre, raíz y seno, en cada procesador): en un procesador de hoy no llega a los vatios que deja la BIOS (PL1), "
+		   "así que no dice si la fuente o el cargador darían para el máximo%s.\r\n", fuerte_puede ? " (para eso, la fuerte: tecla F)" : "");
+	if (ap_cache_apagada)
+		IN("OJO: %d de los demás procesadores llegaron con la caché apagada (CR0.CD a 1, como los dejó la BIOS)%s.\r\n", ap_cache_apagada,
+		   h->fuerte ? "; la carga fuerte la enciende" : "; con la ligera se quedan así (como hasta la 1.1.1) y cargan mucho menos de lo que podrían");
 	if (por_seguridad)
 		IN("Motivo de la parada: %s\r\n", motivo);
 	IN("\r\nSENSOR                                  REPOSO    MÁXIMA    AL ACABAR  NOTA\r\n");
@@ -2705,6 +2790,7 @@ static void linea_calentar(char *d, int cabe, const struct hecha *h)
 		m = snprintf(d, (size_t)cabe, "%s: llegó a %s (empezó en %s, %s%d °C)", EST[e], grados(a, h->t_max), grados(b, h->t_ini), sube >= 0 ? "+" : "", sube);
 	}
 #define LC(...) (m += snprintf(d + m, (size_t)(cabe > m ? cabe - m : 0), __VA_ARGS__), m = m < cabe ? m : cabe - 1)
+	LC("; carga %s", h->fuerte ? "fuerte (SSE2)" : "ligera (x87)");	/* (TERMO 1.2) */
 	if (h->mw >= 0)
 		LC("; el procesador, %s W de media", vatios(w, h->mw));
 	if (h->mhz > 0)
@@ -2792,7 +2878,12 @@ static int compara_calentar(char *t, int cabe)
 			IN("; %d MHz frente a %d MHz", e->mhz, b->mhz);
 		if (e->pct_fr >= 0 && b->pct_fr >= 0)
 			IN("; frenado el %d %% frente al %d %%", e->pct_fr, b->pct_fr);
-		IN(". (Con la carga x87, ligera, puede que ninguna llegue al límite de la BIOS: entonces no se ve si la fuente frena.)\r\n");
+		if (e->fuerte != b->fuerte)
+			IN(". OJO: una con la carga ligera y otra con la fuerte: no se comparan bien (repita la que falte con la misma carga).\r\n");
+		else if (e->fuerte)
+			IN(". (Las dos con la carga fuerte, SSE2: si enchufado no pasa de lo de la batería, o se queda muy por debajo de PL1, lo frena la fuente o el cargador.)\r\n");
+		else
+			IN(". (Con la carga x87, ligera, puede que ninguna llegue al límite de la BIOS: entonces no se ve si la fuente frena; mejor con la fuerte, tecla F.)\r\n");
 	}
 #undef IN
 	return n;
@@ -2815,6 +2906,13 @@ static void escribe_informe(void)
 	IN("Equipo: %s %s %s\r\n", za.t.fabricante, za.t.producto, za.t.version_eq);
 	IN("Placa: %s %s   BIOS: %s\r\n", za.t.placa_fab, za.t.placa, za.t.bios);
 	IN("Procesador: %s (TjMax %d °C, %s)\r\n", cpu.marca, cpu.tjmax, cpu.tj_de_msr ? "la que dice el procesador" : "de tabla");
+	/* (TERMO 1.2) «Enviar a Carlos», la última vez de este arranque */
+	if (envio_ok == 1)
+		IN("Enviado a Carlos: sí, a las %s: %s\r\n", envio_hora, envio_fin);
+	else if (envio_ok == 0)
+		IN("Enviado a Carlos: NO, a las %s: %s\r\n", envio_hora, envio_fin);
+	else if (puede_enviar)
+		IN("Enviado a Carlos: todavía no (tecla E, con la red puesta)\r\n");
 	if (ap_cargados)
 		IN("Núcleos: %s (%d procesadores)\r\n", topologia_texto(), ap_cargados + 1);
 	IN("\r\nPRUEBAS DE ESTE ARRANQUE (en el orden en que se han hecho; cada una, con su sección más abajo)\r\n");
@@ -3073,6 +3171,82 @@ static int carga_hija(int segundos)
 	}
 	(void)sale;
 	sc(SC_SERIE, (u32)"termo: carga parada\n", 20, 0);
+	return 0;
+}
+
+/* (TERMO 1.2) la carga fuerte de la tarea hija (TERMO.BIN /CARGA=s /FUERTE):
+ * SSE2, como la de los demás procesadores (termo.cas, «termo_ap_fuerte»):
+ * siete cadenas de x := x * a + c, dos dobles en cada registro XMM, con a
+ * de un bloque de 16 K (cabe en la caché L1 de cualquier procesador con
+ * SSE2: sin esperar a la memoria) y c en XMM7. a entre 1 - 2^-14 y
+ * 1 - 2^-17, c = 2^-13: x se queda entre 1 y 16 (ni desbordes ni
+ * subnormales). Cada vuelta, los siete a la memoria: si alguno se sale,
+ * es que alguien le ha tocado los registros (el núcleo los guarda al cambiar
+ * de tarea: FXSAVE, tareas.cas) y se dice. */
+#define FU_TROZOS 146	/* 146 x 112 octetos: 16.352, casi 16 K */
+static double fu_bloque[FU_TROZOS * 14] __attribute__((aligned(16)));
+static double fu_suma[2] __attribute__((aligned(16)));
+static double fu_x[14] __attribute__((aligned(16)));
+
+static void fuerte_vuelta(int pasadas)
+{
+	__asm__ volatile("movapd (%[c]), %%xmm7\n\t"
+			 "movapd 0(%[x]), %%xmm0\n\tmovapd 16(%[x]), %%xmm1\n\tmovapd 32(%[x]), %%xmm2\n\tmovapd 48(%[x]), %%xmm3\n\t"
+			 "movapd 64(%[x]), %%xmm4\n\tmovapd 80(%[x]), %%xmm5\n\tmovapd 96(%[x]), %%xmm6\n"
+			 "1:\n\tmovl %[b], %%esi\n\tmovl %[t], %%ecx\n"
+			 "2:\n\t"
+			 "mulpd (%%esi), %%xmm0\n\taddpd %%xmm7, %%xmm0\n\t"
+			 "mulpd 16(%%esi), %%xmm1\n\taddpd %%xmm7, %%xmm1\n\t"
+			 "mulpd 32(%%esi), %%xmm2\n\taddpd %%xmm7, %%xmm2\n\t"
+			 "mulpd 48(%%esi), %%xmm3\n\taddpd %%xmm7, %%xmm3\n\t"
+			 "mulpd 64(%%esi), %%xmm4\n\taddpd %%xmm7, %%xmm4\n\t"
+			 "mulpd 80(%%esi), %%xmm5\n\taddpd %%xmm7, %%xmm5\n\t"
+			 "mulpd 96(%%esi), %%xmm6\n\taddpd %%xmm7, %%xmm6\n\t"
+			 "addl $112, %%esi\n\tdecl %%ecx\n\tjnz 2b\n\t"
+			 "decl %%edx\n\tjnz 1b\n\t"
+			 "movapd %%xmm0, 0(%[x])\n\tmovapd %%xmm1, 16(%[x])\n\tmovapd %%xmm2, 32(%[x])\n\tmovapd %%xmm3, 48(%[x])\n\t"
+			 "movapd %%xmm4, 64(%[x])\n\tmovapd %%xmm5, 80(%[x])\n\tmovapd %%xmm6, 96(%[x])"
+			 : "+d"(pasadas)
+			 : [c] "r"(fu_suma), [x] "r"(fu_x), [b] "g"((u32)fu_bloque), [t] "i"(FU_TROZOS)
+			 : "esi", "ecx", "memory", "cc");
+}
+
+static int carga_hija_fuerte(int segundos)
+{
+	u32 fin = jg_tics() + (u32)segundos * 100, *w, r[4], vueltas = 0;
+	int i, mal = 0;
+
+	cpuid(1, r);
+	if ((r[3] & 0x05000000u) != 0x05000000u || !(sc(SC_CARGA, 8, 0, 0) & 0x100) || !(sc(SC_CARGA, 8, 0, 0) & 4)) {
+		serie("termo: carga fuerte: sin SSE2 (o el núcleo no lo enciende): la ligera\n");
+		return carga_hija(segundos);
+	}
+	w = (u32 *)fu_bloque;
+	for (i = 0; i < FU_TROZOS * 14; i++) {	/* (lo mismo que el bloque de termo.cas) */
+		w[2 * i] = 0;
+		w[2 * i + 1] = 0x3FEFFF80u + (u32)((i * 37) % 64);
+	}
+	w = (u32 *)fu_suma;
+	w[0] = w[2] = 0;
+	w[1] = w[3] = 0x3F200000u;	/* 2^-13 */
+	for (i = 0; i < 14; i++)
+		fu_x[i] = 1.0;
+	serie("termo: carga en marcha (fuerte, SSE2)\n");
+	for (;;) {
+		fuerte_vuelta(3000);
+		vueltas++;
+		for (i = 0; i < 14; i++)
+			if (!(fu_x[i] >= 0.9 && fu_x[i] <= 16.5))
+				break;
+		if (i < 14 && !mal) {
+			mal = 1;
+			serie("termo: carga fuerte: MAL: los registros XMM se han salido de lo que dan las cuentas (el %d, en la vuelta %u)\n", i, vueltas);
+		}
+		if (sc(SC_CARGA, 0, 0, 0) != 1 || (int)(jg_tics() - fin) > 0)
+			break;
+	}
+	serie("termo: carga parada (fuerte: %u vueltas de %u multiplicaciones y sumas de dobles; los registros %s)\n", vueltas, 3000u * FU_TROZOS * 28u,
+	      mal ? "MAL" : "bien");
 	return 0;
 }
 
@@ -3465,6 +3639,25 @@ static void estado_serie(void)
  * puede tardar más de 0,1 s; contando pulsos, el registro salía en el HP
  * Mini cada 4 s en vez de cada 2. Si se pierde un segundo entero, se sigue
  * desde ahora (sin correr para recuperarlo) */
+/* (TERMO 1.2) Calentar, esperando a la primera lectura de ACPI */
+static void mira_espera_acpi(void)
+{
+	if (!espera_acpi || fase == F_CARGA)
+		return;
+	if (!hay_zonas && (int)(jg_tics() - espera_acpi) < 15 * (int)jg_hz)
+		return;
+	if (!hay_zonas)
+		suceso_log("Calentar: ACPI no ha dado nada en 15 s: se empieza sin las zonas ni la batería");
+	else
+		suceso_log("Calentar: ya está la primera lectura de ACPI (a los %u s de pedirlo): se empieza", (jg_tics() - espera_acpi) / jg_hz);
+	espera_acpi = 0;
+	if (fase != F_CARGA && !ram_activa() && !midiendo) {
+		fase = F_REPOSO;
+		empieza();
+	}
+	jg_cambio = 1;
+}
+
 static void pulso(void)
 {
 	static u32 proximo, lento_dicho;
@@ -3488,6 +3681,10 @@ static void pulso(void)
 	cuenta_s++;
 	bmp_trozo();		/* (la pantalla que se está guardando: 32 K por segundo) */
 	lee_todo();
+	if (espera_acpi) {	/* (TERMO 1.2) */
+		lee_zonas();
+		mira_espera_acpi();
+	}
 	t_lee = jg_tics() - t0;
 	if (cuenta_s % 2 == 0) {
 		u32 tz = jg_tics();
@@ -3610,7 +3807,7 @@ static const char *nucleos_texto(void)
 
 /* ---------------------------------------------------------------- pintar */
 struct boton { int x, y, an, al; const char *t; int id; };
-enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA, B_ENVIAR, B_TERMINAL, B_MIDE, B_RAM };
+enum { B_CALENTAR = 1, B_5, B_10, B_15, B_PARAR, B_CAPTURA, B_ENVIAR, B_TERMINAL, B_MIDE, B_RAM, B_CARGA };
 static struct boton bot[12];
 static int nbot;
 
@@ -4110,11 +4307,15 @@ static void pinta(void)
 			trama(10, ym, W - 20, 26, E_TEMPLADO, aclara(C_TEMPLADO, -60));
 			lz_rect(&LZ, 14, ym + 4, LIMITA(ancho_texto(a, 1) + 8, 0, W - 28), 18, 0xFFFFFF);
 			lz_negrita(&LZ, 18, ym + 5, a, C_TINTA, 1);
+		} else if (espera_acpi) {
+			lz_negrita(&LZ, 14, ym + 5, "CALENTAR, EN ESPERA: falta la primera lectura de ACPI (la batería y las zonas térmicas); empieza sola en unos segundos (15 como mucho).", C_TINTA, 1);
 		} else if (nhechas) {
-			snprintf(a, sizeof a, "Pruebas hechas en este arranque: %d (P: verlas con su resultado). Calentar (C), Rendimiento (R), Memoria RAM (M).", nhechas);
+			snprintf(a, sizeof a, "Pruebas hechas en este arranque: %d (P: verlas con su resultado). Calentar (C), Rendimiento (R), Memoria RAM (M)%s.", nhechas,
+				 puede_enviar ? ", Enviar a Carlos (E)" : "");
 			lz_texto(&LZ, 14, ym + 5, a, C_TINTA, 1);
 		} else {
-			lz_texto(&LZ, 14, ym + 5, "Prueba de esfuerzo: elija el tiempo y pulse «Calentar» (C). Se para sola si se calienta.", C_TINTA, 1);
+			lz_texto(&LZ, 14, ym + 5, fuerte_puede ? "Prueba de esfuerzo: elija el tiempo y la carga (F: ligera o fuerte) y pulse «Calentar» (C). Se para sola si se calienta."
+							     : "Prueba de esfuerzo: elija el tiempo y pulse «Calentar» (C). Se para sola si se calienta.", C_TINTA, 1);
 		}
 		boton(xb, yb, 150, 32, "Calentar (C)", B_CALENTAR, fase != F_CARGA, 0);
 		xb += 160;
@@ -4123,7 +4324,10 @@ static void pinta(void)
 		boton(xb, yb, 96, 32, "10 min (2)", B_10, fase != F_CARGA, minutos == 10);
 		xb += 102;
 		boton(xb, yb, 96, 32, "15 min (3)", B_15, fase != F_CARGA, minutos == 15);
-		xb += 112;
+		xb += 106;
+		/* (TERMO 1.2) la carga: ligera o fuerte (marcado: la fuerte) */
+		boton(xb, yb, 170, 32, carga_fuerte ? "Carga: fuerte (F)" : "Carga: ligera (F)", B_CARGA, fase != F_CARGA && fuerte_puede, carga_fuerte);
+		xb += 186;
 		boton(xb, yb, 120, 32, "Parar (Esc)", B_PARAR, fase == F_CARGA || fase == F_ENFRIA || midiendo || ram_activa(), 0);
 		xb += 130;
 		if (W >= 1000) {
@@ -4136,7 +4340,7 @@ static void pinta(void)
 		}
 		{
 			/* (TERMO) «Enviar a Carlos» y «Terminal», si la memoria está preparada */
-			int estrecho = W < 1000, an_env = estrecho ? 80 : 150, an_ter = estrecho ? 90 : 100,
+			int estrecho = W < 1000, an_env = estrecho ? 100 : 190, an_ter = estrecho ? 90 : 100,
 			    an_cap = estrecho ? 50 : 140, pide = (puede_enviar ? an_env + 6 : 0) + (puede_terminal ? an_ter + 6 : 0);
 
 			if (xb + an_cap + pide <= W) {
@@ -4144,7 +4348,7 @@ static void pinta(void)
 				xb += an_cap + 6;
 			}
 			if (puede_enviar && xb + an_env <= W) {
-				boton(xb, yb, an_env, 32, estrecho ? "Enviar" : "Enviar a Carlos", B_ENVIAR, 1, enviando);
+				boton(xb, yb, an_env, 32, estrecho ? "Enviar (E)" : "Enviar a Carlos (E)", B_ENVIAR, 1, enviando);
 				xb += an_env + 6;
 			}
 			if (puede_terminal && xb + an_ter <= W)
@@ -4168,6 +4372,21 @@ static void pinta(void)
 				for (i = 0; i < nhallado; i++)
 					lz_texto(&LZ, 14, y0 + 22 + 16 * i, hallado[i], C_TINTA, 1);
 			}
+		}
+		/* (TERMO 1.2) «Enviar a Carlos»: cómo va y cómo ha ido, en letras */
+		if (envio_cartel && (enviando || envio_fin[0])) {
+			const char *t = enviando ? (strncmp(aviso_envio, "Envío: ", 8) ? aviso_envio : aviso_envio + 8) : envio_fin;
+			int an = W - 120, rx = 60, al = 76 + 18 * lz_parrafo(0, 0, 0, an - 28, t, 0, 1, 18), ry = H - 40 - al - (guarda_aviso[0] ? 50 : 0);
+
+			lz_rect(&LZ, rx + 4, ry + 4, an, al, 0x9A948A);
+			lz_rect(&LZ, rx, ry, an, al, enviando ? 0xFFFFFF : envio_ok == 1 ? 0xE6F2E6 : 0xFFF3C4);
+			if (!enviando && envio_ok != 1)
+				trama(rx, ry, an, 8, E_PELIGRO, C_PELIGRO);
+			lz_marco(&LZ, rx, ry, an, al, C_TINTA);
+			lz_negrita(&LZ, rx + 14, ry + 14, enviando ? "ENVIANDO A CARLOS..." : envio_ok == 1 ? "ENVIADO A CARLOS" : "NO ENVIADO", C_TINTA, 2);
+			lz_parrafo(&LZ, rx + 14, ry + 50, an - 28, t, C_TINTA, 1, 18);
+			if (!enviando)
+				lz_texto(&LZ, rx + 14, ry + al - 20, "Cualquier tecla: cerrar este aviso (E: enviar otra vez).", C_GRIS, 1);
 		}
 		/* la vez anterior no acabó bien: se dice, encima de todo */
 		if (ver_anterior) {
@@ -4210,11 +4429,16 @@ static void lanza_envio(void)
 		snprintf(aviso_envio, sizeof aviso_envio, "Envío: ya se está enviando; espere a que acabe.");
 		return;
 	}
+	envio_cartel = 1;
 	if (!hay_red_ya()) {
-		snprintf(aviso_envio, sizeof aviso_envio, "%s", sin_red_texto);
-		suceso_log("Enviar a Carlos: %s", sin_red_texto);
+		char t[400];
+
+		snprintf(t, sizeof t, "NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez; "
+			 "o súbalo al FTP: los archivos siguen en %s.", carpeta);
+		envio_acaba(t);
 		return;
 	}
+	envio_fin[0] = 0;
 	snprintf(r, sizeof r, "%s\\ENVIO.EST", carpeta);
 	escribe(r, "Empezando a enviar...", 21, 1);
 	suceso_log("Enviar a Carlos: se manda %s", carpeta);
@@ -4222,12 +4446,15 @@ static void lanza_envio(void)
 	if (ES_ERROR(x))
 		x = sc(SC_LANZAR_SUELTO, (u32)"\\HISPA\\TERMO.BIN", (u32)"/ENVIAR /VENTANA", 0);
 	if (ES_ERROR(x)) {
-		snprintf(aviso_envio, sizeof aviso_envio, "Envío: no se puede poner en marcha TERMO.BIN /ENVIAR.");
+		char t[300];
+
+		snprintf(t, sizeof t, "NO ENVIADO: no se puede poner en marcha TERMO.BIN /ENVIAR. Súbalo al FTP: los archivos siguen en %s.", carpeta);
+		envio_acaba(t);
 		return;
 	}
 	enviando = 1;
 	t_envio = jg_tics();
-	snprintf(aviso_envio, sizeof aviso_envio, "Envío: empezando...");
+	snprintf(aviso_envio, sizeof aviso_envio, "Envío: Enviando... (empezando)");
 }
 
 /* cada 2 s, mientras se envía: lo que dice ENVIO.EST */
@@ -4247,16 +4474,36 @@ static void mira_envio(void)
 	if (ES_ERROR(n))
 		return;
 	t[n] = 0;
-	if (strcmp(t, aviso_envio + 7)) {
+	if (strcmp(t, aviso_envio + 8)) {
 		snprintf(aviso_envio, sizeof aviso_envio, "Envío: %s", t);
 		serie("termo: envío dice: %s\n", t);
-		if (busca(t, "Hecho") || busca(t, "Enviados ") || busca(t, "No hay ") || busca(t, "no está preparada") || busca(t, "no vale")) {
+		if (!strncmp(t, "ENVIADO", 7) || !strncmp(t, "NO ENVIADO", 10) || busca(t, "Hecho") || busca(t, "Enviados ") || busca(t, "No hay ") || busca(t, "no está preparada") || busca(t, "no vale")) {
 			enviando = 0;
-			suceso_log("Enviar a Carlos: %s", t);
+			envio_acaba(t);
 		}
 	}
-	if ((int)(jg_tics() - t_envio) > 900 * (int)jg_hz)
+	if (enviando && (int)(jg_tics() - t_envio) > 900 * (int)jg_hz) {
+		char x[300];
+
 		enviando = 0;
+		snprintf(x, sizeof x, "NO ENVIADO: el envío no ha acabado en 15 minutos (la red va muy lenta o se ha colgado). Pulse E otra vez; o súbalo al FTP: los archivos siguen en %s.", carpeta);
+		envio_acaba(x);
+	}
+}
+
+/* (TERMO 1.2) se acabó el envío (bien o mal): el cartel, el .LOG y el informe */
+static void envio_acaba(const char *t)
+{
+	snprintf(envio_fin, sizeof envio_fin, "%s", t);
+	envio_ok = !strncmp(t, "ENVIADO", 7) || busca(t, "Hecho") ? 1 : 0;
+	hora_texto(envio_hora, sizeof envio_hora);
+	snprintf(aviso_envio, sizeof aviso_envio, "Envío: %s", t);
+	envio_cartel = 1;
+	serie("termo: envío: resultado: %s\n", t);
+	suceso_log("Enviar a Carlos: %s", t);
+	escribe_informe();	/* («Enviado a Carlos: ...», también sin ninguna prueba hecha) */
+	jg_cambio = 1;
+	motivo_pinta = 1;
 }
 
 /* (RAM) «Memoria RAM»: TERMO.BIN /RAM, una tarea hija (ram.c); lo que va
@@ -4541,12 +4788,34 @@ static void haz(int id)
 		}
 		if (fase != F_CARGA) {
 			fase = F_REPOSO;
+			/* (TERMO 1.2) sin la primera lectura de ACPI (la batería y las
+			 * zonas: el ASUS GL553VD, nada más arrancar), se espera a ella,
+			 * 15 s como mucho (pulso: mira_espera_acpi), y se dice */
+			if (!hay_zonas && !simula) {
+				if (!espera_acpi) {
+					espera_acpi = jg_tics();
+					if (!espera_acpi)
+						espera_acpi = 1;
+					suceso_log("Calentar: se espera a la primera lectura de ACPI (la batería y las zonas térmicas), 15 s como mucho");
+				}
+				break;
+			}
 			empieza();
 		}
 		break;
 	case B_5: pide_minutos(5); break;
 	case B_10: pide_minutos(10); break;
 	case B_15: pide_minutos(15); break;
+	case B_CARGA:	/* (TERMO 1.2) ligera o fuerte; no con la carga en marcha */
+		if (fase == F_CARGA)
+			break;
+		if (!fuerte_puede) {
+			suceso_log("Carga fuerte: no se puede (%s): se queda la ligera", sse_nucleo ? "el procesador no tiene SSE2" : "necesita Hispa-Pentium 0.8.12");
+			break;
+		}
+		carga_fuerte = !carga_fuerte;
+		suceso_log("la carga, ahora: %s", carga_fuerte ? "fuerte (SSE2: para llegar a PL1/PL2)" : "ligera (x87, la de siempre)");
+		break;
 	case B_PARAR:
 		if (ram_activa())
 			ram_para();
@@ -4591,14 +4860,31 @@ static void suceso(const struct suceso *s)
 		return;
 	}
 	if (s->clase == EV_TECLA) {
+		if (envio_cartel && !enviando && s->a != 'e' && s->a != 'E' && s->a != 0x158) {	/* (TERMO 1.2) el cartel del envío, hasta la siguiente tecla */
+			envio_cartel = 0;
+			jg_cambio = 1;
+			if (ES_INTRO(s->a) || s->a == T_ESC)
+				return;
+		}
 		switch (s->a) {
 		case 'c': case 'C': haz(B_CALENTAR); break;
 		case '1': haz(B_5); break;
 		case '2': haz(B_10); break;
 		case '3': haz(B_15); break;
+		case 'f': case 'F': haz(B_CARGA); break;	/* (TERMO 1.2) */
 		case T_ESC: haz(B_PARAR); break;
 		case 0x158: captura(); estado_serie(); break;	/* F12 */
-		case 'e': case 'E': if (puede_enviar) lanza_envio(); break;
+		case 'e': case 'E':	/* (TERMO 1.2) sin ENVIO.INI, también se dice */
+			if (puede_enviar)
+				lanza_envio();
+			else {
+				char t[300];
+
+				snprintf(t, sizeof t, "NO ENVIADO: esta copia del Termómetro no está preparada para enviar (falta ENVIO.INI). Súbalo al FTP: los archivos siguen en %s.",
+					 carpeta[0] ? carpeta : "la carpeta TERMO");
+				envio_acaba(t);
+			}
+			break;
 		case 't': case 'T': if (puede_terminal) lanza_terminal(); break;
 		case 'r': case 'R': lanza_mide(); break;
 		case 'm': case 'M': lanza_ram(0); break;
@@ -4695,7 +4981,7 @@ int principal(void)
 		for (p = p ? p + 7 : "1000"; *p >= '0' && *p <= '9'; p++)
 			s = s * 10 + *p - '0';
 
-		return carga_hija(s > 0 ? s : 1000);
+		return arg_aqui("/FUERTE") ? carga_hija_fuerte(s > 0 ? s : 1000) : carga_hija(s > 0 ? s : 1000);
 	}
 	/* (TERMO) dónde va todo, y «Enviar a Carlos» (TERMO /ENVIAR: desde la
 	 * Consola lo dice en la pantalla; con /VENTANA, en ENVIO.EST) */
@@ -4763,6 +5049,20 @@ int principal(void)
 	/* (los argumentos, para arg_entero: jg_correr los vuelve a leer) */
 	memcpy(jg_args, args, sizeof args);
 	simula = arg_aqui("/SIMULA");
+	acpi_tarde = ram_linea("acpitarde");	/* (TERMO 1.2, solo las pruebas) */
+	/* (TERMO 1.2) la carga fuerte: ¿la puede hacer este núcleo? (la 224 con
+	 * EBX = 8: 100h más 4 si ha encendido el SSE2); por omisión, la ligera;
+	 * «cargafuerte» en la línea del cargador (o /FUERTE), la fuerte */
+	{
+		u32 r = sc(SC_CARGA, 8, 0, 0);
+
+		sse_nucleo = ES_ERROR(r) || !(r & 0x100) ? 0 : (int)(r & 0xFF) | 0x100;
+		fuerte_puede = (sse_nucleo & 0x104) == 0x104;
+		carga_fuerte = fuerte_puede && (ram_linea("cargafuerte") || arg_aqui("/FUERTE"));
+		serie("termo: coma flotante del núcleo: %s; la carga, por omisión: %s\n",
+		      !sse_nucleo ? "núcleo de antes de la 0.8.12 (sin la carga fuerte)" : sse_nucleo & 4 ? "FXSAVE, SSE y SSE2" : sse_nucleo & 2 ? "FXSAVE y SSE (sin SSE2: sin la carga fuerte)" :
+		      sse_nucleo & 1 ? "FXSAVE (sin SSE)" : "solo x87 (fnsave)", carga_fuerte ? "fuerte (SSE2)" : "ligera (x87)");
+	}
 	nv_sololeer = arg_aqui("/SOLOLEER");	/* (NVIDIA) ni lo volátil de nouveau */
 	dura_s = arg_entero("/DURA", minutos * 60);
 	enfria_max = arg_entero("/ENFRIA", 180);

@@ -12,7 +12,7 @@
 # fuera de la memoria y del FTP: lo que hay que registrar en el servidor) y
 # por la salida. Lo de cada memoria es distinto: se hace cada vez.
 # Lo que se puede cambiar (el entorno):
-#   TERMO_SERVIDORES  «url url» (https://; por omisión, actualiza.hispados.es y hispados.es)
+#   TERMO_SERVIDORES  «url url» (https://; por omisión, hispados.es y actualiza.hispados.es)
 #   TERMO_EQUIPO      el nombre de la carpeta en el servidor (Portatil-gamer)
 #   TERMO_PRUEBA=si   deja servidores http:// (solo las pruebas)
 #   TERMO_SSH_EQUIPO, TERMO_SSH_PUERTO, TERMO_SSH_USUARIO (hispados.es, 22, termo)
@@ -22,7 +22,7 @@
 set -eu
 D=${1:?uso: prepara_memoria.sh CARPETA}
 mkdir -p "$D/SSH"
-SERV=${TERMO_SERVIDORES:-https://actualiza.hispados.es/termo/subir.php https://hispados.es/termo/subir.php}
+SERV=${TERMO_SERVIDORES:-https://hispados.es/termo/subir.php https://actualiza.hispados.es/termo/subir.php}   # (TERMO 1.2) hispados.es primero: actualiza no tiene HTTPS
 EQ=${TERMO_EQUIPO:-Portatil-gamer}
 SE=${TERMO_SSH_EQUIPO:-hispados.es}
 SP=${TERMO_SSH_PUERTO:-22}

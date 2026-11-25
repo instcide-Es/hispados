@@ -6,7 +6,7 @@
  * (/ENVIAR /VENTANA: lo va dejando en TERMO\ENVIO.EST, que la ventana lee).
  *
  * TERMO\ENVIO.INI (lo hace usb.sh con TERMO=1; nunca se sube):
- *   servidor=https://actualiza.hispados.es/termo/subir.php   (uno o dos)
+ *   servidor=https://hispados.es/termo/subir.php   (uno o dos)
  *   equipo=Portatil-gamer
  *   testigo=64 cifras hexadecimales (32 octetos al azar; el servidor solo
  *           guarda su SHA-256 y lo revoca borrando su línea)
@@ -17,6 +17,14 @@
  * servidor; lo que el servidor rechaza (testigo, tamaño, tipo, tope del
  * día) no se repite. En TERMO\ENVIO.HEC, lo ya mandado (nombre y tamaño):
  * la vez siguiente solo va lo nuevo o lo que ha crecido.
+ * (TERMO 1.2) Lo que se dice, para la pantalla (ENVIO.EST, una línea):
+ * «Enviando... (archivo 3 de 9: NOMBRE)» mientras tanto y, al acabar, una
+ * que empieza por «ENVIADO:» o por «NO ENVIADO:», con el motivo en llano
+ * (sin red, el DNS, no se puede conectar, el certificado, el testigo
+ * desconocido -403-, el tope del día -429-...) y qué hacer. Un servidor
+ * con el que no se llega a conectar (el primer archivo) no se reintenta:
+ * se pasa al otro enseguida; y hispados.es va antes que actualiza.hispados.es
+ * (que no tiene HTTPS; las memorias de antes lo llevan primero).
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "juego.h"
 #include <stdarg.h>
@@ -63,6 +71,9 @@ static char *busca_en(const char *t, const char *o)
 static char carpeta[64], ruta_est[80], ruta_hec[80];
 static char servidores[2][200], equipo[48], testigo[72];
 static int n_servidores, prueba;
+/* (TERMO 1.2) el último fallo: el de la red (o 0) y el código HTTP (o 0) */
+static u32 fallo_red;
+static int fallo_http;
 
 /* ---- lo que se dice: a la Consola, o a ENVIO.EST para la ventana ---- */
 static void di(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -122,9 +133,32 @@ static const char *texto_red(u32 e)
 	return "la red ha fallado";
 }
 
-static const char *como_conectar =
-	"Enchufe el cable de red, o conecte el Wi-Fi: Inicio > Configuración > Red (elija la red y escriba su contraseña), "
-	"o en la Consola: REDWIFI /REDES y REDWIFI /CONECTAR nombre. Luego, otra vez «Enviar a Carlos».";
+/* (TERMO 1.2) el motivo del último fallo, en llano, y qué hacer */
+static void motivo_llano(char *d, int cabe, const char *por_que)
+{
+	if (fallo_http == 403)
+		snprintf(d, (size_t)cabe, "el servidor no reconoce esta memoria («%s»: el testigo es desconocido o se ha revocado). Avise a Carlos para que lo dé de alta.", por_que);
+	else if (fallo_http == 429)
+		snprintf(d, (size_t)cabe, "el servidor dice que por hoy ya se ha mandado bastante (64 MB o 400 archivos). Pulse E mañana.");
+	else if (fallo_http == 413 || fallo_http == 415 || fallo_http == 400)
+		snprintf(d, (size_t)cabe, "el servidor no acepta un archivo (%s).", por_que);
+	else if (fallo_http)
+		snprintf(d, (size_t)cabe, "el servidor ha contestado con un error (%d: %s). Pruebe más tarde (E).", fallo_http, por_que);
+	else if (fallo_red == SIN_CABLE || fallo_red == SIN_IP || fallo_red == SIN_RED || fallo_red == SIN_TARJETA)
+		snprintf(d, (size_t)cabe, "sin red (%s). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez.", texto_red(fallo_red));
+	else if (fallo_red == NO_RESUELVE)
+		snprintf(d, (size_t)cabe, "no se encuentra el servidor (el DNS no da su dirección: ¿hay salida a Internet?). Compruébelo y pulse E otra vez.");
+	else if (fallo_red == TLS_CERTIFICADO)
+		snprintf(d, (size_t)cabe, "el certificado del servidor no vale (%s). Avise a Carlos.", por_que);
+	else if (fallo_red == TLS_SIN_HORA)
+		snprintf(d, (size_t)cabe, "el reloj del equipo no está en hora y sin ella no se pueden comprobar los certificados. Póngalo en hora (Panel de control) y pulse E otra vez.");
+	else if (fallo_red == SIN_TLS)
+		snprintf(d, (size_t)cabe, "falta el servicio TLS (TLS.BIN), que hace falta para HTTPS.");
+	else if (fallo_red == RECHAZADA || fallo_red == INALCANZABLE || fallo_red == TIEMPO || fallo_red == TLS_FALLO || fallo_red == CORTADA_RED)
+		snprintf(d, (size_t)cabe, "no se puede conectar con el servidor (%s). Pruebe otra vez dentro de un rato (E).", por_que);
+	else
+		snprintf(d, (size_t)cabe, "%s. Pruebe otra vez (E).", por_que);
+}
 
 /* ¿hay red? espera hasta 20 s a que haya dirección (el DHCP del Wi-Fi tarda) */
 static int hay_red(void)
@@ -299,6 +333,7 @@ static void apunta_mandado(const char *nombre, u32 tam)
 /* un archivo, al servidor u: 0 bien; 1 lo rechaza (no se repite); 2 se puede
  * repetir; 3 con ese servidor no hay manera (el certificado, la hora, el
  * nombre, sin TLS.BIN): el otro, si lo hay */
+static int ningun_bueno = 1;	/* (TERMO 1.2) aún no ha ido bien ningún archivo */
 static int manda(const struct url *u, const char *lote, const char *nombre, const u8 *d, u32 n, char *por_que, int cabe)
 {
 	static const char lim[] = "----HispaTermo7d1f0b2a9c";
@@ -327,9 +362,17 @@ static int manda(const struct url *u, const char *lote, const char *nombre, cons
 		     "Content-Type: multipart/form-data; boundary=%s\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
 		     u->camino, u->host, lim, nc);
 	c = conecta(u, por_que, cabe);
+	fallo_red = 0;
+	fallo_http = 0;
 	if (ES_ERROR_RED(c)) {
 		free(cuerpo);
-		return c == TLS_CERTIFICADO || c == TLS_SIN_HORA || c == SIN_TLS || c == NO_RESUELVE ? 3 : 2;
+		fallo_red = c;
+		/* (TERMO 1.2) sin conectar, con el primer archivo: el otro servidor
+		 * ya (el ASUS GL553VD: actualiza.hispados.es no tiene HTTPS y se
+		 * iban minutos en reintentos antes de probar hispados.es) */
+		if (c == SIN_CABLE || c == SIN_IP || c == SIN_RED || c == SIN_TARJETA)
+			return 2;
+		return c == TLS_CERTIFICADO || c == TLS_SIN_HORA || c == SIN_TLS || c == NO_RESUELVE || !ningun_bueno ? 3 : 2;
 	}
 	r = envia(u, c, (const u8 *)cab_http, (u32)m);
 	if (!r)
@@ -339,9 +382,12 @@ static int manda(const struct url *u, const char *lote, const char *nombre, cons
 		r = recibe(u, c, resp, sizeof resp, &nr);
 	cierra(u, c);
 	if (r) {
+		fallo_red = r;
 		snprintf(por_que, (size_t)cabe, "%s", texto_red(r));
 		return 2;
 	}
+	if (!strncmp(resp, "HTTP/1.", 7))
+		fallo_http = (resp[9] - '0') * 100 + (resp[10] - '0') * 10 + (resp[11] - '0');
 	/* «HTTP/1.1 200 OK» ... y, detrás de la línea en blanco, «OK ...» o «ERROR ...» */
 	p = busca_en(resp, "\r\n\r\n");
 	p = p ? p + 4 : resp;
@@ -438,16 +484,27 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 	snprintf(ruta_est, sizeof ruta_est, "%s\\ENVIO.EST", carpeta);
 	snprintf(ruta_hec, sizeof ruta_hec, "%s\\ENVIO.HEC", carpeta);
 	if (!lee_ini()) {
-		di("Esta copia del Termómetro no está preparada para enviar (falta %s\\ENVIO.INI con el servidor y el testigo).", carpeta);
+		di("NO ENVIADO: esta copia del Termómetro no está preparada para enviar (falta %s\\ENVIO.INI con el servidor y el testigo). Súbalo al FTP: los archivos siguen en %s.", carpeta, carpeta);
 		return 1;
+	}
+	/* (TERMO 1.2) hispados.es antes que actualiza.hispados.es (sin HTTPS) */
+	if (n_servidores == 2 && !strncmp(servidores[0], "https://actualiza.", 18) && strncmp(servidores[1], "https://actualiza.", 18)) {
+		char x[200];
+
+		memcpy(x, servidores[0], sizeof x);
+		memcpy(servidores[0], servidores[1], sizeof x);
+		memcpy(servidores[1], x, sizeof x);
 	}
 	for (k = 0; k < n_servidores; k++)
 		if (!parte_url(servidores[k], &us[k]) || (!us[k].segura && !prueba)) {
-			di("El servidor «%s» no vale: tiene que ser https://.", servidores[k]);
+			di("NO ENVIADO: el servidor «%s» de ENVIO.INI no vale (tiene que ser https://). Súbalo al FTP: los archivos siguen en %s.", servidores[k], carpeta);
 			return 1;
 		}
 	if (!hay_red()) {
-		di("No hay red. %s", como_conectar);
+		u32 ip, e = sc(SC_ESTADO_RED, (u32)&ip, 0, 0);
+
+		di("NO ENVIADO: sin red (%s). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez; o súbalo al FTP: los archivos siguen en %s.",
+		   ES_ERROR_RED(e) ? texto_red(e) : "no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP", carpeta);
 		return 2;
 	}
 	/* lo ya mandado */
@@ -507,7 +564,7 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 		az[0] = (u8)t, az[1] = (u8)(t >> 8), az[2] = (u8)(t >> 16), az[3] = (u8)(t >> 24);
 	}
 	snprintf(lote, sizeof lote, "%04u%02u%02u-%02u%02u%02u-%02X%02X", a, me, d, h, mi, s, az[0] ^ az[2], az[1] ^ az[3]);
-	di("Enviando %d archivos a %s (lote %s)...", nn, us[0].host, lote);
+	di("Enviando... (%d archivos a %s, lote %s)", nn, us[0].host, lote);
 	for (k = 0; k < nn; k++) {
 		u8 *b;
 		u32 n;
@@ -531,7 +588,7 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 
 				if (vez % 4)
 					sc(SC_DORMIR, espera[vez % 4] * jg_hz, 0, 0);
-				di("Enviando %s (%d de %d, %u octetos)%s...", nombres[k], k + 1, nn, n, vez ? ", otra vez" : "");
+				di("Enviando... (archivo %d de %d: %s, %u octetos, a %s)%s", k + 1, nn, nombres[k], n, us[sv].host, vez ? ", otra vez" : "");
 				r = manda(&us[sv], lote, nombres[k], b, n, por_que, sizeof por_que);
 				/* (cuatro veces mal, o con este no hay manera: el otro servidor) */
 				if ((r == 3 || (r == 2 && vez % 4 == 3)) && n_servidores > 1 && probados < 2) {
@@ -552,23 +609,32 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 		free(b);
 		if (r == 0) {
 			buenos++;
+			ningun_bueno = 0;
 			apunta_mandado(nombres[k], n);
 		} else {
 			malos++;
 			di("%s: no se ha podido enviar: %s.", nombres[k], por_que);
-			if (r == 1 && busca_en(por_que, "testigo"))
+			if (r == 1 && (busca_en(por_que, "testigo") || fallo_http == 429))
 				break;	/* (sin testigo, lo demás tampoco va a ir) */
 			if (r == 2 && !hay_red()) {
-				di("Se ha ido la red. %s", como_conectar);
+				di("NO ENVIADO: se ha ido la red a mitad (enviados %d de %d). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez (solo irá lo que falta); o súbalo al FTP: los archivos siguen en %s.",
+				   buenos, nn - iguales, carpeta);
 				return 2;
 			}
 		}
 	}
-	if (malos)
-		di("Enviados %d de %d archivos (%d ya estaban); %d sin enviar: %s. Pruebe otra vez.", buenos, nn - iguales, iguales, malos, por_que);
-	else if (buenos)
-		di("Hecho: %d archivos enviados a Carlos%s (lote %s).", buenos, iguales ? " (los demás ya estaban)" : "", lote);
+	if (malos) {
+		char mot[360];
+
+		motivo_llano(mot, sizeof mot, por_que);
+		if (buenos)
+			di("NO ENVIADO del todo: %d de %d archivos enviados a %s (lote %s); %d sin enviar: %s Súbalos al FTP si no va: los archivos siguen en %s.", buenos, nn - iguales,
+			   us[sv].host, lote, malos, mot, carpeta);
+		else
+			di("NO ENVIADO: %s Si no hay manera, súbalo al FTP: los archivos siguen en %s.", mot, carpeta);
+	} else if (buenos)
+		di("ENVIADO: %d archivos a %s (lote %s)%s.", buenos, us[sv].host, lote, iguales ? (snprintf(por_que, sizeof por_que, "; otros %d ya estaban", iguales), por_que) : "");
 	else
-		di("No hay nada nuevo: los %d archivos ya estaban enviados.", iguales);
+		di("ENVIADO: no había nada nuevo (los %d archivos ya estaban en el servidor).", iguales);
 	return malos ? 3 : 0;
 }

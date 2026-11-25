@@ -49,6 +49,13 @@
 ;        vez (los que se han parado solos tras un parón del equipo); EBX = 7:
 ;        en qué se va el procesador (las órdenes de la memoria USB y los tics
 ;        de cada tarea): en ECX, EDX octetos
+;        (TERMO-FUERTE, 0.8.12) EBX = 1 con ECX bit 1: la carga «fuerte» en
+;        los demás procesadores (SSE2, abajo; solo si el núcleo ha encendido
+;        el SSE2); EBX = 8: la coma flotante del núcleo (100h más Tareas.sse:
+;        1 FXSAVE, 2 SSE, 4 SSE2; un núcleo de antes da 0); en la tabla de
+;        EBX = 4, el cuarto número es la carga pedida (1 fuerte) y, de cada
+;        procesador, +28 su CR0 al llegar (CD y NW: la caché) con el bit 31
+;        si hace la fuerte
 ;        En la 220, también (Intel de Nehalem en adelante) 3F8h, 3F9h, 3FAh,
 ;        3FCh, 3FDh y 3FEh: lo que lleva el paquete y el núcleo en C3, C6 y C7;
 ;        34h (MSR_SMI_COUNT: los SMI del firmware que ha atendido); 179h,
@@ -80,6 +87,7 @@ módulo Termo
     variable hay_bloque: bool
     variable visto: nat32                       ; los tics de la última vez que se pidió (223)
     variable carga: nat32
+    variable carga_fuerte: bool                 ; (TERMO-FUERTE) la carga fuerte (SSE2) en los demás procesadores
     variable r_cpu: arreglo [4] de nat32        ; lo que da cpuid
     ; el rdmsr que puede fallar: dónde está y dónde se sigue (semilla.cas,
     ; la excepción 13, mira «recupera»)
@@ -244,7 +252,9 @@ módulo Termo
     ;  guarda y se repone al acabar). Allí pasan a modo protegido con su GDT,
     ;  su IDT (cualquier excepción: «hlt», nunca un triple fallo) y su pila, y
     ;  solo hacen esto, con las interrupciones cerradas: cuentas de coma
-    ;  flotante mientras la bandera lo pida, y de vez en cuando leen su propio
+    ;  flotante mientras la bandera lo pida (la ligera, x87: una cadena de
+    ;  fsqrt; o, desde la 0.8.12, la fuerte, SSE2: «termo_ap_fuerte», con la
+    ;  caché encendida), y de vez en cuando leen su propio
     ;  MSR 19Ch (la temperatura de su núcleo) y lo dejan en una tabla. No tocan
     ;  nada del núcleo. Se paran: cuando se baja la bandera, o si el latido
     ;  (cada llamada 223/224 del Termómetro) no cambia en unos 10 s (unos
@@ -255,9 +265,12 @@ módulo Termo
     ;  El trampolín (las dos páginas, desde B):
     ;    +000h el código (16 bits y luego 32), +400h la GDT, +420h su GDTR,
     ;    +430h el IDTR, +440h ORDEN (1: cargar), +444h cuántos han llegado,
-    ;    +448h el latido, +500h la IDT (32 puertas, todas a «hlt»), +800h la
-    ;    tabla (16 x 32 octetos: el APIC ID, el estado (1 cargando, 2 parado),
-    ;    las vueltas, el último 19Ch y cuántas lecturas), +1000h las pilas
+    ;    +448h el latido, +44Ch la carga (1: la fuerte), +500h la IDT (32
+    ;    puertas, todas a «hlt»), +600h lo que suma la fuerte, +610h su MXCSR,
+    ;    +800h la tabla (16 x 32 octetos: el APIC ID, el estado (1 cargando, 2
+    ;    parado), las vueltas, el último 19Ch, cuántas lecturas, el latido y el
+    ;    TSC que vio, y su CR0 al llegar con el bit 31 si hace la fuerte), +A00h
+    ;    el bloque de la fuerte (1344 octetos, 168 dobles), +1000h las pilas
     constante AP_MAX = 16
     público variable ap_base: nat32              ; (RAM) público: termoram.cas no despierta a nadie mientras la carga los tiene
     variable ap_activos, ap_motivo, ap_lapic: nat32
@@ -317,7 +330,42 @@ módulo Termo
             mov ebp, eax                ; 1: tiene sensor (Intel: 19Ch)
         termo_ap_sin_dts:
             mov dword [edi+4], 1
+            mov eax, cr0                ; (TERMO-FUERTE) cómo llega: CR0 (CD y NW: la caché, como la deja la BIOS)
+            and eax, 0x7FFFFFFF
+            mov [edi+28], eax
             db 0xDB, 0xE3               ; fninit (a mano: ensambla.py no sabe el x87)
+            ; (TERMO-FUERTE) la carga fuerte, si se pide (+44Ch) y este
+            ; procesador tiene FXSAVE y SSE2: la caché encendida (CD y NW a
+            ; 0, como hace cualquier sistema con sus procesadores), el x87
+            ; de verdad (EM a 0, MP y NE a 1), CR4.OSFXSR y OSXMMEXCPT, MXCSR
+            ; (+610h) y los registros: XMM7, lo que se suma (+600h); XMM0 a
+            ; XMM6, los primeros del bloque (+A00h). La marca: el bit 31 de
+            ; +28 (CR0 nunca lo tiene aquí: sin paginación)
+            cmp dword [0x44C], 1
+            jne termo_ap_ligera
+            mov eax, 1
+            db 0x0F, 0xA2               ; cpuid
+            and edx, 0x05000000         ; FXSR (24) y SSE2 (26)
+            cmp edx, 0x05000000
+            jne termo_ap_ligera
+            mov eax, cr0
+            and eax, 0x9FFFFFF3
+            or eax, 0x22
+            mov cr0, eax
+            db 0x0F, 0x20, 0xE0         ; mov eax, cr4
+            or eax, 0x600
+            db 0x0F, 0x22, 0xE0         ; mov cr4, eax
+            db 0x0F, 0xAE, 0x15, 0x10, 0x06, 0x00, 0x00         ; ldmxcsr [0x610]
+            db 0x66, 0x0F, 0x28, 0x3D, 0x00, 0x06, 0x00, 0x00   ; movapd xmm7, [0x600]
+            db 0x66, 0x0F, 0x28, 0x05, 0x00, 0x0A, 0x00, 0x00   ; movapd xmm0, [0xA00]
+            db 0x66, 0x0F, 0x28, 0x0D, 0x10, 0x0A, 0x00, 0x00   ; movapd xmm1, [0xA10]
+            db 0x66, 0x0F, 0x28, 0x15, 0x20, 0x0A, 0x00, 0x00   ; movapd xmm2, [0xA20]
+            db 0x66, 0x0F, 0x28, 0x1D, 0x30, 0x0A, 0x00, 0x00   ; movapd xmm3, [0xA30]
+            db 0x66, 0x0F, 0x28, 0x25, 0x40, 0x0A, 0x00, 0x00   ; movapd xmm4, [0xA40]
+            db 0x66, 0x0F, 0x28, 0x2D, 0x50, 0x0A, 0x00, 0x00   ; movapd xmm5, [0xA50]
+            db 0x66, 0x0F, 0x28, 0x35, 0x60, 0x0A, 0x00, 0x00   ; movapd xmm6, [0xA60]
+            or dword [edi+28], 0x80000000
+        termo_ap_ligera:
             mov eax, [0x448]
             mov [edi+20], eax
             db 0x0F, 0x31               ; rdtsc
@@ -325,6 +373,8 @@ módulo Termo
         termo_ap_vuelta:
             cmp dword [0x440], 1
             jne termo_ap_para
+            test dword [edi+28], 0x80000000
+            jnz termo_ap_fuerte
             mov ecx, 100000
             db 0xD9, 0xE8               ; fld1
         termo_ap_carga:
@@ -334,6 +384,42 @@ módulo Termo
             dec ecx
             jnz termo_ap_carga
             db 0xDD, 0xD8               ; fstp st0
+            jmp termo_ap_cuenta
+            ; (TERMO-FUERTE) la carga fuerte: siete cadenas independientes
+            ; de x := x * a + c (mulpd con un operando del bloque, addpd con
+            ; XMM7), dos dobles en cada registro: las dos unidades de coma
+            ; flotante del núcleo ocupadas casi siempre, y el bloque (1344
+            ; octetos) leído de la caché L1, sin ir a la memoria. Con a entre
+            ; 1 - 2^-14 y 1 - 2^-17 y c = 2^-13, x se queda entre 2 y 16: ni
+            ; desbordamientos ni números subnormales (que irían despacio).
+            ; 40.000 pasadas de 12 trozos: unos 4 millones de ciclos, como
+            ; una vuelta de la ligera
+        termo_ap_fuerte:
+            mov edx, 40000
+        termo_ap_pasada:
+            mov esi, 0xA00
+            mov ecx, 12
+        termo_ap_trozo:
+            db 0x66, 0x0F, 0x59, 0x06           ; mulpd xmm0, [esi]
+            db 0x66, 0x0F, 0x58, 0xC7           ; addpd xmm0, xmm7
+            db 0x66, 0x0F, 0x59, 0x4E, 0x10     ; mulpd xmm1, [esi+16]
+            db 0x66, 0x0F, 0x58, 0xCF           ; addpd xmm1, xmm7
+            db 0x66, 0x0F, 0x59, 0x56, 0x20     ; mulpd xmm2, [esi+32]
+            db 0x66, 0x0F, 0x58, 0xD7           ; addpd xmm2, xmm7
+            db 0x66, 0x0F, 0x59, 0x5E, 0x30     ; mulpd xmm3, [esi+48]
+            db 0x66, 0x0F, 0x58, 0xDF           ; addpd xmm3, xmm7
+            db 0x66, 0x0F, 0x59, 0x66, 0x40     ; mulpd xmm4, [esi+64]
+            db 0x66, 0x0F, 0x58, 0xE7           ; addpd xmm4, xmm7
+            db 0x66, 0x0F, 0x59, 0x6E, 0x50     ; mulpd xmm5, [esi+80]
+            db 0x66, 0x0F, 0x58, 0xEF           ; addpd xmm5, xmm7
+            db 0x66, 0x0F, 0x59, 0x76, 0x60     ; mulpd xmm6, [esi+96]
+            db 0x66, 0x0F, 0x58, 0xF7           ; addpd xmm6, xmm7
+            add esi, 112
+            dec ecx
+            jnz termo_ap_trozo
+            dec edx
+            jnz termo_ap_pasada
+        termo_ap_cuenta:
             inc dword [edi+8]
             mov eax, [0x448]
             cmp eax, [edi+20]
@@ -556,10 +642,26 @@ módulo Termo
             p[0] := 0x00080000 ob ((alto - ini) yb 0xFFFF)
             p[1] := 0x00008E00
         fin
+        ; (TERMO-FUERTE) lo de la carga fuerte: lo que se suma (2^-13, en los
+        ; dos dobles de +600h), MXCSR (+610h: todo enmascarado) y el bloque
+        ; (+A00h, 168 dobles): a entre 1 - 2^-14 y 1 - 2^-17 (la palabra alta,
+        ; de 3FEFFF80h a 3FEFFFBFh; la baja, a 0)
+        p := puntero(b + 0x600)
+        p[0] := 0
+        p[1] := 0x3F200000
+        p[2] := 0
+        p[3] := 0x3F200000
+        p[4] := 0x1F80
+        para i desde 0 hasta 167 hacer
+            p := puntero(b + 0xA00 + i * 8)
+            p[0] := 0
+            p[1] := 0x3FEFFF80 + ((i * 37) mod 64)
+        fin
         p := puntero(b + 0x440)
         p[0] := 1                                       ; ORDEN: cargar
         p[1] := 0
         p[2] := 1
+        si carga_fuerte entonces p[3] := 1 sino p[3] := 0 fin   ; (TERMO-FUERTE) +44Ch: 1, la fuerte
         ap_base := b
         ; INIT, y dos SIPI al trampolín (el vector: la página)
         ipi_todos(0x000C4500)
@@ -1043,7 +1145,7 @@ módulo Termo
                     p[0] := ap_activos
                     p[1] := ap_motivo
                     p[2] := ap_base
-                    p[3] := 0
+                    si carga_fuerte entonces p[3] := 1 sino p[3] := 0 fin   ; (TERMO-FUERTE) la que se ha pedido
                     si ap_base <> 0 entonces
                         copiar_memoria(puntero(b + 16), puntero(ap_base + 0x800), 512)
                     sino
@@ -1106,8 +1208,16 @@ módulo Termo
                     fin
                     devolver n_t
                 fin
+                ; (TERMO-FUERTE) 8: la coma flotante que ha encendido el núcleo
+                ; (Tareas.sse: 1 FXSAVE, 2 SSE, 4 SSE2), con 100h (un núcleo
+                ; de antes de la 0.8.12 da 0: sin carga en marcha, esto le
+                ; llega como «¿sigue la carga?»)
+                si a = 8 entonces devolver 0x100 ob Tareas.sse fin
                 si a = 1 entonces
                     carga := b yb 1
+                    ; (TERMO-FUERTE) ECX bit 1: la carga fuerte (SSE2) en los
+                    ; demás procesadores; solo si el núcleo ha encendido el SSE2
+                    carga_fuerte := b yb 2 <> 0 y Tareas.sse yb Tareas.SSE_SSE2 <> 0
                     si carga = 1 entonces
                         despierta_ap()                  ; (TERMO) los demás procesadores, a cargar también
                         visto := tics

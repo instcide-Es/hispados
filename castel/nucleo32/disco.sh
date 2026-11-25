@@ -20,7 +20,8 @@
 # TAILSCALE.BIN: nucleo32/hispac/hacer.sh.
 # Con «navegador» (y «red» y «tls»), también el Navegador (nucleo32/navega/hacer.sh)
 # en \NAVEGA, su acceso en \MENU (NAVEGA.MNU, con el icono en el tapiz) y
-# X87.BIN (la prueba de que cada programa tiene su coma flotante). Con 32,
+# X87.BIN y XMM.BIN (las pruebas de que cada programa tiene su coma flotante,
+# el x87 y el SSE: castel/pruebas.sh). Con 32,
 # que caben (16 MB se quedan cortos). (ESCUDO) Con «escudo», el antivirus
 # (nucleo32/escudo/hacer.sh): ESCUDO.BIN, \ESCUDO y su acceso en \MENU.
 # (WIFI) Con «wifi» (y «red»), también el servicio Wi-Fi (WIFI.BIN,
@@ -140,11 +141,11 @@ fi
 if [ "$NAVEGADOR" = navegador ]; then
   mkdir -p $T/nav/NAVEGA
   NAVEGA_PROGRAMA='\NAVEGA\NAVEGA.BIN' NAVEGA_ICONO='\MENU\NAVEGA.ICP' bash $AQUI/navega/hacer.sh $T/nav/NAVEGA
-  make -s -C $AQUI/../.. -f castel/nucleo32/navega/navega.mk build/navega-pentium/X87.BIN > /dev/null
+  make -s -C $AQUI/../.. -f castel/nucleo32/navega/navega.mk build/navega-pentium/X87.BIN build/navega-pentium/XMM.BIN > /dev/null
   mcopy -s -i $V $T/nav/NAVEGA ::
   mmd -i $V ::MENU
   mcopy -i $V $T/nav/NAVEGA.MNU $T/nav/NAVEGA.ICP ::MENU/
-  mcopy -i $V $AQUI/../../build/navega-pentium/X87.BIN ::
+  mcopy -i $V $AQUI/../../build/navega-pentium/X87.BIN $AQUI/../../build/navega-pentium/XMM.BIN ::
 fi
 # (ESCUDO) el antivirus, sin instalar: ESCUDO.BIN en la raíz, \ESCUDO (su LEEME;
 # las firmas, en \ESCUDO\FIRMAS, las pone quien lo pruebe) y su acceso en \MENU
