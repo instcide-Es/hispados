@@ -34,7 +34,10 @@
 ;  INSTALAR escriben en toda la zona solo si quien los lanza lo es (o es el
 ;  sistema); los renglones de SSHD, WG y TAILSCAL (su configuración),
 ;  igual. PAQUETES de un usuario normal mira el catálogo (y apunta su serie)
-;  pero no instala.
+;  pero no instala; (0.8.11, SIN-ADMIN) sí pone al día lo instalado con lo
+;  del catálogo FIRMADO (PAQUETES ACTUALIZA): eso no da poder a nadie, solo
+;  pone lo que ha firmado el proyecto. Lo dice PAQUETES con la llamada 200, 6
+;  (Tarea.firmada) tras comprobar la firma y la serie.
 ;
 ;  Las comprobaciones las hace la llamada al sistema (usuario.cas), con la
 ;  ruta como la entiende el disco (Fat.forma_de_ruta: nada de «hispa.» ni
@@ -448,7 +451,10 @@ módulo Permisos
         ; (USUARIOS) PAQUETES e INSTALAR, en toda la zona, si los lanza un
         ; administrador (o el sistema); los renglones de la configuración de
         ; SSH y de los túneles, igual; los demás, el programa del renglón
-        si z = PROTEGIDA y bit(actual.sello) yb TODO_EL_SISTEMA <> 0 y persona_admin(actual) entonces devolver cierto fin
+        ; (0.8.11, SIN-ADMIN) y PAQUETES de uno normal que pone al día lo
+        ; firmado (Tarea.firmada: lo pide él con la llamada 200, 6, tras
+        ; comprobar la firma y la serie del catálogo; solo PAQUETES)
+        si z = PROTEGIDA y bit(actual.sello) yb TODO_EL_SISTEMA <> 0 y (persona_admin(actual) o (actual.firmada y actual.sello = SELLO_PAQUETES)) entonces devolver cierto fin
         si z = PROTEGIDA y bit(actual.sello) yb escriben <> 0 y ((bit(actual.sello) yb SOLO_ADMIN = 0 y no solo) o persona_admin(actual)) entonces devolver cierto fin
         denegados := denegados + 1
         imprimir2("permisos: acceso denegado a %s para escribir (%s)\n", nat32(ruta), nat32(actual.nombre))

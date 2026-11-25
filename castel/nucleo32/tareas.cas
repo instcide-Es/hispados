@@ -93,6 +93,10 @@ módulo Tareas
         espera_dir: nat32                       ; la dirección a la que espera (la 184), mientras espera
         salir_pedido: bool                      ; uno de sus hilos ha pedido acabar el proceso...
         salir_con: nat32                        ; ...con este código
+        ; (0.8.11, SIN-ADMIN) PAQUETES lanzado por un usuario normal que pone al
+        ; día lo que dice el catálogo firmado (la llamada 200, 6): puede escribir
+        ; en la zona del sistema, como el de un administrador. No se hereda
+        firmada: bool
     fin
 
     público tipo Cola = estructura
@@ -596,6 +600,7 @@ módulo Tareas
         t.uid := 0                              ; (USUARIOS) lo pone quien la carga (usuario.cas)
         t.uid_hijo := 0
         t.remota := falso
+        t.firmada := falso                      ; (SIN-ADMIN)
         t.líder := nulo                         ; (JUEGOS)
         t.hilo_id := t.id
         t.teb := 0
@@ -935,6 +940,7 @@ módulo Tareas
         t.uid := l.uid                          ; (USUARIOS) de quién es: el usuario del proceso (si no, un hilo
         t.uid_hijo := l.uid_hijo                ; sería «del sistema»); y cerrar la sesión acaba también sus hilos
         t.remota := l.remota
+        t.firmada := l.firmada                  ; (SIN-ADMIN) un hilo de ese PAQUETES
         t.terminal := l.terminal
         t.salida := l.salida
         t.salida_serie := l.salida_serie

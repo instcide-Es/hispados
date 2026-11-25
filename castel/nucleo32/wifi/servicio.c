@@ -94,6 +94,19 @@ static u32 aparato = 0xFFFFFFFF;	/* la tarjeta en el PCI (bus << 16 | aparato <<
 static char nombre_tarjeta[48] = "Wi-Fi";
 static u32 hz = 100;
 static char carpeta[16] = "\\";		/* «\HISPA\» o «\» */
+/* (0.8.11, SIN-ADMIN) el diagnóstico: WIFI.LOG se escribe siempre (sin
+ * «Registro=SI», que solo puede poner un administrador), en \HISPA, donde
+ * lo lee cualquiera (y lo copia a una memoria USB); nuevo en cada arranque
+ * (no en cada WIFI.BIN: RED.BIN pasa «/OTRA» si ya lo ha lanzado antes) y,
+ * si algo sale mal, con un DIAGNÓSTICO al final, una vez por cada cosa */
+static int otra_vez;			/* «/OTRA»: no es el primer WIFI.BIN de este arranque */
+static u32 diag_t0;			/* el tic en que empezó WIFI.BIN */
+static void mira_busqueda(void);
+static int diag_hecho;			/* los diagnósticos ya escritos (un bit por causa) */
+#define DIAG_ARRANQUE 1
+#define DIAG_SIN_REDES 2
+#define DIAG_NO_CONECTA 4
+static void diagnostico(int causa, const char *que);
 
 /* ============================================================== el tiempo */
 u32 hl_pentium_tics(void) { return sc(SC_TICS, 0, 0, 0); }
@@ -716,6 +729,9 @@ static void sigue_conexion(void)
 			"el acuerdo de claves no sale bien y han llegado mensajes con la firma mal (¿otro equipo haciéndose pasar por el punto de acceso?)"
 		};
 		avisa("No se conecta a «%s»: %s.", i.ssid, i.fallo < 11 ? por[i.fallo] : "?");
+		/* (SIN-ADMIN) la contraseña mal no es cosa de la tarjeta */
+		if (i.fallo != W_F_CLAVE && i.fallo != W_F_SEGURIDAD)
+			diagnostico(DIAG_NO_CONECTA, i.fallo < 11 ? por[i.fallo] : "no conecta");
 		if (c_nueva && (i.fallo == W_F_CLAVE || i.fallo == W_F_SEGURIDAD)) {
 			/* una red nueva con la contraseña mal: no se insiste */
 			w80211_desconectar();
@@ -725,6 +741,65 @@ static void sigue_conexion(void)
 		}
 		vuelca_registro();
 	}
+}
+
+/* =========================================== (SIN-ADMIN) el diagnóstico */
+/* Al final de WIFI.LOG, lo que le hace falta a quien ayude: la tarjeta, el
+ * controlador, lo que ha contado la radio y lo que ha salido mal (sin claves:
+ * de los BSSID, como siempre, solo los dos últimos octetos). Una vez por
+ * cada causa en cada WIFI.BIN; y se vuelca ya. */
+static void diagnostico(int causa, const char *que)
+{
+	struct w_info i;
+	d32 bien = 0, mal = 0;
+	int vel = 0;
+
+	if (diag_hecho & causa)
+		return;
+	diag_hecho |= causa;
+	hl_log(2, "==== DIAGNÓSTICO: %s ====\n", que);
+	{
+		char pci[32] = "";
+		if (aparato != 0xFFFFFFFF)
+			snprintf(pci, sizeof pci, " en el PCI %02x:%02x.%u", aparato >> 16, (aparato >> 11) & 31, (aparato >> 8) & 7);
+		hl_log(2, "Tarjeta: %s%s; controlador: %s\n", nombre_tarjeta, pci, cond ? cond->familia : "(ninguno: no se ha llegado a montar)");
+	}
+	hl_log(2, "WIFI.BIN %s; radio %s; %u s desde que empezó\n", VERSION, listo ? "en marcha" : "PARADA",
+	       (hl_pentium_tics() - diag_t0) / (hz ? hz : 100));
+	if (listo) {
+		w80211_estado(&i);
+		hl_log(2, "Estado %u, fallo %u, canal %u, señal %d dBm; redes vistas %u; enviadas %u, recibidas %u, reconexiones %u\n",
+		       i.estado, i.fallo, i.canal, i.senal, i.nredes, i.tx, i.rx, i.reconexiones);
+		if (cond && cond->cuentas) {
+			cond->cuentas(&bien, &mal, &vel);
+			hl_log(2, "La radio: tramas buenas %u, malas %u, velocidad %d\n", (unsigned)bien, (unsigned)mal, vel);
+		}
+		if (cond && cond->resumen)
+			cond->resumen();
+	}
+	hl_log(2, "(Lo de arriba: la tarjeta, sus datos de fábrica, el PHY y sus calibraciones, paso a paso.)\n");
+	hl_log(2, "Este archivo está en %sWIFI.LOG: cópielo a una memoria USB y páseselo a quien le ayude.\n", carpeta);
+	hl_log(2, "==== FIN DEL DIAGNÓSTICO ====\n");
+	vuelca_registro();
+}
+
+/* (SIN-ADMIN) ¿ha acabado una búsqueda sin ver ninguna red? (la primera vez: el diagnóstico) */
+static void mira_busqueda(void)
+{
+	static int barria;
+	static int vacias;
+	struct w_info i;
+
+	w80211_estado(&i);
+	if (barria && !i.barriendo && i.nredes == 0 && i.estado != W_CONECTADO) {
+		vacias++;
+		/* (una sola búsqueda vacía puede ser mala suerte: a la segunda) */
+		if (vacias >= 2)
+			diagnostico(DIAG_SIN_REDES, "la tarjeta busca, pero no ve ninguna red");
+	}
+	if (i.nredes > 0)
+		vacias = 0;
+	barria = i.barriendo;
 }
 
 /* ==================================================== RED.BIN: las tramas */
@@ -1156,6 +1231,10 @@ static void busca_aparato(void)
 			continue;
 hallado:
 			aparato = (bus << 16) | (df << 8);
+			/* (SIN-ADMIN) su nombre ya (si no se monta, la ventana dice cuál) */
+			snprintf(nombre_tarjeta, sizeof nombre_tarjeta, "%s %04X:%04X",
+				 (id & 0xffff) == 0x14e4 ? "Broadcom" : (id & 0xffff) == 0x168c ? "Atheros" : "Intel",
+				 id & 0xffff, id >> 16);
 			return;
 		}
 }
@@ -1436,9 +1515,13 @@ int servicio_wifi(void)
 		for (a = args; *a; a++)
 			if ((a[0] == '/' || a[0] == '-') && (a[1] | 32) == 'g' && (a[2] | 32) == 'e' && (a[3] | 32) == 'm')
 				sim_gemela = 1;
+		for (a = args; *a; a++)
+			if ((a[0] == '/' || a[0] == '-') && (a[1] | 32) == 'o' && (a[2] | 32) == 't' && (a[3] | 32) == 'r')
+				otra_vez = 1;		/* (SIN-ADMIN) */
 	}
 	if (sc(SC_APUNTARSE, 0, 0, 0) != 0)
 		return 1;
+	diag_t0 = hl_pentium_tics();
 	hz = sc(SC_DATO, DATO_HZ, 0, 0);
 	if (!hz || ES_ERROR(hz))
 		hz = 100;
@@ -1447,7 +1530,12 @@ int servicio_wifi(void)
 		sc(SC_CERRAR, m, 0, 0);
 		strcpy(carpeta, "\\HISPA\\");
 	}
-	escribe_archivo("WIFI.LOG", "", 0, 0);		/* (nuevo en cada arranque) */
+	/* (nuevo en cada arranque; (SIN-ADMIN) el segundo WIFI.BIN del mismo
+	 * arranque sigue detrás: el diagnóstico del primero no se pierde) */
+	if (!otra_vez)
+		escribe_archivo("WIFI.LOG", "", 0, 0);
+	else
+		hl_log(2, "---- WIFI.BIN otra vez en este arranque (lo de antes, arriba) ----\n");
 	/* el montón del controlador: 2 MB de memoria física seguida */
 	r = sc(SC_DMA, DMA_PAGINAS, (u32)&dma_f, 0);
 	if (ES_ERROR(r)) {
@@ -1464,6 +1552,8 @@ int servicio_wifi(void)
 	vuelca_registro();
 	if (arranca() < 0) {
 		hl_log(0, "El Wi-Fi no se ha podido poner en marcha. Mande el archivo %sWIFI.LOG para arreglarlo.\n", carpeta);
+		if (aparato != 0xFFFFFFFF)
+			diagnostico(DIAG_ARRANQUE, "la tarjeta está, pero no se ha podido poner en marcha");
 		listo = 0;
 		dilo();
 		vuelca_registro();
@@ -1490,6 +1580,7 @@ int servicio_wifi(void)
 		if (listo) {
 			la_radio->sondear();
 			w80211_tic();
+			mira_busqueda();	/* (SIN-ADMIN) */
 		}
 		sigue_conexion();
 		conecta_sola();
