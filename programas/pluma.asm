@@ -4254,6 +4254,18 @@ guardar_como:
         call hvl_cad
 .f2:
         mov byte [edi], 0
+        mov esi, nombre             ; [0.9.31] ¿hay ya otro archivo con ese
+        mov edx, nom_ant            ; nombre? Se pregunta si se reemplaza
+        mov edi, t_guardar_como
+        call hvl_reemplazar
+        jnc .escribe
+        mov esi, nom_ant
+        mov edi, nombre
+        mov ecx, 96
+        rep movsb
+        popad                       ; (no: el nombre de antes, y otra vez el cuadro)
+        jmp guardar_como
+.escribe:
         popad
         call guarda_escribe
         jnc .x
