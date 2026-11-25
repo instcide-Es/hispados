@@ -48,19 +48,19 @@ PORT=${PORT:-8080}
 mkdir -p $T/www
 # --- los ficheros versiones.txt que sirve el servidor HTTP (en CP437, como un
 #     servidor real de Hispa-DOS, para que los acentos cuadren) ---
-printf '[0.9.30]\ncpu=386\n'                                        > $T/www/aldia.txt
+printf '[0.9.31]\ncpu=386\n'                                        > $T/www/aldia.txt
 { printf '; lista de versiones de prueba\n\n'
   printf '[0.9.99]\n'
   printf 'nota=Batería en la barra y consola remota\n'
   printf 'descarga=http://ejemplo/hispados/\n'; } | iconv -f UTF-8 -t CP437 > $T/www/nueva.txt
-{ printf '[0.9.30]\n'
+{ printf '[0.9.31]\n'
   printf 'cpu=386\n'
   printf 'disco=0\n'
   printf 'nivel=1\n'
   printf 'edicion=Hispa-DOS con Hispa Ventanas (grafico)\n'
   printf 'paquete=http://10.0.2.2:%s/noexiste.paq\n' "$PORT"
   printf 'nota=Da el salto al entorno grafico\n'; } | iconv -f UTF-8 -t CP437 > $T/www/recom.txt
-{ printf '[0.9.30]\n'
+{ printf '[0.9.31]\n'
   printf 'cpu=386\n'
   printf 'nivel=0\n'
   printf 'edicion=Hispa-DOS con Hispa Ventanas\n\n'
@@ -153,7 +153,7 @@ else
   ok "no pide «Cargue HSPRED» (lo carga solo)"
 fi
 # (a) al día
-check f "Hispa-DOS 0.9.30 está al día."
+check f "Hispa-DOS 0.9.31 está al día."
 # (b) versión nueva, con nota y descarga
 check f "Hay una versión nueva: 0.9.99"
 check f "Batería en la barra y consola remota"
@@ -161,11 +161,11 @@ check f "Descárgala en: http://ejemplo/hispados/"
 # (e) recomendación por edición más rica; contestamos N
 check f "Tu equipo admite la edición"
 check f "Hispa-DOS con Hispa Ventanas (grafico)"
-check f "¿Descargar e instalar la 0.9.30?"
+check f "¿Descargar e instalar la 0.9.31?"
 check f "Da el salto al entorno grafico"
 check f "De acuerdo: solo mirar"
 # (f) límite por hardware
-check f "Tu equipo llega hasta la 0.9.30"
+check f "Tu equipo llega hasta la 0.9.31"
 check f "Edicion Total"
 check f "Pentium o superior"
 # (g) las gamas: la de Hispa-486 no se mira; la de Hispa-386, sí
