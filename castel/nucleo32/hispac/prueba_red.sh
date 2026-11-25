@@ -94,7 +94,9 @@ wg)
   mcopy -o -i $DISCO $D/WG0.CNF ::WG/WG0.CNF
   # (ESCUDO) no a ciegas (45 s, que con la máquina cargada no llegan): hasta
   # que el WireGuard de aquí tenga el apretón de manos de Hispa-Pentium
-  ( for _ in $(seq 120); do
+  # (0.8.12) hasta 600 s: probar.sh compila antes la semilla (más de 2 min con
+  # la máquina cargada), y con 120 no llegaba nunca
+  ( for _ in $(seq 600); do
       [ "$(ip netns exec $ESP wg show wg0 latest-handshakes | awk '{print $2}')" -gt 0 ] 2> /dev/null && break
       sleep 1
     done
@@ -205,7 +207,7 @@ EOF
   rm -rf $D/tmp/*
   touch $D/marca
   ( SAL=
-    for _ in $(seq 90); do
+    for _ in $(seq 300); do
       sleep 2
       [ -z "$SAL" ] && SAL=$(find $D/tmp -maxdepth 2 -name sal 2> /dev/null | head -1)
       [ -n "$SAL" ] && grep -aq "register/" $SAL && break

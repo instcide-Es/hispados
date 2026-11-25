@@ -4084,7 +4084,10 @@ if $AQUI/nucleo32/disco.sh $R/d.img 16 red tls ssh > $R/disco.txt 2>&1 && mmd -i
    && mcopy -i $R/d.img $R/sshd/ID_ED.SSH ::SSH/ID_ED.SSH && [ -s $R/sshd/sshd.pid ]; then
 # 1. SSHD, con el ssh de aquí: una orden y una sesión con terminal
 cp $R/d.img $R/a.img
-( for _ in $(seq 120); do sleep 1; timeout 2 bash -c "</dev/tcp/127.0.0.1/$PH" 2> /dev/null && break; done
+# (0.8.12) el puerto lo abre QEMU al arrancar, y antes probar.sh compila la
+# semilla (más de 2 min con la máquina cargada): hasta 600 s, no 120 (con 120
+# el ssh iba antes de que hubiera QEMU: «Connection refused», desde la 0.8.11)
+( for _ in $(seq 600); do sleep 1; timeout 2 bash -c "</dev/tcp/127.0.0.1/$PH" 2> /dev/null && break; done
   sleep 20
   timeout 60 ssh -p $PH -o StrictHostKeyChecking=no -o UserKnownHostsFile=$R/conocidos -o UpdateHostKeys=no -o IdentitiesOnly=yes -o BatchMode=yes -i $R/clave prueba@127.0.0.1 \
     "echo hola desde hispa" < /dev/null > $R/orden.txt 2>&1; echo "código $?" >> $R/orden.txt
