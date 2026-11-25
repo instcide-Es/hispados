@@ -4485,48 +4485,77 @@ con_extension:
         ret
 
 ; escribe el documento en [nombre]. Primero entero en un temporal (el mismo
-; nombre, con .TMP); solo cuando está bien escrito se quita el de antes y el
-; temporal toma su nombre: si el disco se llena o se va la luz a mitad, en el
-; disco sigue habiendo un documento entero (el de antes o, como mucho, el
-; nuevo en el .TMP)
+; nombre, con .TMP; .TM1 si ya es .TMP); solo cuando está bien escrito, el de
+; antes pasa a .BAK, el temporal toma su nombre y la .BAK se borra: si el
+; disco se llena o se va la luz a mitad, en el disco sigue habiendo un
+; documento entero (el de antes, en su nombre o en la .BAK, o el nuevo en el
+; .TMP). [0.9.31] Si el último cambio de nombre falla, el de antes vuelve a su
+; nombre y el temporal (bueno) se queda, y se dice dónde
 guarda_escribe:
         pushad
         mov byte [tecleando], 0
+        mov esi, nombre             ; de solo lectura (o una carpeta): no se
+        call gua_atrib              ; toca (hvplib.inc, guardar.inc)
+        jc .nuevo
+        test cl, 0x11
+        jnz .mal
+.nuevo:
         mov esi, nombre
         mov edi, nom_seg
         mov eax, 'TMP'
-        call hvl_ruta
-        mov esi, nombre             ; (un nombre sin extensión, o que ya es
-        mov edi, nom_seg            ; .TMP: se escribe directamente)
-.c:
-        mov al, [esi]
-        cmp al, [edi]
-        jne .seguro
-        inc esi
-        inc edi
-        test al, al
-        jnz .c
-        mov esi, nombre
-        mov edi, firma
-        call lam_guarda
-        jc .mal
-        jmp .bien
-.seguro:
+        mov edx, 'TM1'
+        call gua_ext
         mov esi, nom_seg
         mov edi, firma
         call lam_guarda
         jc .mal_tmp
+        mov esi, nombre             ; el de antes, a .BAK (si es la primera
+        mov edi, gua_bak            ; vez, no hay de antes)
+        mov eax, 'BAK'
+        mov edx, 'BK1'
+        call gua_ext
+        xor ebx, ebx
         mov esi, nombre
-        HV dos_borrar               ; (si es la primera vez, no hay de antes)
+        call gua_atrib
+        jc .ren
+        mov esi, gua_bak
+        HV dos_borrar
+        mov esi, nombre
+        mov edi, gua_bak
+        call renombra
+        setnc bl                    ; BL=1: el de antes está en la .BAK
+.ren:
         mov esi, nom_seg
         mov edi, nombre
         call renombra
-        jc .mal_tmp
+        jc .mal_ren
+        test bl, bl
+        jz .bien
+        mov esi, gua_bak
+        HV dos_borrar
 .bien:
         mov byte [modif], 0
         call pon_titulo
         popad
         clc
+        ret
+.mal_ren:
+        test bl, bl                 ; el de antes, otra vez a su nombre
+        jz .mr
+        mov esi, gua_bak
+        mov edi, nombre
+        call renombra
+.mr:
+        mov edi, hvl_txt            ; y el temporal, que está entero, se queda
+        mov esi, t_no_renombra
+        call hvl_cad
+        mov esi, nom_seg
+        call hvl_cad
+        mov byte [edi], 0
+        mov esi, hvl_txt
+        call aviso
+        popad
+        stc
         ret
 .mal_tmp:
         mov esi, nom_seg            ; (el temporal a medias, fuera)
@@ -4537,6 +4566,8 @@ guarda_escribe:
         popad
         stc
         ret
+t_no_renombra db "Se ha guardado entero, pero no se ha podido", 10
+            db "ponerle su nombre. Está en:", 10, 0
 ; ESI=nombre de antes EDI=el nuevo: cambia de nombre un archivo (INT 21h,
 ; 56h, con los dos nombres en el búfer de paso de DOS). CF=1 si no se puede
 renombra:
@@ -6693,7 +6724,7 @@ titulo      resb 112
 nombre      resb 96
 nom_tmp     resb 96
 nom_exp     resb 100
-nom_seg     resb 100                ; el temporal en el que se guarda
+nom_seg     resb GUA_RUTA           ; el temporal en el que se guarda
 nom_ant     resb 96                 ; (OFICINA2) el nombre de antes de «Guardar como»
 num_txt     resb 12
 t_vista_b   resb 12
