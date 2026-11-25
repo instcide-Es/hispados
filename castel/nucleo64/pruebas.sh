@@ -1353,5 +1353,24 @@ if [ $c = 85 ] && grep -q "^INTx: las rutas de ACPI (_PRT): 0 tablas resueltas (
    && grep -q "^Red: 00:03.0 8086:100E .*, INTx por la GSI 1[01] (y mirando cada 10 ms)$" <<< "$v" && grep -q "^Hispa-64 etapa 10: todo en orden.$" <<< "$v"; then
   ok "etapa 10, con «pc» (los enlaces LNKA, de _CRS hecho por un método): la línea de la configuración, y mirando cada 10 ms"
 else ko "etapa 10, con «pc» la INTx no sale como debe (código $c): $(grep -E '^INTx|^Red: 00|parado' <<< "$v" | paste -sd '|')"; fi
+# [etapa 10] la red por USB enchufada en marcha (device_add, por el monitor de
+# QEMU): el vigía USB la enumera, la red la toma y DHCP le da la IP; al
+# desenchufarla (device_del), sin enlace
+rm -f "$T/e10hp.txt" "$T/mon10.sock"
+timeout 120 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$T/HISPA64.SIM" -append "sinmusl sinpruebas" -display none -serial file:"$T/e10hp.txt" \
+  -monitor unix:"$T/mon10.sock",server,nowait $DBG -no-reboot -m 256 -machine q35 -device qemu-xhci,id=xhci -netdev user,id=u0 > /dev/null 2>&1 &
+q=$!
+for _ in $(seq 1 300); do grep -q "todo en orden" "$T/e10hp.txt" 2> /dev/null && break; sleep 0.2; done
+python3 -I "$AQUI/pantallazo.py" orden "$T/mon10.sock" "device_add usb-net,netdev=u0,bus=xhci.0,id=un" 2> /dev/null
+for _ in $(seq 1 100); do serie "$T/e10hp.txt" | grep -q "^Red: eth0: IP 10.0.2.15/24 (DHCP" && break; sleep 0.2; done
+python3 -I "$AQUI/pantallazo.py" orden "$T/mon10.sock" "device_del un" 2> /dev/null
+for _ in $(seq 1 50); do serie "$T/e10hp.txt" | grep -q "^Red: eth0: sin enlace" && break; sleep 0.2; done
+python3 -I "$AQUI/pantallazo.py" orden "$T/mon10.sock" "quit" 2> /dev/null
+wait $q 2> /dev/null
+v=$(serie "$T/e10hp.txt" | tr -s ' ' | sed 's/Reloj: [0-9/]* [0-9:]* (tics: [0-9]*; ocupados: [0-9]*%) //g')
+if grep -q "USB: se ha enchufado 1-[0-9]*: 0525:A4A2 «RNDIS/QEMU USB Network Device»" <<< "$v" && grep -q "^Red: USB 1-[0-9]* 0525:A4A2 .*, CDC-ECM (la configuración 1 de 2)" <<< "$v" \
+   && grep -q "^Red: eth0: IP 10.0.2.15/24 (DHCP de 10.0.2.2" <<< "$v" && grep -q "USB: se ha desenchufado 1-" <<< "$v" && grep -q "^Red: eth0: sin enlace" <<< "$v" && ! grep -q "parado" <<< "$v"; then
+  ok "etapa 10, la red por USB enchufada en marcha (device_add): enumerada, a la red y con IP por DHCP; desenchufada (device_del): sin enlace"
+else ko "etapa 10, la red por USB en marcha no sale como debe: $(grep -E 'USB: se|^Red|parado' <<< "$v" | cut -c1-120 | paste -sd '|')"; fi
 echo "== Hispa-64: $BIEN bien, $MAL mal =="
 [ $MAL = 0 ]
