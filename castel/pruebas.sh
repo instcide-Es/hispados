@@ -1838,9 +1838,10 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     tr -d '\r' < $G/usb.sal | iconv -f CP437 -t UTF-8 > $G/usb.txt2
     S=$G/usb.txt2
     # (SSH, TAILSCALE: SSH, SSHD, WG y TAILSCAL también van como módulos; (SONIDO) y SONIDO.BIN con sus cuatro .WAV: 31;
-    # (PANEL) y PANEL.BIN y HORARED.BIN: 41)
+    # (PANEL) y PANEL.BIN y HORARED.BIN: 41; USUARIOS, ARGON2 y RATON: 44; (BLUETOOTH) y BT.BIN: 45,
+    # los mismos que la entrada «sin tocar el USB» de la 06)
     mira "la memoria USB con GRUB (usb.sh): arranca el núcleo que pide el modo gráfico, con los programas también como módulos (M:) y la memoria como unidad X:" \
-      "^memoria: 64 MB, .* 41 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
+      "^memoria: 64 MB, .* 45 programas de usuario" "^unidades: M: (en memoria) X: (disco 0, USB, FAT16); la del sistema, X:" \
       "^escritorio: en marcha, 800 x 600 con 32 bits por punto (el modo lo ha dejado puesto el cargador)"
     miracap "y el escritorio sale en el modo que ha puesto GRUB: la barra, el menú Inicio y el documento que ha venido como módulo" u1 tam 800 600 \
       negrita 30 570 46 580 Inicio negrita 46 155 54 163 "Bloc de notas" negrita 256 159 264 167 "Mis documentos"
