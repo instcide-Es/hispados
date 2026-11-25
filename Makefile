@@ -541,6 +541,14 @@ $(B)/iwl_analiza: tests/wifi/iwl_analiza.c wifi/nucleo/iwl_fw.c wifi/nucleo/iwl_
 	gcc -std=gnu11 -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/iwl_analiza.c wifi/nucleo/iwl_fw.c
 $(B)/iwl_modelo: tests/wifi/iwl_modelo.c wifi/nucleo/radio_iwl.c wifi/nucleo/iwl_fw.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c wifi/nucleo/iwl.h wifi/nucleo/iwl_fw.h wifi/nucleo/nucleo.h | $(B)
 	gcc -std=gnu11 -O2 -Wall -Wno-unused -fno-builtin -DIWL_ANFITRION -Iwifi/nucleo -o $@ tests/wifi/iwl_modelo.c wifi/nucleo/radio_iwl.c wifi/nucleo/iwl_fw.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c
+# (RTL8723BS) la Realtek de las tabletas Bay Trail por SDIO: el SDIO
+# (wifi/nucleo/sdio.c) y el controlador (radio_rtl.c, de Linux) contra el
+# modelo de la controladora, la tarjeta y el chip (tests/wifi/rtl_sim.c), con
+# la gestión 802.11 y WPA2 encima: castel/pruebas.sh, parte 55 (SOLO=rtl)
+RTL_PRUEBA_F = tests/wifi/rtl_prueba.c tests/wifi/rtl_sim.c wifi/nucleo/sdio.c wifi/nucleo/radio_rtl.c \
+               wifi/linux/rtl8723bs/tablas_8723b.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c wifi/nucleo/sim.c
+$(B)/rtl_prueba: $(RTL_PRUEBA_F) tests/wifi/rtl_sim.h wifi/nucleo/sdio.h wifi/nucleo/rtl.h wifi/nucleo/nucleo.h | $(B)
+	gcc -std=gnu11 -O2 -Wall -Wno-unused -fno-builtin -Iwifi/nucleo -Iwifi/linux/rtl8723bs -Itests/wifi -o $@ $(RTL_PRUEBA_F)
 # ACPI de Hispa-486 (docs/ACPI.md): la batería de los portátiles que no tienen
 # APM. HSPACPI.COM (residente: contesta INT 15h AX=530Ah como una BIOS con
 # APM) y su núcleo de 32 bits HSPACPI.BIN: ACPICA de Intel (acpi/acpica/, sin
