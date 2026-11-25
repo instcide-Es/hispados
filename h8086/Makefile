@@ -129,6 +129,7 @@ ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos
 define DISQUETE
+	@n=$$(stat -c %s $(B)/NUCLEO86.SYS); if [ $$n -gt 16384 ]; then echo "NUCLEO86.SYS mide $$n octetos: la regla es menos de 16 K (y arranque.asm no carga más de unos 29,5 K)"; exit 1; fi
 	rm -f $@
 	mformat -C -f $(1) -v HISPA-8086 -i $@ ::
 	python3 pon_arranque.py $(B)/arranque.bin $@

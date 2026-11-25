@@ -369,3 +369,24 @@ esta v2 "PLUMA necesita 64 K de memoria libres." "n.º 20: PLUMA con poca memori
 esta v2 "sigue vivo" "n.º 20: y no se cuelga: "
 apaga
 }
+
+# ---- n.º 24, los detalles: dos «>», la cola de 126 letras y PARTIR BORRAR 12 ----
+p_auditoria_bajos() {
+echo "== Hispa-8086: auditoría 1, los detalles (n.º 24) =="
+cp $IMG/hispa8086-360.img $T/a.img
+mcopy -i $T/a.img build/N8.COM ::
+arranca $T/a.img 486
+local i; for ((i=1; i<=4; i++)); do escribe "ver > a.txt > b.txt"; done
+escribe "limpiar"; escribe "n8"; sleep 2
+pantalla b1
+esta b1 "N8: caben 08 archivos abiertos" "n.º 24: tras cuatro «VER > A > B», siguen cabiendo los ocho archivos (con la 0.13, 4): "
+local p=$(printf 'x%.0s' $(seq 1 115))
+escribe "limpiar"; escribe "hola $p"; sleep 1
+pantalla b2
+if tr -d '\n' < $T/b2.txt | grep -qF "Parametros: $p"; then ok "n.º 24: un programa recibe 116 letras de su línea (antes, 100)"; else ko "n.º 24: la línea del programa sale cortada"; fi
+escribe "limpiar"; escribe "partir borrar 12 /a"; sleep 2
+pantalla b3
+esta b3 "PARTIR - las particiones del disco duro" "n.º 24: «PARTIR BORRAR 12» no borra la partición 2: dice cómo se usa: "
+noesta b3 "borrada" ""
+apaga
+}

@@ -8,6 +8,8 @@ uso: xmodem.py ZÓCALO enviar ARCHIVO     manda ARCHIVO (PASAR RECIBIR lo espera
 
 Es XMODEM de libro, hecho aparte del de PASAR (en ensamblador): si los dos se
 entienden, es que los dos cumplen el protocolo.
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 """
 import socket, sys, time
 

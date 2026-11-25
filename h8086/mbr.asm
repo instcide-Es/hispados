@@ -77,8 +77,8 @@ error:
         int 0x16
         int 0x19
 
-m_no_activa db "No hay particion activa", 0
+m_no_activa db "No hay partición activa", 0
 m_disco     db "Error de disco", 0
-m_sin_sistema db "La particion no tiene sistema", 0
+m_sin_sistema db "La partición no tiene sistema", 0
 
         times 446 - ($ - $$) db 0

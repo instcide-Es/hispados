@@ -59,6 +59,8 @@ inicio:
         sub al, '0'
         mov [numero], al
         inc si
+        cmp byte [si], ' '          ; (una cifra sola: con «12» ganaba el 2, y
+        ja .uso                     ; con /A ni se preguntaba)
         jmp .arg
 .a2:
         call mayus

@@ -377,7 +377,12 @@ ejecuta_red:
         DOS 0x3C
         jc .mal
 .s2:
-        mov [r_sal], ax
+        mov bx, [r_sal]             ; (con dos «>», el primero se cierra:
+        mov [r_sal], ax             ; quedaba abierto para siempre)
+.cierra_ant:
+        test bx, bx
+        jz .b
+        DOS 0x3E
         jmp .b
 .ent:
         mov byte [si], 0
@@ -388,8 +393,9 @@ ejecuta_red:
         mov al, 0
         DOS 0x3D
         jc .mal
+        mov bx, [r_ent]
         mov [r_ent], ax
-        jmp .b
+        jmp .cierra_ant
 .mal:
         call pon_error
         pop si
@@ -2725,7 +2731,7 @@ ejecuta:
         jz .tf
         stosb
         inc cx
-        cmp cx, 100
+        cmp cx, 126                 ; (lo que cabe en la cola, como en DOS)
         jb .t
 .tf:
         mov byte [di], 0x0D
@@ -3373,7 +3379,7 @@ m_e_ruta    db "No existe esa ruta.", 10, 0
 m_e_muchos  db "Hay demasiados archivos abiertos.", 10, 0
 m_e_acceso  db "No se puede: acceso denegado.", 10, 0
 m_e_dir_act db "No se puede quitar el directorio en el que se está.", 10, 0
-m_e_otro_dir db "Para cambiar el nombre, los dos tienen que estar en el mismo directorio.", 10, 0
+m_e_otro_dir db "Para cambiar el nombre, los dos tienen que estar en la misma unidad.", 10, 0
 m_e_grande  db "El programa no cabe en la memoria.", 10, 0
 m_e_formato db "Ese programa no es válido.", 10, 0
 m_e_lleno   db "El disco está lleno: la copia ha quedado a medias.", 10, 0

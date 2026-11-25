@@ -1481,7 +1481,8 @@ dir_hueco:
 ; =============================================================================
 ;  Rutas y nombres
 ; =============================================================================
-; AL, a mayúscula (también la eñe y las vocales con tilde de la página 437)
+; AL, a mayúscula (y la ñ, la Ñ; las vocales con tilde no tienen mayúscula en
+; la página 437, salvo la É, y se quedan como están)
 mayus:
         cmp al, 'a'
         jb .x

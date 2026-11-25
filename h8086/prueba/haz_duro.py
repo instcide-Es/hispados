@@ -4,6 +4,8 @@ megas (40 cilindros, 16 cabezas, 63 sectores) con una sola partición FAT16
 que empieza en el sector 63, como las hacía FDISK.
 
 uso: haz_duro.py IMAGEN.img
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 """
 import struct, subprocess, sys
 

@@ -7,7 +7,7 @@
 ;
 ;       FILES=n         cuántos archivos pueden estar abiertos a la vez (de 8,
 ;                       que es lo que hay sin decir nada, a 64). Cada uno son
-;                       24 octetos de memoria.
+;                       28 octetos de memoria.
 ;       BUFFERS=n       cuántos sectores guarda la reserva de sectores de
 ;                       disco.inc (de 0, sin reserva, a 30; sin decir nada,
 ;                       4). Cada uno son 516 octetos de memoria.
