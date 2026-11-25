@@ -10028,6 +10028,21 @@ create_file:
         jne .exists
         test byte [fentry+11], 0x19
         jnz .acc
+        ; abierto por otro handle: vaciarlo dejaría a ese handle leyendo (o
+        ; escribiendo) grupos ya libres; MS-DOS con SHARE lo niega (20h).
+        ; Las aperturas por FCB del mismo proceso sin cerrar (lo normal en
+        ; los programas de FCB) se sueltan antes, como recicla MS-DOS.
+        call fcb_drop_open
+        jnc .nodrop
+        mov eax, [w_dir]            ; soltar pudo reescribir la entrada
+        xor cx, cx
+        mov si, w_name
+        mov dl, 0x16
+        call find_entry
+        jc .new
+.nodrop:
+        call file_is_open
+        jc .shr
         ; vaciar el fichero existente
         call fent_clus
         call fat_free_chain
@@ -10079,6 +10094,10 @@ create_file:
         mov ax, E_EXISTS
         stc
         ret
+.shr:
+        mov ax, E_SHARE
+        stc
+        ret
 .acc:
         mov ax, E_ACCESS
         stc
@@ -10086,6 +10105,57 @@ create_file:
 .nopath:
         mov ax, E_NOPATH
         stc
+        ret
+
+; soltar las SFT abiertas por FCB por el proceso actual sobre la entrada CX
+; de [w_dir] (unidad seleccionada) -> CF si se ha soltado alguna
+fcb_drop_open:
+        pushad
+        mov eax, [w_dir]
+        call dir_ident              ; EAX = su sector, DL = entrada
+        jc .no
+        mov di, sft_table
+        xor bl, bl
+        xor bp, bp                  ; BP = soltadas
+.l:
+        cmp byte [di+SFT_REF], 0
+        je .n
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .n
+        test byte [di+SFT_FLAGS], 2
+        jz .n
+        mov cx, [cur_psp]
+        cmp cx, [di+SFT_PSP]
+        jne .n
+        mov bh, [sel_drv]
+        cmp bh, [di+SFT_DRV]
+        jne .n
+        cmp eax, [di+SFT_DSEC]
+        jne .n
+        cmp dl, [di+SFT_DIDX]
+        jne .n
+        pushad
+        mov byte [di+SFT_REF], 1
+        call sft_release
+        popad
+        inc bp
+.n:
+        add di, SFT_LEN
+        inc bl
+        cmp bl, SFT_N1
+        jne .nb
+        add di, 6
+.nb:
+        cmp bl, NSFT
+        jb .l
+        test bp, bp
+        jz .no
+        popad
+        stc
+        ret
+.no:
+        popad
+        clc
         ret
 
 ; ¿alguien tiene abierto el fichero de la entrada CX de [w_dir] (unidad
