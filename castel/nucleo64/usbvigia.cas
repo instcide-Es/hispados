@@ -12,7 +12,7 @@
 ; =============================================================================
 módulo Usbvigia
 
-    importar Cifras64, Es64, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Xhci64, Usb64, Usbalm64, Usbhid64
+    importar Cifras64, Es64, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Xhci64, Usb64, Usbalm64, Usbhid64, Usbred64
 
     variable vigía: puntero a Hilo
     variable parar: bool
@@ -92,6 +92,7 @@ módulo Usbvigia
             si aparato(j) <> nulo y aparato(j).ido entonces
                 hid_se_va(j)
                 se_va(j)
+                red_se_va(j)
                 escribir("USB: se ha desenchufado ")
                 escribe_sitio(j)
                 escribir("\n")
@@ -102,7 +103,7 @@ módulo Usbvigia
         j := MAX_APARATOS
         mientras j > 0 hacer
             j := j - 1
-            si aparato(j) <> nulo y aparato(j).ido y aparato(j).dueño <> DE_ALM entonces
+            si aparato(j) <> nulo y aparato(j).ido y aparato(j).dueño <> DE_ALM y aparato(j).dueño <> DE_RED entonces
                 suelta(j)
                 uv_quitados := uv_quitados + 1
             fin
@@ -116,6 +117,7 @@ módulo Usbvigia
         hid_nuevo(i)
         escribe_clase(i)
         escribir("\n")
+        red_nuevo(i)                        ; [etapa 10] un adaptador de red (CDC-ECM)
         ; (y si es un concentrador, lo que tenga ya se ha enumerado)
         mira_nuevos()
     fin

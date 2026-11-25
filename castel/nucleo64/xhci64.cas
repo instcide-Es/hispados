@@ -111,6 +111,7 @@ módulo Xhci64
         trb_ini, trb_largo: arreglo [8] de nat32
         hechos: nat64
         aviso: Suceso
+        otro_aviso: nat64           ; [etapa 10] otro Suceso que señalar al acabar (el de la red: Usbred64), o 0
     fin
 
     tipo Ctl = estructura
@@ -297,6 +298,7 @@ módulo Xhci64
                         e.hecho := cierto
                         e.hechos := e.hechos + 1
                         señala(dirección(e.aviso))
+                        si e.otro_aviso <> 0 entonces señala(puntero(e.otro_aviso)) fin
                         si e.clase = 3 entonces al_vigía := cierto fin
                     fin
                 fin

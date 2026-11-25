@@ -1,0 +1,347 @@
+; =============================================================================
+;  usbred64.cas - Hispa-64, etapa 10: la red por USB, CDC Ethernet (ECM)
+;  (docs/64/HISPA-64.md, sección 16): los adaptadores USB de cable que
+;  hablan la clase de comunicaciones de USB, con la subclase de Ethernet: la
+;  RTL8153 en su segunda configuración (la primera es la propia de Realtek,
+;  la de su driver r8152), y los demás de CDC-ECM; en QEMU, «-device usb-net»
+;  (su primera configuración es RNDIS; la segunda, ECM).
+;  Usb64 ya ha elegido la configuración de ECM (si la primera no es de una
+;  clase que se atienda) y ha leído, de la interfaz de datos, su variante 1
+;  (la 0 no tiene extremos: así el aparato no manda nada hasta que se le
+;  elige). Aquí:
+;   - la interfaz de control (clase 2, subclase 6) y la de datos (0x0A) con
+;     sus dos extremos a granel; la MAC, del texto que dice el descriptor de
+;     Ethernet (iMACAddress: doce cifras hexadecimales);
+;   - SET_INTERFACE (la variante 1 de los datos) y el filtro de paquetes
+;     (SET_ETHERNET_PACKET_FILTER: los suyos, los de difusión y los de
+;     multidifusión);
+;   - recibir: un pedido a granel de 2 KB siempre en marcha (pide_informe y
+;     mirar si ha llegado, como los informes de HID: sin el mutex del
+;     aparato mientras se espera); al acabar, el xHCI señala el suceso del
+;     hilo «red» (Ext.otro_aviso), que lo recoge y pide otro;
+;   - mandar: a granel, de una vez (con el mutex del aparato); si la trama
+;     mide un múltiplo del paquete del extremo, un octeto más (como usbnet de
+;     Linux: así no hace falta el paquete de largo cero);
+;   - el enlace: los avisos de la interfaz de control (NETWORK_CONNECTION y
+;     CONNECTION_SPEED_CHANGE), si los manda; sin avisos, con enlace.
+;  NCM (la subclase 0x0D: varias tramas en un bloque) queda para más
+;  adelante: la RTL8153 y los de casa traen ECM.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbred64
+
+    importar Cifras64, Es64, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Xhci64, Usb64, Redcom64
+
+    constante MAX_UR = 4
+    constante RX_TAM = 2048
+
+    tipo Ur = estructura
+        aparato: nat32
+        ifz_n: nat32
+        e_in, e_out, e_int: nat32               ; los extremos (sus índices en el Aparato)
+        if_control, if_datos: nat32             ; los números de las interfaces
+        rx: nat64                               ; una página (física): lo que llega en la primera mitad, la trama que sale en la segunda
+        notif: nat64                            ; los avisos (física; 64 octetos)
+        rx_pedido, int_pedido: bool
+        enlace, velocidad: nat32
+        avisos, malos, ida: nat64
+        mac: arreglo [8] de byte
+        nombre: arreglo [56] de byte
+    fin
+
+    variable urs: arreglo [MAX_UR] de Ur
+    público variable ur_n: nat32
+    público variable ur_rx, ur_tx, ur_avisos: nat64
+    variable listo: bool
+
+    función ap(k: nat32): puntero a Aparato
+        devolver aparato(urs[k].aparato)
+    fin
+
+    función cifra_hex(c: byte): nat32
+        si c >= '0' y c <= '9' entonces devolver nat32(c - '0') fin
+        si c >= 'A' y c <= 'F' entonces devolver nat32(c - 'A') + 10 fin
+        si c >= 'a' y c <= 'f' entonces devolver nat32(c - 'a') + 10 fin
+        devolver 0xFF
+    fin
+
+    ; ¿es el aparato i de CDC-ECM, con sus dos extremos a granel? (sus números, en u)
+    función es_ecm(i: nat32, ref u: Ur): bool
+        variable a: puntero a Aparato
+        variable j, ic, id: nat32
+        a := aparato(i)
+        ic := U_NINGUNO
+        id := U_NINGUNO
+        j := 0
+        mientras j < a.n_interfaces hacer
+            si a.interfaces[j].clase = 2 y a.interfaces[j].subclase = 6 y ic = U_NINGUNO entonces ic := j fin
+            si a.interfaces[j].clase = 0x0A y a.interfaces[j].variante = 1 y id = U_NINGUNO entonces id := j fin
+            j := j + 1
+        fin
+        si ic = U_NINGUNO o id = U_NINGUNO entonces devolver falso fin
+        u.e_in := busca_ext(a, id, 2, cierto)
+        u.e_out := busca_ext(a, id, 2, falso)
+        u.e_int := busca_ext(a, ic, 3, cierto)
+        u.if_control := a.interfaces[ic].número
+        u.if_datos := a.interfaces[id].número
+        devolver u.e_in <> U_NINGUNO y u.e_out <> U_NINGUNO
+    fin
+
+    ; la MAC del texto iMACAddress («525400123456»); falso si no se entiende
+    función lee_mac(a: puntero a Aparato, ref u: Ur): bool
+        variable t: arreglo [40] de byte
+        variable i, h, l: nat32
+        si a.mac_texto = 0 entonces devolver falso fin
+        texto_de(a, a.mac_texto, dirección(t[0]), 40)
+        i := 0
+        mientras i < 6 hacer
+            h := cifra_hex(t[i * 2])
+            l := cifra_hex(t[i * 2 + 1])
+            si h = 0xFF o l = 0xFF entonces devolver falso fin
+            u.mac[i] := byte((h << 4) ob l)
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; un aparato nuevo: si es de CDC-ECM y nadie lo tiene, a la red (con el mutex de la red)
+    función toma_aparato(i: nat32): bool
+        variable a: puntero a Aparato
+        variable u: puntero a Ur
+        variable k, j, l_: nat32
+        variable r: ent32
+        a := aparato(i)
+        si a = nulo o no a.usado o a.ido o a.dueño <> DE_NADIE o ur_n >= MAX_UR entonces devolver falso fin
+        k := ur_n
+        u := dirección(urs[k])
+        si no es_ecm(i, valor(u)) entonces devolver falso fin
+        u.aparato := i
+        si no lee_mac(a, valor(u)) entonces
+            escribir("Red: USB ")
+            escribe_sitio(i)
+            escribir(": CDC-ECM sin una MAC que se entienda; no se usa\n")
+            devolver falso
+        fin
+        ; la variante 1 de los datos (SET_INTERFACE) y el filtro (0x43: DIRECTED, BROADCAST, ALL_MULTICAST)
+        r := u_control(a, 0x01, 11, 1, u.if_datos, 0)
+        si r < 0 entonces
+            escribir("Red: USB ")
+            escribe_sitio(i)
+            escribir(": CDC-ECM no deja elegir la variante 1 de sus datos; no se usa\n")
+            devolver falso
+        fin
+        u_control(a, 0x21, 0x43, 0x0E, u.if_control, 0)
+        u.rx := página_de(a.ctl)
+        u.notif := página_de(a.ctl)
+        si u.rx = 0 o u.notif = 0 entonces devolver falso fin
+        a.dueño := DE_RED
+        ; (el suceso del hilo «red», al llegar algo)
+        a.ext[u.e_in].otro_aviso := nat64(dirección(red_suceso))
+        si u.e_int <> U_NINGUNO entonces a.ext[u.e_int].otro_aviso := nat64(dirección(red_suceso)) fin
+        u.enlace := 1
+        según nat16(a.velocidad)
+            caso V_SÚPER: u.velocidad := 1000
+            caso V_ALTA: u.velocidad := 100
+            si no: u.velocidad := 10
+        fin
+        ; el nombre: «USB CDC-ECM 0BDA:8153 USB 10/100/1000 LAN»
+        copia(nat64(dirección(u.nombre[0])), nat64("USB CDC-ECM "), 12)
+        j := 12
+        hex_a(dirección(u.nombre[0]), j, a.fabricante)
+        u.nombre[j] := ':'
+        j := j + 1
+        hex_a(dirección(u.nombre[0]), j, a.producto)
+        si a.nombre[0] <> 0 entonces
+            u.nombre[j] := ' '
+            j := j + 1
+            l_ := 0
+            mientras a.nombre[l_] <> 0 y j < 55 hacer
+                u.nombre[j] := a.nombre[l_]
+                j := j + 1
+                l_ := l_ + 1
+            fin
+        fin
+        u.nombre[j] := 0
+        u.ifz_n := alta_ifz(T_USB, k, nat64(dirección(u.mac[0])), dirección(u.nombre[0]))
+        si u.ifz_n = 0xFFFFFFFF entonces
+            a.dueño := DE_NADIE
+            devolver falso
+        fin
+        si con_mensajes(a.ctl) entonces ifz(u.ifz_n).modo_int := 1 sino ifz(u.ifz_n).modo_int := 0 fin
+        u.rx_pedido := falso
+        u.int_pedido := falso
+        ur_n := k + 1
+        pide(k)
+        escribir("Red: USB ")
+        escribe_sitio(i)
+        escribir(" ")
+        hex4u(a.fabricante)
+        escribir(":")
+        hex4u(a.producto)
+        si a.nombre[0] <> 0 entonces escribir(" «", a.nombre, "»") fin
+        escribir(", CDC-ECM (la configuración ", a.configuración, " de ", a.n_conf, "), MAC ")
+        escribe_mac(nat64(dirección(u.mac[0])))
+        escribir(", a granel por los extremos ")
+        hex2u(a.ext[u.e_in].número)
+        escribir(" y ")
+        hex2u(a.ext[u.e_out].número)
+        escribir(" (de ", a.ext[u.e_in].paquete, " octetos)")
+        si con_mensajes(a.ctl) entonces escribir(", con las interrupciones del xHCI\n") sino escribir(", mirando cada 10 ms\n") fin
+        devolver cierto
+    fin
+
+    función hex_a(t: puntero a byte, ref j: nat32, v: nat32)
+        variable k, c: nat32
+        k := 4
+        mientras k > 0 hacer
+            k := k - 1
+            c := (v >> (k * 4)) yb 15
+            si c < 10 entonces t[j] := byte('0' + c) sino t[j] := byte('A' + c - 10) fin
+            j := j + 1
+        fin
+    fin
+
+    función hex2u(v: nat32)
+        variable t: arreglo [8] de byte
+        variable j: nat32
+        j := 0
+        hex_a(dirección(t[0]), j, v)
+        t[4] := 0
+        escribir("0x", dirección(t[2]))
+    fin
+
+    función copia(a: nat64, de: nat64, n: nat64)
+        ensamblador
+            mov rdi, {a}
+            mov rsi, {de}
+            mov rcx, {n}
+            rep movsb
+        fin
+    fin
+
+    ; los pedidos que tienen que estar en marcha: recibir y, si lo hay, los avisos
+    función pide(k: nat32)
+        variable a: puntero a Aparato
+        a := ap(k)
+        si a.ido entonces devolver fin
+        si no urs[k].rx_pedido entonces
+            u_pide_informe(a, urs[k].e_in, urs[k].rx, RX_TAM)
+            urs[k].rx_pedido := cierto
+        fin
+        si urs[k].e_int <> U_NINGUNO y no urs[k].int_pedido entonces
+            u_pide_informe(a, urs[k].e_int, urs[k].notif, 16)
+            urs[k].int_pedido := cierto
+        fin
+    fin
+
+    ; un aviso de la interfaz de control (8 octetos de cabecera, y sus datos)
+    función aviso(k: nat32, n: ent32)
+        variable d: nat64
+        variable c: nat32
+        si n < 8 entonces devolver fin
+        d := virt(urs[k].notif)
+        c := m8(d + 1)
+        urs[k].avisos := urs[k].avisos + 1
+        ur_avisos := ur_avisos + 1
+        si c = 0x00 entonces
+            ; NETWORK_CONNECTION: wValue, 1 con enlace
+            si m16(d + 2) <> 0 entonces urs[k].enlace := 1 sino urs[k].enlace := 0 fin
+        sino si c = 0x2A y n >= 16 entonces
+            ; CONNECTION_SPEED_CHANGE: lo de bajada, en bit/s
+            urs[k].velocidad := m32(d + 8) div 1000000
+        fin
+    fin
+
+    ; ---- lo que pide la pila (con el mutex de la red) ----
+    público función us_envía(k: nat32, d: nat64, l: nat32): bool
+        variable a: puntero a Aparato
+        variable r: ent32
+        variable p: nat64
+        si k >= ur_n o l > 1600 entonces devolver falso fin
+        a := ap(k)
+        si a.ido entonces devolver falso fin
+        p := urs[k].rx + RX_TAM
+        copia(virt(p), d, nat64(l))
+        si l mod a.ext[urs[k].e_out].paquete = 0 entonces
+            pon_m8(virt(p) + l, 0)
+            l := l + 1
+        fin
+        r := u_granel(a, urs[k].e_out, p, l, 1000)
+        si r = T_PARADA entonces quita_parada(a, urs[k].e_out) fin
+        si r < 0 entonces devolver falso fin
+        ur_tx := ur_tx + 1
+        devolver cierto
+    fin
+
+    ; lo que ha llegado (una trama a d), o 0
+    público función us_recoge(k: nat32, d: nat64): nat32
+        variable a: puntero a Aparato
+        variable r: ent32
+        si k >= ur_n entonces devolver 0 fin
+        a := ap(k)
+        si a.ido entonces devolver 0 fin
+        si urs[k].int_pedido entonces
+            r := u_informe(a, urs[k].e_int, 16)
+            si r <> -3 entonces
+                urs[k].int_pedido := falso
+                si r > 0 entonces aviso(k, r) fin
+            fin
+        fin
+        si no urs[k].rx_pedido entonces pide(k) fin
+        r := u_informe(a, urs[k].e_in, RX_TAM)
+        si r = -3 entonces
+            pide(k)
+            devolver 0
+        fin
+        urs[k].rx_pedido := falso
+        si r < 14 o r > ent32(TRAMA) entonces
+            si r < 0 entonces urs[k].malos := urs[k].malos + 1 fin
+            pide(k)
+            si r < 0 entonces devolver 0 fin
+            devolver us_recoge(k, d)
+        fin
+        copia(d, virt(urs[k].rx), nat64(r))
+        ur_rx := ur_rx + 1
+        pide(k)
+        devolver nat32(r)
+    fin
+
+    público función us_enlace(k: nat32, ref vel: nat32): bool
+        si k >= ur_n entonces devolver falso fin
+        si ap(k).ido entonces devolver falso fin
+        vel := urs[k].velocidad
+        devolver urs[k].enlace <> 0
+    fin
+
+    ; ---- al arrancar, y lo que se enchufa ----
+    ; los adaptadores de CDC-ECM ya enumerados (lo llama la red al prepararse)
+    público función prepara_usbred()
+        variable i: nat32
+        i := 0
+        mientras i < MAX_APARATOS hacer
+            toma_aparato(i)
+            i := i + 1
+        fin
+        listo := cierto
+    fin
+
+    ; (el vigía USB) se ha enchufado el aparato i: si es de red, a la red
+    público función red_nuevo(i: nat32)
+        si no listo entonces devolver fin
+        cierra_mutex(dirección(red_m))
+        toma_aparato(i)
+        abre_mutex(dirección(red_m))
+    fin
+
+    ; (el vigía USB) el aparato i se va: su interfaz, sin enlace (el aparato
+    ; se queda, marcado, como el de las memorias: la pila puede tenerlo a mano)
+    público función red_se_va(i: nat32)
+        variable k: nat32
+        k := 0
+        mientras k < ur_n hacer
+            si urs[k].aparato = i entonces urs[k].enlace := 0 fin
+            k := k + 1
+        fin
+    fin
+
+fin Usbred64.

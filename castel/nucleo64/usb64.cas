@@ -41,10 +41,12 @@ módulo Usb64
     público constante DE_HID = 1
     público constante DE_ALM = 2
     público constante DE_HUB = 3
+    público constante DE_RED = 4                ; [etapa 10] la red por USB (CDC-ECM: usbred64.cas)
 
     público tipo Interfaz = estructura
         número, clase, subclase, protocolo: nat32
         largo_informe: nat32                    ; (HID) lo que mide su descriptor de informe
+        variante: nat32                         ; [etapa 10] la que se usa (la 1 de los datos de CDC: la 0 no tiene extremos)
     fin
 
     público tipo Aparato = estructura
@@ -70,6 +72,9 @@ módulo Usb64
         hub_ext: nat32                          ; su extremo de interrupción (o U_NINGUNO)
         nombre: arreglo [40] de byte            ; iProduct
         hecho: arreglo [24] de byte             ; iManufacturer
+        ; [etapa 10] las configuraciones que tiene, la que se ha elegido (su
+        ; índice) y, si es de CDC Ethernet, el texto de su MAC (iMACAddress)
+        n_conf, conf_índice, mac_texto: nat32
     fin
 
     público variable aparatos: arreglo [MAX_APARATOS] de puntero a Aparato
@@ -168,21 +173,51 @@ módulo Usb64
     fin
 
     ; ---- los descriptores ----
+    ; [etapa 10] ¿hay en la configuración leída (largo octetos) una interfaz de
+    ; CDC Ethernet (ECM: clase 2, subclase 6)?
+    función con_ecm(a: puntero a Aparato, largo: nat32): bool
+        variable d: nat32
+        variable p: nat64
+        p := de_control(a)
+        d := 0
+        mientras d + 9 <= largo y m8(p + d) >= 2 y d + m8(p + d) <= largo hacer
+            si m8(p + d + 1) = 4 y m8(p + d + 5) = 2 y m8(p + d + 6) = 6 entonces devolver cierto fin
+            d := d + m8(p + d)
+        fin
+        devolver falso
+    fin
+
+    ; ¿lleva la configuración leída alguna interfaz de las clases que se atienden (HID, almacenamiento, concentrador)?
+    función con_clase_conocida(a: puntero a Aparato, largo: nat32): bool
+        variable d, c: nat32
+        variable p: nat64
+        p := de_control(a)
+        d := 0
+        mientras d + 9 <= largo y m8(p + d) >= 2 y d + m8(p + d) <= largo hacer
+            c := m8(p + d + 5)
+            si m8(p + d + 1) = 4 y (c = 3 o c = 8 o c = 9) entonces devolver cierto fin
+            d := d + m8(p + d)
+        fin
+        devolver falso
+    fin
+
     función lee_configuración(a: puntero a Aparato, largo: nat32)
-        variable d, n, k, clase, interfaz: nat32
+        variable d, n, k, clase, interfaz, j: nat32
         variable vale: bool
         variable p: nat64
         p := de_control(a)
         a.configuración := nat32(m8(p + 5))
         a.n_interfaces := 0
         a.n_ext := 0
+        a.mac_texto := 0
         d := 0
         interfaz := 0
         vale := falso
         mientras d + 2 <= largo y m8(p + d) >= 2 y d + m8(p + d) <= largo hacer
             k := m8(p + d + 1)
             si k = 4 y m8(p + d) >= 9 entonces
-                ; una interfaz (solo su primera variante)
+                ; una interfaz (solo su primera variante; [etapa 10] y la 1 de los
+                ; datos de CDC, 0x0A, que es la que tiene los extremos)
                 vale := m8(p + d + 3) = 0 y a.n_interfaces < MAX_INTERFACES
                 si vale entonces
                     n := a.n_interfaces
@@ -191,9 +226,21 @@ módulo Usb64
                     a.interfaces[n].subclase := m8(p + d + 6)
                     a.interfaces[n].protocolo := m8(p + d + 7)
                     a.interfaces[n].largo_informe := 0
+                    a.interfaces[n].variante := 0
                     interfaz := n
                     a.n_interfaces := n + 1
+                sino si m8(p + d + 3) = 1 y m8(p + d + 5) = 0x0A entonces
+                    j := 0
+                    mientras j < a.n_interfaces y a.interfaces[j].número <> m8(p + d + 2) hacer j := j + 1 fin
+                    si j < a.n_interfaces entonces
+                        vale := cierto
+                        interfaz := j
+                        a.interfaces[j].variante := 1
+                    fin
                 fin
+            sino si k = 0x24 y vale y m8(p + d) >= 4 y m8(p + d + 2) = 0x0F entonces
+                ; (CDC) el de Ethernet: el texto de la MAC
+                a.mac_texto := m8(p + d + 3)
             sino si k = 0x21 y vale y m8(p + d) >= 9 entonces
                 ; el descriptor HID: lo que mide el de informe
                 a.interfaces[interfaz].largo_informe := m16(p + d + 7)
@@ -243,6 +290,11 @@ módulo Usb64
         t[j] := 0
     fin
 
+    ; [etapa 10] (para las clases) un texto del aparato, en ASCII
+    público función texto_de(a: puntero a Aparato, k: nat32, t: puntero a byte, máx: nat32)
+        lee_texto(a, k, t, máx)
+    fin
+
     función ficha_libre(): nat32
         variable i: nat32
         i := 0
@@ -271,9 +323,9 @@ módulo Usb64
     ; o del concentrador «padre»): su dirección, quién es y su configuración.
     ; Da su número, o U_NINGUNO.
     público función enumera(c: nat32, raíz: nat32, padre: nat32, p: nat32, velocidad: nat32): nat32
-        variable i, largo, m0: nat32
+        variable i, largo, m0, k: nat32
         variable a, h: puntero a Aparato
-        variable r: ent32
+        variable r, r2: ent32
         variable d: nat64
         i := ficha_libre()
         si i = U_NINGUNO entonces
@@ -335,11 +387,33 @@ módulo Usb64
         a.fabricante := m16(d + 8)
         a.producto := m16(d + 10)
         largo := m8(d + 14) ob (m8(d + 15) << 8)
+        a.n_conf := m8(d + 17)
         ; su configuración (la primera): cuánto mide, y entera
         r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200, 0, 9)
         si r < 9 entonces devolver no_se_deja(i, 4, "no da su configuración") fin
         r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200, 0, m16(d + 2))
         si r < 9 entonces devolver no_se_deja(i, 5, "no da su configuración entera") fin
+        a.conf_índice := 0
+        ; [etapa 10] si la primera no es de una clase que se atienda (la de
+        ; Realtek de la RTL8153, la RNDIS de QEMU) y otra es de CDC Ethernet, esa
+        si a.n_conf > 1 y no con_clase_conocida(a, nat32(r)) y no con_ecm(a, nat32(r)) entonces
+            k := 1
+            mientras k < a.n_conf y k < 8 hacer
+                r2 := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200 ob k, 0, 9)
+                si r2 >= 9 entonces r2 := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200 ob k, 0, m16(d + 2)) fin
+                si r2 >= 9 y con_ecm(a, nat32(r2)) entonces
+                    a.conf_índice := k
+                    r := r2
+                    romper
+                fin
+                k := k + 1
+            fin
+            si a.conf_índice = 0 entonces
+                r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200, 0, 9)
+                si r >= 9 entonces r := u_control(a, 0x80, PIDE_DESCRIPTOR, 0x0200, 0, m16(d + 2)) fin
+                si r < 9 entonces devolver no_se_deja(i, 5, "no da su configuración entera") fin
+            fin
+        fin
         lee_configuración(a, nat32(r))
         lee_texto(a, largo >> 8, dirección(a.nombre[0]), 40)
         lee_texto(a, largo yb 0xFF, dirección(a.hecho[0]), 24)

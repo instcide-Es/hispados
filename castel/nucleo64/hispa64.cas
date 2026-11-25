@@ -74,7 +74,7 @@ módulo Hispa64
     importar I2chid64
     importar PrMusl64
     importar Disp64
-    importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Ip64, Tcp64, Red64, PrRed64
+    importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
     constante VERSIÓN = "0.10.0"
     constante MB1 = 0x2BADB002

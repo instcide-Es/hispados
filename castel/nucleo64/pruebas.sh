@@ -1252,6 +1252,9 @@ red9() {   # SALIDA NIC CPUS LÍNEA [dns]: arranca con RED.PRB y el cliente del 
     echo "ECO servidor 7000 1"
   } > "$R9/RED.PRB"
   for f in "$T"/prog/*; do m="$m,$f"; done
+  # [etapa 10] la red por USB: usb-net (CDC-ECM) detrás de un xHCI
+  local nicq="-nic user,model=$nic,hostfwd=tcp:127.0.0.1:$((17000 + n))-:7000"
+  [ "$nic" = usb-net ] && nicq="-device qemu-xhci,id=xhci -netdev user,id=u0,hostfwd=tcp:127.0.0.1:$((17000 + n))-:7000 -device usb-net,netdev=u0,bus=xhci.0"
   rm -f "$s" "$s.eco"
   ( for i in $(seq 150); do python3 -I -c '
 import socket, sys
@@ -1264,7 +1267,7 @@ sys.exit(0 if r == d else 1)' "$((17000 + n))" 2> /dev/null && { echo bien > "$s
   local cli=$!
   (cd "$R9" && timeout 300 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$m" -append "apagar sinmusl $l" -display none -serial file:"$s" \
     -monitor none $DBG -no-reboot -m 512 -machine q35 -smp "$n" -rtc base="${RTC9:-localtime}" \
-    -nic user,model="$nic",hostfwd=tcp:127.0.0.1:$((17000 + n))-:7000 > /dev/null 2>&1); local c=$?
+    $nicq > /dev/null 2>&1); local c=$?
   kill $cli 2> /dev/null; wait $cli 2> /dev/null
   return $c
 }
@@ -1306,6 +1309,13 @@ if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
   fi
   red9 "$T/e9d.txt" rtl8139 8 "realtek=ensayo"
   red9_ok "$T/e9d.txt" "la Realtek RTL8168 (con la RTL8139C+ de QEMU, «realtek=ensayo»), 8 procesadores"
+  # [etapa 10] la red por USB: CDC-ECM (la segunda configuración de usb-net; la primera, RNDIS)
+  red9 "$T/e10u.txt" usb-net 2 ""
+  red9_ok "$T/e10u.txt" "[etapa 10] la red por USB (usb-net de QEMU, CDC-ECM, detrás del xHCI), 2 procesadores"
+  v=$(serie "$T/e10u.txt")
+  if grep -q "^Red: USB 1-[0-9]* 0525:A4A2 «RNDIS/QEMU USB Network Device», CDC-ECM (la configuración 1 de 2), MAC 40:54:00:12:34:56, a granel por los extremos 0x82 y 0x02 (de 64 octetos), con las interrupciones del xHCI$" <<< "$v"; then
+    ok "etapa 10, la red por USB: la configuración de CDC-ECM (la 2.ª de las dos: la 1.ª es RNDIS), la variante 1 de los datos, la MAC de su iMACAddress, recibir sin el mutex del aparato (el xHCI despierta al hilo «red»)"
+  else ko "etapa 10, la red por USB no dice lo que debe: $(grep -E '^Red: USB|^USB|^  1-' <<< "$v" | paste -sd '|')"; fi
   # la zona: la hora local con cambio de horario, y el CMOS en UTC o en hora local
   v=$(serie "$T/e9b.txt"); w=$(serie "$T/e9a.txt")
   if grep -q "zona UTC (TZ=UTC0), el CMOS en UTC$" <<< "$v" && grep -q "zona Europa/Madrid (TZ=CET-1CEST,M3.5.0,M10.5.0/3), el CMOS en hora local$" <<< "$w" \
