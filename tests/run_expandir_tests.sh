@@ -3,6 +3,9 @@
 # KWAJ métodos 0 y 1 (generados aquí) y, si se indica MSDOS_DISKS con los
 # disquetes de un MS-DOS 6.x (no forman parte del proyecto), KWAJ método 3
 # comparado con el EXPAND.EXE original.
+# [0.9.31] Un KWAJ con un nombre guardado que sale de la carpeta
+# («..\..\M») o lleva unidad («C:MALO»): se usa el del origen, y no se
+# escribe fuera de la carpeta de destino.
 # EXPAND test.
 set -u
 cd "$(dirname "$0")/.."
@@ -23,10 +26,18 @@ for m, out in ((0, 'K0.TX_'), (1, 'K1.TX_')):
     extra = struct.pack('<I', len(data)) + b'KDATOS\0' + b'TXT\0'
     hdr = b'KWAJ\x88\xf0\x27\xd1' + struct.pack('<HHH', m, 14 + len(extra), 0x19) + extra
     open(d + '/' + out, 'wb').write(hdr + body)
+# [0.9.31] nombres guardados que no son de un archivo de la carpeta
+for nom, out in ((b'..\\..\\M', 'KM.TX_'), (b'C:MALO', 'KC.TX_')):
+    extra = struct.pack('<I', len(data)) + nom + b'\0' + b'TXT\0'
+    hdr = b'KWAJ\x88\xf0\x27\xd1' + struct.pack('<HHH', 0, 14 + len(extra), 0x19) + extra
+    open(d + '/' + out, 'wb').write(hdr + data)
 EOF
+mcopy -i $T/f.img $T/KM.TX_ ::KM.TX_
+mcopy -i $T/f.img $T/KC.TX_ ::KC.TX_
 mcopy -i $T/f.img $T/K0.TX_ ::K0.TX_
 mcopy -i $T/f.img $T/K1.TX_ ::K1.TX_
-CMDS=("MD SALIDA" "EXPANDIR K0.TX_ SALIDA\\K0.TXT" "EXPAND K1.TX_ SALIDA\\K1.TXT" "EXPANDIR K1.TX_" "EXPANDIR NOEXISTE.EX_")
+CMDS=("MD SALIDA" "EXPANDIR K0.TX_ SALIDA\\K0.TXT" "EXPAND K1.TX_ SALIDA\\K1.TXT" "EXPANDIR K1.TX_" "EXPANDIR NOEXISTE.EX_"
+      "MD SALIDA\\DOS" "EXPANDIR KM.TX_ SALIDA\\DOS" "EXPANDIR KC.TX_ SALIDA")
 HAVE_SZ=0
 if command -v mscompress >/dev/null; then
   mkdir $T/sz && cp $T/DATOS.TXT $T/sz/ && (cd $T/sz && mscompress DATOS.TXT >/dev/null 2>&1)
@@ -55,6 +66,10 @@ same SALIDA/K0.TXT $T/DATOS.TXT "KWAJ método 0"
 same SALIDA/K1.TXT $T/DATOS.TXT "KWAJ método 1 (EXPAND)"
 same KDATOS.TXT $T/DATOS.TXT "nombre original guardado en KWAJ"
 if grep -qF "No se encontró el archivo." $T/log.txt; then ok "archivo que no existe"; else ko "archivo que no existe"; fi
+# [0.9.31] el nombre de la cabecera no saca el archivo de su carpeta
+same SALIDA/DOS/KM.TX_ $T/DATOS.TXT "KWAJ con «..\\..\\M» guardado: en la carpeta dada, con el nombre del origen"
+if mdir -i $T/f.img ::M.TXT >/dev/null 2>&1 || mdir -i $T/f.img ::SALIDA/M.TXT >/dev/null 2>&1; then ko "KWAJ «..\\..\\M»: ha escrito fuera"; else ok "KWAJ «..\\..\\M»: nada fuera de la carpeta"; fi
+same SALIDA/KC.TX_ $T/DATOS.TXT "KWAJ con «C:MALO» guardado: con el nombre del origen"
 if [ $HAVE_SZ = 1 ]; then same SALIDA/SZ.TXT $T/DATOS.TXT "SZDD (mscompress)"; else echo "  --   SZDD: mscompress no está instalado"; fi
 if [ $HAVE_MS = 1 ]; then
   for n in PAIS.TXT HIMEM.SYS; do

@@ -394,10 +394,30 @@ name_from_src:
         mov [di-1], al
 .r:
         jmp build_dst
-; KWAJ: el guardado en la cabecera; si no hay, el del origen
+; KWAJ: el guardado en la cabecera; si no hay, el del origen. [0.9.31] Viene
+; del archivo (de cualquiera): solo vale un nombre de archivo, sin carpetas ni
+; unidad («\AUTOEXEC.BAT», «..\..\X», «C:X»), sin «.» ni «..», sin comodines
+; ni letras de control; si no, se usa el del origen
 name_kwaj:
         cmp byte [kname], 0
         je .src
+        cmp byte [kname], '.'       ; «.», «..», «.BAT»: no
+        je .src
+        mov si, kname
+.v:
+        lodsb
+        test al, al
+        jz .vale
+        cmp al, ' '
+        jbe .src
+        push di
+        mov di, k_malas
+        mov cx, K_MALAS
+        repne scasb
+        pop di
+        je .src
+        jmp .v
+.vale:
         mov si, kname
         mov di, oname
         call strcpy
@@ -407,6 +427,8 @@ name_kwaj:
         mov di, oname
         call strcpy
         jmp build_dst
+k_malas db '\/:*?"<>|+=;,[]', 127
+K_MALAS equ $ - k_malas
 ; fdst = destino dado, o carpeta + oname
 build_dst:
         mov di, fdst
