@@ -14,7 +14,7 @@ módulo Ured
 
     modelo usuario
 
-    importar Llamadas, Rbase, Rtarjeta, Rwifi, Rpila, Rtcp, Mem32, Textos32, Rcorta
+    importar Llamadas, Rbase, Rtarjeta, Rwifi, Rmovil, Rpila, Rtcp, Mem32, Textos32, Rcorta
 
     ; lo que dice el icono (red.cas)
     constante RED_SIN_TARJETA = 1
@@ -50,6 +50,7 @@ módulo Ured
         e := cómo_está()
         ; (WIFI) el bit 9: por el Wi-Fi; los 12 y 13: lo que se prefiere (RED.INI)
         si tarjeta = T_WIFI entonces e := e ob 0x200 fin
+        si tarjeta = T_MOVIL entonces e := e ob 0x400 fin         ; (MÓVIL) el bit 10: por el móvil por USB
         e := e ob (preferir << 12)
         si e <> estado_dicho o mi_ip <> ip_dicha o túnel_ip <> túnel_dicho entonces
             ; (el aparato que hace DMA para RED.BIN: el del cable; el Wi-Fi lo dice WIFI.BIN)
@@ -71,7 +72,7 @@ módulo Ured
             apunta4("enlace: sí (%u Mbit/s)", velocidad(), 0, 0, 0)
             dhcp_empezar()
         sino
-            si tarjeta = T_WIFI entonces apunta("enlace: no (el Wi-Fi no está conectado)") sino apunta("enlace: no (¿el cable?)") fin    ; (WIFI)
+            si tarjeta = T_WIFI entonces apunta("enlace: no (el Wi-Fi no está conectado)") sino si tarjeta = T_MOVIL entonces apunta("enlace: no (el móvil por USB)") sino apunta("enlace: no (¿el cable?)") fin    ; (WIFI) (MÓVIL)
             dhcp_parar()
             pila_sin_cable()
             tcp_sin_red(SIN_CABLE)
@@ -89,19 +90,39 @@ módulo Ured
     fin
 
     ; (WIFI) ¿por el cable o por el Wi-Fi? (Rwifi.conviene, con lo que dice RED.INI)
+    ; (MÓVIL) y el móvil por USB: el cable de verdad (con enlace) antes que el
+    ; móvil, y el móvil antes que el Wi-Fi (salvo con «Preferir=WIFI»)
     función elige_tarjeta()
         variable cable_ok, w: bool
+        variable quiero, antes: nat32
         Rwifi.cambió := falso
+        Rmovil.mirar()
+        Rmovil.cambió := falso
         cable_ok := tarjeta_cable <> T_NINGUNA y enlace_de(tarjeta_cable)
         w := conviene(cable_ok)
-        si w y tarjeta <> T_WIFI entonces
+        quiero := tarjeta_cable
+        si w y preferir = PREFIERE_WIFI entonces
+            quiero := T_WIFI
+        sino si no cable_ok y Rmovil.listo entonces
+            quiero := T_MOVIL
+        sino si w entonces
+            quiero := T_WIFI
+        fin
+        si quiero <> tarjeta entonces
+            antes := tarjeta
             corta()
-            usar_wifi(cierto)
-            apunta("la red va por el Wi-Fi")
-        sino si no w y tarjeta = T_WIFI entonces
-            corta()
-            usar_wifi(falso)
-            si tarjeta = T_NINGUNA entonces apunta("la red ya no va por el Wi-Fi (no hay cable)") sino apunta("la red va por el cable") fin
+            usar(quiero)
+            si tarjeta = T_WIFI entonces
+                apunta("la red va por el Wi-Fi")
+            sino si tarjeta = T_MOVIL entonces
+                apunta("la red va por el móvil por USB")
+            sino si tarjeta = T_NINGUNA y antes = T_MOVIL entonces
+                apunta("la red ya no va por el móvil por USB (no hay cable)")
+            sino si tarjeta = T_NINGUNA entonces
+                apunta("la red ya no va por el Wi-Fi (no hay cable)")
+            sino
+                apunta("la red va por el cable")
+            fin
         fin
         mira_enlace()
     fin
@@ -311,6 +332,7 @@ módulo Ured
                 fin
                 r := 0
                 si tarjeta = T_WIFI entonces r := 1 fin
+                si tarjeta = T_MOVIL entonces r := 2 fin      ; (MÓVIL)
                 contestar(h, s, preferir, r, 0, nulo, 0)
             caso O_UDP:
                 si tarjeta = T_NINGUNA entonces
@@ -337,6 +359,7 @@ módulo Ured
         atender_corte(cierto)
         si apuntarse() <> 0 entonces salir(1) fin
         apunta("Hispa-Pentium 0.8: el servicio de red (RED.BIN)")
+        apunta("(red 0.8.12: también el móvil por USB, el anclaje de USB de Android: RNDIS y CDC-NCM)")
         ; (WIFI) RED.INI y, si hay tarjeta Wi-Fi, WIFI.BIN (antes que la del
         ; cable: así enciende su radio mientras tanto)
         Rwifi.arrancar()
@@ -346,7 +369,7 @@ módulo Ured
         carga_reglas()                          ; (CORTAFUEGOS)
         enlace := falso
         estado_dicho := 0xFFFFFFFF
-        mira_enlace()
+        elige_tarjeta()                         ; ((MÓVIL) y si hay un móvil por USB) y mira_enlace()
         dilo()
         p := puntero(dirección(pedido[0]))
         espera := 1
@@ -354,6 +377,7 @@ módulo Ured
         enlace_visto := ahora()
         mientras cierto hacer
             vaciar_cable(dirección(trama[0]))                ; (WIFI) la del cable, mientras se va por el Wi-Fi
+            si Rmovil.cambió entonces elige_tarjeta() fin    ; (MÓVIL) se ha ido el móvil
             si tarjeta <> T_NINGUNA entonces
                 atender_tarjeta()
                 k := 0

@@ -50,6 +50,7 @@ módulo Usbbase
     público tipo Interfaz = estructura
         número: nat32
         clase, subclase, protocolo: nat32
+        alterna: nat32                          ; (MÓVIL) la variante de la que son sus extremos (1: los datos de NCM/ECM)
     fin
 
     público tipo Aparato = estructura

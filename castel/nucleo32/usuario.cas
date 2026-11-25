@@ -953,7 +953,7 @@ módulo Usuario
                 devolver montar_imagen(u, ruta)
             caso 134, 135:
                 devolver atender_reproductor(n, a, b, c)        ; (REPRODUCTOR) el CD de música y la bandeja
-            caso 90..100:                               ; (WIFI) la 100, el servicio Wi-Fi
+            caso 90..101:                               ; (WIFI) la 100, el servicio Wi-Fi; (MÓVIL) la 101, el móvil por USB
                 r := atender_red(n, a, b, c)
                 ; si no hay servicio de red, se pone en marcha (una vez) y se
                 ; vuelve a pedir

@@ -224,6 +224,7 @@ cuarta parte, los discos y el USB).
 | `sdhci.cas` (Sdhci) | (SDHCI) Las **tarjetas SD** y el **eMMC** por una controladora **SDHCI** (la de las tabletas Bay Trail): la del PCI, la dada a mano o la de «modo ACPI»; SD y eMMC, ADMA2 o PIO (sección 7, «Las tarjetas SD y el eMMC»). |
 | `sdacpi.cas` (Sdacpi) | (SDHCI) Las controladoras SD/eMMC que solo dice ACPI (`ACPI.BIN`, la llamada 160), y lo aprendido de ellas en `\SDHCI.TXT`. |
 | `usbcal.cas` (Usbcal) | **El USB en caliente** (desde la 0.8, sección 11): la tarea que mira los puertos y atiende lo que se enchufa y se desenchufa en marcha, y «quitar con seguridad». |
+| `usbmovil.cas` (Usbmovil) | (MÓVIL) **El móvil por USB** (el «Anclaje de USB» de Android: RNDIS y CDC-NCM): lo reconoce, lo aparta para el servicio de red (la llamada 101) y lo recibe a granel sin esperar (sección 14 undetricies). |
 | `registro.cas` (Registro) | El **registro del arranque**: lo que el núcleo dice de los discos y del USB, apuntado para guardarlo en `ARRANQUE.TXT`. |
 | `fecha.cas` (Fecha) | La **fecha y la hora** del reloj de pila del PC (la CMOS), como las guarda la FAT; y **ponerlo en hora**. |
 | `ajustes.cas` (Ajustes) | Los **ajustes de un sistema instalado** (`\HISPA\HISPA.INI`): el nombre del usuario y del equipo y el teclado (sección 12). |
@@ -4030,6 +4031,7 @@ núcleo) y un fallo de la red acaba con el servicio, no con el sistema.
      rtarjeta.cas  las tarjetas (e1000, RTL8139) y lo común
      ryukon.cas  la Marvell Yukon 88E8059 (HP Mini 5103)
      rrtl.cas    la Realtek RTL8111/8168 (ASUS GL553VD, Toshiba NB250)
+     rmovil.cas  (MÓVIL) el móvil por USB: RNDIS y CDC-NCM (sección 14 undetricies)
      rbase.cas   puertos, PCI, el registro, orden de red, sumas
         │  puertos de E/S (IOPL 3), registros (llamada 95), DMA (94), IRQ (98)
         ▼
@@ -11704,6 +11706,175 @@ HID sobre I2C, así que:
 
 En el equipo, lo primero que mirar es `ARRANQUE.TXT` (las líneas `i2c:` e
 `i2c-hid:`) y `ACPI.TXT` (las `ACPI: I2C-HID:`).
+
+## 14 undetricies. El móvil por USB: el «Anclaje de USB» de Android (rama usb-movil, «(MÓVIL)», la 0.8.12)
+
+*25/11/2026.* Para el **sábado 28/11** en el mercadillo: arrancar un portátil
+viejo con la memoria del Termómetro, enchufar el móvil de Carlos (un **Xiaomi
+Redmi Note 11**, Android/MIUI) por el cable USB y usar «Enviar a Carlos» sin
+depender de la Wi-Fi (ni de la tarjeta de red) de cada portátil.
+
+**En el móvil**: Ajustes › Conexión y compartir › **Anclaje de USB** (en
+otros Android: Ajustes › Redes › Zona Wi-Fi y compartir conexión › Compartir
+conexión por USB). El móvil se va del USB y vuelve con **otra cara**: casi
+siempre **RNDIS** (la interfaz de control E0/01/03, EF/04/01 o 02/02/FF, y la
+de datos CDC, 0Ah) y, en algunos, **CDC-NCM** (02/0D/00, con la de datos en su
+variante 1). El móvil hace de router: da la IP por DHCP (192.168.42.x, u otra
+red en los Android de ahora) y sale por sus datos o su Wi-Fi.
+
+```
+  RED.BIN (anillo 3)
+     rmovil.cas  T_MOVIL: RNDIS (los mensajes y REMOTE_NDIS_PACKET_MSG) y NCM (NTB16)
+        │  la llamada 101: 0 cómo está, 1 control, 2 enviar, 3 recibir (solo el servicio de red)
+        ▼
+  el núcleo
+     usbmovil.cas  reconoce el móvil (solo esas clases), sus interfaces y extremos;
+                   los búferes (16 K alineados); lanza RED.BIN si no está
+     usb.cas       granel_abre/granel_pide/granel_mira: recibir a granel SIN esperar
+     xhci.cas      el anillo del extremo (como las tuberías de interrupción, a otro búfer)
+     ehci.cas      una tercera cola en la lista asíncrona (cabecera, trabajo y ésta),
+                   con la alternancia en la cola
+     uhci.cas      una tubería de la cadena con una fila de TD a granel (64 paquetes)
+```
+
+**Lo que hace el núcleo** (`usbmovil.cas`, «(MÓVIL)» en `usb.cas`,
+`xhci.cas`, `ehci.cas`, `usbcal.cas`, `semilla.cas`, `red.cas`,
+`usuario.cas` y `escritorio.cas`):
+
+- **Solo un aparato de esas clases**: al enumerarlo (al arrancar o en
+  caliente, por `usbcal.cas`) se mira si tiene la interfaz de control de
+  RNDIS o de NCM y, detrás, una de datos con sus dos extremos a granel. Lo
+  demás del USB no se toca; los adaptadores de red por USB (el RTL8153 por
+  CDC-ECM, el que en un MacBook real dejaba sin teclado en Hispa-DOS) siguen
+  sin usarse. `lee_configuración` apunta ahora también los extremos de la
+  **variante 1** de una interfaz de datos CDC cuya variante 0 no tiene ninguno
+  (la de NCM): así el xHCI los configura desde el principio.
+- **En caliente**: el móvil se enchufa y, después, se activa el anclaje: el
+  aparato de antes (MTP, cargar) se va y llega el nuevo. Cada móvil que llega
+  es una **generación** nueva; RED.BIN la ve (cada cuarto de segundo) y lo pone
+  en marcha otra vez; lo que pide con una generación vieja da `MV_NO_HAY`.
+  Avisos: «Móvil conectado por USB: la red va por él» y «El móvil por USB se
+  ha desconectado».
+- **Si el servicio de red no está en marcha**, se pone (una tarea del núcleo,
+  `lanza_red_movil`; con «sinred», no). Y el escritorio lo pone al arrancar si
+  hay tarjeta PCI **o un móvil**.
+- **Recibir sin esperar**: lo que se pide (16 K) llega mientras RED.BIN hace
+  otra cosa; cuando lo recoge, se pide lo siguiente en el acto. En el xHCI es
+  el anillo del extremo (`Xhci.tubo_pide_en`); en el EHCI, una cola propia en
+  la lista asíncrona (`Ehci.asinc_*`; una por controladora), que sale de ella
+  (con el timbre de avance) cuando el aparato se va. En la UHCI (el móvil en
+  un USB 1.1, o lo de velocidad plena detrás de un EHCI con compañeras), una
+  tubería de la cadena, como las de interrupción, con una fila de hasta 64
+  TD a granel en una página propia (`Uhci.asinc_*`). (La primera prueba,
+  recibiendo con `granel()` esperando 2 centésimas en la UHCI, dejaba el
+  teclado USB de la misma controladora con una tecla pulsada: el cerrojo del
+  USB, casi siempre ocupado.)
+- **La llamada 101** (solo el servicio de red; `red.cas` mira que los punteros
+  sean suyos): EBX = op + generación << 8; ECX, el puntero; EDX, cuántos.
+
+| op | Qué | Da |
+|---|---|---|
+| 0 | cómo está, a ECX (16 palabras: generación, si está, clase 1 RNDIS / 2 NCM, fabricante y modelo, velocidad, controladora, el paquete de los dos extremos, las dos interfaces, la variante, si recibe sin esperar, recibidos, enviados, fallos, la clase de la de control) | la generación (0: no hay) |
+| 1 | una petición de control al móvil: en ECX, pide, petición, valor, índice y n (hasta 1024), y detrás los datos | los octetos, o `MV_FALLO`/`MV_PARADA`/`MV_NO_HAY` |
+| 2 | enviar los EDX octetos de ECX (hasta 16 K) a granel | los octetos |
+| 3 | lo que haya llegado (una transferencia: uno o varios paquetes de RNDIS, o un NTB) a ECX (caben EDX) | los octetos; 0, aún nada |
+
+**Lo que hace RED.BIN** (`rmovil.cas`, una tarjeta más: `T_MOVIL`):
+
+- **RNDIS** (la norma pública de Microsoft, *Remote NDIS Specification*; el
+  orden de los pasos, como `rndis_host.c` de Linux): los mensajes por
+  SEND_ENCAPSULATED_COMMAND (21h/00h) y GET_ENCAPSULATED_RESPONSE (A1h/01h,
+  hasta 40 veces, con un tic entre una y otra: si aún no está, el móvil dice
+  STALL o da un octeto): **REMOTE_NDIS_INITIALIZE** (1.0, hasta 16 K de una
+  vez), **QUERY** de `OID_802_3_PERMANENT_ADDRESS` (la MAC; si no,
+  `OID_802_3_CURRENT_ADDRESS`), de `OID_GEN_MAXIMUM_FRAME_SIZE` (para el
+  registro) y de `OID_GEN_MEDIA_CONNECT_STATUS`, y **SET** de
+  `OID_GEN_CURRENT_PACKET_FILTER` a 2Dh (a mí, difusión, toda la
+  multidifusión y promiscuo, como Linux). Las QUERY llevan un búfer de entrada
+  a cero (como Linux: QEMU no quiere uno vacío). Cada trama va con su
+  **REMOTE_NDIS_PACKET_MSG** de 44 octetos; las que llegan pueden venir varias
+  en una transferencia (Android las junta, rellenas hasta 8): se parten; lo que
+  no es un PACKET_MSG o está roto se tira (y se cuenta).
+- **CDC-NCM** (la norma *Network Control Model* 1.0 del USB-IF; mirando
+  `cdc_ncm.c`): GET_NTB_PARAMETERS (el divisor, el resto y la alineación de lo
+  que sale), SET_NTB_INPUT_SIZE a 16 K si el móvil manda NTB más grandes, la
+  MAC de la cadena **iMACAddress** del descriptor funcional de Ethernet,
+  SET_INTERFACE de los datos a la variante 0 y a la 1, y
+  SET_ETHERNET_PACKET_FILTER. Lo que llega: **NTB16** (la cabecera NTH16,
+  sus NDP16 encadenados, «NCM0» o «NCM1», y los datagramas); lo que sale, un
+  NTB16 por trama (el NDP16 en 12, el datagrama donde piden el divisor y el
+  resto).
+- Lo que sale y es un múltiplo del paquete del extremo lleva **un octeto de
+  más** (a cero), para que acabe en un paquete corto (lo que hace Linux; el
+  `f_ncm` de los Android lo sabe quitar).
+- **La prioridad**: el cable de verdad (con enlace) > el móvil por USB > el
+  Wi-Fi (con `Preferir=WIFI` en RED.INI, el Wi-Fi primero; con
+  `Preferir=CABLE`, el cable o el móvil, sin el Wi-Fi). Si el cable pierde el
+  enlace, la red pasa al móvil; si lo recupera, vuelve al cable.
+- **Lo que se ve**: `IPCONFIG` dice `Tarjeta . . . : el móvil por USB
+  (Android, RNDIS) (USB 2717:FF88)` y `Por . . . : el cable USB del móvil
+  (Anclaje de USB)`; el icono de la red, al pulsarlo, «La red: por el móvil
+  por USB (Android), con la IP ...»; la ventana del Wi-Fi, «la red va por el
+  móvil por USB»; el bit 10 de la llamada 96 (`Red.por_movil`). Y todo lo que
+  pasa, en `IPCONFIG /TODO` y en `RED.LOG` (con `Registro=SI`): `red: móvil
+  por USB: RNDIS 1.0, medio 0, hasta 1580 octetos`, `... en marcha; MAC ...`,
+  `la red va por el móvil por USB`; y en `ARRANQUE.TXT`, las líneas `usb:`
+  del móvil (`usb: el móvil por USB (Android, RNDIS): aparato 2, 2717:FF88;
+  interfaces 0 y 1 (clase E00103), extremos 81 y 01`).
+- (De paso) el PING ya no dice `tiempo=4294961 ms`: cuando el 8253 ha vuelto
+  a empezar y su tic aún no ha llegado, `ahora_us` va unos ms atrás (salía
+  sobre todo con la red por USB).
+
+**El Termómetro**: «Enviar a Carlos» espera a la red (`hay_red`, la llamada
+97) y la usa: con la base y la red de la 0.8.12 en la memoria, el móvil vale
+como un cable (si no hay servicio de red, el núcleo lo pone en marcha al
+llegar el móvil). Lo único de `termo.c`/`envio.c`: el texto de «cómo
+conectar» podría decir también «o el móvil por USB (Anclaje de USB)» (rama
+termo-fuerte).
+
+**Probarlo** (`castel/pruebas.sh`, parte 55: `SOLO=movil`; `pruebas_movil.sh`).
+QEMU tiene `-device usb-net`, que da **RNDIS** en su primera configuración (la
+que pone el núcleo: 02/02/FF y 0A, extremos 82 y 02) y CDC-ECM en la
+segunda; es de velocidad plena:
+
+```
+QEMU_MAS="-device qemu-xhci,id=u -netdev user,id=n0 -device usb-net,netdev=n0,bus=u.0,mac=40:54:00:12:34:56" \
+  ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes castel/nucleo32/probar.sh "" ":pausa 2" ipconfig "ping 10.0.2.2"
+```
+
+1. xHCI, el móvil enchufado al arrancar (y un teclado USB a la vez): RNDIS en
+   marcha, DHCP (10.0.2.15), IPCONFIG, PING 3 de 3 y DESCARGAR de 400 K con el
+   SHA-256 igual (en QEMU, unos 600 K/s).
+2. EHCI con sus UHCI compañeras (el usb-net va a la UHCI): lo mismo, con un
+   teclado USB en la misma UHCI que sigue tecleando bien.
+3. En caliente: sin tarjeta; `device_add`: RED.BIN se pone en marcha solo,
+   DHCP y PING; `device_del`: «se ha ido», sin tarjeta; otra vez con otra MAC
+   (otra generación): otra IP y PING.
+4. Cable (e1000) y móvil: el cable; `set_link` apagado: el móvil (PING va);
+   encendido: el cable.
+5. **NCM, con datos grabados** (QEMU no lo tiene): `UMOVILP.BIN`
+   (`umovilp.cas`) parte y arma con `rmovil.cas` lo que hace
+   `tests/movil_ncm.py`: NTB16 como los de `f_ncm` de Linux (el NDP16 al
+   final), con el NDP16 delante, «NCM1», dos NDP encadenados, diez datagramas,
+   uno roto, uno que se sale; RNDIS con tres paquetes juntos y rellenos; y lo
+   que se arma (el NTB16 con divisor 4 y resto 0 o 2, el octeto de más).
+6. **La cola asíncrona del EHCI** (el usb-net no la alcanza: es de velocidad
+   plena): con `usbasinc` en la línea del cargador, `usbalm.cas` recibe lo de
+   las memorias USB por ella: una memoria de alta velocidad en el EHCI, 300 K
+   leídos y escritos, iguales, y fsck.fat.
+7. El escritorio sin tarjeta PCI y con el móvil: RED.BIN al arrancar, y el
+   aviso del icono.
+
+Resultados del 25/11 (en el VPS): `SOLO=movil` 88/1 (la que faltaba, solo
+la expresión de la prueba: corregida y comprobada a mano), `SOLO=red` 78/0 y
+`SOLO=caliente` 79/0. La memoria de prueba, arrancada en QEMU con el usb-net:
+el escritorio, la red por el móvil, `RED.LOG` y `ARRANQUE.TXT` escritos.
+
+**Lo que solo se verá en el Xiaomi**: la clase de verdad (E0/01/03, casi
+seguro), el RNDIS de Android (INITIALIZE con su MaxTransferSize, varias tramas
+juntas), la alta velocidad (480 Mbit/s: EHCI con la cola asíncrona, o xHCI) y
+el DHCP del móvil (192.168.42.x). Y NCM en un móvil de verdad. La memoria de
+prueba: `Pruebas/Pendientes/Movil-USB/Anclaje-Android/`.
 
 ## 15. Las pruebas
 

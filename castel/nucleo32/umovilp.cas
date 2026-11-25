@@ -1,0 +1,87 @@
+; =============================================================================
+;  umovilp.cas - (MÓVIL) UMOVILP.BIN: la prueba de la parte de paquetes del
+;  móvil por USB (rmovil.cas) con datos grabados, sin móvil: para CDC-NCM,
+;  que QEMU no tiene (su usb-net solo da RNDIS y CDC-ECM), y para RNDIS con
+;  varias tramas en una transferencia (QEMU manda una cada vez). Lee
+;  \MOVIL.IN (lo hace tests/movil_ncm.py) y deja en \MOVIL.OUT lo que sale:
+;    entrada: [1 octeto: 1 RNDIS o 2 NCM, partir][2: largo][los datos]
+;             [3 RNDIS o 4 NCM, armar][2: divisor][2: resto][2: alineación]
+;             [2: paquete][2: largo][la trama]
+;    salida:  (partir) [2: tramas][2: tiradas] y cada trama [2: largo][...]
+;             (armar) [2: largo][lo que iría por el USB]
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Umovilp
+
+    modelo usuario
+
+    importar Llamadas, Rmovil, Mem32
+
+    variable ent: arreglo [60000] de byte
+    variable sal: arreglo [60000] de byte
+    variable ns: nat32
+
+    función lee16(p: puntero a byte): nat32
+        devolver nat32(p[0]) ob (nat32(p[1]) << 8)
+    fin
+
+    función pon16(v: nat32)
+        sal[ns] := byte(v)
+        sal[ns + 1] := byte(v >> 8)
+        ns := ns + 2
+    fin
+
+    función principal(): byte
+        variable m, n, i, c, l, k, t, largo, d, r, a, q: nat32
+        variable p: puntero a byte
+        m := abrir("\\MOVIL.IN")
+        si m >= 0xFFFFFFE0 entonces
+            escribir("UMOVILP: no está \\MOVIL.IN\n")
+            devolver 1
+        fin
+        n := leer(m, dirección(ent[0]), 60000)
+        cerrar(m)
+        si n >= 0xFFFFFFE0 entonces devolver 1 fin
+        ns := 0
+        i := 0
+        r := 0
+        mientras i + 3 <= n hacer
+            c := ent[i]
+            si c = 1 o c = 2 entonces
+                l := lee16(dirección(ent[i + 1]))
+                si i + 3 + l > n entonces romper fin
+                t := prueba_parte(c, dirección(ent[i + 3]), l)
+                pon16(t)
+                pon16(tiradas_m)
+                para k desde 1 hasta t hacer
+                    p := prueba_trama(k - 1, largo)
+                    pon16(largo)
+                    copiar_memoria(dirección(sal[ns]), p, largo)
+                    ns := ns + largo
+                fin
+                i := i + 3 + l
+            sino si c = 3 o c = 4 entonces
+                d := lee16(dirección(ent[i + 1]))
+                q := lee16(dirección(ent[i + 3]))
+                a := lee16(dirección(ent[i + 5]))
+                k := lee16(dirección(ent[i + 7]))
+                l := lee16(dirección(ent[i + 9]))
+                si i + 11 + l > n entonces romper fin
+                t := prueba_arma(c - 2, d, q, a, k, dirección(ent[i + 11]), l, dirección(sal[ns + 2]))
+                pon16(t)
+                ns := ns + t
+                i := i + 11 + l
+            sino
+                romper
+            fin
+            r := r + 1
+        fin
+        m := crear("\\MOVIL.OUT")
+        si m >= 0xFFFFFFE0 entonces devolver 1 fin
+        escribir_archivo(m, dirección(sal[0]), ns)
+        cerrar(m)
+        escribir("UMOVILP: ", r, " casos\n")
+        devolver 0
+    fin
+
+fin Umovilp.

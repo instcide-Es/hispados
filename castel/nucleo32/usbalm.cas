@@ -53,6 +53,35 @@ módulo Usbalm
     variable scsi: arreglo [16] de byte         ; la orden SCSI que se va a mandar
     variable encontrada: nat32                  ; la última que ha apuntado mira()
 
+    ; (MÓVIL) con «usbasinc» en la línea del cargador (las pruebas): lo que
+    ; entra se recibe por la tubería a granel que no espera (granel_abre,
+    ; la del móvil por USB), y no con granel(): así se prueba con una memoria
+    ; de alta velocidad en el EHCI (el usb-net de QEMU es de velocidad plena)
+    público variable prueba_asinc: bool
+    variable tubo_de: arreglo [MAX_MEMORIAS] de nat32
+    variable tubo_ap: arreglo [MAX_MEMORIAS] de nat32
+
+    función recibe_de(m: nat32, d: nat32, n: nat32, cs: nat32): ent32
+        variable a, t, tope: nat32
+        variable r: ent32
+        a := memorias[m].aparato
+        si no prueba_asinc entonces devolver granel(a, memorias[m].entra, d, n, cs) fin
+        si tubo_ap[m] <> a + 1 entonces
+            tubo_de[m] := granel_abre(a, memorias[m].entra)
+            tubo_ap[m] := a + 1
+        fin
+        t := tubo_de[m]
+        si t = NINGUNO entonces devolver granel(a, memorias[m].entra, d, n, cs) fin
+        si no granel_pide(t, d, n) entonces devolver T_FALLO fin
+        tope := tics + cs + 1
+        mientras cierto hacer
+            r := granel_mira(t, n)
+            si r <> T_ESPERA entonces devolver r fin
+            si tics > tope entonces devolver T_FALLO fin
+        fin
+        devolver T_FALLO
+    fin
+
     ; reinicia la clase: la orden propia del transporte, y fuera las paradas
     función reinicia(m: nat32)
         reinicios := reinicios + 1
@@ -87,7 +116,7 @@ módulo Usbalm
         fin
         si n <> 0 entonces
             si entra entonces
-                r := granel(a, memorias[m].entra, datos, n, 1000)
+                r := recibe_de(m, datos, n, 1000)
                 si r = T_PARADA entonces quita_parada(a, memorias[m].entra) fin
             sino
                 r := granel(a, memorias[m].sale, datos, n, 1000)
@@ -99,10 +128,10 @@ módulo Usbalm
             fin
         fin
         ; el estado (si el extremo se ha parado, se le quita y se pide otra vez)
-        r := granel(a, memorias[m].entra, sobres + 0x40, 13, 1000)
+        r := recibe_de(m, sobres + 0x40, 13, 1000)
         si r = T_PARADA entonces
             quita_parada(a, memorias[m].entra)
-            r := granel(a, memorias[m].entra, sobres + 0x40, 13, 1000)
+            r := recibe_de(m, sobres + 0x40, 13, 1000)
         fin
         c := puntero(sobres + 0x40)
         b := puntero(sobres + 0x40)

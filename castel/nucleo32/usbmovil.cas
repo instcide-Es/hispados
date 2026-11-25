@@ -1,0 +1,294 @@
+; =============================================================================
+;  usbmovil.cas - (MÓVIL) el móvil por USB del núcleo de Hispa-Pentium: el
+;  «Anclaje de USB» de Android (compartir la conexión del móvil por el
+;  cable USB). Al activarlo, el móvil se va del USB y vuelve con otra cara:
+;  casi siempre RNDIS (la interfaz de control E0/01/03, EF/04/01 o 02/02/FF,
+;  y la de datos CDC, 0A) y, en algunos, CDC-NCM (02/0D/00 y la de datos, en
+;  su variante 1). Este módulo solo lo reconoce y lo aparta para el servicio
+;  de red: lo de RNDIS y NCM (los mensajes, los paquetes) lo hace RED.BIN
+;  (rmovil.cas) por la llamada 101 (red.cas), que aquí son cuatro cosas:
+;  cómo está, una petición de control, enviar a granel y recibir a granel
+;  (sin esperar: lo que llega se va guardando mientras tanto; usb.cas,
+;  granel_abre). No toca nada más del USB: solo un aparato de esas clases
+;  (los adaptadores de red por USB, como el RTL8153, no: siguen sin usarse).
+;  Lo atiende usbcal.cas, como lo demás que se enchufa en marcha; y, si el
+;  servicio de red no está en marcha, lo pone (lanzador, de semilla.cas).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbmovil
+
+    importar Usb, Usbbase, Marcos, Tareas, Registro, Mem32
+
+    público constante M_RNDIS = 1
+    público constante M_NCM = 2
+    público constante BÚFER = 16384             ; lo que se recibe de una vez (y lo más que se envía)
+    constante BÚFER_UHCI = 4096                 ; (en la UHCI, que espera: lo que cabe en una tanda)
+
+    ; ---- lo que da la llamada 101 si no sale ----
+    público constante MV_NO_HAY = 0xFFFFFFF7    ; no hay móvil (o ya no es el de esa generación)
+    público constante MV_FALLO = 0xFFFFFFF6     ; la transferencia ha fallado
+    público constante MV_PARADA = 0xFFFFFFF5    ; el móvil ha dicho que no (STALL)
+
+    público variable aparato: nat32 = 0xFFFFFFFF  ; el móvil (usb.cas); NINGUNO: no hay
+    público variable generación: nat32          ; sube con cada móvil que llega (0: aún ninguno)
+    público variable clase: nat32               ; M_RNDIS o M_NCM
+    público variable lanzador: nat32            ; (semilla.cas) la rutina que pone en marcha RED.BIN (0: no)
+    variable if_control, if_datos, alt_datos, triple: nat32
+    variable e_entra, e_sale, e_aviso: nat32    ; sus extremos (índices en el aparato)
+    variable tubo: nat32 = 0xFFFFFFFF           ; la tubería a granel de entrada (NINGUNO: aún no, o UHCI)
+    variable sin_asinc: bool                    ; (la UHCI) se recibe con granel(), esperando poco
+    variable pedido: bool                       ; hay una petición de recibir en marcha
+    variable entra_f, sale_f: nat32             ; los búferes (físicos, 16 K alineados a 16 K)
+    público variable recibidos, enviados, fallos: nat32
+    variable cerrojo: Cerrojo
+
+    ; ¿es la interfaz de control de RNDIS o de NCM? (M_..., o 0)
+    función de_clase(c: nat32, s: nat32, p: nat32): nat32
+        si c = 0xE0 y s = 0x01 y p = 0x03 entonces devolver M_RNDIS fin       ; Android (y Windows: «wireless controller»)
+        si c = 0xEF y s = 0x04 y p = 0x01 entonces devolver M_RNDIS fin       ; «misc», RNDIS sobre Ethernet
+        si c = 0x02 y s = 0x02 y p = 0xFF entonces devolver M_RNDIS fin       ; CDC ACM «del fabricante» (Linux, QEMU)
+        si c = 0x02 y s = 0x0D y p = 0x00 entonces devolver M_NCM fin         ; CDC-NCM
+        devolver 0
+    fin
+
+    función nombre_clase(): puntero a byte
+        si clase = M_NCM entonces devolver "CDC-NCM" fin
+        devolver "RNDIS"
+    fin
+
+    ; los búferes (una vez): 16 K alineados a 16 K (no cruzan una frontera
+    ; de 64 K, como pide la xHCI; la EHCI los lleva en un solo qTD)
+    función búferes(): bool
+        si entra_f = 0 entonces
+            entra_f := reservar_seguidos(8)
+            si entra_f <> 0 entonces entra_f := (entra_f + 0x3FFF) yb 0xFFFFC000 fin
+        fin
+        si sale_f = 0 entonces
+            sale_f := reservar_seguidos(8)
+            si sale_f <> 0 entonces sale_f := (sale_f + 0x3FFF) yb 0xFFFFC000 fin
+        fin
+        devolver entra_f <> 0 y sale_f <> 0
+    fin
+
+    ; el aparato a acaba de enumerarse (al arrancar o en caliente): si es un
+    ; móvil con el anclaje de USB (RNDIS o NCM), queda para el servicio de
+    ; red. Da cierto si lo es.
+    público función nuevo(a: nat32): bool
+        variable k, j, m, ic, id, en, sa, av: nat32
+        si a >= MAX_APARATOS entonces devolver falso fin
+        si no aparatos[a].usado entonces devolver falso fin
+        m := 0
+        ic := NINGUNO
+        para k desde 1 hasta aparatos[a].n_interfaces hacer
+            si m = 0 entonces
+                m := de_clase(aparatos[a].interfaces[k - 1].clase, aparatos[a].interfaces[k - 1].subclase, aparatos[a].interfaces[k - 1].protocolo)
+                si m <> 0 entonces ic := k - 1 fin
+            fin
+        fin
+        si m = 0 entonces devolver falso fin
+        ; la de datos: la primera de la clase 0Ah detrás de la de control
+        id := NINGUNO
+        para k desde ic + 2 hasta aparatos[a].n_interfaces hacer
+            si id = NINGUNO y aparatos[a].interfaces[k - 1].clase = 0x0A entonces id := k - 1 fin
+        fin
+        en := NINGUNO
+        sa := NINGUNO
+        av := NINGUNO
+        si id <> NINGUNO entonces
+            para j desde 1 hasta aparatos[a].n_extremos hacer
+                si aparatos[a].extremos[j - 1].interfaz = id y aparatos[a].extremos[j - 1].clase = 2 entonces
+                    si aparatos[a].extremos[j - 1].número yb 0x80 <> 0 entonces
+                        si en = NINGUNO entonces en := j - 1 fin
+                    sino
+                        si sa = NINGUNO entonces sa := j - 1 fin
+                    fin
+                fin
+                si aparatos[a].extremos[j - 1].interfaz = ic y aparatos[a].extremos[j - 1].clase = 3 y av = NINGUNO entonces av := j - 1 fin
+            fin
+        fin
+        si en = NINGUNO o sa = NINGUNO entonces
+            apunta2("usb: móvil por USB (%s) en el aparato %u, pero sin sus dos extremos a granel: no se usa\n", nat32(nombre_de(m)), a)
+            devolver falso
+        fin
+        si aparato <> NINGUNO y aparato <> a entonces
+            apunta1("usb: ya hay un móvil por USB: el del aparato %u no se usa\n", a)
+            devolver falso
+        fin
+        si no búferes() entonces
+            apunta0("usb: móvil por USB, pero no hay memoria para sus búferes\n")
+            devolver falso
+        fin
+        tomar(cerrojo)
+        aparato := a
+        clase := m
+        if_control := aparatos[a].interfaces[ic].número
+        if_datos := aparatos[a].interfaces[id].número
+        alt_datos := aparatos[a].interfaces[id].alterna
+        triple := (aparatos[a].interfaces[ic].clase << 16) ob (aparatos[a].interfaces[ic].subclase << 8) ob aparatos[a].interfaces[ic].protocolo
+        e_entra := en
+        e_sale := sa
+        e_aviso := av
+        tubo := NINGUNO
+        sin_asinc := falso
+        pedido := falso
+        generación := generación + 1
+        soltar(cerrojo)
+        apunta3("usb: el móvil por USB (Android, %s): aparato %u, %04X:", nat32(nombre_clase()), a, aparatos[a].fabricante)
+        apunta3("%04X; interfaces %u y %u", aparatos[a].producto, if_control, if_datos)
+        apunta3(" (clase %06X), extremos %02X y %02X\n", triple, aparatos[a].extremos[en].número, aparatos[a].extremos[sa].número)
+        ; el servicio de red: si no está en marcha, que se ponga (él lo ve solo)
+        si lanzador <> 0 entonces crear_tarea("red-movil", lanzador, 0) fin
+        devolver cierto
+    fin
+
+    función nombre_de(m: nat32): puntero a byte
+        si m = M_NCM entonces devolver "CDC-NCM" fin
+        devolver "RNDIS"
+    fin
+
+    ; el aparato a se ha desenchufado (o ha cambiado de cara: el móvil se
+    ; vuelve a enumerar al activar o quitar el anclaje). Cierto si era el
+    ; móvil. (Su tubería la cierra usb.cas al quitarlo.)
+    público función se_va(a: nat32): bool
+        si a <> aparato o a = NINGUNO entonces devolver falso fin
+        aparato := NINGUNO
+        tomar(cerrojo)
+        tubo := NINGUNO
+        pedido := falso
+        soltar(cerrojo)
+        apunta1("usb: el móvil por USB (aparato %u) ya no está\n", a)
+        devolver cierto
+    fin
+
+    ; los que se enumeraron al arrancar
+    público función prepara(): nat32
+        variable a, n: nat32
+        n := 0
+        para a desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[a].usado y nuevo(a) entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  La llamada 101 (solo el servicio de red: red.cas lo mira, y también
+    ;  que los punteros sean suyos). «op» en los 8 bits bajos de EBX y la
+    ;  generación del móvil en los de arriba (si ya no es esa, MV_NO_HAY).
+    ; -------------------------------------------------------------------------
+    ; 0: cómo está, a «p» (16 palabras): la generación, si está, la clase
+    ; (M_RNDIS, M_NCM), fabricante y modelo, la velocidad, la controladora,
+    ; el paquete de los dos extremos a granel, las dos interfaces, la
+    ; variante de los datos, si recibe sin esperar, lo recibido, lo enviado,
+    ; los fallos y la clase de la de control. Da la generación (0: no hay).
+    público función estado(p: puntero a nat32): nat32
+        variable a: nat32
+        llenar32(p, 16, 0)
+        a := aparato
+        p[0] := generación
+        si a = NINGUNO entonces devolver 0 fin
+        p[1] := 1
+        p[2] := clase
+        p[3] := aparatos[a].fabricante ob (aparatos[a].producto << 16)
+        p[4] := aparatos[a].velocidad
+        p[5] := aparatos[a].hc_clase
+        p[6] := aparatos[a].extremos[e_sale].paquete
+        p[7] := aparatos[a].extremos[e_entra].paquete
+        p[8] := if_control
+        p[9] := if_datos
+        p[10] := alt_datos
+        si tubo <> NINGUNO entonces p[11] := 1 fin
+        si sin_asinc entonces p[11] := 2 fin
+        p[12] := recibidos
+        p[13] := enviados
+        p[14] := fallos
+        p[15] := triple
+        devolver generación
+    fin
+
+    función de_usb(r: ent32): nat32
+        si r = T_PARADA entonces devolver MV_PARADA fin
+        si r < 0 entonces devolver MV_FALLO fin
+        devolver nat32(r)
+    fin
+
+    ; 1: una petición de control al móvil: en «p», pide, petición, valor,
+    ; índice y n (hasta 1024); detrás (p + 20), los datos, que van o vienen
+    público función control_(gen: nat32, p: puntero a nat32): nat32
+        variable a, n: nat32
+        a := aparato
+        si a = NINGUNO o gen <> generación entonces devolver MV_NO_HAY fin
+        n := p[4]
+        si n > 1024 entonces devolver MV_FALLO fin
+        devolver de_usb(control(a, p[0], p[1], p[2], p[3], puntero(nat32(p) + 20), n))
+    fin
+
+    ; 2: envía los n octetos de «d» (hasta 16 K) por su extremo a granel de salida
+    público función enviar(gen: nat32, d: puntero a byte, n: nat32): nat32
+        variable a: nat32
+        variable r: ent32
+        a := aparato
+        si a = NINGUNO o gen <> generación entonces devolver MV_NO_HAY fin
+        si n = 0 o n > BÚFER entonces devolver MV_FALLO fin
+        tomar(cerrojo)
+        copiar_memoria(puntero(sale_f), d, n)
+        r := granel(a, e_sale, sale_f, n, 100)
+        si r = T_PARADA entonces quita_parada(a, e_sale) fin
+        si r >= 0 entonces enviados := enviados + 1 sino fallos := fallos + 1 fin
+        soltar(cerrojo)
+        devolver de_usb(r)
+    fin
+
+    ; 3: lo que haya llegado por el extremo a granel de entrada (lo de una
+    ; transferencia: uno o varios paquetes de RNDIS, o un NTB de NCM), a «d»
+    ; (caben n): los octetos que han llegado (si no caben, los primeros), 0
+    ; si aún nada. Se pide lo siguiente en el acto.
+    público función recibir(gen: nat32, d: puntero a byte, n: nat32): nat32
+        variable a: nat32
+        variable r: ent32
+        a := aparato
+        si a = NINGUNO o gen <> generación entonces devolver MV_NO_HAY fin
+        tomar(cerrojo)
+        si tubo = NINGUNO y no sin_asinc entonces
+            tubo := granel_abre(a, e_entra)
+            si tubo = NINGUNO entonces
+                sin_asinc := cierto
+                apunta0("usb: el móvil por USB: sin la cola a granel (¿no quedan tuberías?): se recibe esperando\n")
+            fin
+        fin
+        si sin_asinc entonces
+            ; (la UHCI) esperando poco: lo que no llega a tiempo se tira
+            r := granel(a, e_entra, entra_f, BÚFER_UHCI, 2)
+            si r = T_PARADA entonces quita_parada(a, e_entra) fin
+            si r < 0 entonces r := 0 fin
+        sino
+            si no pedido entonces
+                pedido := granel_pide(tubo, entra_f, BÚFER)
+                si no pedido entonces
+                    soltar(cerrojo)
+                    devolver MV_FALLO
+                fin
+            fin
+            r := granel_mira(tubo, BÚFER)
+            si r = T_ESPERA entonces
+                soltar(cerrojo)
+                devolver 0
+            fin
+            pedido := falso
+            si r < 0 entonces
+                fallos := fallos + 1
+                soltar(cerrojo)
+                devolver MV_FALLO
+            fin
+        fin
+        si r > 0 entonces
+            recibidos := recibidos + 1
+            si nat32(r) > n entonces r := ent32(n) fin
+            copiar_memoria(d, puntero(entra_f), nat32(r))
+        fin
+        ; lo siguiente, ya pedido (llega mientras RED.BIN mira esto)
+        si no sin_asinc entonces pedido := granel_pide(tubo, entra_f, BÚFER) fin
+        soltar(cerrojo)
+        devolver nat32(r)
+    fin
+
+fin Usbmovil.

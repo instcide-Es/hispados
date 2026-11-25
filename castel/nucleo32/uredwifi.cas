@@ -93,6 +93,7 @@ módulo UredWifi
     variable aviso: arreglo [160] de byte
     variable preferir: nat32 = 0xFF
     variable por_wifi: bool                     ; RED.BIN va por el Wi-Fi (si no, por el cable)
+    variable por_movil: bool                    ; (MÓVIL) RED.BIN va por el móvil por USB
     variable ip: nat32
     variable buf: arreglo [8192] de byte
     variable resp_largo: nat32
@@ -182,6 +183,7 @@ módulo UredWifi
         si r < 3 entonces
             preferir := r
             por_wifi := cab[1] = 1
+            por_movil := cab[1] = 2                 ; (MÓVIL)
         fin
         devolver r
     fin
@@ -280,6 +282,8 @@ módulo UredWifi
             dd[2] := nat32(dirección(ipt[0]))
             si por_wifi o ip = 0 entonces
                 formatear(destino, 160, "Señal %d dBm, canal %u; IP %s", dd)
+            sino si por_movil entonces
+                formatear(destino, 160, "Señal %d dBm, canal %u; la red va por el móvil por USB (IP %s)", dd)
             sino
                 formatear(destino, 160, "Señal %d dBm, canal %u; la red va por el cable (IP %s)", dd)
             fin

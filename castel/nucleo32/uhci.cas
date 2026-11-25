@@ -59,6 +59,9 @@ módulo Uhci
         primera: nat32                          ; el enlace a la primera cola de la cadena
         tubos: nat32                            ; las que están en uso: un bit cada una
         alternas: arreglo [MAX_TUBOS] de nat32  ; el testigo de cada tubería
+        gmem: nat32                             ; (MÓVIL) la página de los TD a granel que no esperan
+        gtubo: nat32                            ; (MÓVIL) su tubería (NINGUNA: no hay)
+        gn, gpaquete, gtoken, gbaja: nat32      ; (MÓVIL) cuántos TD hay pedidos, el paquete, a quién y si es de baja velocidad
     fin
 
     público variable uhcis: arreglo [MAX_UHCI] de Controladora
@@ -402,6 +405,86 @@ módulo Uhci
         fin
         uhcis[c].tubos := uhcis[c].tubos yb nob (nat32(1) << t)
         espera_ms(2)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (MÓVIL) A granel sin esperar: una tubería de la cadena (como las de
+    ;  interrupción) cuya cola lleva una fila de TD a granel (de un tirón:
+    ;  primero en profundidad), en una página propia; una por controladora
+    ; -------------------------------------------------------------------------
+    constante MAX_GTD = 64
+
+    público función asinc_abre(c: nat32, ref a: Aparato, ref e: Extremo): nat32
+        variable t: nat32
+        si uhcis[c].gmem = 0 entonces uhcis[c].gmem := reservar_marco() fin
+        si uhcis[c].gmem = 0 entonces devolver NINGUNA fin
+        si uhcis[c].gtubo <> 0 y uhcis[c].gtubo <> NINGUNA entonces devolver NINGUNA fin
+        si e.paquete = 0 entonces devolver NINGUNA fin
+        t := tubo_abre(c, a, e)
+        si t = NINGUNA entonces devolver NINGUNA fin
+        uhcis[c].gtubo := t + 1
+        uhcis[c].gn := 0
+        uhcis[c].gpaquete := e.paquete
+        uhcis[c].gtoken := PID_ENTRA ob (a.dir << 8) ob ((e.número yb 0x0F) << 15)
+        uhcis[c].gbaja := 0
+        si a.velocidad = V_BAJA entonces uhcis[c].gbaja := 0x04000000 fin
+        devolver t
+    fin
+
+    ; pide hasta n octetos (como mucho MAX_GTD paquetes) a «datos» (física)
+    público función asinc_pide(c: nat32, t: nat32, datos: nat32, n: nat32)
+        variable q, d: puntero a nat32
+        variable i, k, p, tg: nat32
+        p := uhcis[c].gpaquete
+        k := (n + p - 1) div p
+        si k > MAX_GTD entonces k := MAX_GTD fin
+        si k = 0 entonces k := 1 fin
+        tg := uhcis[c].alternas[t]
+        para i desde 0 hasta k - 1 hacer
+            d := puntero(uhcis[c].gmem + i * 0x20)
+            si i = k - 1 entonces d[0] := 1 sino d[0] := (uhcis[c].gmem + (i + 1) * 0x20) ob 4 fin
+            d[2] := uhcis[c].gtoken ob (((tg + i) yb 1) << 19) ob (((p - 1) yb 0x7FF) << 21)
+            d[3] := datos + i * p
+            d[1] := ACTIVO ob 0x18000000 ob 0x20000000 ob uhcis[c].gbaja     ; tres intentos; si llega menos, se para
+        fin
+        uhcis[c].gn := k
+        q := puntero(uhcis[c].mem + D_COLAS + t * 0x10)
+        q[1] := uhcis[c].gmem
+    fin
+
+    ; ¿ha llegado? Los octetos, T_ESPERA o T_FALLO
+    público función asinc_mira(c: nat32, t: nat32, n: nat32): ent32
+        variable q, d: puntero a nat32
+        variable i, e, l, total: nat32
+        q := puntero(uhcis[c].mem + D_COLAS + t * 0x10)
+        total := 0
+        para i desde 0 hasta uhcis[c].gn - 1 hacer
+            d := puntero(uhcis[c].gmem + i * 0x20)
+            e := d[1]
+            si e yb ACTIVO <> 0 entonces devolver T_ESPERA fin
+            si e yb FALLOS <> 0 entonces
+                q[1] := 1
+                uhcis[c].alternas[t] := (uhcis[c].alternas[t] + i) yb 1
+                devolver T_FALLO
+            fin
+            l := (e + 1) yb 0x7FF
+            total := total + l
+            si l < uhcis[c].gpaquete entonces
+                ; corto: ahí acaba
+                q[1] := 1
+                uhcis[c].alternas[t] := (uhcis[c].alternas[t] + i + 1) yb 1
+                devolver ent32(total)
+            fin
+        fin
+        q[1] := 1
+        uhcis[c].alternas[t] := (uhcis[c].alternas[t] + uhcis[c].gn) yb 1
+        devolver ent32(total)
+    fin
+
+    público función asinc_cierra(c: nat32, t: nat32)
+        tubo_cierra(c, t)
+        uhcis[c].gtubo := 0
+        uhcis[c].gn := 0
     fin
 
     público función tubo_datos(c: nat32, t: nat32): puntero a byte

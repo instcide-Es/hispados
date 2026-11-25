@@ -29,7 +29,7 @@
 ; =============================================================================
 módulo Usbcal
 
-    importar Tareas, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Discos, Fat, Unidades, Ventanas, Registro, Textos32, Formato, Cdcal
+    importar Tareas, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Usbmovil, Discos, Fat, Unidades, Ventanas, Registro, Textos32, Formato, Cdcal
 
     ; ---- lo que da quitar() ----
     público constante Q_BIEN = 0                ; ya se puede quitar
@@ -178,6 +178,8 @@ módulo Usbcal
                 fin
                 m := Usbalm.nueva(j)
                 si m <> NINGUNO entonces memoria_nueva(m) fin
+                ; (MÓVIL) el anclaje de USB de un móvil (RNDIS o NCM): para la red
+                si Usbmovil.nuevo(j) entonces avisa("Móvil conectado por USB: la red va por él") fin
             fin
         fin
     fin
@@ -193,6 +195,7 @@ módulo Usbcal
                 Usbhid.se_va(j)
                 m := Usbalm.se_va(j)
                 si m <> NINGUNO entonces memoria_ida(m) fin
+                si Usbmovil.se_va(j) entonces avisa("El móvil por USB se ha desconectado") fin     ; (MÓVIL)
             fin
         fin
         quita(a)

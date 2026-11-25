@@ -1,0 +1,585 @@
+; =============================================================================
+;  rmovil.cas - (MÓVIL) el móvil por USB para el servicio de red de
+;  Hispa-Pentium (RED.BIN): «una tarjeta más», T_MOVIL, que es el «Anclaje de
+;  USB» de Android (compartir la conexión del móvil por el cable USB). El
+;  núcleo (usbmovil.cas) lo reconoce y deja hablarle por la llamada 101:
+;  cómo está, peticiones de control, enviar y recibir a granel. Lo de cada
+;  clase va aquí:
+;   - RNDIS (casi todos los Android; la norma pública de Microsoft, «Remote
+;     NDIS Specification» 1.0): los mensajes de control por
+;     SEND_ENCAPSULATED_COMMAND y GET_ENCAPSULATED_RESPONSE (INITIALIZE, y
+;     QUERY y SET de los OID: la MAC en OID_802_3_PERMANENT_ADDRESS, el filtro
+;     en OID_GEN_CURRENT_PACKET_FILTER, el enlace en
+;     OID_GEN_MEDIA_CONNECT_STATUS) y cada trama con su cabecera
+;     REMOTE_NDIS_PACKET_MSG de 44 octetos (las que llegan, varias en una
+;     transferencia si el móvil las junta);
+;   - CDC-NCM (la norma «Network Control Model» 1.0 del USB-IF): los NTB de
+;     16 bits (la cabecera NTH16, su NDP16 con los datagramas), los
+;     parámetros de GET_NTB_PARAMETERS, la MAC de la cadena iMACAddress del
+;     descriptor funcional de Ethernet, y la interfaz de datos en su variante 1.
+;  Hecho mirando cómo lo hacen rndis_host.c y cdc_ncm.c de Linux (GPL-2.0),
+;  sin copiar su código: el orden de los pasos (INITIALIZE, la MAC, el
+;  filtro 0x2D), el octeto de más cuando lo que sale es un múltiplo del
+;  paquete, y la tabla de NTB16.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Rmovil
+
+    importar Rbase, Llamadas, Mem32, Textos32, Formato
+
+    constante M_RNDIS = 1
+    constante M_NCM = 2
+    constante BÚFER = 16384
+    constante MAX_TRAMAS = 64
+    constante MV_NO_HAY = 0xFFFFFFF7
+
+    ; ---- RNDIS ----
+    constante R_PAQUETE = 0x00000001
+    constante R_INICIA = 0x00000002
+    constante R_PREGUNTA = 0x00000004
+    constante R_PON = 0x00000005
+    constante R_ESTADO = 0x00000007             ; REMOTE_NDIS_INDICATE_STATUS_MSG (lo dice el móvil)
+    constante R_SIGUE = 0x00000008              ; KEEPALIVE
+    constante R_HECHO = 0x80000000              ; la respuesta: el mismo, con este bit
+    constante OID_MAC = 0x01010101              ; OID_802_3_PERMANENT_ADDRESS
+    constante OID_MAC_AHORA = 0x01010102        ; OID_802_3_CURRENT_ADDRESS
+    constante OID_TRAMA = 0x00010106            ; OID_GEN_MAXIMUM_FRAME_SIZE
+    constante OID_FILTRO = 0x0001010E           ; OID_GEN_CURRENT_PACKET_FILTER
+    constante OID_ENLACE = 0x00010114           ; OID_GEN_MEDIA_CONNECT_STATUS
+    constante FILTRO = 0x2D                     ; a mí, difusión, toda la multidifusión y promiscuo (como Linux)
+
+    público variable listo: bool                ; el móvil está, y puesto en marcha
+    público variable enlace_movil: bool
+    público variable cambió: bool               ; ha llegado, se ha ido o ha cambiado: que se mire ya
+    público variable mac_movil: arreglo [8] de byte
+    público variable nombre_movil: arreglo [48] de byte
+    público variable id_movil: nat32            ; fabricante (abajo) y modelo (arriba) del USB
+    público variable vel_movil: nat32           ; Mbit/s del USB
+    público variable recibidas_m, enviadas_m, tiradas_m: nat32
+    variable gen: nat32                         ; la generación del móvil con que se trabaja (0: ninguno)
+    variable intentos, próximo: nat32
+    variable clase, if_control, if_datos, paquete_sale: nat32
+    variable info: arreglo [16] de nat32
+    variable ent: arreglo [BÚFER] de byte       ; lo que ha llegado (una transferencia)
+    variable tramas_ini, tramas_largo: arreglo [MAX_TRAMAS] de nat32
+    variable n_tramas, i_trama: nat32
+    variable sal: arreglo [2048] de byte
+    variable ctl: arreglo [262] de nat32        ; la petición de control (5 palabras) y sus datos (1024)
+    variable pedido_id: nat32
+    variable dev_max: nat32                     ; (RNDIS) lo más que recibe el móvil de una vez
+    ; (NCM) los parámetros de los NTB
+    variable ncm_div, ncm_resto, ncm_alin, ncm_sal_max, ncm_sec: nat32
+
+    función ll(op: nat32, p: nat32, n: nat32): nat32
+        variable a: nat32
+        a := op ob (gen << 8)
+        ensamblador
+            mov eax, 101
+            mov ebx, {a}
+            mov ecx, {p}
+            mov edx, {n}
+            int 0x80
+        fin
+    fin
+
+    ; ---- el orden del USB (el octeto bajo primero) ----
+    función le16(p: puntero a byte): nat32
+        devolver nat32(p[0]) ob (nat32(p[1]) << 8)
+    fin
+    función le32(p: puntero a byte): nat32
+        devolver nat32(p[0]) ob (nat32(p[1]) << 8) ob (nat32(p[2]) << 16) ob (nat32(p[3]) << 24)
+    fin
+    función pon_le16(p: puntero a byte, v: nat32)
+        p[0] := byte(v)
+        p[1] := byte(v >> 8)
+    fin
+    función pon_le32(p: puntero a byte, v: nat32)
+        p[0] := byte(v)
+        p[1] := byte(v >> 8)
+        p[2] := byte(v >> 16)
+        p[3] := byte(v >> 24)
+    fin
+
+    ; una petición de control al móvil (los datos, en ctl[5...]). Da los
+    ; octetos que han ido (o un error: >= 0xFFFFFFE0)
+    función control(pide: nat32, petición: nat32, valor_: nat32, índice: nat32, n: nat32): nat32
+        ctl[0] := pide
+        ctl[1] := petición
+        ctl[2] := valor_
+        ctl[3] := índice
+        ctl[4] := n
+        devolver ll(1, nat32(dirección(ctl[0])), n)
+    fin
+
+    función datos_ctl(): puntero a byte
+        devolver puntero(nat32(dirección(ctl[5])))
+    fin
+
+    función es_error(r: nat32): bool
+        devolver r >= 0xFFFFFFE0
+    fin
+
+    ; =========================================================================
+    ;  RNDIS
+    ; =========================================================================
+    ; manda el mensaje que hay en los datos de ctl (n octetos) y espera su
+    ; respuesta (del tipo «espera»): queda en los datos de ctl. Da su largo, o 0.
+    función rndis_orden(n: nat32, espera: nat32): nat32
+        variable r, vez, t: nat32
+        variable d: puntero a byte
+        d := datos_ctl()
+        r := control(0x21, 0x00, 0, if_control, n)              ; SEND_ENCAPSULATED_COMMAND
+        si es_error(r) entonces
+            apunta4("móvil por USB: RNDIS: no se puede mandar el mensaje %08X (%08X)", le32(d), r, 0, 0)
+            devolver 0
+        fin
+        para vez desde 1 hasta 40 hacer
+            r := control(0xA1, 0x01, 0, if_control, 1024)       ; GET_ENCAPSULATED_RESPONSE
+            si no es_error(r) y r >= 16 entonces
+                t := le32(d)
+                si t = espera y le32(d + 8) = pedido_id entonces devolver r fin
+                si t = R_ESTADO entonces apunta4("móvil por USB: RNDIS: el móvil dice el estado %08X", le32(d + 8), 0, 0, 0) fin
+            sino si r = MV_NO_HAY entonces
+                devolver 0
+            fin
+            ; (aún no está: el móvil dice que no, STALL, o da un octeto)
+            dormir(1)
+        fin
+        apunta4("móvil por USB: RNDIS: sin respuesta al mensaje %08X", espera yb 0x7FFFFFFF, 0, 0, 0)
+        devolver 0
+    fin
+
+    ; pregunta un OID: lo que contesta (hasta «cabe» octetos), a destino. Da
+    ; cuántos octetos (0: no lo sabe o no ha contestado)
+    función rndis_pregunta(oid: nat32, destino: puntero a byte, cabe: nat32): nat32
+        variable d: puntero a byte
+        variable r, n, of: nat32
+        d := datos_ctl()
+        ; (con un búfer de entrada a cero, del largo de lo que se espera, como
+        ; Linux: hay quien, como QEMU, no quiere uno vacío)
+        si cabe < 4 entonces cabe := 4 fin
+        si cabe > 64 entonces cabe := 64 fin
+        llenar(d, 28 + cabe, 0)
+        pedido_id := pedido_id + 1
+        pon_le32(d, R_PREGUNTA)
+        pon_le32(d + 4, 28 + cabe)
+        pon_le32(d + 8, pedido_id)
+        pon_le32(d + 12, oid)
+        pon_le32(d + 16, cabe)
+        pon_le32(d + 20, 20)                    ; (desde el número del pedido)
+        r := rndis_orden(28 + cabe, R_PREGUNTA ob R_HECHO)
+        si r < 24 entonces devolver 0 fin
+        si le32(d + 12) <> 0 entonces devolver 0 fin               ; el estado: no lo sabe
+        n := le32(d + 16)
+        of := le32(d + 20) + 8
+        si of + n > r o n > 1024 entonces devolver 0 fin
+        si n > cabe entonces n := cabe fin
+        copiar_memoria(destino, d + of, n)
+        devolver n
+    fin
+
+    ; pone un OID a un valor de 4 octetos. Da el estado (0: bien)
+    función rndis_pon(oid: nat32, v: nat32): nat32
+        variable d: puntero a byte
+        variable r: nat32
+        d := datos_ctl()
+        llenar(d, 32, 0)
+        pedido_id := pedido_id + 1
+        pon_le32(d, R_PON)
+        pon_le32(d + 4, 32)
+        pon_le32(d + 8, pedido_id)
+        pon_le32(d + 12, oid)
+        pon_le32(d + 16, 4)
+        pon_le32(d + 20, 20)
+        pon_le32(d + 28, v)
+        r := rndis_orden(32, R_PON ob R_HECHO)
+        si r < 16 entonces devolver 0xFFFFFFFF fin
+        devolver le32(d + 12)
+    fin
+
+    función rndis_iniciar(): bool
+        variable d: puntero a byte
+        variable r, n: nat32
+        variable v: arreglo [8] de byte
+        d := datos_ctl()
+        llenar(d, 24, 0)
+        pedido_id := pedido_id + 1
+        pon_le32(d, R_INICIA)
+        pon_le32(d + 4, 24)
+        pon_le32(d + 8, pedido_id)
+        pon_le32(d + 12, 1)                     ; la versión 1.0
+        pon_le32(d + 16, 0)
+        pon_le32(d + 20, BÚFER)                 ; lo más que se recibe de una vez
+        r := rndis_orden(24, R_INICIA ob R_HECHO)
+        si r < 52 entonces
+            apunta("móvil por USB: RNDIS: el móvil no contesta a REMOTE_NDIS_INITIALIZE")
+            devolver falso
+        fin
+        si le32(d + 12) <> 0 entonces
+            apunta4("móvil por USB: RNDIS: INITIALIZE, con el estado %08X", le32(d + 12), 0, 0, 0)
+            devolver falso
+        fin
+        dev_max := le32(d + 36)
+        apunta4("móvil por USB: RNDIS %u.%u, medio %u, hasta %u octetos", le32(d + 16), le32(d + 20), le32(d + 28), dev_max)
+        apunta4("móvil por USB: RNDIS: %u paquetes por transferencia, alineados a 2^%u", le32(d + 32), le32(d + 40), 0, 0)
+        si dev_max < 1600 entonces dev_max := 1600 fin
+        llenar(dirección(v[0]), 8, 0)
+        n := rndis_pregunta(OID_MAC, dirección(v[0]), 6)
+        si n < 6 entonces n := rndis_pregunta(OID_MAC_AHORA, dirección(v[0]), 6) fin
+        si n > 6 entonces n := 6 fin
+        si n < 6 entonces
+            apunta("móvil por USB: RNDIS: el móvil no da la MAC (OID_802_3_PERMANENT_ADDRESS)")
+            devolver falso
+        fin
+        copiar_memoria(dirección(mac_movil[0]), dirección(v[0]), 6)
+        si rndis_pregunta(OID_TRAMA, dirección(v[0]), 4) = 4 entonces apunta4("móvil por USB: RNDIS: tramas de hasta %u octetos", le32(dirección(v[0])), 0, 0, 0) fin
+        r := rndis_pon(OID_FILTRO, FILTRO)
+        si r <> 0 entonces
+            apunta4("móvil por USB: RNDIS: no se puede poner el filtro de paquetes (%08X)", r, 0, 0, 0)
+            devolver falso
+        fin
+        si rndis_pregunta(OID_ENLACE, dirección(v[0]), 4) = 4 y le32(dirección(v[0])) <> 0 entonces
+            apunta("móvil por USB: RNDIS: el móvil dice que no tiene conexión (OID_GEN_MEDIA_CONNECT_STATUS)")
+        fin
+        devolver cierto
+    fin
+
+    ; las tramas que trae una transferencia: cada una con su
+    ; REMOTE_NDIS_PACKET_MSG (lo que no lo es, o está roto, se tira)
+    función rndis_parte(n: nat32)
+        variable p, t, l, of, dl: nat32
+        p := 0
+        mientras p + 44 <= n y n_tramas < MAX_TRAMAS hacer
+            t := le32(dirección(ent[p]))
+            l := le32(dirección(ent[p + 4]))
+            si t <> R_PAQUETE o l < 44 o p + l > n entonces
+                si t <> R_PAQUETE o l <> 0 entonces tiradas_m := tiradas_m + 1 fin
+                devolver
+            fin
+            of := le32(dirección(ent[p + 8])) + 8
+            dl := le32(dirección(ent[p + 12]))
+            si of >= 44 y of + dl <= l y dl >= 14 y dl <= 1518 entonces
+                tramas_ini[n_tramas] := p + of
+                tramas_largo[n_tramas] := dl
+                n_tramas := n_tramas + 1
+            sino
+                tiradas_m := tiradas_m + 1
+            fin
+            p := p + l
+        fin
+    fin
+
+    función rndis_envía(t: puntero a byte, n: nat32): bool
+        variable k: nat32
+        llenar(dirección(sal[0]), 44, 0)
+        pon_le32(dirección(sal[0]), R_PAQUETE)
+        pon_le32(dirección(sal[4]), 44 + n)
+        pon_le32(dirección(sal[8]), 36)
+        pon_le32(dirección(sal[12]), n)
+        copiar_memoria(dirección(sal[44]), t, n)
+        k := 44 + n
+        ; (un múltiplo del paquete: un octeto de más, para que acabe en uno corto)
+        si paquete_sale <> 0 y k mod paquete_sale = 0 entonces
+            sal[k] := 0
+            k := k + 1
+        fin
+        devolver no es_error(ll(2, nat32(dirección(sal[0])), k))
+    fin
+
+    ; =========================================================================
+    ;  CDC-NCM
+    ; =========================================================================
+    función hexa(c: nat32): nat32
+        si c >= '0' y c <= '9' entonces devolver c - '0' fin
+        si c >= 'A' y c <= 'F' entonces devolver c - 'A' + 10 fin
+        si c >= 'a' y c <= 'f' entonces devolver c - 'a' + 10 fin
+        devolver 0xFF
+    fin
+
+    ; la MAC: la cadena iMACAddress del descriptor funcional de Ethernet
+    ; (CS_INTERFACE 24h, subtipo 0Fh), 12 cifras hexadecimales en UTF-16
+    función ncm_mac(): bool
+        variable d: puntero a byte
+        variable r, i, cadena, a, b: nat32
+        d := datos_ctl()
+        r := control(0x80, 6, 0x0200, 0, 1024)
+        si es_error(r) o r < 9 entonces devolver falso fin
+        cadena := 0
+        i := 0
+        mientras i + 3 < r y d[i] >= 2 hacer
+            si d[i + 1] = 0x24 y d[i + 2] = 0x0F y d[i] >= 13 y cadena = 0 entonces cadena := d[i + 3] fin
+            i := i + d[i]
+        fin
+        si cadena = 0 entonces devolver falso fin
+        r := control(0x80, 6, 0x0300 ob cadena, 0x0409, 255)
+        si es_error(r) o r < 26 entonces devolver falso fin
+        para i desde 0 hasta 5 hacer
+            a := hexa(d[2 + i * 4])
+            b := hexa(d[4 + i * 4])
+            si a = 0xFF o b = 0xFF entonces devolver falso fin
+            mac_movil[i] := byte((a << 4) ob b)
+        fin
+        devolver cierto
+    fin
+
+    función ncm_iniciar(): bool
+        variable d: puntero a byte
+        variable r, ent_max: nat32
+        d := datos_ctl()
+        ncm_div := 4
+        ncm_resto := 0
+        ncm_alin := 4
+        ncm_sal_max := BÚFER
+        r := control(0xA1, 0x80, 0, if_control, 28)             ; GET_NTB_PARAMETERS
+        si no es_error(r) y r >= 28 entonces
+            ent_max := le32(d + 4)
+            ncm_sal_max := le32(d + 16)
+            si le16(d + 20) >= 4 y le16(d + 20) <= 256 entonces ncm_div := le16(d + 20) fin
+            ncm_resto := le16(d + 22) mod ncm_div
+            si le16(d + 24) >= 4 y le16(d + 24) <= 256 entonces ncm_alin := le16(d + 24) fin
+            apunta4("móvil por USB: NCM: NTB de hasta %u octetos al llegar y %u al salir (formatos %04X)", ent_max, ncm_sal_max, le16(d + 2), 0)
+            apunta4("móvil por USB: NCM: al salir, divisor %u, resto %u, alineación %u", ncm_div, ncm_resto, ncm_alin, 0)
+            si ent_max > BÚFER entonces
+                pon_le32(d, BÚFER)
+                r := control(0x21, 0x86, 0, if_control, 4)      ; SET_NTB_INPUT_SIZE
+                si es_error(r) entonces apunta("móvil por USB: NCM: no deja poner el tamaño de los NTB (16 K)") fin
+            fin
+        sino
+            apunta("móvil por USB: NCM: sin GET_NTB_PARAMETERS (lo de siempre)")
+        fin
+        si ncm_sal_max < 1600 o ncm_sal_max > 2048 entonces ncm_sal_max := 2048 fin
+        si no ncm_mac() entonces
+            apunta("móvil por USB: NCM: no se sabe la MAC (iMACAddress)")
+            devolver falso
+        fin
+        ; los datos: la variante 0 y luego la 1 (la que tiene los extremos)
+        control(0x01, 11, 0, if_datos, 0)                         ; SET_INTERFACE
+        r := control(0x01, 11, 1, if_datos, 0)
+        si es_error(r) entonces
+            apunta4("móvil por USB: NCM: no deja poner la variante 1 de la interfaz de datos (%08X)", r, 0, 0, 0)
+            devolver falso
+        fin
+        ; el filtro (si no lo lleva, no pasa nada): a mí, difusión y multidifusión
+        control(0x21, 0x43, 0x0E, if_control, 0)                  ; SET_ETHERNET_PACKET_FILTER
+        ncm_sec := 0
+        devolver cierto
+    fin
+
+    ; las tramas de un NTB16 (la cabecera NTH16 y sus NDP16)
+    función ncm_parte(n: nat32)
+        variable blk, ndp, l, i, of, dl, vueltas, firma: nat32
+        si n < 12 o le32(dirección(ent[0])) <> 0x484D434E o le16(dirección(ent[4])) <> 12 entonces
+            tiradas_m := tiradas_m + 1
+            devolver
+        fin
+        blk := le16(dirección(ent[8]))
+        si blk = 0 o blk > n entonces blk := n fin
+        ndp := le16(dirección(ent[10]))
+        vueltas := 0
+        mientras ndp >= 12 y ndp + 16 <= blk y vueltas < 8 hacer
+            firma := le32(dirección(ent[ndp]))
+            si firma <> 0x304D434E y firma <> 0x314D434E entonces
+                tiradas_m := tiradas_m + 1
+                devolver
+            fin
+            l := le16(dirección(ent[ndp + 4]))
+            si l < 16 o ndp + l > blk entonces
+                tiradas_m := tiradas_m + 1
+                devolver
+            fin
+            i := ndp + 8
+            mientras i + 4 <= ndp + l y n_tramas < MAX_TRAMAS hacer
+                of := le16(dirección(ent[i]))
+                dl := le16(dirección(ent[i + 2]))
+                si of = 0 o dl = 0 entonces romper fin
+                si of + dl <= blk y dl >= 14 y dl <= 1518 entonces
+                    tramas_ini[n_tramas] := of
+                    tramas_largo[n_tramas] := dl
+                    n_tramas := n_tramas + 1
+                sino
+                    tiradas_m := tiradas_m + 1
+                fin
+                i := i + 4
+            fin
+            ndp := le16(dirección(ent[ndp + 6]))
+            vueltas := vueltas + 1
+        fin
+    fin
+
+    ; una trama en un NTB16: la cabecera, un NDP16 con un datagrama y el
+    ; datagrama donde pide el móvil (divisor y resto)
+    función ncm_envía(t: puntero a byte, n: nat32): bool
+        variable ndp, of, k: nat32
+        ndp := ((12 + ncm_alin - 1) div ncm_alin) * ncm_alin
+        of := ndp + 16
+        mientras of mod ncm_div <> ncm_resto hacer of := of + 1 fin
+        k := of + n
+        si k + 1 > ncm_sal_max o k + 1 > 2048 entonces devolver falso fin
+        llenar(dirección(sal[0]), of, 0)
+        pon_le32(dirección(sal[0]), 0x484D434E)               ; «NCMH»
+        pon_le16(dirección(sal[4]), 12)
+        pon_le16(dirección(sal[6]), ncm_sec)
+        pon_le16(dirección(sal[8]), k)
+        pon_le16(dirección(sal[10]), ndp)
+        pon_le32(dirección(sal[ndp]), 0x304D434E)             ; «NCM0»
+        pon_le16(dirección(sal[ndp + 4]), 16)
+        pon_le16(dirección(sal[ndp + 6]), 0)
+        pon_le16(dirección(sal[ndp + 8]), of)
+        pon_le16(dirección(sal[ndp + 10]), n)
+        copiar_memoria(dirección(sal[of]), t, n)
+        ncm_sec := (ncm_sec + 1) yb 0xFFFF
+        si paquete_sale <> 0 y k mod paquete_sale = 0 entonces
+            sal[k] := 0
+            k := k + 1
+        fin
+        devolver no es_error(ll(2, nat32(dirección(sal[0])), k))
+    fin
+
+    ; =========================================================================
+    ;  Lo común
+    ; =========================================================================
+    función nombre_clase(): puntero a byte
+        si clase = M_NCM entonces devolver "CDC-NCM" fin
+        devolver "RNDIS"
+    fin
+
+    función se_fue()
+        si gen <> 0 o listo entonces
+            si listo entonces apunta("móvil por USB: se ha ido (desenchufado, o se ha quitado el anclaje de USB)") fin
+            cambió := cierto
+        fin
+        gen := 0
+        listo := falso
+        enlace_movil := falso
+        n_tramas := 0
+        i_trama := 0
+    fin
+
+    ; el móvil de la generación g: ponerlo en marcha
+    función iniciar()
+        variable ok: bool
+        clase := info[2]
+        id_movil := info[3]
+        if_control := info[8]
+        if_datos := info[9]
+        paquete_sale := info[6]
+        según nat16(info[4])
+            caso 1: vel_movil := 1
+            caso 2: vel_movil := 12
+            caso 3: vel_movil := 480
+            caso 4: vel_movil := 5000
+            si no: vel_movil := 0
+        fin
+        copiar(nombre_movil, "el móvil por USB (Android, ")
+        concatenar(nombre_movil, nombre_clase())
+        concatenar(nombre_movil, ")")
+        intentos := intentos + 1
+        apunta4("móvil por USB: %04X:%04X, %s, %u Mbit/s", id_movil yb 0xFFFF, id_movil >> 16, nat32(nombre_clase()), vel_movil)
+        llenar(dirección(mac_movil[0]), 8, 0)
+        si clase = M_NCM entonces ok := ncm_iniciar() sino ok := rndis_iniciar() fin
+        n_tramas := 0
+        i_trama := 0
+        si ok entonces
+            listo := cierto
+            enlace_movil := cierto
+            cambió := cierto
+            apunta4("móvil por USB: en marcha; MAC %02X:%02X:%02X:%02X", mac_movil[0], mac_movil[1], mac_movil[2], mac_movil[3])
+            apunta4("móvil por USB: MAC ...:%02X:%02X", mac_movil[4], mac_movil[5], 0, 0)
+        sino
+            apunta4("móvil por USB: no se ha podido poner en marcha (intento %u de 4)", intentos, 0, 0, 0)
+            próximo := ahora() + 200
+        fin
+    fin
+
+    ; mira si hay móvil (cada cuarto de segundo, ured.cas): si ha llegado uno
+    ; nuevo (o el mismo con otra cara), se pone en marcha; si se ha ido, se dice
+    público función mirar()
+        variable g: nat32
+        g := ll(0, nat32(dirección(info[0])), 64)
+        si es_error(g) entonces devolver fin            ; (un núcleo sin la llamada 101: no hay)
+        si g = 0 o info[1] = 0 entonces
+            se_fue()
+            devolver
+        fin
+        si g <> gen entonces
+            si listo entonces se_fue() fin
+            gen := g
+            intentos := 0
+            iniciar()
+        sino si no listo y intentos < 4 y ent32(ahora() - próximo) >= 0 entonces
+            iniciar()
+        fin
+    fin
+
+    ; una trama para el móvil
+    público función enviar(t: puntero a byte, n: nat32): bool
+        variable ok: bool
+        si no listo o n > 1514 entonces devolver falso fin
+        si clase = M_NCM entonces ok := ncm_envía(t, n) sino ok := rndis_envía(t, n) fin
+        si ok entonces enviadas_m := enviadas_m + 1 fin
+        devolver ok
+    fin
+
+    ; la trama siguiente que haya llegado, a destino: su largo (0: ninguna)
+    público función recibir(destino: puntero a byte): nat32
+        variable r, l: nat32
+        si no listo entonces devolver 0 fin
+        si i_trama >= n_tramas entonces
+            n_tramas := 0
+            i_trama := 0
+            r := ll(3, nat32(dirección(ent[0])), BÚFER)
+            si r = MV_NO_HAY entonces
+                se_fue()
+                devolver 0
+            fin
+            si es_error(r) o r = 0 entonces devolver 0 fin
+            si clase = M_NCM entonces ncm_parte(r) sino rndis_parte(r) fin
+            si n_tramas = 0 entonces devolver 0 fin
+        fin
+        l := tramas_largo[i_trama]
+        copiar_memoria(destino, dirección(ent[tramas_ini[i_trama]]), l)
+        i_trama := i_trama + 1
+        recibidas_m := recibidas_m + 1
+        devolver l
+    fin
+
+    ; ---- (las pruebas: tests/movil_ncm.py y UMOVILP.BIN, umovilp.cas) ----
+    ; lo de una transferencia ya llegada (de la clase c: 1, RNDIS; 2, NCM),
+    ; partido en tramas como lo hace recibir(): cuántas (y las tiradas, en
+    ; «tiradas_m»); trama_de da cada una
+    público función prueba_parte(c: nat32, d: puntero a byte, n: nat32): nat32
+        si n > BÚFER entonces n := BÚFER fin
+        copiar_memoria(dirección(ent[0]), d, n)
+        n_tramas := 0
+        i_trama := 0
+        tiradas_m := 0
+        si c = M_NCM entonces ncm_parte(n) sino rndis_parte(n) fin
+        devolver n_tramas
+    fin
+
+    público función prueba_trama(i: nat32, ref largo: nat32): puntero a byte
+        largo := tramas_largo[i]
+        devolver dirección(ent[tramas_ini[i]])
+    fin
+
+    ; lo que se mandaría por el móvil (sin mandarlo: gen = 0, ll da error):
+    ; el NTB16 (o el paquete de RNDIS) de la trama t, a destino; su largo
+    público función prueba_arma(c: nat32, div_: nat32, resto: nat32, alin: nat32, paquete: nat32, t: puntero a byte, n: nat32, destino: puntero a byte): nat32
+        variable k: nat32
+        clase := c
+        ncm_div := div_
+        ncm_resto := resto
+        ncm_alin := alin
+        ncm_sal_max := 2048
+        paquete_sale := paquete
+        gen := 0
+        llenar(dirección(sal[0]), 2048, 0xEE)
+        si c = M_NCM entonces ncm_envía(t, n) sino rndis_envía(t, n) fin
+        ; (el largo: el del NTB o el del mensaje, y el octeto de más si lo hay)
+        si c = M_NCM entonces k := le16(dirección(sal[8])) sino k := le32(dirección(sal[4])) fin
+        si paquete <> 0 y k mod paquete = 0 entonces k := k + 1 fin
+        copiar_memoria(destino, dirección(sal[0]), k)
+        devolver k
+    fin
+
+fin Rmovil.
