@@ -60,6 +60,9 @@ inicio:
         mov cx, pila_fin - acc      ; y lo que dejaba otro programa ([lote] con
         xor al, al                  ; la G de un /G de antes) se tomaba por
         rep stosb                   ; bueno
+        mov byte [npunto], 12       ; (y la coma de los números, en su sitio:
+                                    ; sin esto, texto_edicion se colgaba si
+                                    ; nada había pintado antes una celda)
         mov bx, (pila_fin - inicio + 0x100 + 15) / 16
         DOS 0x4A                    ; el programa se queda con lo suyo
         mov bx, 0xFFFF              ; y pide lo demás
