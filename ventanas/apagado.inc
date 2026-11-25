@@ -135,6 +135,9 @@ apa_dialogo:
 ; lanzador o sin INFO.COM, se sale sin más, como antes.
 apa_volver:
         pushad
+        mov edi, apa_tit            ; [0.9.31] ¿cambios sin guardar? Que lo
+        call apa_consultar          ; pregunte cada programa (y el Bloc)
+        jc .x
         call apa_fin_sesion         ; [APAGAR-USB] que los programas guarden ya
         mov byte [salir], 1
         cmp word [lz_seg], 0
@@ -200,21 +203,9 @@ apa_encargo:
 .esta:
         mov ebx, eax
         call dos_cerrar
-        cmp dword [bloc_ven], 0     ; ¿texto sin guardar en el Bloc de notas?
-        je .poner
-        push ebp
-        mov ebp, [bloc_edit]
-        mov eax, EM_MODIFICADO
-        call msg_enviar
-        pop ebp
-        test eax, eax
-        jz .poner
-        mov esi, apa_bloc
-        mov edi, apa_tit
-        mov eax, DM_ACEPTAR_CANCELAR
-        call dlg_mensaje
-        cmp eax, ID_ACEPTAR
-        jne .x
+        mov edi, apa_tit            ; ¿cambios sin guardar? [0.9.31] en el
+        call apa_consultar          ; Bloc de notas y en cada programa
+        jc .x
 .poner:
         ; [APAGAR-USB] que los programas guarden ya lo pendiente (Configuración:
         ; VENTANAS.INI) y CENTRO.INI, ya (y comprobado), antes del encargo
@@ -256,6 +247,79 @@ apa_encargo:
         call dlg_mensaje
 .x:
         popad
+        ret
+
+; [0.9.31] Antes de salir de Hispa Ventanas (apagar, reiniciar, volver a
+; Hispa-DOS, ejecutar un programa de DOS o cambiar la resolución), lo que no
+; se ha guardado: EBP=dueña de los cuadros EDI=su título.
+;  - El Bloc de notas: si tiene cambios, «se perderán. ¿Continuar?».
+;  - Cada programa de Hispa Ventanas (.HVP), en su ventana principal:
+;    WM_QUERYENDSESSION, con msg_enviar (como SendMessage en Windows: el
+;    programa contesta en el momento, con su «¿Quiere guardarlos?»), y
+;    EAX=0 es que no se sale («Cancelar», o no se ha podido guardar).
+;    Quien no lo atiende, ven_defecto: 1, se puede.
+; -> CF=1 si no se sale. Se llama desde una tarea (no desde la del sistema:
+; los cuadros de los programas necesitan su bucle).
+apa_consultar:
+        pushad
+        cmp dword [bloc_ven], 0
+        je .progs
+        push ebp
+        mov ebp, [bloc_edit]
+        mov eax, EM_MODIFICADO
+        call msg_enviar
+        pop ebp
+        test eax, eax
+        jz .progs
+        mov esi, apa_bloc
+        mov eax, DM_ACEPTAR_CANCELAR
+        call dlg_mensaje
+        cmp eax, ID_ACEPTAR
+        jne .no
+.progs:
+        mov ebp, [ven_tabla]
+        mov edx, MAX_VEN
+.v:
+        cmp dword [ebp+V_USO], 1
+        jne .s
+        cmp dword [ebp+V_PADRE], 0
+        jne .s
+        mov eax, [ebp+V_PROC]       ; ¿es de un módulo? (su código, dentro)
+        mov esi, hvp_tabla
+        mov ecx, HVP_MAX
+.h:
+        cmp dword [esi+HS_USO], 1
+        jne .hs
+        mov ebx, [esi+HS_BASE]
+        cmp eax, ebx
+        jb .hs
+        add ebx, [ebx+H_MEM]
+        cmp eax, ebx
+        jb .pide
+.hs:
+        add esi, HS_TAM
+        dec ecx
+        jnz .h
+        jmp .s
+.pide:
+        push edx
+        mov eax, WM_QUERYENDSESSION
+        xor ecx, ecx
+        xor edx, edx
+        call msg_enviar
+        pop edx
+        test eax, eax
+        jz .no
+.s:
+        add ebp, V_TAM
+        dec edx
+        jnz .v
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
         ret
 
 ; [APAGAR-USB] Antes de salir (apagar, reiniciar o volver a Hispa-DOS): a

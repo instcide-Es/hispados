@@ -88,8 +88,7 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    ([ARCHIVOS], `programas/archivos.asm`, ver «Administrador de archivos»). La
    segunda tanda de juegos (Bloques, Solitario, Tragabolas y Almacén) ya
    está (`tests/run_juegos2_tests.sh`). Pendiente (se
-   hará según haga falta en las etapas 4 y 5): avisar de los
-   textos sin guardar al salir con el botón «Salir»; órdenes
+   hará según haga falta en las etapas 4 y 5): órdenes
    de menú desactivadas o con marca; tabuladores y ajuste de línea en el
    cuadro de texto; varias copias del mismo programa a la vez; elegir el
    «solo el contorno» (`AJ_CONTORNO`) desde Configuración. Hecho después
@@ -222,8 +221,17 @@ VENTANAS [/1024 | /800 | /640 | /MODO:AxB[xC] | /MODO:AUTO] [/8 | /15 | /16 | /2
   encargo de ejecutar `REINICIA.COM` o `APAGAR.COM` de su carpeta, sin
   «volver», vuelve a modo texto y termina; el lanzador quita HSPDPMI de la
   memoria y ejecuta el programa, que escribe en el disco lo pendiente y
-  reinicia o apaga (si el Bloc de notas tiene cambios sin guardar, pregunta
-  antes). Si falta el programa, lo dice y no sale. CENTRO.INI se guarda
+  reinicia o apaga (si hay cambios sin guardar, pregunta antes: [0.9.31]
+  `apa_consultar`, en `ventanas/apagado.inc`, lo hace al volver a
+  Hispa-DOS, apagar, reiniciar, ejecutar un programa de DOS desde el Centro
+  o cambiar la resolución: el Bloc de notas dice «se perderán. ¿Continuar?»,
+  y a la ventana principal de cada programa .HVP le envía
+  WM_QUERYENDSESSION —como SendMessage en Windows, con `msg_enviar`— y el
+  programa contesta en el momento con su «¿Quiere guardarlos?»: Pluma,
+  Cuentas, Publicaciones, Presentaciones, Pintura, el Mirador y Facturas
+  (esta, si FACTURAS.DAT está dañado y hay cambios que no ha podido
+  guardar). EAX=0 es «Cancelar» o «no se ha podido guardar»: no se sale.
+  Quien no lo atiende deja salir: `ven_defecto` devuelve 1). Si falta el programa, lo dice y no sale. CENTRO.INI se guarda
   con el cuadro aún en pantalla, antes de dejar el encargo (y al salir ya no
   se repite): si no se puede escribir (la memoria USB protegida, quitada o
   que no responde) lo dice —«No se ha podido guardar el Centro de programas
@@ -2620,8 +2628,9 @@ los pasos de deshacer; otro, del tamaño justo, para lo copiado. El relleno
 va por tramos de fila, sin recursión.
 
 Pendiente: ampliar la vista (lupa), voltear y girar, líneas a 45° con
-Mayús, elegir la fuente del texto y avisar de los cambios sin guardar al
-salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
+Mayús y elegir la fuente del texto. (Avisar de los cambios sin guardar al
+salir con el botón «Salir» de la barra de arriba: hecho en la 0.9.31, con
+WM_QUERYENDSESSION.)
 
 ### Reproductor de sonido
 

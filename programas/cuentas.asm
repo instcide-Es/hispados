@@ -1023,6 +1023,8 @@ cue_proc:
         je .crear
         cmp eax, WM_CLOSE
         je .cerrar
+        cmp eax, WM_QUERYENDSESSION ; [0.9.31] se sale de Hispa Ventanas
+        je .fin_sesion
         cmp eax, WM_DESTROY
         je .destruir
         HVJ ven_defecto
@@ -1086,6 +1088,15 @@ cue_proc:
         call cuenta_cols
         call inval
         jmp hecho
+.fin_sesion:                        ; ¿cambios sin guardar? Se pregunta, como
+        cmp byte [editando], 0
+        je .fs1
+        call commit_edit
+.fs1:
+        call preguntar
+        setnc al                    ; al cerrar (EAX=0: «Cancelar», no se sale)
+        movzx eax, al
+        ret
 .cerrar:
         cmp byte [editando], 0
         je .c1

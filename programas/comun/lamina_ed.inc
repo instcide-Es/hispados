@@ -985,6 +985,8 @@ ed_proc:
         je .crear
         cmp eax, WM_CLOSE
         je .cerrar
+        cmp eax, WM_QUERYENDSESSION ; [0.9.31] se sale de Hispa Ventanas
+        je .fin_sesion
         cmp eax, WM_DESTROY
         je .destruir
         HVJ ven_defecto
@@ -1058,6 +1060,11 @@ ed_proc:
         call calc_vista
         call inval
         jmp hecho
+.fin_sesion:                        ; ¿cambios sin guardar? Se pregunta, como
+        call preguntar
+        setnc al                    ; al cerrar (EAX=0: «Cancelar», no se sale)
+        movzx eax, al
+        ret
 .cerrar:
         call preguntar
         jc hecho

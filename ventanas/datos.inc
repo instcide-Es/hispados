@@ -144,10 +144,6 @@ t_sin_lanzador  db "Para abrir programas de Hispa-DOS hay que entrar", 10
                 db "en Hispa Ventanas con la orden VENTANAS.", 0
 t_no_esta       db "No se encuentra el programa del acceso directo.", 10
                 db "Mire la ruta en Archivo > Propiedades.", 0
-t_lanzar_bloc   db "Para ejecutar un programa de Hispa-DOS, Hispa Ventanas", 10
-                db "se cierra y vuelve al terminar el programa.", 10
-                db "El Bloc de notas tiene cambios sin guardar y se perderán.", 10
-                db "¿Continuar?", 0
 t_bp_tit        db "Buscar programas", 0
 t_bp_preg       db "Carpeta donde están los juegos:", 0
 t_bp_defecto    db "C:\JUEGOS", 0

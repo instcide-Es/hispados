@@ -829,6 +829,8 @@ mir_proc:
         je .crear
         cmp eax, WM_CLOSE
         je .cerrar
+        cmp eax, WM_QUERYENDSESSION ; [0.9.31] se sale de Hispa Ventanas
+        je .fin_sesion
         cmp eax, WM_DESTROY
         je .destruir
         HVJ ven_defecto
@@ -927,6 +929,11 @@ mir_proc:
         mov ecx, O_SIG
         call orden_haz
         jmp hecho
+.fin_sesion:                        ; ¿cambios sin guardar? Se pregunta, como
+        call confirma_retoque
+        setnc al                    ; al cerrar (EAX=0: «Cancelar», no se sale)
+        movzx eax, al
+        ret
 .cerrar:
         call confirma_retoque       ; (retocada y sin guardar: se pregunta)
         jc hecho

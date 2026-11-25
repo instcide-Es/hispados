@@ -21,6 +21,12 @@ WM_SETTEXT      equ 0x000C
 WM_GETTEXT      equ 0x000D
 WM_PAINT        equ 0x000F
 WM_CLOSE        equ 0x0010
+WM_QUERYENDSESSION equ 0x0011       ; [0.9.31] se va a salir de Hispa Ventanas (apagar, reiniciar,
+                                    ; volver a Hispa-DOS o ejecutar un programa de DOS): el
+                                    ; programa pregunta por lo que no ha guardado y devuelve
+                                    ; EAX=1 (se puede salir) o 0 (no: «Cancelar»). Lo envía
+                                    ; apa_consultar (con msg_enviar) a la ventana principal de
+                                    ; cada .HVP; ven_defecto devuelve 1
 WM_QUIT         equ 0x0012
 WM_ENDSESSION   equ 0x0016          ; [APAGAR-USB] se sale de Hispa Ventanas (ECX=1): guardar ya
                                     ; lo pendiente (lo envía apa_fin_sesion a las ventanas de

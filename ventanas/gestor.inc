@@ -897,7 +897,9 @@ ven_defecto:
         je ctx_def_rup
         cmp eax, WM_CONTEXTMENU     ; [CONTEXTO] a la madre, o el menú de la ventana
         je ctx_def_menu
-        xor eax, eax
+        cmp eax, WM_QUERYENDSESSION ; [0.9.31] quien no dice nada deja salir
+        sete al
+        movzx eax, al
         ret
 .pintar:
         call dc_pintar

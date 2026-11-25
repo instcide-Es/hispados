@@ -1385,21 +1385,9 @@ acc_lanzar:
         mov ebx, eax
         call dos_cerrar
         pop ebx
-        cmp dword [bloc_ven], 0     ; ¿texto sin guardar en el Bloc de notas?
-        je .e3
-        push ebp
-        mov ebp, [bloc_edit]
-        mov eax, EM_MODIFICADO
-        call msg_enviar
-        pop ebp
-        test eax, eax
-        jz .e3
-        mov esi, t_lanzar_bloc
-        mov edi, t_centro
-        mov eax, DM_ACEPTAR_CANCELAR
-        call dlg_mensaje
-        cmp eax, ID_ACEPTAR
-        jne .x
+        mov edi, t_centro           ; Hispa Ventanas se cierra: ¿cambios sin
+        call apa_consultar          ; guardar? [0.9.31] en el Bloc y en cada programa
+        jc .x
 .e3:
         movzx edx, word [lz_seg]    ; el encargo, a la memoria del lanzador
         shl edx, 4
