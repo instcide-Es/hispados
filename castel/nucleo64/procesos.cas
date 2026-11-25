@@ -77,6 +77,7 @@ módulo Procesos
     público constante R_ARCHIVO = 2             ; [etapa 7] (reg_ext) de un archivo
     público constante F_CONSOLA = 1             ; las clases de archivo abierto
     público constante F_ARCHIVO = 2             ; [etapa 5] uno del VFS (Vfs64.Abierto)
+    público constante F_APARTADO = 98           ; [etapa 10 b] apartado mientras se abre lo suyo (aparta_fd)
     público constante PILA_PROG = 0x800000           ; 8 MB de pila
     público constante MÍNIMO = 0x10000          ; nada por debajo de 64 KB (el puntero nulo)
     público constante SIGILL = 4
@@ -154,6 +155,7 @@ módulo Procesos
         n_hilos: nat64              ; los que tiene
         hilos: arreglo [MAX_HILOS] de nat64
         h_cerrojo: nat64            ; el de la lista de los hilos y las señales pendientes
+        fd_cerrojo: nat64           ; [etapa 10 b] el de apartar y cerrar descriptores (dos hilos a la vez)
         s_pend: nat64               ; las señales pendientes del proceso (kill)
         s_info: arreglo [64] de nat64
         acc_marcas, acc_rest, acc_másc: arreglo [65] de nat64       ; sa_flags, sa_restorer y sa_mask
@@ -2045,6 +2047,7 @@ módulo Procesos
             i := i + 1
         fin
         q.h_cerrojo := 0
+        q.fd_cerrojo := 0
         q.s_pend := 0
         q.saliendo := 0
         q.solo := 0
@@ -2277,7 +2280,13 @@ módulo Procesos
         ; los descriptores: lo abierto, compartido
         i := 0
         mientras i < MAX_FD hacer
-            si q.fd_clase[i] <> 0 entonces otro_fd(q, i) fin
+            ; ([etapa 10 b] lo que otro hilo del padre estaba abriendo, no)
+            si q.fd_clase[i] = F_APARTADO entonces
+                q.fd_clase[i] := 0
+                q.fd_obj[i] := 0
+            sino si q.fd_clase[i] <> 0 entonces
+                otro_fd(q, i)
+            fin
             i := i + 1
         fin
         ; el marco del padre, con RAX = 0 y las banderas limpias
@@ -2330,7 +2339,44 @@ módulo Procesos
     público variable al_otro_fd: nat64          ; f(clase, objeto): una referencia más
     público variable al_cierra_fd: nat64        ; f(clase, objeto): una menos
     público variable al_acabar_proc: nat64      ; [etapa 8] f(pid, 0): el proceso cierra todo (al acabar)
+    ; [etapa 10 b] el primer descriptor libre desde mínimo_, ya apartado
+    ; (F_APARTADO, con fd_cerrojo), o -1: dos hilos que abren a la vez no se
+    ; llevan el mismo (antes, los dos lo veían libre y uno pisaba al otro: lo
+    ; del primero se perdía y, al cerrar el segundo, el primero leía de lo
+    ; suelto: con curl y su resolutor en un hilo). Quien lo aparta lo llena
+    ; (primero el objeto, luego la clase) o lo devuelve (devuelve_fd).
+    público función aparta_fd(p: puntero a Proceso, mínimo_: nat32): ent32
+        variable fd: nat32
+        variable b: nat64
+        b := toma(dirección(p.fd_cerrojo))
+        fd := mínimo_
+        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
+        si fd < MAX_FD entonces
+            p.fd_obj[fd] := 0
+            p.fd_clase[fd] := F_APARTADO
+        fin
+        suelta(dirección(p.fd_cerrojo), b)
+        si fd >= MAX_FD entonces devolver -1 fin
+        devolver ent32(fd)
+    fin
+
+    ; [etapa 10 b] uno apartado que no se ha llegado a llenar, libre otra vez
+    público función devuelve_fd(p: puntero a Proceso, fd: ent32)
+        si fd >= 0 y fd < ent32(MAX_FD) y p.fd_clase[nat32(fd)] = F_APARTADO entonces p.fd_clase[nat32(fd)] := 0 fin
+    fin
+
+    ; [etapa 10 b] llena el apartado fd: el objeto antes que la clase (lo ve
+    ; otro hilo en cuanto cambia la clase)
+    público función llena_fd(p: puntero a Proceso, fd: ent32, clase: nat32, obj: nat64)
+        p.fd_obj[nat32(fd)] := obj
+        ensamblador
+            sfence
+        fin
+        p.fd_clase[nat32(fd)] := clase
+    fin
+
     público función otro_fd(q: puntero a Proceso, i: nat32)
+        si q.fd_clase[i] = F_APARTADO entonces devolver fin
         si q.fd_clase[i] = F_ARCHIVO y q.fd_obj[i] <> 0 entonces
             vfs_otro(puntero(q.fd_obj[i]))
         sino si q.fd_clase[i] > F_ARCHIVO y al_otro_fd <> 0 entonces
@@ -2339,6 +2385,7 @@ módulo Procesos
     fin
 
     público función cierra_fd_obj(clase: nat32, obj: nat64)
+        si clase = F_APARTADO entonces devolver fin
         si clase = F_ARCHIVO y obj <> 0 entonces
             vfs_cierra(puntero(obj))
         sino si clase > F_ARCHIVO y al_cierra_fd <> 0 entonces

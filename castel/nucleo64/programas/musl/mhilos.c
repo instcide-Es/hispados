@@ -5,7 +5,10 @@
  * consumidores con una condición, TLS (__thread), pthread_join con lo que
  * devuelven, semáforos, una barrera, un hilo suelto, el plazo de
  * pthread_cond_timedwait, y los registros de AVX de cada hilo intactos
- * aunque cambien de procesador. Estático (MHILOS) y dinámico (MHILOSD). */
+ * aunque cambien de procesador. [etapa 10 b] Y 8 hilos que abren y cierran
+ * descriptores a la vez (sockets, eventfd, tuberías, /etc/hosts): ninguno
+ * repetido (antes, dos hilos se podían llevar el mismo). Estático (MHILOS) y
+ * dinámico (MHILOSD). */
 #include "comun.h"
 #include <stdlib.h>
 #include <pthread.h>
@@ -15,6 +18,9 @@
 #include <unistd.h>
 #include <sched.h>
 #include <sys/syscall.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <sys/eventfd.h>
 
 #define N 8
 #define VUELTAS 2000
@@ -29,6 +35,41 @@ static long consumido[N];
 static sem_t sem;
 static pthread_barrier_t barrera;
 static volatile int avx_mal, avx_hecho;
+
+/* [etapa 10 b] los descriptores, a la vez: cada uno apunta de quién es el que le dan */
+#define FD_VUELTAS 150
+static volatile int dueño_fd[1024], fd_repetidos, fd_fallos, fd_hechos;
+static void apunta_fd(int f, long k)
+{
+	if (f < 0 || f >= 1024) { __sync_fetch_and_add(&fd_fallos, 1); return; }
+	if (__sync_val_compare_and_swap(&dueño_fd[f], 0, (int)k + 1) != 0) __sync_fetch_and_add(&fd_repetidos, 1);
+	__sync_fetch_and_add(&fd_hechos, 1);
+}
+static void suelta_fd(int f, long k)
+{
+	if (f >= 0 && f < 1024) __sync_val_compare_and_swap(&dueño_fd[f], (int)k + 1, 0);
+	close(f);
+}
+static void *descriptores(void *a)
+{
+	long k = (long)a;
+	char b[64];
+	for (int i = 0; i < FD_VUELTAS; i++) {
+		int s = socket(AF_INET, SOCK_DGRAM, 0), e = eventfd(0, 0), t[2] = { -1, -1 }, f;
+		apunta_fd(s, k);
+		apunta_fd(e, k);
+		if (pipe(t) == 0) { apunta_fd(t[0], k); apunta_fd(t[1], k); } else __sync_fetch_and_add(&fd_fallos, 1);
+		f = open("/etc/hosts", O_RDONLY);
+		apunta_fd(f, k);
+		if (f >= 0 && read(f, b, sizeof b) <= 0) __sync_fetch_and_add(&fd_fallos, 1);
+		suelta_fd(f, k);
+		suelta_fd(t[0], k);
+		suelta_fd(t[1], k);
+		suelta_fd(e, k);
+		suelta_fd(s, k);
+	}
+	return 0;
+}
 
 static void *suma(void *a)
 {
@@ -178,6 +219,11 @@ int main(void)
 	total = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
 	MIRA(j == ETIMEDOUT && total >= 40 && total < 1000, "pthread_cond_timedwait: ETIMEDOUT a su hora");
 	printf("  pthread_cond_timedwait de 50 ms: ETIMEDOUT en %ld ms\n", total);
+	/* [etapa 10 b] los descriptores, a la vez */
+	for (i = 0; i < N; i++) pthread_create(&h[i], 0, descriptores, (void *)i);
+	for (i = 0; i < N; i++) pthread_join(h[i], 0);
+	MIRA(fd_repetidos == 0 && fd_fallos == 0 && fd_hechos == N * FD_VUELTAS * 5, "8 hilos que abren y cierran descriptores a la vez: ninguno repetido");
+	printf("  descriptores: 8 hilos abren y cierran a la vez %d (sockets, eventfd, tuberías y /etc/hosts): %d repetidos, %d fallos\n", fd_hechos, fd_repetidos, fd_fallos);
 	/* AVX */
 	if (__builtin_cpu_supports("avx")) {
 		for (i = 0; i < N; i++) pthread_create(&h[i], 0, avx, (void *)i);

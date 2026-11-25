@@ -74,7 +74,7 @@ done
 nice "$M" -static -o "$S/CURL" "$OC"/src/*.o "$OC/libcurl.a" "$OB/libbearssl.a" -pthread
 # ---- la prueba de libcurl ----
 # shellcheck disable=SC2086
-nice "$M" -O2 -Wall -Wno-unused-result -fno-stack-protector -static -DCURL_STATICLIB -I"$C/include" $BI \
-  -o "$S/MCURL" "$AQUI/red/mcurl.c" "$OC/libcurl.a" "$OB/libbearssl.a" -pthread
+nice "$M" -O2 -Wall -Wno-unused-result -Wno-unused-function -fno-stack-protector -static -DCURL_STATICLIB -I"$C/include" $BI \
+  -o "$S/MCURL" "$AQUI/red/mcurl.c" "$OC/src/ca_embed.o" "$OC/libcurl.a" "$OB/libbearssl.a" -pthread
 strip --strip-unneeded "$S/CURL" "$S/MCURL"
 echo "hechos: CURL MCURL"

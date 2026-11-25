@@ -82,18 +82,15 @@ módulo Red64
     fin
 
     ; el primer descriptor libre de p (o -1)
+    ; ([etapa 10 b] apartado: Procesos.aparta_fd; quien lo pide lo llena o lo devuelve)
     función fd_nuevo(p: puntero a Proceso): ent32
-        variable fd: nat32
-        fd := 0
-        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
-        si fd >= MAX_FD entonces devolver -1 fin
-        devolver ent32(fd)
+        devolver aparta_fd(p, 0)
     fin
 
     ; el socket del descriptor fd (o nulo, con el error)
     función de_fd(p: puntero a Proceso, fd: nat64, ref err: ent64): puntero a Sock
         err := 0
-        si fd >= MAX_FD o p.fd_clase[nat32(fd)] = 0 entonces
+        si fd >= MAX_FD o p.fd_clase[nat32(fd)] = 0 o p.fd_clase[nat32(fd)] = F_APARTADO entonces
             err := EBADF
             devolver nulo
         fin
@@ -211,15 +208,17 @@ módulo Red64
         bloquea()
         si t = S_STREAM entonces s := nuevo_sock(t, nat32(proto), TCP_RX, TCP_TX) sino s := nuevo_sock(t, nat32(proto), UDP_RX, 0) fin
         suelta_()
-        si s = nulo entonces devolver ENOMEM fin
+        si s = nulo entonces
+            devuelve_fd(p, fd)
+            devolver ENOMEM
+        fin
         s.refs := 1
-        p.fd_clase[nat32(fd)] := F_SOCKET
-        p.fd_obj[nat32(fd)] := nat64(s)
         p.fd_nobloq[nat32(fd)] := 0
         si tipo_ yb SOCK_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 fin
         p.fd_cloexec[nat32(fd)] := 0
         si tipo_ yb SOCK_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 fin
-        sockets_abiertos := sockets_abiertos + 1
+        llena_fd(p, fd, F_SOCKET, nat64(s))
+        suma_atómica(dirección(sockets_abiertos), 1)
         devolver ent64(fd)
     fin
 
@@ -333,13 +332,12 @@ módulo Red64
             devolver EMFILE
         fin
         c.refs := 1
-        p.fd_clase[nat32(nfd)] := F_SOCKET
-        p.fd_obj[nat32(nfd)] := nat64(c)
         p.fd_nobloq[nat32(nfd)] := 0
         si marcas_ yb SOCK_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(nfd)] := 1 fin
         p.fd_cloexec[nat32(nfd)] := 0
         si marcas_ yb SOCK_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(nfd)] := 1 fin
-        sockets_abiertos := sockets_abiertos + 1
+        llena_fd(p, nfd, F_SOCKET, nat64(c))
+        suma_atómica(dirección(sockets_abiertos), 1)
         si v <> 0 entonces
             err := da_dir(p, v, lv, c.r_ip, c.r_puerto)
             si err < 0 entonces devolver err fin

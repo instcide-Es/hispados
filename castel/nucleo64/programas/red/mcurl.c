@@ -14,7 +14,8 @@
  *   MCURL [-c CA.PEM] [-r NOMBRE:PUERTO:IP] DIRECCIÓN...
  *                       las baja a la vez (la interfaz «multi»), cada una con
  *                       su código, sus octetos y su sha256 (BearSSL); -c, la
- *                       autoridad para HTTPS; -r, un nombre sin DNS (como
+ *                       autoridad para HTTPS (sin -c, las de siempre, como
+ *                       CURL); -r, un nombre sin DNS (como
  *                       --resolve de curl). Acaba con 0 si todas dan 200.
  */
 #include <stdio.h>
@@ -408,6 +409,7 @@ static int pruebas(void)
 }
 
 /* ---- bajar direcciones a la vez, con su sha256 ---- */
+extern const unsigned char curl_ca_embed[];      /* las de w32/tls/raices (hazcurl.sh) */
 static int baja(int argc, char **argv)
 {
 	const char *ca = NULL;
@@ -435,6 +437,10 @@ static int baja(int argc, char **argv)
 		curl_easy_setopt(cc[i], CURLOPT_FOLLOWLOCATION, 1L);
 		curl_easy_setopt(cc[i], CURLOPT_TIMEOUT_MS, 120000L);
 		if (ca) curl_easy_setopt(cc[i], CURLOPT_CAINFO, ca);
+		else {      /* sin -c: las autoridades de siempre (las de CURL, w32/tls/raices) */
+			struct curl_blob b = { (void *)curl_ca_embed, strlen((const char *)curl_ca_embed), CURL_BLOB_NOCOPY };
+			curl_easy_setopt(cc[i], CURLOPT_CAINFO_BLOB, &b);
+		}
 		if (res) curl_easy_setopt(cc[i], CURLOPT_RESOLVE, res);
 		curl_multi_add_handle(mu, cc[i]);
 	}

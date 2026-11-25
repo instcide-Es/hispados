@@ -103,7 +103,7 @@ módulo Sistema
     ; ¿es fd un archivo abierto del programa?
     función fd_bien(p: puntero a Proceso, fd: nat64): bool
         si fd >= MAX_FD entonces devolver falso fin
-        devolver p.fd_clase[nat32(fd)] <> 0
+        devolver p.fd_clase[nat32(fd)] <> 0 y p.fd_clase[nat32(fd)] <> F_APARTADO
     fin
 
     ; ---- la consola [etapa 6: Tty64, que pasa lo de UTF-8 a la página 437] ----
@@ -130,13 +130,10 @@ módulo Sistema
         devolver puntero(p.fd_obj[nat32(fd)])
     fin
 
-    ; el primer descriptor libre desde «desde», o -1
+    ; el primer descriptor libre desde «desde», o -1; [etapa 10 b] ya
+    ; apartado (Procesos.aparta_fd): quien lo pide lo llena o lo devuelve
     función fd_libre(p: puntero a Proceso, mínimo_: nat32): ent32
-        variable fd: nat32
-        fd := mínimo_
-        mientras fd < MAX_FD y p.fd_clase[fd] <> 0 hacer fd := fd + 1 fin
-        si fd >= MAX_FD entonces devolver -1 fin
-        devolver ent32(fd)
+        devolver aparta_fd(p, mínimo_)
     fin
 
     ; una ruta del programa, a un bloque del montón (lo suelta quien llama); nulo y el error
@@ -327,9 +324,8 @@ módulo Sistema
             libera(t)
             fd := fd_libre(p, 0)
             si fd < 0 entonces devolver EMFILE fin
-            p.fd_clase[nat32(fd)] := F_CONSOLA
-            p.fd_obj[nat32(fd)] := 0
             si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
+            llena_fd(p, fd, F_CONSOLA, 0)
             devolver ent64(fd)
         fin
         ; [etapa 8] los dispositivos: /dev/fb0, /dev/input/event0, /dev/shm/..., /dev/null, /dev/zero
@@ -342,11 +338,13 @@ módulo Sistema
             fin
             err := abre_disp(p, t, dc, marcas_, dob)
             libera(t)
-            si err < 0 entonces devolver err fin
-            p.fd_clase[nat32(fd)] := dc
-            p.fd_obj[nat32(fd)] := dob
+            si err < 0 entonces
+                devuelve_fd(p, fd)
+                devolver err
+            fin
             si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
             si marcas_ yb O_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 sino p.fd_nobloq[nat32(fd)] := 0 fin
+            llena_fd(p, fd, dc, dob)
             devolver ent64(fd)
         fin
         ; [etapa 9] /dev/urandom, /dev/random y los textos de la red
@@ -364,11 +362,13 @@ módulo Sistema
                 dc := F_AZAR
             fin
             libera(t)
-            si dc = F_TEXTO y dob = 0 entonces devolver ENOMEM fin
-            p.fd_clase[nat32(fd)] := dc
-            p.fd_obj[nat32(fd)] := dob
+            si dc = F_TEXTO y dob = 0 entonces
+                devuelve_fd(p, fd)
+                devolver ENOMEM
+            fin
             si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
             p.fd_nobloq[nat32(fd)] := 0
+            llena_fd(p, fd, dc, dob)
             devolver ent64(fd)
         fin
         base := nulo
@@ -387,25 +387,34 @@ módulo Sistema
         si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
         a := vfs_abre(base, t, marcas_ yb (nob nat64(O_CLOEXEC)), err)
         libera(t)
-        si a = nulo entonces devolver err fin
-        p.fd_clase[nat32(fd)] := F_ARCHIVO
-        p.fd_obj[nat32(fd)] := nat64(a)
+        si a = nulo entonces
+            devuelve_fd(p, fd)
+            devolver err
+        fin
+        p.fd_nobloq[nat32(fd)] := 0
+        llena_fd(p, fd, F_ARCHIVO, nat64(a))
         devolver ent64(fd)
     fin
 
     función cierra(p: puntero a Proceso, fd: nat64): ent64
         variable c: nat32
         variable ob_: nat64
-        si no fd_bien(p, fd) entonces devolver EBADF fin
+        variable b: nat64
+        ; ([etapa 10 b] con fd_cerrojo: dos hilos que cierran el mismo no lo cierran dos veces)
+        si fd >= MAX_FD entonces devolver EBADF fin
+        b := toma(dirección(p.fd_cerrojo))
+        si no fd_bien(p, fd) entonces
+            suelta(dirección(p.fd_cerrojo), b)
+            devolver EBADF
+        fin
         c := p.fd_clase[nat32(fd)]
         ob_ := p.fd_obj[nat32(fd)]
         p.fd_clase[nat32(fd)] := 0
         p.fd_obj[nat32(fd)] := 0
         p.fd_nobloq[nat32(fd)] := 0
-        cierra_fd_obj(c, ob_)
-        p.fd_clase[nat32(fd)] := 0
-        p.fd_obj[nat32(fd)] := 0
         p.fd_cloexec[nat32(fd)] := 0
+        suelta(dirección(p.fd_cerrojo), b)
+        cierra_fd_obj(c, ob_)
         devolver 0
     fin
 
@@ -413,19 +422,36 @@ módulo Sistema
     función duplica(p: puntero a Proceso, fd: nat64, a: ent64, mínimo_: nat32): ent64
         variable n: ent32
         si no fd_bien(p, fd) entonces devolver EBADF fin
+        variable b: nat64
+        variable c: nat32
+        variable ob_: nat64
         si a >= 0 entonces
             si a >= MAX_FD entonces devolver EBADF fin
             si nat64(a) = fd entonces devolver a fin
+            ; ([etapa 10 b] uno que otro hilo está abriendo: EBUSY, como Linux)
+            si p.fd_clase[nat32(a)] = F_APARTADO entonces devolver -16 fin
             si fd_bien(p, nat64(a)) entonces cierra(p, nat64(a)) fin
+            b := toma(dirección(p.fd_cerrojo))
+            si p.fd_clase[nat32(a)] <> 0 entonces
+                suelta(dirección(p.fd_cerrojo), b)
+                devolver -16
+            fin
+            p.fd_clase[nat32(a)] := F_APARTADO
+            suelta(dirección(p.fd_cerrojo), b)
             n := ent32(a)
         sino
             n := fd_libre(p, mínimo_)
             si n < 0 entonces devolver EMFILE fin
         fin
-        p.fd_clase[nat32(n)] := p.fd_clase[nat32(fd)]
-        p.fd_obj[nat32(n)] := p.fd_obj[nat32(fd)]
+        c := p.fd_clase[nat32(fd)]
+        ob_ := p.fd_obj[nat32(fd)]
+        si c = 0 o c = F_APARTADO entonces
+            devuelve_fd(p, n)
+            devolver EBADF
+        fin
         p.fd_cloexec[nat32(n)] := 0
         p.fd_nobloq[nat32(n)] := p.fd_nobloq[nat32(fd)]
+        llena_fd(p, n, c, ob_)
         otro_fd(p, nat32(n))
         devolver ent64(n)
     fin
@@ -1528,25 +1554,30 @@ módulo Sistema
         variable a, b: ent32
         variable t: nat64
         si marcas_ yb (nob nat64(O_CLOEXEC ob O_NONBLOCK)) <> 0 entonces devolver EINVAL fin
-        a := fd_libre(p, 0)
+        a := fd_libre(p, 0)                            ; ([etapa 10 b] los dos, apartados)
         si a < 0 entonces devolver EMFILE fin
-        p.fd_clase[nat32(a)] := F_TUBO_L               ; (apartado mientras se busca el otro)
         b := fd_libre(p, 0)
-        p.fd_clase[nat32(a)] := 0
-        si b < 0 entonces devolver EMFILE fin
+        si b < 0 entonces
+            devuelve_fd(p, a)
+            devolver EMFILE
+        fin
         t := nuevo_tubo()
-        si t = 0 entonces devolver ENOMEM fin
+        si t = 0 entonces
+            devuelve_fd(p, a)
+            devuelve_fd(p, b)
+            devolver ENOMEM
+        fin
         fds[0] := nat32(a)
         fds[1] := nat32(b)
         si no copia_a(p, v, nat64(dirección(fds[0])), 8) entonces
+            devuelve_fd(p, a)
+            devuelve_fd(p, b)
             cierra_fd_obj(F_TUBO_L, t)
             cierra_fd_obj(F_TUBO_E, t)
             devolver EFAULT
         fin
-        p.fd_clase[nat32(a)] := F_TUBO_L
-        p.fd_obj[nat32(a)] := t
-        p.fd_clase[nat32(b)] := F_TUBO_E
-        p.fd_obj[nat32(b)] := t
+        llena_fd(p, a, F_TUBO_L, t)
+        llena_fd(p, b, F_TUBO_E, t)
         p.fd_cloexec[nat32(a)] := nat32((marcas_ >> 19) yb 1)
         p.fd_cloexec[nat32(b)] := nat32((marcas_ >> 19) yb 1)
         p.fd_nobloq[nat32(a)] := nat32((marcas_ >> 11) yb 1)
@@ -1563,10 +1594,9 @@ módulo Sistema
             cierra_objeto(nat64(c), d)
             devolver EMFILE
         fin
-        p.fd_clase[nat32(fd)] := c
-        p.fd_obj[nat32(fd)] := d
         p.fd_nobloq[nat32(fd)] := nat32((marcas_ >> 11) yb 1)
         p.fd_cloexec[nat32(fd)] := nat32((marcas_ >> 19) yb 1)
+        llena_fd(p, fd, c, d)
         devolver ent64(fd)
     fin
 
@@ -2050,13 +2080,15 @@ módulo Sistema
         fd := fd_libre(p, 0)
         si fd < 0 entonces devolver EMFILE fin
         e := puntero(nat64(reserva(tamaño(Epoll))))
-        si e = nulo entonces devolver ENOMEM fin
+        si e = nulo entonces
+            devuelve_fd(p, fd)
+            devolver ENOMEM
+        fin
         ceros_mem(nat64(e), tamaño(Epoll))
         e.refs := 1
-        p.fd_clase[nat32(fd)] := F_EPOLL
-        p.fd_obj[nat32(fd)] := nat64(e)
         p.fd_nobloq[nat32(fd)] := 0
         p.fd_cloexec[nat32(fd)] := nat32((marcas_ >> 19) yb 1)
+        llena_fd(p, fd, F_EPOLL, nat64(e))
         devolver ent64(fd)
     fin
 
