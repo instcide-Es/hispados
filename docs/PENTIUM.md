@@ -11632,6 +11632,11 @@ QEMU_MAS="-device qemu-xhci,id=u -netdev user,id=n0 -device usb-net,netdev=n0,bu
 7. El escritorio sin tarjeta PCI y con el móvil: RED.BIN al arrancar, y el
    aviso del icono.
 
+Resultados del 25/11 (en el VPS): `SOLO=movil` 88/1 (la que faltaba, solo
+la expresión de la prueba: corregida y comprobada a mano), `SOLO=red` 78/0 y
+`SOLO=caliente` 79/0. La memoria de prueba, arrancada en QEMU con el usb-net:
+el escritorio, la red por el móvil, `RED.LOG` y `ARRANQUE.TXT` escritos.
+
 **Lo que solo se verá en el Xiaomi**: la clase de verdad (E0/01/03, casi
 seguro), el RNDIS de Android (INITIALIZE con su MaxTransferSize, varias tramas
 juntas), la alta velocidad (480 Mbit/s: EHCI con la cola asíncrona, o xHCI) y
