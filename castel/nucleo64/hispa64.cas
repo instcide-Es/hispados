@@ -989,7 +989,7 @@ módulo Hispa64
     fin
 
     función etapa2()
-        variable t0, k0, k1, t1: nat64
+        variable t0, k0, k1, t1, p0, h0: nat64
         variable s0, s1, i: nat32
         variable c: puntero a Cpu
         pon_pila_bsp(k_pila_fin)
@@ -1020,14 +1020,20 @@ módulo Hispa64
         fin
         enciende()
         si tic_va y fuente <> NINGUNO y no tiene("sinmedir") entonces
-            ; 1 s con el reloj
+            ; 1 s con el reloj: los tics que llegan y [etapa 11 b] los que no
+            ; (el procesador parado desde fuera: Apic64.tic los cuenta con el
+            ; TSC), que suman los 100; y cada cuánto da el tic el
+            ; temporizador, contra el TSC (lo que de verdad se ha programado)
+            c := yo()
             k0 := mis_tics()
+            p0 := c.perdidos
+            h0 := c.huecos
             t0 := ahora_ns()
             mientras ahora_ns() - t0 < 1000000000 hacer espera_int() fin
             tics_1s := mis_tics() - k0
             escribir("Tic: ", tics_1s, " tics en 1 s (")
             si fuente = HPET entonces escribir("medido con el HPET") sino escribir("medido con el reloj de ACPI") fin
-            escribir(")")
+            escribir("), ", c.perdidos - p0, " que no han llegado (", c.huecos - h0, " huecos)")
             ; y entre dos cambios del segundo del CMOS (otro reloj, que no es el que ha medido)
             si hay_cmos() entonces
                 t0 := ahora_ns()
@@ -1038,6 +1044,7 @@ módulo Hispa64
                     s1 := segundo_cmos()
                 fin
                 k0 := mis_tics()
+                p0 := c.perdidos
                 s0 := s1
                 t1 := ahora_ns()
                 mientras s1 = s0 y ahora_ns() - t1 < 1500000000 hacer
@@ -1047,8 +1054,12 @@ módulo Hispa64
                 k1 := mis_tics()
                 si s1 <> s0 entonces
                     tics_cmos := k1 - k0
-                    escribir("; entre dos cambios del segundo del CMOS: ", tics_cmos, " tics")
+                    escribir("; entre dos cambios del segundo del CMOS: ", tics_cmos, " tics y ", c.perdidos - p0, " que no han llegado")
                 fin
+            fin
+            p0 := periodo_tic_us()
+            si p0 <> 0 entonces
+                escribir("; el temporizador, cada ", p0 div 1000, ",", (p0 div 100) mod 10, (p0 div 10) mod 10, " ms (contra el TSC)")
             fin
             escribir("\n")
         fin

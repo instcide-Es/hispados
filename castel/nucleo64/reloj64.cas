@@ -112,8 +112,31 @@ módulo Reloj64
         devolver i < 100000000
     fin
 
+    ; [etapa 11 b] el TSC y la hora, leídos juntos (la hora antes y después,
+    ; la vez que menos hay entre las dos); la hora, en muestra_ns
+    variable muestra_ns: nat64
+    función muestra_tsc(): nat64
+        variable ta, tb, c, mejor, mc, mt: nat64
+        variable i: nat32
+        mejor := 0xFFFFFFFFFFFFFFFF
+        i := 0
+        mientras i < 8 hacer
+            ta := ahora_ns()
+            c := tsc()
+            tb := ahora_ns()
+            si tb - ta < mejor entonces
+                mejor := tb - ta
+                mc := c
+                mt := ta + (tb - ta) div 2
+            fin
+            si i >= 1 y mejor < 20000 entonces i := 8 sino i := i + 1 fin
+        fin
+        muestra_ns := mt
+        devolver mc
+    fin
+
     público función prepara_reloj()
-        variable t0, c0: nat64
+        variable t0, c0, c1: nat64
         si pon_hpet() entonces
             fuente := HPET
         sino si pm_tmr <> 0 entonces
@@ -126,12 +149,14 @@ módulo Reloj64
             cpuid(0x80000007, 0)
             tsc_invariante := rd yb 0x100 <> 0
         fin
-        ; la frecuencia del TSC: 50 ms con el reloj
+        ; la frecuencia del TSC: 50 ms con el reloj ([etapa 11 b] el TSC y la
+        ; hora leídos juntos, como la cuenta del APIC en Apic64.mide)
         si fuente <> NINGUNO entonces
-            c0 := tsc()
-            t0 := ahora_ns()
+            c0 := muestra_tsc()
+            t0 := muestra_ns
             mientras ahora_ns() - t0 < 50000000 hacer pausa() fin
-            tsc_hz := muldiv(tsc() - c0, 1000000000, ahora_ns() - t0)
+            c1 := muestra_tsc()
+            tsc_hz := muldiv(c1 - c0, 1000000000, muestra_ns - t0)
         fin
     fin
 

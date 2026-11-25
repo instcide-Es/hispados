@@ -259,8 +259,26 @@ módulo Apic64
     ; ---- lo que se atiende ----
     interrupción función tic()
         variable c: puntero a Cpu
+        variable t, d, p: nat64
         c := yo()
         c.tics := c.tics + 1
+        ; [etapa 11 b] si el procesador ha estado parado desde fuera (en una
+        ; máquina virtual, el anfitrión cargado no le da su hilo), los tics del
+        ; temporizador de ese rato se juntan en uno (el APIC no guarda más de
+        ; uno pendiente): se cuentan los que faltan por el TSC, para que las
+        ; medidas del tiempo sepan qué parte no es del sistema
+        si tsc_hz <> 0 entonces
+            t := tsc()
+            si c.tsc_tic <> 0 entonces
+                d := t - c.tsc_tic
+                p := tsc_hz div HZ
+                si d > p + p div 2 entonces
+                    c.perdidos := c.perdidos + (d + p div 2) div p - 1
+                    c.huecos := c.huecos + 1
+                fin
+            fin
+            c.tsc_tic := t
+        fin
         eoi()
         si al_tic <> 0 entonces llama0(al_tic) fin
     fin
@@ -320,16 +338,49 @@ módulo Apic64
     fin
 
     ; ---- el temporizador del APIC local ----
+    ; [etapa 11 b] su cuenta (CCR) y la hora, leídas juntas: la hora antes y
+    ; después de la cuenta, y solo si entre las dos hay poco (si no, otra
+    ; vez; la primera vez también se repite, que en el TCG de QEMU traducir
+    ; el código ya es un rato). Antes se ponía la cuenta y luego se leía la
+    ; hora, y lo que pasara entre las dos (traducir el código, el anfitrión
+    ; sin darle su hilo al procesador) se contaba como del temporizador, que
+    ; salía lento: con el servidor cargado, 72 tics en 1 s en vez de 100
+    variable muestra_ns: nat64
+    función muestra_ccr(): nat64
+        variable ta, tb, c, mejor, mc, mt: nat64
+        variable i: nat32
+        mejor := 0xFFFFFFFFFFFFFFFF
+        i := 0
+        mientras i < 8 hacer
+            ta := ahora_ns()
+            c := nat64(apic_lee(0x390))
+            tb := ahora_ns()
+            si tb - ta < mejor entonces
+                mejor := tb - ta
+                mc := c
+                mt := ta + (tb - ta) div 2
+            fin
+            si i >= 1 y mejor < 20000 entonces i := 8 sino i := i + 1 fin
+        fin
+        muestra_ns := mt
+        devolver mc
+    fin
+
     ; cuántas cuentas da en 10 ms (dividido entre 16), con el reloj que haya
     función mide(): nat32
-        variable t0: nat64
+        variable t0, c0, c1: nat64
         apic_pon(0x3E0, 3)                               ; entre 16
         apic_pon(0x320, 0x10000 ob V_TIC)                ; tapado, de una vez
         si fuente <> NINGUNO entonces
+            ; 20 ms entre dos muestras de la cuenta y la hora, leídas juntas
             apic_pon(0x380, 0xFFFFFFFF)
-            t0 := ahora_ns()
-            mientras ahora_ns() - t0 < 10000000 hacer pausa() fin
+            c0 := muestra_ccr()
+            t0 := muestra_ns
+            mientras ahora_ns() - t0 < 20000000 hacer pausa() fin
+            c1 := muestra_ccr()
             si fuente = HPET entonces medido_con := "el HPET" sino medido_con := "el reloj de ACPI" fin
+            si c1 >= c0 o muestra_ns <= t0 entonces devolver 0 fin
+            devolver nat32(muldiv(c0 - c1, 10000000, muestra_ns - t0))
         sino
             apic_pon(0x380, 0xFFFFFFFF)
             si no diez_ms_pit() entonces devolver 0 fin
@@ -340,18 +391,56 @@ módulo Apic64
 
     ; pone el tic: el temporizador del APIC, periódico, HZ por segundo
     público función pon_tic(): bool
+        variable c: puntero a Cpu
         si por_10ms = 0 entonces por_10ms := mide() fin
         si por_10ms < 10 entonces devolver falso fin
         apic_pon(0x3E0, 3)
         apic_pon(0x320, 0x20000 ob V_TIC)                ; periódico
         apic_pon(0x380, por_10ms * 100 div HZ)
+        c := yo()
+        c.tsc_tic := 0
         tic_va := cierto
         devolver cierto
     fin
 
     público función para_tic()
+        variable c: puntero a Cpu
         apic_pon(0x320, 0x10000 ob V_TIC)
+        c := yo()
+        c.tsc_tic := 0
         tic_va := falso
+    fin
+
+    ; [etapa 11 b] cada cuánto da el tic el temporizador del APIC, en
+    ; microsegundos, medido contra el TSC (no contra los tics que llegan, que
+    ; en una máquina virtual cargada se pierden): su cuenta (CCR) y el TSC,
+    ; leídos juntos muchas veces durante 30 ms; solo cuentan los pares
+    ; seguidos (menos de 0,2 ms entre uno y otro, sin dar la vuelta), así que
+    ; si el procesador se para un rato desde fuera, ese rato no entra.
+    ; 0 si no se puede (sin TSC medido o sin tic)
+    público función periodo_tic_us(): nat64
+        variable t0, t, ta, c, ca, sdc, sdt, lím, ini: nat64
+        si tsc_hz = 0 o no tic_va entonces devolver 0 fin
+        ini := nat64(apic_lee(0x380))
+        lím := tsc_hz div 5000
+        sdc := 0
+        sdt := 0
+        t0 := tsc()
+        ta := t0
+        ca := nat64(apic_lee(0x390))
+        mientras ta - t0 < tsc_hz * 3 div 100 hacer
+            c := nat64(apic_lee(0x390))
+            t := tsc()
+            si c <= ca y t - ta < lím entonces
+                sdc := sdc + (ca - c)
+                sdt := sdt + (t - ta)
+            fin
+            ca := c
+            ta := t
+        fin
+        si sdc = 0 entonces devolver 0 fin
+        ; ini cuentas, a sdc cuentas por sdt vueltas del TSC
+        devolver muldiv(muldiv(ini, sdt, sdc), 1000000, tsc_hz)
     fin
 
     ; todo lo de las interrupciones del procesador que arranca

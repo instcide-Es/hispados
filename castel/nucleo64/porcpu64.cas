@@ -51,6 +51,12 @@ módulo PorCpu64
         rsp_usuario: nat64          ; (syscall) la pila del programa, mientras se cambia
         espacio: nat64              ; el espacio de direcciones en uso (Espacios), o 0: el del núcleo
         esp_gen: nat64              ; hasta qué aviso de vaciar la TLB de ese espacio está al día
+        ; [etapa 11 b] los tics que no han llegado: el procesador parado desde
+        ; fuera (el anfitrión de una máquina virtual que no le da su hilo, o el
+        ; SMM), visto con el TSC entre un tic y el siguiente (Apic64.tic)
+        tsc_tic: nat64              ; el TSC del último tic (0: aún ninguno desde pon_tic)
+        perdidos: nat64             ; los tics que tenían que haber llegado y no (los del temporizador que se juntan en uno)
+        huecos: nat64               ; las veces que entre dos tics ha habido más de tic y medio
     fin
 
     variable bsp: Cpu alineado 64           ; (en su línea de la caché)

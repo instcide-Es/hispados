@@ -193,14 +193,27 @@ entre() {   # SALIDA TEXTO MIN MAX
   local v; v=$(serie "$1" | grep -o -- "$2[0-9]*" | head -1 | grep -o '[0-9]*$')
   [ -n "$v" ] && [ "$v" -ge "$3" ] && [ "$v" -le "$4" ]
 }
-# (de 75 a 110: con el servidor cargado, el TCG de QEMU pierde tics del APIC, nunca da
-# de más; sin carga salen 99 o 100)
-# (y de 50 a 110 por UEFI con 4 procesadores, y sin HPET con 4: el TCG reparte el servidor
-# entre los cuatro; con el servidor cargado han salido 64)
-tics_bien() {   # SALIDA RELOJ [MÍNIMO]: 100 tics en 1 s y entre dos segundos del CMOS
-  local m=${3:-75}
-  entre "$1" "^Tic: " "$m" 110 && hay "$1" "^Tic: [0-9]* tics en 1 s (medido con $2); entre dos cambios del segundo del CMOS: " \
-    && entre "$1" "entre dos cambios del segundo del CMOS: " "$m" 110
+# [etapa 11 b] el tic: lo que se mide es lo del sistema, no lo del anfitrión.
+# Antes se pedían de 75 (o 50) a 110 tics en 1 s, y con el servidor cargado
+# salían 31, 43... La causa: el temporizador del APIC se calibraba poniendo la
+# cuenta y leyendo después la hora (lo de en medio, traducir el código el TCG
+# o el anfitrión sin darle el hilo, contaba como suyo: salía cada 13,9 ms en
+# vez de 10); ahora la cuenta y la hora se leen juntas. Y lo que de verdad no
+# es del sistema, los tics que no llegan porque el anfitrión no le da su hilo
+# al procesador (el APIC junta en uno los que vencen mientras), el núcleo los
+# cuenta con el TSC (Apic64.tic). Se pide: el temporizador, cada 10 ms contra
+# el TSC (de 9,80 a 10,20: lo programado de verdad); los que llegan más los
+# que no, los 100 de 1 s (de 95 a 106) y los de entre dos segundos del CMOS
+# (de 90 a 110); y que lleguen al menos MÍNIMO (30; con KVM, 90).
+tics_bien() {   # SALIDA RELOJ [MÍNIMO]
+  local m=${3:-30} l n p nc pc per
+  l=$(serie "$1" | grep "^Tic: [0-9]* tics en 1 s (medido con $2), [0-9]* que no han llegado ([0-9]* huecos); entre dos cambios del segundo del CMOS: [0-9]* tics y [0-9]* que no han llegado; el temporizador, cada [0-9]*,[0-9][0-9] ms (contra el TSC)$" | head -1)
+  [ -n "$l" ] || return 1
+  n=$(sed 's/^Tic: \([0-9]*\) tics.*/\1/' <<< "$l"); p=$(sed 's/.*), \([0-9]*\) que no han llegado (.*/\1/' <<< "$l")
+  nc=$(sed 's/.*CMOS: \([0-9]*\) tics y.*/\1/' <<< "$l"); pc=$(sed 's/.*tics y \([0-9]*\) que no.*/\1/' <<< "$l")
+  per=$(sed 's/.*cada \([0-9]*\),\([0-9][0-9]\) ms.*/\1\2/' <<< "$l" | sed 's/^0*//')
+  [ "$n" -ge "$m" ] && [ $((n + p)) -ge 95 ] && [ $((n + p)) -le 106 ] && [ $((nc + pc)) -ge 90 ] && [ $((nc + pc)) -le 110 ] \
+    && [ "${per:-0}" -ge 980 ] && [ "$per" -le 1020 ]
 }
 # [etapa 3] lo de los procesadores y el planificador, con N en marcha
 e3_bien() {   # SALIDA N
@@ -216,7 +229,8 @@ e3_bien() {   # SALIDA N
     && grep -q "^Semáforos: 4 productores y 4 consumidores, 10000 cosas por un búfer de 16: la suma, 50005000 (exacta)$" <<< "$v" \
     && entre "$s" "^Prioridades: en el procesador [0-9]*, uno normal y tres de fondo, sin parar, 300 ms: el normal hace el " 90 100 \
     && grep -q "^  y uno interactivo que duerme 10 ms, 10 veces, en ese mismo procesador: se pasa de media [0-9,]* ms (pasa por delante: [1-9][0-9]* expropiaciones)$" <<< "$v" \
-    && entre "$s" "se pasa de media " 0 25 \
+    && grep -q "^  sin los [0-9]* tics que no han llegado (el procesador parado desde fuera): [0-9]*,[0-9] ms$" <<< "$v" \
+    && entre "$s" "^  sin los [0-9]* tics que no han llegado (el procesador parado desde fuera): " 0 25 \
     && { [ "$n" = 1 ] || grep -q "^  y, ya con el marco nuevo en su TLB (lee 0x2222), quitada con aviso (desmapea: 1 aviso por IPI): al [0-9]* le falla la lectura (fallo de página en 0xFFFFD00100000000, con red), como debe$" <<< "$v"; } \
     && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"
 }
@@ -368,7 +382,7 @@ for m in pc q35; do
   S=$T/sinhpet-$m.txt
   if [ $c = 85 ] && hay $S "^  sin HPET$" && hay $S "^Reloj: el reloj de ACPI (sin HPET), a 3,579 MHz$" \
      && hay $S "^  su temporizador: [0-9]* cuentas cada 10 ms (entre 16), medido con el reloj de ACPI; el tic, 100 por segundo, al vector 0x40$" \
-     && tics_bien $S "el reloj de ACPI" 50 && entre $S "^IOAPIC: el canal 0 del 8254, por la GSI 2, al vector 0x3E: " 17 23 \
+     && tics_bien $S "el reloj de ACPI" && entre $S "^IOAPIC: el canal 0 del 8254, por la GSI 2, al vector 0x3E: " 17 23 \
      && hay $S "^  procesadores (MADT): 4 encendidos" && e3_bien $S 4; then
     ok "etapa 2 sin HPET («$m,hpet=off», 4 procesadores): el reloj de ACPI; «$(serie $S | grep '^Tic:')»; «$(serie $S | grep '^IOAPIC:' | cut -d: -f2-)»; y la etapa 3 con el reloj de ACPI (con cerrojo) en los 4"
   else ko "etapa 2 sin HPET («$m») no dice lo que debe (código $c): $(serie $S | grep -E '^Reloj|^Tic|^IOAPIC:|parado' | paste -sd ' ') $(e3_dice $S)"; fi
@@ -1047,7 +1061,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   if [ $c = 85 ] && grep -q "páginas de 1 GB: sí" <<< "$S" && grep -q "; 4 procesadores lógicos en el paquete" <<< "$S" \
      && grep -q "^  0x00000001.*disponible$" <<< "$S" && grep -q "^Memoria: 2,9 GB libres" <<< "$S" && grep -q "en páginas de 1 GB: [1-9]" <<< "$S" \
      && grep -q "; de 1 GB, también$" <<< "$S" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$S" \
-     && grep -q "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" <<< "$S" && tics_bien "$T/uefi-max.txt" "el HPET" 50 \
+     && grep -q "^  procesadores (MADT): 4 encendidos (APIC 0, 1, 2, 3)$" <<< "$S" && tics_bien "$T/uefi-max.txt" "el HPET" \
      && grep -q "^IOAPIC: el temporizador 0 del HPET, por la GSI 1[6-9], al vector 0x3E: 20 de 20 interrupciones (cada 10 ms)$" <<< "$S" \
      && grep -q "^PCI (PCIe, por ECAM): [0-9]* funciones en los buses 0 a 255, 1 BAR por encima de 4 GB$" <<< "$S" \
      && grep -q "^      BAR4 0x[0-9A-F]\{9,\}, 16 KB de memoria de 64 bits (por encima de 4 GB), precargable$" <<< "$S" \
@@ -1066,7 +1080,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # [etapa 2] por UEFI sin HPET (q35, el reloj de ACPI) y con «pc» (i440FX: PCI por los puertos)
   uefi "$T/uefi-sinhpet.txt" -machine q35,hpet=off -m 256 -smp 4 -monitor none; c=$?
   S=$(serie "$T/uefi-sinhpet.txt")
-  if [ $c = 85 ] && grep -q "^Reloj: el reloj de ACPI (sin HPET), a 3,579 MHz$" <<< "$S" && tics_bien "$T/uefi-sinhpet.txt" "el reloj de ACPI" 50 \
+  if [ $c = 85 ] && grep -q "^Reloj: el reloj de ACPI (sin HPET), a 3,579 MHz$" <<< "$S" && tics_bien "$T/uefi-sinhpet.txt" "el reloj de ACPI" \
      && grep -q "^IOAPIC: el canal 0 del 8254, por la GSI 2" <<< "$S" && e3_bien "$T/uefi-sinhpet.txt" 4; then
     ok "por UEFI sin HPET (q35, 4 procesadores): el reloj de ACPI; «$(grep '^Tic:' <<< "$S")»"
   else ko "por UEFI sin HPET no dice lo que debe (código $c): $(grep -E '^Reloj|^Tic|^IOAPIC:|parado' <<< "$S" | paste -sd ' ')"; fi
@@ -1454,6 +1468,11 @@ if [ -w /dev/kvm ]; then
   if [ $c = 85 ] && e4_bien "$T/kvm1.txt" 4 && e7_bien "$T/kvm1.txt" 4; then
     ok "etapa 11, con KVM (-cpu host, q35, 4 procesadores): las etapas 4 y 7 enteras (los programas, musl, C++, la letra, MRED, MSONIDO), todo en orden"
   else ko "etapa 11, con KVM (-cpu host) no sale (código $c): $(e4_dice "$T/kvm1.txt") $(serie "$T/kvm1.txt" | grep -E 'Doble|parado|  MAL' | head -5 | paste -sd '|')"; fi
+  # [etapa 11 b] con KVM, el tiempo es el de verdad: aquí cuentan el tic (90 o más de los 100, el
+  # temporizador cada 10 ms contra el TSC) y el planificador (etapa 3 entera, el interactivo incluido)
+  if [ $c = 85 ] && tics_bien "$T/kvm1.txt" "el HPET" 90 && e3_bien "$T/kvm1.txt" 4; then
+    ok "etapa 11 b, con KVM: el tic ($(serie "$T/kvm1.txt" | grep '^Tic:' | cut -d';' -f1,3 | sed 's/^Tic: //')) y el planificador (la etapa 3, 4 procesadores; el interactivo: $(serie "$T/kvm1.txt" | grep -o 'se pasa de media [0-9,]* ms'))"
+  else ko "etapa 11 b, con KVM, el tic o el planificador no van: $(serie "$T/kvm1.txt" | grep -E '^Tic:|^Prioridades|se pasa de media|sin los|MAL' | head -6 | paste -sd '|')"; fi
   mb1 "apagar sinred" "$T/kvm2.txt" 256 -enable-kvm -machine pc; c=$?
   if [ $c = 85 ] && e4_bien "$T/kvm2.txt" 1 && hay "$T/kvm2.txt" "^MRED: todo bien (126 pruebas)$"; then
     ok "etapa 11, con KVM (el procesador de QEMU por omisión, «pc», 1 procesador, sinred: solo «lo»): las etapas 4 y 7, y MRED por 127.0.0.1"

@@ -344,18 +344,30 @@ módulo PrSmp64
     variable para_ya: nat64
     variable hecho_p: arreglo [4] de nat64
     variable pasado: nat64              ; lo que se pasa el interactivo, en total
+    variable pasado_neto: nat64         ; [etapa 11 b] lo mismo, sin los tics que no han llegado (el procesador parado desde fuera)
+    variable perdidos_i: nat64          ; [etapa 11 b] esos tics
 
     ; uno interactivo que duerme 10 ms, 10 veces, donde corren los de abajo
     función interactivo(arg: nat64)
         variable r: nat32
-        variable t0, d: nat64
+        variable t0, d, p0, dp: nat64
+        variable c: puntero a Cpu
         pasado := 0
+        pasado_neto := 0
+        perdidos_i := 0
         r := 0
         mientras r < 10 hacer
+            c := yo()
+            p0 := c.perdidos
             t0 := ahora_ns()
             duerme_ms(10)
             d := ahora_ns() - t0
+            c := yo()
+            dp := c.perdidos - p0
+            perdidos_i := perdidos_i + dp
             si d > 10000000 entonces pasado := pasado + (d - 10000000) fin
+            ; lo que el procesador ha estado parado desde fuera no es del planificador
+            si d > 10000000 + dp * 10000000 entonces pasado_neto := pasado_neto + (d - 10000000 - dp * 10000000) fin
             r := r + 1
         fin
     fin
@@ -398,6 +410,7 @@ módulo PrSmp64
         escribir("Prioridades: en el procesador ", k, ", uno normal y tres de fondo, sin parar, 300 ms: el normal hace el ", tanto_por_ciento(hecho_p[0], total), " % del trabajo\n")
         si tanto_por_ciento(hecho_p[0], total) < 90 entonces mal("el hilo normal no pasa por delante de los de fondo") fin
         escribir("  y uno interactivo que duerme 10 ms, 10 veces, en ese mismo procesador: se pasa de media ", pasado div 10000000, ",", (pasado div 1000000) mod 10, " ms (pasa por delante: ", expropiaciones - e0, " expropiaciones)\n")
+        escribir("  sin los ", perdidos_i, " tics que no han llegado (el procesador parado desde fuera): ", pasado_neto div 10000000, ",", (pasado_neto div 1000000) mod 10, " ms\n")
         si expropiaciones = e0 entonces mal("el interactivo no pasa por delante del normal (ninguna expropiación)") fin
     fin
 
