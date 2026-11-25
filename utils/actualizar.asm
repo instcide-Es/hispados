@@ -36,15 +36,40 @@
 ;  HTTPS, así que el archivo y los paquetes tienen que estar en un servidor
 ;  propio por HTTP. Necesita HSPRED y la red configurada (ver docs/RED.md).
 ;
-;  SEGURIDAD: primero baja el paquete y lo desempaqueta DEL TODO en una carpeta
-;  temporal (C:\ACTUALIZA) y solo si todo está bien aplica los ficheros en el
-;  sitio; si falla la descarga o el desempaquetado, aborta sin tocar nada.
+;  SEGURIDAD (0.9.31, docs/RED.md «La firma de versiones.txt»): la lista
+;  tiene que llevar la firma Ed25519 de Hispa-DOS (clave_act, compilada aquí)
+;  y el paquete, el SHA-256 y el tamaño que dice ella; se comprueba ANTES de
+;  abrirlo. Luego se lee una vez sin escribir nada (nombres que no salgan de
+;  la carpeta, la suma, el sitio que hace falta), se desempaqueta DEL TODO en
+;  una carpeta temporal (C:\ACTUALIZA) y solo entonces se aplica, cada archivo
+;  con copia segura (NOMBRE.$$$ y cambio de nombre al final). Si algo falla
+;  antes de aplicar, no se toca nada; si falla algún archivo al aplicar, se
+;  dice y se sale con nivel de error 1.
 ; =============================================================================
         cpu 386
         bits 16
         org 0x100
 
 %include "version.inc"
+
+; [FIRMA] con las cuentas de la firma, todo (código, datos y pila) ya no cabía
+; en los 64 KB del .COM: el búfer de copiar, de 16 KB a 4 KB, y la cola de la
+; red, de 8 paquetes a 6. tools/tam_com.py mira (en «tam_total») que quepa.
+%define BUFSZ 4096
+%define RQ_N 6
+
+        jmp start
+tam_total dd prog_end               ; (en 0x103: lo mira tools/tam_com.py)
+        times 0x20 - ($ - $$) db 0
+; ---- [FIRMA] las cuentas en C (utils/firma/cripto16.c, «gcc -m16»): SHA-256
+; y la comprobación de una firma Ed25519. Están enlazadas para 0x120 (justo
+; aquí); cripto16.inc trae sus direcciones (CR_FIRMA, CR_SHA_INI...). Se las
+; llama con «call dword» (66 E8 rel32: con «o32 call» NASM deja el
+; desplazamiento de 16 bits), los argumentos de 32 bits en la pila (cdecl) y la
+; parte alta de ESP a cero.
+cripto16:
+        incbin "cripto16.bin"
+%include "cripto16.inc"
 
 HDR_MAX      equ 2048
 BODY_MAX     equ 4096
@@ -130,7 +155,11 @@ start:
         mov byte [dl_modo], 0
         call http_get
         jc error
-        mov byte [body_buf + BODY_MAX - 1], 0
+        mov bx, [body_len]
+        mov byte [body_buf + bx], 0
+        ; [FIRMA] sin una firma buena de Hispa-DOS no se cree nada de la lista
+        call comprueba_lista
+        jc error
         call parse_versiones
         call decide
         call mostrar_veredicto      ; termina con red_salir salvo si instala
@@ -361,6 +390,124 @@ lee_gama:
 .b2:
         ret
 
+;  [FIRMA] La firma de versiones.txt (docs/RED.md, «La firma de versiones.txt»)
+;  La lista (body_buf, body_len octetos) acaba con una línea
+;      firma=ed25519 <128 cifras hex>
+;  que es la firma Ed25519, con la clave de Hispa-DOS (clave_act, compilada
+;  aquí), de ETIQUETA + todo lo que va por delante de esa línea. Si es buena,
+;  corta la lista en esa línea (lo de detrás no se lee) y CF=0; si no, CF=1 y
+;  SI = el mensaje. La hace tools/firma_versiones.py.
+; =============================================================================
+comprueba_lista:
+        mov cx, [body_len]
+        cmp cx, BODY_MAX - 1
+        jae .grande                 ; no ha cabido entera: la firma no se ve
+        mov si, body_buf
+        mov bx, body_buf
+        add bx, cx                  ; BX = el final
+.linea:
+        cmp si, bx
+        jae .sinfirma
+        mov di, k_firma_eq          ; ¿empieza por «firma=»?
+        call prefijo
+        jnc .hallada
+.salta:
+        cmp si, bx
+        jae .sinfirma
+        lodsb
+        cmp al, 10
+        jne .salta
+        jmp .linea
+.hallada:
+        mov ax, si
+        sub ax, body_buf
+        mov [firmados], ax          ; lo firmado: hasta aquí
+        add si, 6
+        call blancos
+        mov di, k_ed25519
+        call prefijo
+        jc .malformada
+        add si, 7
+        call blancos
+        mov di, firma_bin
+        mov cx, 64
+        call hex_a_bin
+        jc .malformada
+        ; las cuentas (unos segundos en un 386), con la pila en buf, que aún
+        ; no se usa (las cuentas de la curva piden unos KB de pila)
+        mov [sv_sp2], sp
+        mov sp, buf + BUFSZ - 16
+        movzx esp, sp
+        push dword clave_act
+        movzx eax, word [firmados]
+        push eax
+        push dword body_buf
+        push dword ETIQ_LEN
+        push dword etiqueta
+        push dword firma_bin
+        call dword CR_FIRMA
+        mov sp, [sv_sp2]
+        cmp eax, 1
+        jne .mala
+        mov bx, [firmados]          ; lo de detrás de la firma no cuenta
+        mov byte [body_buf + bx], 0
+        clc
+        ret
+.grande:
+        mov si, m_firgrande
+        stc
+        ret
+.sinfirma:
+        mov si, m_sinfirma
+        stc
+        ret
+.malformada:
+        mov si, m_firmal
+        stc
+        ret
+.mala:
+        mov si, m_firmala
+        stc
+        ret
+
+; SI = cifras hex -> DI, CX octetos; CF=1 si falta alguna o no es hex.
+; SI queda detrás.
+hex_a_bin:
+.o:
+        call .cifra
+        jc .r
+        shl al, 4
+        mov ah, al
+        call .cifra
+        jc .r
+        or al, ah
+        stosb
+        loop .o
+        clc
+.r:
+        ret
+.cifra:
+        lodsb
+        cmp al, '0'
+        jb .no
+        cmp al, '9'
+        jbe .dig
+        or al, 0x20
+        cmp al, 'a'
+        jb .no
+        cmp al, 'f'
+        ja .no
+        sub al, 'a' - 10
+        clc
+        ret
+.dig:
+        sub al, '0'
+        clc
+        ret
+.no:
+        stc
+        ret
+
 ; =============================================================================
 ;  Leer versiones.txt (en body_buf, acaba en 0) a las tablas de secciones.
 ;  Entiende secciones [x.y.z] con claves cpu/ram/disco/nivel/edicion/paquete/
@@ -506,6 +653,10 @@ nueva_seccion:
         mov byte [v_cpu + bx], 0
         mov byte [v_haspaq + bx], 0
         mov byte [v_cumple + bx], 0
+        mov byte [v_hassha + bx], 0     ; [FIRMA]
+        mov bx, [cur_i]
+        shl bx, 2
+        mov dword [v_oct + bx], 0xFFFFFFFF  ; [FIRMA] sin «octetos=»: no se mira
         mov bx, [cur_i]
         shl bx, 1
         mov word [v_disco + bx], 0
@@ -580,7 +731,36 @@ aplica_clave:
         mov bp, k_descarga
         call kcmp
         jnc .descarga
+        mov di, p_clave
+        mov bp, k_sha256
+        call kcmp
+        jnc .sha256
+        mov di, p_clave
+        mov bp, k_octetos
+        call kcmp
+        jnc .octetos
 .r:
+        ret
+.sha256:                            ; [FIRMA] el SHA-256 del paquete
+        mov si, p_valor
+        mov di, [cur_i]
+        shl di, 5
+        add di, v_sha
+        mov cx, 32
+        call hex_a_bin
+        jc .r
+        cmp byte [si], 0            ; justo 64 cifras
+        jne .r
+        mov bx, [cur_i]
+        mov byte [v_hassha + bx], 1
+        ret
+.octetos:                           ; [FIRMA] el tamaño del paquete
+        mov si, p_valor
+        call parse_num
+        jc .r
+        mov bx, [cur_i]
+        shl bx, 2
+        mov [v_oct + bx], eax
         ret
 .cpu:
         mov si, p_valor
@@ -880,6 +1060,7 @@ decide:
         mov [best_notify], bx
 .r2:
         mov al, [v_haspaq + bx]
+        and al, [v_hassha + bx]     ; [FIRMA] sin SHA-256 firmado no se instala
         test al, al
         jz .next
         mov [mn_a], bx
@@ -1248,6 +1429,7 @@ do_install:
         call cp_asciiz
         ; limpiar cualquier temporal anterior y crear la carpeta
         call limpia_temp
+        jc .falla_temp
         mov dx, tdir_path
         mov ah, 0x39
         int 0x21
@@ -1260,16 +1442,34 @@ do_install:
         call cp_asciiz
         call http_get
         jc .falla_desc
-        ; desempaquetar
-        mov si, m_desempaq
+        ; [FIRMA] el paquete entero tiene que ser el de la lista firmada
+        ; (SHA-256 y tamaño), ANTES de abrirlo
+        mov si, m_compsha
         call puts
+        call sha_paquete
+        jc .falla_sha
+        ; 1.ª pasada: solo leer (los nombres, la suma, lo que ocupa)
+        mov byte [up_escribe], 0
         call unpack_paq
         jc .falla_paq
+        call mira_sitio
+        jc .falla_sitio
+        ; 2.ª pasada: desempaquetar en el temporal
+        mov si, m_desempaq
+        call puts
+        mov byte [up_escribe], 1
+        call unpack_paq
+        jc .falla_paq
+        mov dx, tpaq_path           ; el .PAQ ya no hace falta: deja sitio
+        mov ah, 0x41
+        int 0x21
         ; aplicar en el sitio
         mov si, m_aplicando
         call puts
         call apply_update
         call limpia_temp
+        cmp word [nfailed], 0
+        jne .a_medias
         mov si, m_actok
         call puts
         mov ax, [best_inst]
@@ -1279,6 +1479,24 @@ do_install:
         mov si, m_actok2
         call puts
         clc
+        ret
+.a_medias:
+        ; algún archivo no se ha podido poner: el viejo sigue en su sitio
+        ; (copia segura), pero el sistema queda mezclado. Decirlo claro.
+        mov si, m_amedias
+        call puts
+        movzx eax, word [nfailed]
+        call putnum
+        mov si, m_amedias2
+        call puts
+        stc
+        ret
+.falla_temp:
+        mov si, m_notemp
+        call puts
+        mov si, m_abortado
+        call puts
+        stc
         ret
 .falla_desc:
         push si
@@ -1290,16 +1508,123 @@ do_install:
         call puts
         stc
         ret
-.falla_paq:
+.falla_sha:
+        push si
         call limpia_temp
-        mov si, m_paqmal
+        pop si
+        call puts
+        mov si, m_abortado
+        call puts
+        stc
+        ret
+.falla_sitio:
+        push si
+        call limpia_temp
+        pop si
+        call puts
+        movzx eax, word [up_mib]
+        call putnum
+        mov si, m_sinsitio2
+        call puts
+        mov si, m_abortado
+        call puts
+        stc
+        ret
+.falla_paq:
+        push word [up_msg]
+        call limpia_temp
+        pop si
         call puts
         mov si, m_abortado
         call puts
         stc
         ret
 
+; [FIRMA] el SHA-256 y el tamaño del paquete bajado (C:\ACTUALIZA.PAQ) tienen
+; que ser los de la lista firmada (best_inst). CF=1 y SI = el mensaje si no.
+sha_paquete:
+        mov dx, tpaq_path
+        mov ax, 0x3D00
+        int 0x21
+        jc .mal
+        mov [paqfh], ax
+        mov dword [sha_tot], 0
+        movzx esp, sp
+        call dword CR_SHA_INI
+.l:
+        mov bx, [paqfh]
+        mov dx, buf
+        mov cx, BUFSZ
+        mov ah, 0x3F
+        int 0x21
+        jc .mal_c
+        test ax, ax
+        jz .fin
+        movzx eax, ax
+        add [sha_tot], eax
+        movzx esp, sp
+        push eax
+        push dword buf
+        call dword CR_SHA_MAS
+        add sp, 8
+        jmp .l
+.fin:
+        mov bx, [paqfh]
+        mov ah, 0x3E
+        int 0x21
+        movzx esp, sp
+        push dword sha_calc
+        call dword CR_SHA_FIN
+        add sp, 4
+        mov bx, [best_inst]
+        shl bx, 2
+        mov eax, [v_oct + bx]
+        cmp eax, 0xFFFFFFFF
+        je .sinoct
+        cmp eax, [sha_tot]
+        jne .mal
+.sinoct:
+        mov si, sha_calc
+        mov di, [best_inst]
+        shl di, 5
+        add di, v_sha
+        mov cx, 32
+        repe cmpsb
+        jne .mal
+        clc
+        ret
+.mal_c:
+        mov bx, [paqfh]
+        mov ah, 0x3E
+        int 0x21
+.mal:
+        mov si, m_shamal
+        stc
+        ret
+
+; ¿cabe? Hacen falta, libres en la unidad de arranque, lo que ocupa
+; desempaquetado (en el temporal) otra vez (los archivos nuevos al aplicar),
+; más 1 MB de margen. [up_mib] = los MB que hacen falta; CF=1 y SI si no.
+mira_sitio:
+        mov eax, [paq_total]
+        shr eax, 19                 ; dos veces lo desempaquetado, en MB
+        add eax, 1
+        mov [up_mib], ax
+        push eax
+        mov dl, [boot_num]
+        call det_disco
+        pop edx
+        cmp eax, edx
+        jb .no
+        clc
+        ret
+.no:
+        mov si, m_sinsitio
+        stc
+        ret
+
 ; borrar el temporal: el .PAQ y el árbol \ACTUALIZA
+; CF=1 si \ACTUALIZA no se ha podido borrar del todo
 limpia_temp:
         mov dx, tpaq_path
         mov ax, 0x4301
@@ -1308,8 +1633,32 @@ limpia_temp:
         mov dx, tpaq_path
         mov ah, 0x41
         int 0x21
+        ; ¿está la carpeta (o un archivo con ese nombre)?
+        mov dx, arb_dta
+        mov ah, 0x1A
+        int 0x21
+        mov dx, tdir_path
+        mov cx, 0x17
+        mov ah, 0x4E
+        int 0x21
+        jc .no_esta
+        test byte [arb_dta + 0x15], 0x10
+        jnz .carpeta
+        mov dx, tdir_path           ; un archivo C:\ACTUALIZA: fuera
+        mov ax, 0x4301
+        xor cx, cx
+        int 0x21
+        mov dx, tdir_path
+        mov ah, 0x41
+        int 0x21
+        ret
+.carpeta:
+        mov byte [arb_prof], 0
         mov si, tdir_path
         call borra_arbol
+        ret
+.no_esta:
+        clc
         ret
 
 ; aplicar \ACTUALIZA sobre la unidad de arranque (motor de copiaarbol.inc)
@@ -1324,6 +1673,7 @@ apply_update:
         mov word [nfailed], 0
         mov word [nkept], 0
         call backup_cfg
+        mov byte [seguro], 1        ; nada del sistema se vacía antes de tener el nuevo
         mov byte [keepdata], 1
         mov byte [keep], 0
         mov byte [fix], 0
@@ -1368,6 +1718,7 @@ apply_update:
         mov di, s_root
         call copy_set
         mov byte [fix], 0
+        mov byte [seguro], 0
         ret
 
 ; [HISPA-486] \HISPA32 del paquete (los programas de 32 bits), si la trae
@@ -1413,7 +1764,9 @@ copia_inet:
 .r:
         ret
 
-; guardar CONFIG.SYS y AUTOEXEC.BAT del usuario como .ANT (unidad de arranque)
+; guardar una COPIA de CONFIG.SYS y AUTOEXEC.BAT del usuario como .ANT (unidad
+; de arranque). Copia, no cambia el nombre: si el paquete no los trae o algo
+; falla, los del usuario siguen en su sitio.
 backup_cfg:
         mov al, [boot_letter]
         mov [bk_cs], al
@@ -1428,32 +1781,37 @@ backup_cfg:
         call backup_one
         ret
 
-; renombrar SI (origen) a DI (.ANT); borra antes un .ANT anterior
+; copiar SI (origen) a DI (.ANT), si el origen existe; pisa un .ANT anterior
 backup_one:
         push si
         push di
-        mov dx, di
-        mov ax, 0x4301
-        xor cx, cx
-        int 0x21
-        mov dx, di
-        mov ah, 0x41
-        int 0x21
-        pop di
-        pop si
-        push si
-        push di
         mov dx, si
-        mov ah, 0x56
+        mov ax, 0x4300
         int 0x21
+        jc .r                       ; no lo hay: nada que guardar
+        push di
+        mov di, path_s              ; SI (origen) -> path_s
+        call strcpy
+        pop si
+        mov di, path_d              ; DI (.ANT) -> path_d
+        call strcpy
+        mov byte [fix], 0
+        mov byte [seguro], 0
+        call copy_file
+.r:
         pop di
         pop si
         ret
 
 ; =============================================================================
 ;  Desempaquetar C:\ACTUALIZA.PAQ en C:\ACTUALIZA (formato PAQ1, ver docs)
+;  [up_escribe]=0: solo leerlo (comprobar los nombres y la suma y contar lo
+;  que ocupa en [paq_total]), sin escribir nada; =1: desempaquetarlo.
+;  CF=1 si no vale ([up_msg] = el mensaje).
 ; =============================================================================
 unpack_paq:
+        mov word [up_msg], m_paqmal
+        mov dword [paq_total], 0
         mov dx, tpaq_path
         mov ax, 0x3D00
         int 0x21
@@ -1496,7 +1854,12 @@ unpack_paq:
         jc .errc
         mov eax, [hdrbuf]
         mov [datlen], eax
-        call ruta_destino
+        add [paq_total], eax
+        jc .errc
+        call ruta_destino           ; [FIRMA] nada fuera de \ACTUALIZA
+        jc .errnom
+        cmp byte [up_escribe], 0
+        je .solo_leer
         call mkpath
         mov dx, destpath
         xor cx, cx
@@ -1511,6 +1874,14 @@ unpack_paq:
         int 0x21
         inc dword [paq_i]
         jmp .loop
+.solo_leer:
+        call copia_datos            ; (sin escribir: solo la suma)
+        jc .errc
+        inc dword [paq_i]
+        jmp .loop
+.errnom:
+        mov word [up_msg], m_paqnombre
+        jmp .errc
 .fin:
         mov bx, [paqfh]
         mov ah, 0x3E
@@ -1581,6 +1952,8 @@ copia_datos:
         cmp ax, cx
         jne .err
         call suma_buf
+        cmp byte [up_escribe], 0
+        je .siguiente
         mov bx, [outfh]
         mov cx, [chunk]
         mov dx, buf
@@ -1589,6 +1962,7 @@ copia_datos:
         jc .err
         cmp ax, cx
         jne .err
+.siguiente:
         mov eax, [datlen]
         sub eax, [chunk]
         mov [datlen], eax
@@ -1624,8 +1998,59 @@ suma_buf:
         pop cx
         ret
 
-; destpath = tdir_path + "\" + nombuf (con '/' -> '\')
+; destpath = tdir_path + "\" + nombuf (con '/' -> '\'). [FIRMA] CF=1 si el
+; nombre podría salir de \ACTUALIZA o no es un nombre de archivo: empieza por
+; '\' o '/', lleva ':' (una unidad), '..', '*', '?', caracteres de control o
+; espacios, un trozo vacío («A\\B», «A\»), o más carpetas de las que sabe
+; borrar borra_arbol (ARB_MAX).
 ruta_destino:
+        mov si, nombuf
+        mov al, [si]
+        cmp al, '\'
+        je .mal
+        cmp al, '/'
+        je .mal
+        xor dx, dx                  ; DX = separadores
+        xor ah, ah                  ; AH = letras del trozo
+.v:
+        lodsb
+        test al, al
+        jz .vfin
+        cmp al, ' '
+        jbe .mal
+        cmp al, 0x7F
+        je .mal
+        cmp al, ':'
+        je .mal
+        cmp al, '*'
+        je .mal
+        cmp al, '?'
+        je .mal
+        cmp al, '\'
+        je .sep
+        cmp al, '/'
+        je .sep
+        cmp al, '.'
+        jne .letra
+        cmp byte [si], '.'
+        je .mal
+.letra:
+        inc ah
+        jmp .v
+.sep:
+        test ah, ah
+        jz .mal
+        xor ah, ah
+        inc dx
+        cmp dx, ARB_MAX - 1
+        jae .mal
+        jmp .v
+.mal:
+        stc
+        ret
+.vfin:
+        test ah, ah
+        jz .mal
         mov si, tdir_path
         mov di, destpath
         call strcpy
@@ -1644,6 +2069,7 @@ ruta_destino:
         jmp .l
 .e:
         mov byte [di], 0
+        clc
         ret
 
 ; crear los directorios intermedios de destpath (ignora los que ya existan)
@@ -1673,7 +2099,9 @@ mkpath:
 
 ; =============================================================================
 ;  Borrar recursivamente un árbol de directorios (el temporal)
-;  SI = ruta ASCIIZ del directorio a vaciar y borrar
+;  SI = ruta ASCIIZ del directorio a vaciar y borrar. CF=1 si algo no se ha
+;  podido borrar (o hay más de ARB_MAX niveles): entonces se para ahí, en vez
+;  de buscarlo otra vez y otra (el bucle sin fin de antes de la 0.9.31).
 ; =============================================================================
 borra_arbol:
         push si
@@ -1683,7 +2111,7 @@ borra_arbol:
         int 0x21
         call arb_patron
         mov dx, arb_pat
-        mov cx, 0x06
+        mov cx, 0x07
         mov ah, 0x4E
         int 0x21
         jc .fd
@@ -1696,6 +2124,7 @@ borra_arbol:
         mov dx, arb_full_b
         mov ah, 0x41
         int 0x21
+        jc .falla
         jmp .ff
 .fd:
         mov dx, arb_dta
@@ -1703,7 +2132,7 @@ borra_arbol:
         int 0x21
         call arb_patron
         mov dx, arb_pat
-        mov cx, 0x10
+        mov cx, 0x17
         mov ah, 0x4E
         int 0x21
 .dl:
@@ -1713,13 +2142,14 @@ borra_arbol:
         cmp byte [arb_dta + 0x1E], '.'
         je .dn
         call arb_sub
-        jc .dn                      ; demasiada profundidad: dejarlo
+        jc .falla                   ; demasiada profundidad
         push si
         mov si, di
         inc byte [arb_prof]
         call borra_arbol
         dec byte [arb_prof]
         pop si
+        jc .falla
         jmp .fd
 .dn:
         mov ah, 0x4F
@@ -1728,8 +2158,16 @@ borra_arbol:
 .rm:
         pop si
         mov dx, si
+        mov ax, 0x4301              ; (sin solo lectura, por si acaso)
+        xor cx, cx
+        int 0x21
+        mov dx, si
         mov ah, 0x3A
         int 0x21
+        ret
+.falla:
+        pop si
+        stc
         ret
 
 ; arb_pat = [si] + "\*.*"
@@ -2423,6 +2861,11 @@ carga_hspred:
 %include "util.inc"
 %include "red.inc"
 
+%ifdef CLAVE_PRUEBA
+%include "../tests/firma/clave_prueba.inc"   ; SOLO build/ACTPRUEB.COM (pruebas)
+%else
+%include "clave_firma.inc"          ; la clave pública de Hispa-DOS
+%endif
 m_uso       db "Busca por la red una versión más nueva o una edición más rica de", 13, 10
             db "Hispa-DOS que la instalada (", VER_STR, ") y, si el equipo la aguanta y", 13, 10
             db "quieres, la descarga y la instala en el sitio (conserva tus datos y", 13, 10
@@ -2435,6 +2878,7 @@ m_uso       db "Busca por la red una versión más nueva o una edición más ric
             db "versiones y sus requisitos (ver docs/RED.md).", 13, 10
             db 13, 10
             db "Solo HTTP sin cifrar: las direcciones https:// todavía no funcionan.", 13, 10
+            db "Solo instala lo que lleve la firma de Hispa-DOS (clave ", CLAVE_HUELLA, "...).", 13, 10
             db "Necesita HSPRED y la red configurada (ver CONFRED).", 13, 10, 0
 m_cargando  db "Cargando el controlador de red (HSPRED)...", 13, 10, 0
 m_mirando   db "Buscando actualizaciones de Hispa-DOS ", VER_STR, "...", 13, 10, 0
@@ -2486,6 +2930,26 @@ m_actok     db "Actualizado a ", 0
 m_actok2    db ". Reinicia para usar la nueva versión.", 13, 10, 0
 m_abortado  db "No se ha cambiado nada en el sistema.", 13, 10, 0
 m_paqmal    db "El paquete bajado no es válido o está incompleto.", 13, 10, 0
+m_paqnombre db "El paquete trae un archivo con un nombre no permitido (fuera de su", 13, 10
+            db "carpeta); no se instala.", 13, 10, 0
+m_compsha   db "Comprobando que el paquete es el de la lista firmada...", 13, 10, 0
+m_shamal    db "El paquete bajado no es el que dice la lista firmada de Hispa-DOS", 13, 10
+            db "(su SHA-256 o su tamaño no cuadran); no se instala.", 13, 10, 0
+m_sinsitio  db "No hay sitio en el disco para la actualización: hacen falta ", 0
+m_sinsitio2 db " MB libres.", 13, 10, 0
+m_notemp    db "No se ha podido vaciar la carpeta temporal \ACTUALIZA (bórrela a mano).", 13, 10, 0
+m_amedias   db "ATENCIÓN: no se han podido poner todos los archivos (fallan ", 0
+m_amedias2  db "). Los que", 13, 10
+            db "fallan siguen como estaban, pero el sistema ha quedado mezclado entre", 13, 10
+            db "dos versiones: haga sitio en el disco y vuelva a ejecutar ACTUALIZAR, o", 13, 10
+            db "instale desde la memoria USB (INSTALAR).", 13, 10, 0
+m_sinfirma  db "La lista de versiones del servidor no lleva la firma de Hispa-DOS:", 13, 10
+            db "no se instala nada (puede no ser del servidor de verdad).", 0
+m_firmal    db "La firma de la lista de versiones está mal escrita: no se instala nada.", 0
+m_firmala   db "La firma de la lista de versiones NO es buena: o la ha cambiado alguien", 13, 10
+            db "por el camino o no es de Hispa-DOS. No se instala nada.", 0
+m_firgrande db "La lista de versiones es demasiado larga para comprobar su firma:", 13, 10
+            db "no se instala nada.", 0
 m_redir     db "El servidor manda a otra dirección: ", 0
 m_muchas    db "Demasiadas redirecciones.", 0
 m_https     db "Las direcciones https:// (cifradas) todavía no funcionan en Hispa-DOS;", 13, 10
@@ -2523,6 +2987,12 @@ k_nivel     db "NIVEL", 0
 k_paquete   db "PAQUETE", 0
 k_edicion   db "EDICION", 0
 k_gama      db "GAMA", 0
+k_sha256    db "SHA256", 0          ; [FIRMA]
+k_octetos   db "OCTETOS", 0
+k_firma_eq  db "FIRMA=", 0
+k_ed25519   db "ED25519", 0
+etiqueta    db "HISPADOS-VERSIONES 1", 10   ; lo que va delante de lo firmado
+ETIQ_LEN    equ $ - etiqueta
 edi_ruta    db "A:\HISPADOS\EDICION.INI", 0
 h32_ruta    db "A:\ACTUALIZA\HISPA32", 0
 s_h32dir    db "\HISPA32\", 0
@@ -2629,6 +3099,13 @@ inst_gama   resw 1                  ; la gama de lo instalado (EDICION.INI)
 v_cpu       resb MAX_VER
 v_haspaq    resb MAX_VER
 v_cumple    resb MAX_VER
+v_hassha    resb MAX_VER            ; [FIRMA] trae «sha256=»
+v_oct       resd MAX_VER            ; [FIRMA] «octetos=» (FFFFFFFF: no lo dice)
+v_sha       resb MAX_VER * 32       ; [FIRMA] el SHA-256 de cada paquete
+firmados    resw 1                  ; [FIRMA] octetos de la lista firmados
+firma_bin   resb 64
+sha_calc    resb 32
+sv_sp2      resw 1
 v_str       resb MAX_VER * V_STRSZ
 v_edi       resb MAX_VER * V_EDISZ
 v_paq       resb MAX_VER * V_PAQSZ
@@ -2646,6 +3123,11 @@ paqfh       resw 1
 outfh       resw 1
 paq_n       resd 1
 paq_sum     resd 1
+paq_total   resd 1                  ; [FIRMA] lo que ocupa desempaquetado
+sha_tot     resd 1
+up_escribe  resb 1
+up_msg      resw 1
+up_mib      resw 1
 paq_i       resd 1
 suma_cl     resd 1
 datlen      resd 1

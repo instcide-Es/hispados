@@ -29,6 +29,11 @@
 ;                  que se copiarian (para la barra de progreso de SETUP)
 ;    [cs_aviso]    si no es 0, se llama antes de cada fichero (path_s y
 ;                  path_d ya puestos; debe conservar los registros y la DTA)
+;    [seguro]=1    (ACTUALIZAR) no tocar el archivo de destino hasta tener el
+;                  nuevo entero: se escribe en NOMBRE.$$$ y, si todo ha ido
+;                  bien, el viejo pasa a NOMBRE.$$V, el nuevo a NOMBRE y se
+;                  borra el viejo. Si algo falla, el viejo sigue en su sitio
+;                  (asi un disco lleno no deja el equipo sin KERNEL.SYS)
 ;  Resultados:  [ncopied] copiados, [nfailed] fallidos, [nkept] conservados.
 ;
 ;  Este fichero NO lleva acentos ni enies en cadenas: se incluye sin pasar por
@@ -36,7 +41,9 @@
 ;  No imprime nada: solo trabaja con ficheros (INT 21h).
 ; =============================================================================
 
-BUFSZ       equ 16384
+%ifndef BUFSZ
+BUFSZ       equ 16384           ; (ACTUALIZAR lo pone mas chico: le falta sitio)
+%endif
 
 ; DI = carpeta de destino ("\HISPADOS\"): crearla en la unidad de destino
 make_dir:
@@ -248,6 +255,17 @@ strcpy:
 copy_file:
         mov byte [en_medio], 0
         mov dx, path_d
+        cmp byte [seguro], 0
+        je .dst
+        mov si, path_t              ; [seguro] el nuevo, primero en NOMBRE.$$$
+        mov al, '$'
+        call cf_otro_nombre
+        mov si, path_v              ; y el viejo pasara a NOMBRE.$$V
+        mov al, 'V'
+        call cf_otro_nombre
+        mov dx, path_t
+.dst:
+        mov [cf_dest], dx
         mov ax, 0x4301
         xor cx, cx
         int 0x21                    ; quitar solo lectura de una copia anterior
@@ -256,7 +274,7 @@ copy_file:
         int 0x21
         jc .r
         mov [hs], ax
-        mov dx, path_d
+        mov dx, [cf_dest]
         mov ah, 0x3C
         xor cx, cx
         int 0x21
@@ -294,16 +312,22 @@ copy_file:
         int 0x21
         mov ah, 0x3E
         int 0x21
+        jc .borra                   ; al cerrar no se ha podido escribir todo
         mov bx, [hs]
         mov ah, 0x3E
         int 0x21
+        cmp byte [seguro], 0
+        je .bien
+        jmp cf_cambia               ; [seguro] el nuevo, en su sitio
+.bien:
         clc
         ret
 .both:
         mov bx, [hd]
         mov ah, 0x3E
         int 0x21
-        mov dx, path_d              ; no dejar un archivo a medias
+.borra:
+        mov dx, [cf_dest]           ; no dejar un archivo a medias
         mov ah, 0x41
         int 0x21
 .cl:
@@ -312,6 +336,85 @@ copy_file:
         int 0x21
         stc
 .r:
+        ret
+
+; [seguro] SI = buffer: path_d con la extension cambiada por "$$" + AL
+; (KERNEL.SYS -> KERNEL.$$$ o KERNEL.$$V; sin extension, se le pone)
+cf_otro_nombre:
+        push di
+        mov di, si
+        push si
+        push ax
+        mov si, path_d
+        call strcpy                 ; DI queda sobre el cero
+        pop ax
+        pop si
+        mov bx, di
+.b:
+        cmp bx, si                  ; hacia atras: el punto del nombre
+        je .sinext
+        dec bx
+        cmp byte [bx], '.'
+        je .ext
+        cmp byte [bx], '\'
+        je .sinext
+        cmp byte [bx], ':'
+        je .sinext
+        jmp .b
+.sinext:
+        mov bx, di
+        mov byte [bx], '.'
+.ext:
+        mov byte [bx+1], '$'
+        mov byte [bx+2], '$'
+        mov [bx+3], al
+        mov byte [bx+4], 0
+        pop di
+        ret
+
+; [seguro] path_t (el nuevo, entero) -> path_d; el viejo, a path_v y fuera.
+; CF=1 si no se ha podido (y entonces el viejo sigue en path_d)
+cf_cambia:
+        mov dx, path_v
+        mov ax, 0x4301
+        xor cx, cx
+        int 0x21
+        mov dx, path_v
+        mov ah, 0x41
+        int 0x21                    ; un .$$V de otra vez
+        mov byte [cf_habia], 0
+        mov dx, path_d
+        mov di, path_v
+        mov ah, 0x56
+        int 0x21                    ; el viejo, aparte (si lo hay)
+        jc .nuevo
+        mov byte [cf_habia], 1
+.nuevo:
+        mov dx, path_t
+        mov di, path_d
+        mov ah, 0x56
+        int 0x21
+        jc .vuelve
+        cmp byte [cf_habia], 0
+        je .ok
+        mov dx, path_v
+        mov ah, 0x41
+        int 0x21                    ; ya no hace falta
+.ok:
+        clc
+        ret
+.vuelve:
+        cmp byte [cf_habia], 0
+        je .quita
+        mov dx, path_v              ; el viejo, otra vez a su sitio
+        mov di, path_d
+        mov ah, 0x56
+        int 0x21
+.quita:
+        mov dx, path_t
+        mov ah, 0x41
+        int 0x21
+        stc
         ret
 
 ; en buf (CX bytes): "X:" de la unidad de origen -> "C:", la letra que
@@ -479,6 +582,11 @@ nkept       dw 0
 hs          dw 0
 hd          dw 0
 cs_dir      dw 0
+seguro      db 0                ; [seguro]: ver la cabecera
+cf_habia    db 0
+cf_dest     dw 0
+path_t      times 128 db 0
+path_v      times 128 db 0
 ; prefijo de origen dentro de la unidad (ASCIIZ, vacio por omision). INSTALAR lo
 ; deja vacio; ACTUALIZAR escribe aqui "\ACTUALIZA".
 src_pre     times 68 db 0

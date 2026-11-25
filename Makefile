@@ -434,8 +434,31 @@ $(B)/CONSOLA.COM: utils/consola.asm $(RED_DEP) | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 # ACTUALIZAR (docs/RED.md): busca por HTTP si hay una versión más nueva del
 # sistema (lib/version.inc) y avisa. En el disco es ACTUALIZ.COM (8.3).
- $(B)/ACTUALIZAR.COM: utils/actualizar.asm $(RED_DEP) lib/version.inc lib/copiaarbol.inc lib/equipodet.inc | $(B)
+# [FIRMA] (0.9.31) solo instala lo que diga un versiones.txt firmado (Ed25519,
+# la clave de lib/clave_firma.inc) y un paquete con el SHA-256 de la lista:
+# las cuentas, en C (utils/firma/cripto16.c), con «gcc -m16» (código del 386
+# para el modo real), enlazadas en 0x120 del .COM (cripto16.ld) y metidas con
+# incbin; sus direcciones, en cripto16.inc. ACTPRUEB.COM es lo mismo con la
+# clave DE PRUEBA (tests/firma/): solo para las pruebas, nunca a una imagen.
+CRIPTO16CF = -m16 -march=i386 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables \
+             -fno-builtin -fomit-frame-pointer -mno-80387 -Wall -Werror
+$(B)/gen/lib/cripto16.bin: utils/firma/cripto16.c utils/firma/cripto16.ld | $(B)
+	gcc $(CRIPTO16CF) -c $< -o $(B)/gen/lib/cripto16.o
+	ld -m elf_i386 --no-warn-rwx-segments -T utils/firma/cripto16.ld -o $(B)/gen/lib/cripto16.elf $(B)/gen/lib/cripto16.o
+	@# nada de fuera (libgcc...): todo tiene que estar dentro
+	@test -z "$$(nm -u $(B)/gen/lib/cripto16.o)" || { nm -u $(B)/gen/lib/cripto16.o; exit 1; }
+	nm $(B)/gen/lib/cripto16.elf | awk '$$3 ~ /^cr_/ { printf "%s equ 0x%s\n", toupper($$3), $$1 }' > $(B)/gen/lib/cripto16.inc.tmp
+	mv -f $(B)/gen/lib/cripto16.inc.tmp $(B)/gen/lib/cripto16.inc
+	objcopy -O binary $(B)/gen/lib/cripto16.elf $@
+ $(B)/ACTUALIZAR.COM: utils/actualizar.asm $(RED_DEP) lib/version.inc lib/copiaarbol.inc lib/equipodet.inc lib/clave_firma.inc $(B)/gen/lib/cripto16.bin | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+	python3 tools/tam_com.py $@
+# FIRMATST: las cuentas de la firma, solas, en el equipo (tests/run_firma_tests.sh)
+$(B)/FIRMATST.COM: tests/progs/firmatst.asm $(B)/gen/lib/cripto16.bin | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/ACTPRUEB.COM: $(B)/ACTUALIZAR.COM tests/firma/clave_prueba.inc
+	$(NASM) $(NFLAGS) -DCLAVE_PRUEBA -o $@ $(B)/gen/utils/actualizar.asm
+	python3 tools/tam_com.py $@
 RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CONSOLA.COM $(B)/ACTUALIZAR.COM
 # Wi-Fi de Hispa-486 (docs/WIFI.md): HSPWIFI.COM (residente, packet driver),
 # su núcleo de 32 bits HSPWIFI.BIN (wifi/: la radio Broadcom con los fuentes

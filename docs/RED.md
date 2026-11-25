@@ -108,9 +108,31 @@ para comparar y `VER_EDI`, el nivel de riqueza de la edición instalada).
    `*.INI`/`*.REC`, y guarda el `CONFIG.SYS`/`AUTOEXEC.BAT` del usuario como
    `.ANT`. Nunca formatea. Al acabar borra el temporal y pide reiniciar.
 
-**Seguridad**: si falla la descarga o el desempaquetado, aborta sin tocar nada
-del sistema (primero baja y desempaqueta entero en el temporal; solo cuando
-está completo y la suma de control cuadra, aplica).
+**Seguridad** (desde la 0.9.31; auditoría de Claude Windows del 25/11/2026):
+- `versiones.txt` tiene que llevar la **firma Ed25519** de Hispa-DOS (ver
+  «La firma de versiones.txt», abajo). Sin firma, o con una que no vale, no
+  se cree nada de la lista: ni se instala ni se avisa.
+- El paquete bajado tiene que tener el **SHA-256 y el tamaño** que dice la
+  lista firmada, y se comprueba **antes de abrirlo**.
+- Luego se lee entero una vez **sin escribir nada** (los nombres, la suma, lo
+  que ocupa): un nombre que empiece por `\` o `/`, con `:` (una unidad),
+  `..`, `*`, `?`, espacios o caracteres de control, un trozo vacío o más de 4
+  carpetas, y no se instala nada. Solo entonces se desempaqueta en
+  `C:\ACTUALIZA` y se aplica.
+- Antes de desempaquetar mira que haya sitio de verdad: dos veces lo que
+  ocupa el paquete desempaquetado y 1 MB más.
+- **Copia segura**: cada archivo del sistema se escribe primero como
+  `NOMBRE.$$$`, y solo cuando está entero el viejo pasa a `NOMBRE.$$V`, el
+  nuevo a su nombre y el viejo se borra. Si algo falla (el disco lleno), el
+  viejo sigue en su sitio: ya no se queda el equipo sin `KERNEL.SYS`.
+- `CONFIG.SYS` y `AUTOEXEC.BAT` se **copian** a `.ANT` (antes se les cambiaba
+  el nombre: si el paquete no los traía, el usuario se quedaba sin ellos).
+- Si algún archivo no se ha podido poner, lo dice claro («ATENCIÓN: no se han
+  podido poner todos los archivos») y sale con nivel de error 1; ya no dice
+  «Actualizado».
+- La carpeta temporal se borra sin dar vueltas: si algo no se puede borrar,
+  lo dice y no sigue (antes, con más de 6 niveles, se quedaba en un bucle sin
+  fin cada vez que se ejecutaba).
 
 ### Formato de versiones.txt
 
@@ -164,9 +186,95 @@ paquete=http://actualiza.hispados.es/hispa486-0.9.26.paq
 ```
 
 Para subir una versión en el servidor: cambia `lib/version.inc` y
-`actualiza.hispados.es/versiones.txt`, y sube el `.PAQ` generado con
+`actualiza.hispados.es/versiones.txt`, sube el `.PAQ` generado con
 `tools/paquete.py` (`make paq` hace `build/hispados.paq` de la imagen USB de
-Hispa-386 y `make paq486`, `build/hispa486.paq` de la de Hispa-486).
+Hispa-386 y `make paq486`, `build/hispa486.paq` de la de Hispa-486) y
+**firma la lista** (abajo).
+
+Las claves de la 0.9.31 (las pone `tools/firma_versiones.py`; un ACTUALIZAR
+de antes no las conoce y no las mira):
+
+```
+sha256=<64 cifras hex>   ; el SHA-256 del .PAQ entero (sin él, no se instala)
+octetos=<tamaño>         ; su tamaño (si está, tiene que cuadrar)
+firma=ed25519 <128 cifras hex>   ; la última línea: la firma de lo de delante
+```
+
+### La firma de versiones.txt
+
+Desde la 0.9.31, ACTUALIZAR solo cree un `versiones.txt` que acabe con la
+línea `firma=ed25519 <firma>`: la firma Ed25519 (RFC 8032) de
+
+    "HISPADOS-VERSIONES 1\n" + todo el archivo hasta esa línea
+
+con la clave de Hispa-DOS. Su parte pública va compilada en `ACTUALIZ.COM`
+(`lib/clave_firma.inc`): es **la misma que la de los catálogos de
+Hispa-Pentium** (`castel/nucleo32/clave.cas`, huella `3ae4b4b9447dc1c4`),
+una sola clave para toda la familia. La etiqueta del principio hace que la
+firma de otra cosa (un `CATALOGO.TXT` de Hispa-Pentium) no valga aquí. Lo que
+vaya detrás de la línea de la firma no se lee. El archivo entero tiene que
+caber en 4 095 octetos.
+
+Las cuentas (SHA-256, SHA-512 y Ed25519) están en C,
+`utils/firma/cripto16.c` (las de la curva, de TweetNaCl), compiladas con
+`gcc -m16` para el modo real del 386 y metidas en `ACTUALIZ.COM` (11 KB).
+Comprobar la firma tarda unos segundos en un 386 y nada en un Pentium.
+
+**Firmar** (lo hace quien tiene la clave privada, Carlos; nunca va en el
+repositorio):
+
+```
+make paq paq486                     # build/hispados.paq y build/hispa486.paq
+cp build/hispados.paq  CARPETA/hispados-0.9.31.paq
+cp build/hispa486.paq  CARPETA/hispa486-0.9.31.paq
+# CARPETA/versiones.txt, sin sha256= ni firma= (los pone el guion)
+python3 tools/firma_versiones.py firma CARPETA/versiones.txt --clave RUTA/DE/LA/PRIVADA
+python3 tools/firma_versiones.py comprueba CARPETA/versiones.txt --paquetes CARPETA
+```
+
+`firma` busca cada `paquete=` en la carpeta de `versiones.txt` (o en la de
+`--paquetes`), pone sus `sha256=` y `octetos=`, firma y escribe la línea de la
+firma (las de antes las quita: se puede volver a firmar). `comprueba`, con la
+clave de `lib/clave_firma.inc`, dice si la firma es buena y si los paquetes
+cuadran. La clave privada es la de `tools/hpq.py clave` (64 cifras hex).
+`tools/firma_versiones.py sha ARCHIVO...` da el SHA-256 para publicarlo.
+
+**Las pruebas** usan otra clave, la de `tests/firma/clave_prueba.key` (está a
+la vista: solo vale para las pruebas). La lleva `build/ACTPRUEB.COM` (`make
+build/ACTPRUEB.COM`, el mismo programa con `-DCLAVE_PRUEBA`), que las pruebas
+copian al disco como `ACTUALIZ.COM`; **nunca va en una imagen ni en un
+paquete**. Pruebas: `tests/run_firma_tests.sh` (las cuentas, en el anfitrión
+y en QEMU, y el guion), `tests/run_actualizar_tests.sh` (listas sin firmar,
+cambiadas y con algo colado detrás) y `tests/run_actualizar_instala_tests.sh`
+(paquete cambiado en el servidor, paquete con `..\` y `\`, y la buena).
+
+### La transición: de la 0.9.30 a la 0.9.31
+
+Los ACTUALIZAR ya instalados (0.9.30 y anteriores) **no miran la firma**:
+para ellos, `sha256=`, `octetos=` y `firma=` son claves desconocidas, y
+bajan el paquete y miran solo su suma de 32 bits, como siempre. Así que la
+0.9.31 les llega por el canal viejo **una sola vez**; desde ella, todo va
+firmado. Mientras dure ese paso, quien pueda ponerse entre el equipo y el
+servidor (una Wi-Fi ajena, un DNS falso) podría darles otra cosa. Para que
+el riesgo sea el menor posible:
+
+1. **Publicar la 0.9.31 también para instalarla a mano**: la imagen USB y
+   los disquetes en GitHub (HTTPS) con su `SHA256SUMS`, y en la web el
+   SHA-256 de `hispados-0.9.31.paq`, `hispa486-0.9.31.paq` y de
+   `ACTUALIZ.COM` (`tools/firma_versiones.py sha ...`).
+2. **Avisar en la web** (Novedades y la ficha de cada gama): «La 0.9.31
+   trae las actualizaciones firmadas. Si puede, instálela desde la memoria
+   USB (INSTALAR, opción Actualizar) o actualice desde una red de confianza
+   (la de su casa, no una Wi-Fi pública). Desde la 0.9.31, ACTUALIZAR no
+   instala nada que no lleve la firma de Hispa-DOS».
+3. Que el `versiones.txt` del servidor siga sirviendo la 0.9.31 a los viejos
+   (la sección de la 386 primero, como siempre), **ya firmado**: a los
+   viejos no les estorba y a los nuevos les vale.
+4. Después de actualizar, se puede comprobar en otro equipo que
+   `C:\HISPADOS\ACTUALIZ.COM` tiene el SHA-256 publicado (`sha256sum`,
+   `certutil -hashfile ACTUALIZ.COM SHA256` en Windows).
+5. No publicar más versiones para el canal viejo: desde la 0.9.31, solo
+   firmadas.
 
 ### Formato del paquete .PAQ
 
@@ -192,8 +300,9 @@ Por cada fichero, en orden:
    bytes    datos         el contenido del fichero
 ```
 
-`ACTUALIZAR` comprueba la magia, el número de ficheros y que la suma de control
-cuadra antes de aplicar nada. Uso:
+`ACTUALIZAR` comprueba el SHA-256 de la lista firmada, y luego la magia, el
+número de ficheros, los nombres y que la suma de control cuadra, antes de
+desempaquetar nada. Uso:
 `python3 -I tools/paquete.py <carpeta> <salida.paq>`.
 
 ### La dirección y los límites
