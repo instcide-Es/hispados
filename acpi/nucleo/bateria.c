@@ -161,9 +161,15 @@ static ACPI_STATUS ca_hallado(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret
  * información» (batería distinta, capacidad recalculada) */
 static u32 avisos;
 static int cambio;			/* el equipo avisa de que la batería o el cable han cambiado */
+/* [Hispa-64] los demás avisos (el botón de encendido PNP0C0C, el brillo),
+ * para quien los quiera (acpi/hispa64/servicio.c; en Hispa-DOS no hay) */
+void nucleo_aviso(ACPI_HANDLE h, UINT32 valor) __attribute__((weak));
 static void aviso(ACPI_HANDLE h, UINT32 valor, void *ctx)
 {
 	int i;
+
+	if (nucleo_aviso)
+		nucleo_aviso(h, valor);
 
 	for (i = 0; i < nbat; i++)
 		if (h == bat[i]) {
@@ -201,7 +207,7 @@ static ACPI_STATUS acpi_arranca(void)
 	ACPI_HANDLE h;
 	int i;
 
-	reg("ACPI: RSDP en %08Xh\n", mq_rsdp());
+	reg("ACPI: RSDP en %08Xh\n", (u32)mq_rsdp());
 	if (!mq_rsdp()) {
 		reg("ACPI: el equipo no tiene ACPI (no se encuentra la RSDP)\n");
 		return AE_NOT_FOUND;
@@ -523,7 +529,11 @@ void bateria_para(void)
 	ec_reg(0);
 }
 
-void bateria_tarea(void)
+/* [Hispa-64] el arranque y una lectura, por separado: Hispa-64 los llama
+ * desde su hilo «acpi» (acpi/hispa64/servicio.c), sin la tarea de aquí.
+ * bateria_arranca: 0 si hay baterías que leer; 1 si ACPI va pero no hay;
+ * -1 si ACPI no va */
+int bateria_arranca(void)
 {
 	ACPI_STATUS s;
 
@@ -533,19 +543,41 @@ void bateria_tarea(void)
 		apm.fase = FASE_ERROR;
 		apm.error = s;
 		apm_publica();
-		return;
+		return -1;
 	}
 	if (!nbat) {
 		reg("El equipo no declara baterías (PNP0C0A): es de sobremesa o no las lleva por ACPI\n");
 		apm.fase = FASE_SIN_BATERIA;
 		apm_publica();
-		return;
+		return 1;
 	}
+	return 0;
+}
+
+/* una lectura; devuelve 1 si el equipo ha avisado de un cambio desde la anterior */
+int bateria_lectura(void)
+{
+	int c = cambio;
+
+	lectura();
+	cambio = 0;
+	return c;
+}
+
+/* ¿ha avisado el equipo (Notify) de que la batería o el cable han cambiado? */
+int bateria_cambio(void)
+{
+	return cambio;
+}
+
+void bateria_tarea(void)
+{
+	if (bateria_arranca())
+		return;
 	for (;;) {
 		u64 fin;
 
-		lectura();
-		cambio = 0;
+		bateria_lectura();
 		fin = mq_ahora_us() + (u64)(ini.cada_s ? ini.cada_s : 10) * 1000000;
 		/* entre lecturas, los avisos del controlador embebido se miran
 		 * cuatro veces por segundo (es leer un puerto): una tecla de

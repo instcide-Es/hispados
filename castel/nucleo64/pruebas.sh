@@ -238,8 +238,8 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 40 archivos: " <<< "$v" \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.0 x86_64$" <<< "$v" \
+    && grep -q "^Unidad en memoria: 41 archivos: " <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.1 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -280,7 +280,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.0 x86_64 (etapa 11 (el planificador, la congestión y la INTx))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.1 x86_64 (etapa 11 b (ACPICA, la batería y el tic estable))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -330,7 +330,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.1 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 1[12][0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -431,10 +431,33 @@ con_monitor boton "$T/boton.txt" "esperando el bot" system_powerdown; c=$?
 if [ $c = 0 ] && hay "$T/boton.txt" "^Botón de encendido pulsado: se apaga el equipo (ACPI, S5).$" && ! hay "$T/boton.txt" "No se ha podido apagar"; then
   ok "prueba=boton: el botón de encendido (system_powerdown) llega por la SCI y apaga el equipo por ACPI (QEMU acaba con 0)"
 else ko "prueba=boton no apaga (código $c): $(serie "$T/boton.txt" | tail -3 | paste -sd ' ')"; fi
-mb1 "apagar sinmedir sinpruebas prueba=acpiapagar" "$T/acpiapagar.txt" 128; c=$?
+mb1 "apagar sinmedir sinpruebas sinacpica prueba=acpiapagar" "$T/acpiapagar.txt" 128; c=$?
 if [ $c = 0 ] && hay "$T/acpiapagar.txt" "^Prueba: apagar por ACPI (S5, SLP_TYP 0)...$" && ! hay "$T/acpiapagar.txt" "No se ha podido apagar"; then
-  ok "prueba=acpiapagar: apaga por ACPI (\\_S5 de la DSDT, PM1a_CNT)"
+  ok "prueba=acpiapagar (sinacpica): apaga por ACPI (\\_S5 de la DSDT, PM1a_CNT)"
 else ko "prueba=acpiapagar no apaga (código $c): $(serie "$T/acpiapagar.txt" | tail -3 | paste -sd ' ')"; fi
+# [etapa 11 b] y por ACPICA: _PTS(5), \_S5 evaluado y SLP_EN (AcpiEnterSleepState)
+mb1 "apagar sinmedir sinpruebas acpi=registro prueba=acpiapagar" "$T/acpiapagar2.txt" 128; c=$?
+if [ $c = 0 ] && hay "$T/acpiapagar2.txt" "^Apagar: por ACPICA (_PTS(5), \\\\_S5 y SLP_EN)$" \
+   && hay "$T/acpiapagar2.txt" "^ACPI: apagar: _PTS(5) y lo de antes (AcpiEnterSleepStatePrep): AE_OK" && ! hay "$T/acpiapagar2.txt" "No se ha podido apagar"; then
+  ok "etapa 11 b, apagar por ACPICA: _PTS(5) y \\_S5 evaluados, SLP_TYP y SLP_EN (QEMU acaba con 0)"
+else ko "etapa 11 b, apagar por ACPICA no apaga (código $c): $(serie "$T/acpiapagar2.txt" | grep -E 'Apagar|ACPI: apagar|ACPICA' | tail -4 | paste -sd '|')"; fi
+# [etapa 11 b] ACPICA: la batería de mentira (tests/acpi/bateria-qemu.aml: sus métodos leen la CMOS,
+# que cambia la prueba) y el brillo de mentira (brillo-qemu.aml), en «pc» y en q35
+A11="$(dirname "$C")/tests/acpi"
+for maq in pc q35; do
+  mb1 "apagar sinmusl sinred acpi=registro prueba=acpica" "$T/acpica-$maq.txt" 256 -machine $maq -smp 2 \
+    -acpitable file="$A11/bateria-qemu.aml" -acpitable file="$A11/brillo-qemu.aml"; c=$?
+  S=$T/acpica-$maq.txt
+  if [ $c = 85 ] && hay $S "^ACPICA: ACPICA64.BIN, [0-9]* KB (" && hay $S "^ACPICA: en marcha ([0-9]* KB de su montón; 0 avisos o errores de ACPICA); \\\\_S5 ([0-9]*, [0-9]*); el brillo, \\\\_SB_.HLCD (50 %)$" \
+     && hay $S "^Batería 1: \\\\_SB_.HBAT$" && hay $S "^Adaptador de corriente: \\\\_SB_.HACA$" \
+     && hay $S "^Prueba de ACPICA: la batería al 73 % y con el cable (CMOS 60h y 61h): 1 puesta(s), al 73 %, 3650 de 5000 mAh (de fábrica 7350), con el cable, cargando, 312 ciclos$" \
+     && hay $S "^  y al 41 % sin el cable: 1 puesta(s), al 41 %, 2050 de 5000 mAh (de fábrica 7350), sin el cable" \
+     && hay $S "^  y quitada: 0 baterías puestas$" \
+     && hay $S "^Prueba de ACPICA: el brillo, \\\\_SB_.HLCD, 10 niveles: a 30 % (_BCM) y leído (_BQC): 30; pedido el 77 %: 80 (el nivel de _BCL más cercano)$" \
+     && ! hay $S "  MAL" && hay $S "^Hispa-64 etapa 11: todo en orden.$"; then
+    ok "etapa 11 b, ACPICA en «$maq»: las tablas y el espacio de nombres, la batería de mentira por _BIF, _BIX y _BST (73 % cargando, 41 % sin el cable, quitada) y el adaptador (_PSR); el brillo por _BCL, _BCM y _BQC; $(serie $S | grep -o '[0-9]* KB de su montón')"
+  else ko "etapa 11 b, ACPICA en «$maq» no sale (código $c): $(serie $S | grep -E '^ACPICA|^Prueba de ACPICA|^  y |MAL|parado|ACPI: falla' | head -8 | cut -c1-140 | paste -sd '|')"; fi
+done
 mb1 "apagar sinmusl" "$T/mb3g.txt" 3G -cpu max; c=$?
 S=$T/mb3g.txt
 if [ $c = 85 ] && hay $S "^Memoria: 2,9 GB libres" && hay $S "en páginas de 1 GB: [1-9]" && hay $S "; de 1 GB, también$" \
@@ -659,14 +682,28 @@ else ko "etapa 5 con discos de 3 TB no sale (código $c): $(e5_dice $S) $(fsck_d
 # 3. sin interrupciones (sinmsix sinmsi), «pc» con una AHCI aparte: se mira la cola
 copia_discos
 # shellcheck disable=SC2086
-mb1 "apagar escribir sinmsix sinmsi sinmusl" "$T/e5s.txt" 256 -machine pc -smp 2 $NVME5 $CRUDO5 -device ahci,id=ah \
+mb1 "apagar escribir sinmsix sinmsi sinmusl sinacpica" "$T/e5s.txt" 256 -machine pc -smp 2 $NVME5 $CRUDO5 -device ahci,id=ah \
   -drive file="$T/w5/sata.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ah.2; c=$?
 S=$T/e5s.txt
 if [ $c = 85 ] && [ "$(serie $S | grep -c '; sin interrupciones (se mira la cola);')" = 3 ] \
    && hay $S "^ARCHIVOS: 7 discos de prueba (7 escritos); todo bien" && e5_bien $S \
    && sata_bien "$T/w5/sata.img"; then
-  ok "etapa 5 sin MSI ni MSI-X («pc», 2 procesadores, la AHCI aparte): las tres controladoras mirando la cola, y todo igual (fsck.fat y miraexfat.py, bien)"
+  ok "etapa 5 sin MSI ni MSI-X («pc», 2 procesadores, la AHCI aparte; sinacpica): las tres controladoras mirando la cola, y todo igual (fsck.fat y miraexfat.py, bien)"
 else ko "etapa 5 sin interrupciones no sale (código $c): $(e5_dice $S) $(fsck_dice) $(exfat_dice)"; fi
+# 3 c. [etapa 11 b] lo mismo con ACPICA: el _PRT de «pc» va por los enlaces LNKA-LNKD, cuyo _CRS
+# es un método (lee lo programado en el PIIX): ACPICA lo resuelve, y las que tienen su GSI para
+# ellas solas van por su INTx (por nivel, activa en alto, como dice el _CRS); las demás, la cola
+copia_discos
+# shellcheck disable=SC2086
+mb1 "apagar escribir sinmsix sinmsi sinmusl" "$T/e5p.txt" 256 -machine pc -smp 2 $NVME5 $CRUDO5 -device ahci,id=ah \
+  -drive file="$T/w5/sata.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ah.2; c=$?
+S=$T/e5p.txt
+if [ $c = 85 ] && hay $S "^INTx: las rutas de ACPI (_PRT): 1 tablas resueltas (1 por ACPICA, con 128 entradas por enlaces de _CRS hecho por un método), 128 entradas$" \
+   && [ "$(serie $S | grep -cE 'INTx por la GSI 1[01] \(del _PRT\)')" -ge 1 ] \
+   && hay $S "^ARCHIVOS: 7 discos de prueba (7 escritos); todo bien" && e5_bien $S \
+   && entre $S "^Interrupciones de los discos: NVMe " 1 999999 && hay $S "; GSI tapadas por no apagarse: 0$" && sata_bien "$T/w5/sata.img"; then
+  ok "etapa 11 b, sin MSI ni MSI-X en «pc», con ACPICA: el _PRT por los enlaces (su _CRS, un método), $(serie $S | grep -cE 'INTx por la GSI 1[01] \(del _PRT\)') controladora(s) por su INTx; «$(serie $S | grep '^Interrupciones de los discos' | cut -d: -f2- | sed 's/^ //')»; ARCHIVOS, fsck.fat y miraexfat.py, bien"
+else ko "etapa 11 b, la INTx en «pc» por los enlaces de ACPICA no sale (código $c): $(serie $S | grep -E '^INTx|INTx por|cola|^Interrupciones|^ARCHIVOS|MAL|parado' | cut -c1-120 | paste -sd '|') $(fsck_dice) $(exfat_dice)"; fi
 # 3 b. [etapa 11] sin MSI ni MSI-X en q35: la INTx de cada una por la GSI del _PRT
 # (los GSIA-GSIH), con sus interrupciones (por nivel: se apagan), y el xHCI igual
 copia_discos
@@ -990,8 +1027,8 @@ TECLAS7+='LUA /PRUEBA.LUA uno dos{intro}{indicador}LUA{intro}{pausa}{pausa}print
 TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{indicador}salir{intro}'
 con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
 v=$(serie "$T/e7.txt")
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.0, etapa 11 " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  40 archivos (" <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.1, etapa 11 " <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  41 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
    && grep -q "^mkdir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
@@ -1033,7 +1070,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   }
   uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.0 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.1 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \

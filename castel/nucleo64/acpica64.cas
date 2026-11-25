@@ -1,0 +1,402 @@
+; =============================================================================
+;  acpica64.cas - Hispa-64, etapa 11 b: ACPICA en el núcleo (docs/64/HISPA-64.md,
+;  sección 18). Los métodos de AML de verdad (no «a ojo», como Aml64): la
+;  batería (_BIF/_BIX y _BST), el adaptador (_PSR), el controlador embebido
+;  (sus _Qxx), el botón de encendido que avisa con Notify (PNP0C0C), apagar
+;  por _S5 con _PTS(5), el brillo (_BCL, _BCM, _BQC) y las rutas de las INTx
+;  de un _PRT con enlaces de _CRS hecho por un método (los LNKA de siempre).
+;
+;  ACPICA64.BIN (acpi/hispa64/: ACPICA de Intel y el núcleo de C de acpi/nucleo/,
+;  los de Hispa-DOS y Hispa-Pentium, compilados para 64 bits) viene en la
+;  unidad en memoria. Aquí: se comprueba su cabecera, se copia a
+;  0xFFFFFFFFC0000000 (para donde está enlazado: el código de solo leer, los
+;  datos sin ejecutar), se le da su montón (4 MB) y las funciones del núcleo
+;  que necesita (struct h64_tabla de acpi/hispa64/hispa64.h: si cambia una,
+;  la otra), y se le llama siempre con el mutex: un hilo dentro cada vez
+;  (ACPICA va con ACPI_SINGLE_THREADED). Arranca en el arranque, antes de las
+;  tarjetas (las INTx de los _PRT); luego el hilo «acpi» mira los avisos del
+;  controlador embebido cada 250 ms y lee la batería cada 10 s.
+;
+;  ¿Por qué en el núcleo y no como un servicio del anillo 3 (como ACPI.BIN de
+;  Hispa-Pentium)? Lo piden cosas del núcleo y en el arranque: las rutas de
+;  las INTx antes de las tarjetas, apagar (después de vaciar los discos) y,
+;  más adelante, suspender; un servicio llegaría tarde y necesitaría
+;  llamadas nuevas para los puertos, la memoria física y la configuración
+;  PCI. Linux hace lo mismo. Lo que se arriesga (un fallo dentro de ACPICA
+;  es un fallo del núcleo) es lo de cualquier controlador.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Acpica64
+
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Sinc64, Pci64, Unidad64, Acpi64, Apic64
+
+    constante BASE = 0xFFFFFFFFC0000000
+    constante FIRMA = 0x0034364950434148       ; «HACPI64»
+    constante VERSIÓN_H64 = 1
+    constante MONTÓN = 4194304
+    ; las llamadas (hispa64.h)
+    constante H64_INICIA = 0
+    constante H64_ARRANCA = 1
+    constante H64_LEE = 2
+    constante H64_EVENTOS = 3
+    constante H64_ESTADO = 4
+    constante H64_PRT = 5
+    constante H64_APAGA = 6
+    constante H64_BRILLO = 7
+    constante H64_PRUEBA = 9
+
+    público tipo Inicio = estructura
+        versión, opciones: nat32
+        rsdp, montón, montón_largo: nat64
+        t_escribe, t_mapa, t_pci_lee, t_pci_pon, t_duerme, t_ahora: nat64
+    fin
+
+    público tipo Estado = estructura
+        versión, fase, nbat, pct, ca, estado, minutos, lecturas, unidad: nat32
+        diseño, llena, queda, ritmo, voltaje, bst_estado, ciclos: nat32
+        s5, slp_a, slp_b, botones: nat32
+        brillo_hay, brillo, brillo_n: nat32
+        ec_hay, ec_eventos: nat32
+        errores, memoria_kb, memoria_max_kb, avisos: nat32
+        bat_ruta: arreglo [32] de byte
+        modelo: arreglo [20] de byte
+        ca_ruta: arreglo [32] de byte
+        ec_ruta: arreglo [32] de byte
+        brillo_ruta: arreglo [48] de byte
+    fin
+
+    público constante MAX_RUTAS = 128
+    público tipo Rutas = estructura
+        n, sin_resolver: nat32
+        r: arreglo [640] de nat32       ; de 5 en 5: ranura, patilla, gsi, marcas, enlace
+    fin
+
+    público variable en_marcha_acpica: bool     ; ACPICA en marcha
+    público variable sin_baterías: bool         ; va, pero el equipo no declara baterías
+    público variable est: Estado                ; lo último (con el mutex)
+    público variable registro: bool             ; lo que dice ACPICA, a la consola
+    público variable llamadas: nat64
+    variable entrada: nat64
+    variable ini: Inicio
+    variable m: Mutex
+    variable rutas_: Rutas
+    variable botones_vistos: nat32
+
+    ; ---- lo que le da el núcleo (las llama con castel0..castel5) ----
+    función k_escribe(p: nat64, n: nat64)
+        variable i: nat64
+        variable c: nat32
+        si no registro entonces devolver fin
+        i := 0
+        mientras i < n hacer
+            c := m8(p + i)
+            si c <> 13 entonces escribir_car(c) fin
+            i := i + 1
+        fin
+    fin
+
+    función k_mapa(f: nat64, n: nat64): nat64
+        variable v: nat64
+        si n = 0 entonces n := 1 fin
+        v := virt(f)
+        si traduce(v) = f y traduce(v + n - 1) = f + n - 1 entonces devolver v fin
+        devolver mapea_disp(f, n, sin_caché())
+    fin
+
+    función k_pci_lee(b: nat64, d: nat64, f: nat64, r: nat64): nat64
+        devolver nat64(lee32(nat32(b), nat32(d), nat32(f), nat32(r)))
+    fin
+
+    función k_pci_pon(b: nat64, d: nat64, f: nat64, r: nat64, v: nat64)
+        pon32(nat32(b), nat32(d), nat32(f), nat32(r), nat32(v))
+    fin
+
+    función k_duerme(ms: nat64)
+        duerme_ms(ms)
+    fin
+
+    función k_ahora(): nat64
+        devolver ahora_ns()
+    fin
+
+    ; ---- llamar ----
+    función entra(f: nat64, a: nat64, b: nat64, e: nat64): nat64
+        ensamblador
+            mov rdi, {f}
+            mov rsi, {a}
+            mov rdx, {b}
+            mov rax, {e}
+            call rax
+        fin
+    fin
+
+    función llama(f: nat64, a: nat64, b: nat64): ent64
+        variable r: nat64
+        si entrada = 0 entonces devolver -1 fin
+        cierra_mutex(dirección(m))
+        llamadas := llamadas + 1
+        r := entra(f, a, b, entrada)
+        abre_mutex(dirección(m))
+        devolver ent64(r)
+    fin
+
+    función al_día()
+        llama(H64_ESTADO, nat64(dirección(est)), tamaño(Estado))
+    fin
+
+    ; ---- ponerlo en su sitio ----
+    función carga(): bool
+        variable i: ent32
+        variable src, largo, ini_datos, fin_img, fin_bss, v, f, n, k: nat64
+        i := busca_archivo("ACPICA64.BIN")
+        si i < 0 entonces
+            escribir("ACPICA: no está ACPICA64.BIN en la unidad (sin ACPICA: lo de las tablas, a ojo)\n")
+            devolver falso
+        fin
+        src := dónde(nat32(i))
+        largo := cuánto(nat32(i))
+        si largo < 64 o m64(src) <> FIRMA o m32(src + 8) <> VERSIÓN_H64 entonces
+            escribir("ACPICA: ACPICA64.BIN no es de esta versión (la cabecera no cuadra)\n")
+            devolver falso
+        fin
+        ini_datos := m64(src + 16)
+        fin_img := m64(src + 24)
+        fin_bss := m64(src + 32)
+        entrada := m64(src + 40)
+        si ini_datos < BASE o fin_img < ini_datos o fin_bss < fin_img o fin_img - BASE > largo o fin_bss - BASE > 16777216 o entrada < BASE o entrada >= ini_datos entonces
+            escribir("ACPICA: ACPICA64.BIN: la cabecera no cuadra con el archivo\n")
+            entrada := 0
+            devolver falso
+        fin
+        v := BASE
+        mientras v < fin_bss hacer
+            f := pide()
+            si f = 0 entonces
+                escribir("ACPICA: sin memoria para ACPICA64.BIN\n")
+                entrada := 0
+                devolver falso
+            fin
+            k := 0
+            mientras k < 4096 hacer
+                si v + k + 8 <= fin_img entonces pon_m64(virt(f) + k, m64(src + (v - BASE) + k)) sino pon_m64(virt(f) + k, 0) fin
+                k := k + 8
+            fin
+            ; (lo último del archivo, si no acaba en múltiplo de 8)
+            si v < fin_img y fin_img < v + 4096 y (fin_img - v) yb 7 <> 0 entonces
+                n := (fin_img - v) yb (nob nat64(7))
+                mientras v + n < fin_img hacer
+                    pon_m8(virt(f) + n, m8(src + (v - BASE) + n))
+                    n := n + 1
+                fin
+            fin
+            si v < ini_datos entonces
+                si no mapea(v, f, K4, código()) entonces entrada := 0 fin
+            sino
+                si no mapea(v, f, K4, datos()) entonces entrada := 0 fin
+            fin
+            si entrada = 0 entonces
+                escribir("ACPICA: no se puede poner ACPICA64.BIN en 0xFFFFFFFFC0000000\n")
+                devolver falso
+            fin
+            v := v + 4096
+        fin
+        escribir("ACPICA: ACPICA64.BIN, ", largo div 1024, " KB (", (ini_datos - BASE) div 1024, " KB de código), en 0xFFFFFFFFC0000000 con ", (fin_bss - BASE) div 1024, " KB\n")
+        devolver cierto
+    fin
+
+    ; al arrancar, antes de las tarjetas (lo que no pueda, lo dice y sigue sin ACPICA)
+    público función prepara_acpica(con_registro: bool, sin_ini: bool)
+        variable r: ent64
+        variable p: puntero a byte
+        registro := con_registro
+        si no hay_acpi o rsdp_v = 0 entonces devolver fin
+        si no carga() entonces devolver fin
+        p := reserva(MONTÓN)
+        si p = nulo entonces
+            escribir("ACPICA: sin memoria para su montón\n")
+            entrada := 0
+            devolver
+        fin
+        ini.versión := VERSIÓN_H64
+        ini.opciones := 0
+        si sin_ini entonces ini.opciones := 2 fin
+        ini.rsdp := traduce(rsdp_v)
+        ini.montón := nat64(p)
+        ini.montón_largo := MONTÓN
+        ini.t_escribe := nat64(dirección(k_escribe))
+        ini.t_mapa := nat64(dirección(k_mapa))
+        ini.t_pci_lee := nat64(dirección(k_pci_lee))
+        ini.t_pci_pon := nat64(dirección(k_pci_pon))
+        ini.t_duerme := nat64(dirección(k_duerme))
+        ini.t_ahora := nat64(dirección(k_ahora))
+        si llama(H64_INICIA, nat64(dirección(ini)), 0) <> 0 entonces
+            escribir("ACPICA: ACPICA64.BIN no acepta lo que se le da\n")
+            entrada := 0
+            devolver
+        fin
+        r := llama(H64_ARRANCA, 0, 0)
+        al_día()
+        si r < 0 entonces
+            escribir("ACPICA: no arranca (las tablas o el espacio de nombres; ", est.errores, " errores de ACPICA): sin ACPICA\n")
+            devolver
+        fin
+        en_marcha_acpica := cierto
+        sin_baterías := r = 1
+        si no sin_baterías entonces llama(H64_LEE, 0, 0) fin
+        al_día()
+        escribe_estado()
+        botones_vistos := est.botones
+        crea(nat64(dirección(hilo_acpi)), 0, "acpi", NORMAL, CUALQUIERA)
+    fin
+
+    ; lo que se sabe, en una o dos líneas
+    público función escribe_estado()
+        escribir("ACPICA: en marcha (", est.memoria_kb, " KB de su montón; ", est.errores, " avisos o errores de ACPICA); \\_S5 ")
+        si est.s5 <> 0 entonces escribir("(", est.slp_a, ", ", est.slp_b, ")") sino escribir("no está") fin
+        si est.ec_hay <> 0 entonces escribir("; el controlador embebido, ", dirección(est.ec_ruta[0])) fin
+        si est.brillo_hay <> 0 entonces escribir("; el brillo, ", dirección(est.brillo_ruta[0]), " (", est.brillo, " %)") fin
+        escribir("\n")
+        si est.nbat = 0 y sin_baterías entonces
+            escribir("  sin baterías (el equipo no declara ninguna PNP0C0A)\n")
+        sino
+            escribir("  batería: ", dirección(est.bat_ruta[0]), " «", dirección(est.modelo[0]), "», ")
+            si est.pct = 0xFF entonces escribir("no se sabe cuánta") sino escribir("al ", est.pct, " %") fin
+            escribir(" (", est.queda, " de ", est.llena, " m")
+            si est.unidad = 1 entonces escribir("Ah") sino escribir("Wh") fin
+            escribir("; de fábrica, ", est.diseño, ")")
+            si est.ca = 1 entonces escribir(", con el cable") sino si est.ca = 0 entonces escribir(", sin el cable") fin
+            si est.estado = 3 entonces escribir(", cargando") fin
+            si est.minutos <> 0xFFFF entonces escribir(", quedan ", est.minutos, " minutos") fin
+            si est.ciclos <> 0xFFFFFFFF entonces escribir(", ", est.ciclos, " ciclos") fin
+            escribir("; el adaptador: ", dirección(est.ca_ruta[0]), "\n")
+        fin
+    fin
+
+    ; el hilo «acpi»: los avisos cada 250 ms; la batería cada 10 s (o al avisar el equipo)
+    función hilo_acpi(nada: nat64)
+        variable n: nat32
+        variable r: ent64
+        n := 0
+        mientras cierto hacer
+            duerme_ms(250)
+            r := llama(H64_EVENTOS, 0, 0)
+            n := n + 1
+            si (r = 1 o n >= 40) y no sin_baterías entonces
+                llama(H64_LEE, 0, 0)
+                n := 0
+            fin
+            al_día()
+            si est.botones <> botones_vistos entonces
+                botones_vistos := est.botones
+                botón := cierto
+                n_botón := n_botón + 1
+            fin
+        fin
+    fin
+
+    ; una lectura ya (y lo que se sabe, al día)
+    público función lee_ya()
+        si no en_marcha_acpica entonces devolver fin
+        si no sin_baterías entonces llama(H64_LEE, 0, 0) fin
+        al_día()
+    fin
+
+    ; las rutas del _PRT del dispositivo de esa ruta, resueltas por ACPICA: cuántas (-1: no)
+    público función rutas_de(ruta: puntero a byte): puntero a Rutas
+        si no en_marcha_acpica entonces devolver nulo fin
+        si llama(H64_PRT, nat64(ruta), nat64(dirección(rutas_))) < 0 entonces devolver nulo fin
+        devolver dirección(rutas_)
+    fin
+
+    ; apagar por ACPICA (_PTS(5), \_S5, SLP_EN): si vuelve, no se ha apagado
+    público función apaga_acpica()
+        si no en_marcha_acpica entonces devolver fin
+        llama(H64_APAGA, 0, 0)
+    fin
+
+    ; el brillo: pon (0-100) o -1 para leerlo; -1 si no hay
+    público función brillo(nivel: ent64): ent64
+        si no en_marcha_acpica entonces devolver -1 fin
+        devolver llama(H64_BRILLO, nat64(nivel), 0)
+    fin
+
+    ; (pruebas) evaluar un método sin argumentos que da un entero
+    público función evalúa_entero(nombre: puntero a byte): ent64
+        si no en_marcha_acpica entonces devolver -1 fin
+        devolver llama(H64_PRUEBA, 1, nat64(nombre))
+    fin
+
+    ; ---- (pruebas) prueba=acpica ----
+    ; Con la batería de mentira de QEMU (tests/acpi/bateria-qemu.aml, con
+    ; -acpitable: sus métodos leen la CMOS 60h-62h) y el brillo de mentira
+    ; (tests/acpi/brillo-qemu.aml): se cambia lo de la CMOS y se mira que
+    ; ACPICA lo lee por _BST/_BIF/_PSR; y el brillo, puesto y leído.
+    público variable fallos_acpica: nat32
+
+    función mal(qué: puntero a byte)
+        fallos_acpica := fallos_acpica + 1
+        pon_color(12, 0)
+        escribir("  MAL: ", qué, "\n")
+        pon_color(7, 0)
+    fin
+
+    función pon_cmos(r: nat32, v: nat32)
+        variable b: nat64
+        b := sin_ints()
+        sale8(0x70, r)
+        sale8(0x71, v)
+        restaura(b)
+    fin
+
+    público función prueba_acpica()
+        variable b: ent64
+        si no en_marcha_acpica entonces
+            mal("prueba=acpica sin ACPICA en marcha")
+            devolver
+        fin
+        si sin_baterías entonces
+            escribir("Prueba de ACPICA: sin baterías (¿sin tests/acpi/bateria-qemu.aml?)\n")
+        sino
+            ; 73 %, puesta y con el cable
+            pon_cmos(0x60, 73)
+            pon_cmos(0x61, 3)
+            pon_cmos(0x62, 0)
+            lee_ya()
+            escribir("Prueba de ACPICA: la batería al 73 % y con el cable (CMOS 60h y 61h): ")
+            escribe_bat()
+            si est.pct <> 73 o est.ca <> 1 o est.estado <> 3 o est.diseño <> 7350 o est.llena <> 5000 entonces mal("ACPICA no lee la batería (73 %, cargando)") fin
+            ; 41 %, sin el cable
+            pon_cmos(0x60, 41)
+            pon_cmos(0x61, 2)
+            lee_ya()
+            escribir("  y al 41 % sin el cable: ")
+            escribe_bat()
+            si est.pct <> 41 o est.ca <> 0 o est.estado = 3 entonces mal("ACPICA no lee la batería (41 %, sin el cable)") fin
+            ; quitada
+            pon_cmos(0x61, 0)
+            lee_ya()
+            escribir("  y quitada: ", est.nbat, " baterías puestas\n")
+            si est.nbat <> 0 entonces mal("ACPICA no ve que se ha quitado la batería") fin
+            pon_cmos(0x61, 3)
+            lee_ya()
+        fin
+        si est.brillo_hay <> 0 entonces
+            b := brillo(30)
+            escribir("Prueba de ACPICA: el brillo, ", dirección(est.brillo_ruta[0]), ", ", est.brillo_n, " niveles: a 30 % (_BCM) y leído (_BQC): ", b)
+            si b <> 30 entonces mal("el brillo no queda en el 30 %") fin
+            b := brillo(77)
+            escribir("; pedido el 77 %: ", b, " (el nivel de _BCL más cercano)\n")
+            si b <> 80 entonces mal("el brillo pedido al 77 % no va al nivel de _BCL más cercano (80)") fin
+        fin
+    fin
+
+    función escribe_bat()
+        escribir(est.nbat, " puesta(s), al ", est.pct, " %, ", est.queda, " de ", est.llena, " mAh (de fábrica ", est.diseño, "), ")
+        si est.ca = 1 entonces escribir("con el cable") sino escribir("sin el cable") fin
+        si est.estado = 3 entonces escribir(", cargando") fin
+        si est.minutos <> 0xFFFF entonces escribir(", quedan ", est.minutos, " min") fin
+        si est.ciclos <> 0xFFFFFFFF entonces escribir(", ", est.ciclos, " ciclos") fin
+        escribir("\n")
+    fin
+
+fin Acpica64.

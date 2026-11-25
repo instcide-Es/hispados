@@ -37,4 +37,9 @@ MUSL=""
 if [ "${SIN_MUSL:-0}" != 1 ]; then MUSL=" $("$AQUI/hazmusl.sh" "$S" | tail -1 | cut -d: -f2)"; fi
 # [etapa 8] los programas gráficos (VENTANAS, NOTAS, PLUMA, CUENTAS: hazventanas.sh)
 if [ "${SIN_MUSL:-0}" != 1 ] && [ "${SIN_VENTANAS:-0}" != 1 ]; then MUSL="$MUSL $("$AQUI/hazventanas.sh" "$S" | tail -1 | cut -d: -f2)"; fi
-echo "hechos:$HECHOS HOLACAS SALUDO.TXT$MUSL"
+# [etapa 11 b] ACPICA en el núcleo (acpi/hispa64/hacer.sh): ACPICA64.BIN
+ACPICA=""
+if command -v gcc > /dev/null && command -v ld > /dev/null && [ "${SIN_ACPICA:-0}" != 1 ]; then
+  "$(dirname "$C")/acpi/hispa64/hacer.sh" "$S/ACPICA64.BIN" && ACPICA=" ACPICA64.BIN"
+fi
+echo "hechos:$HECHOS HOLACAS SALUDO.TXT$MUSL$ACPICA"

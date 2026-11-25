@@ -1514,6 +1514,29 @@ módulo Aml64
         fin
     fin
 
+    ; [etapa 11 b] la misma ruta, en d (con su cero al final; para ACPICA)
+    público función ruta_disp(i: nat32, d: puntero a byte, máx: nat32)
+        variable k, j, n: nat32
+        n := 0
+        d[n] := '\\'
+        n := n + 1
+        k := 0
+        mientras k < d_hondo[i] y n + 6 < máx hacer
+            si k > 0 entonces
+                d[n] := '.'
+                n := n + 1
+            fin
+            j := 0
+            mientras j < 4 hacer
+                d[n] := byte((d_cam[i][k] >> (j * 8)) yb 0xFF)
+                n := n + 1
+                j := j + 1
+            fin
+            k := k + 1
+        fin
+        d[n] := 0
+    fin
+
     público función escribe_trozo(s_: nat32)
         escribe_seg(s_)
     fin

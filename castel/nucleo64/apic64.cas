@@ -414,33 +414,53 @@ módulo Apic64
     ; [etapa 11 b] cada cuánto da el tic el temporizador del APIC, en
     ; microsegundos, medido contra el TSC (no contra los tics que llegan, que
     ; en una máquina virtual cargada se pierden): su cuenta (CCR) y el TSC,
-    ; leídos juntos muchas veces durante 30 ms; solo cuentan los pares
-    ; seguidos (menos de 0,2 ms entre uno y otro, sin dar la vuelta), así que
-    ; si el procesador se para un rato desde fuera, ese rato no entra.
+    ; leídos juntos (el TSC antes y después de la cuenta, y solo si entre
+    ; los dos hay poco), al principio y al final de 4 ms en los que la cuenta
+    ; no da la vuelta (si la da, otra vez). Lo que el procesador esté parado
+    ; desde fuera entre medias no cambia nada: la cuenta y el TSC siguen.
     ; 0 si no se puede (sin TSC medido o sin tic)
+    variable ccr_tsc: nat64
+    función ccr_y_tsc(): nat64
+        variable ta, tb, c, mejor, mc, i: nat64
+        mejor := 0xFFFFFFFFFFFFFFFF
+        i := 0
+        mientras i < 8 hacer
+            ta := tsc()
+            c := nat64(apic_lee(0x390))
+            tb := tsc()
+            si tb - ta < mejor entonces
+                mejor := tb - ta
+                mc := c
+                ccr_tsc := ta + (tb - ta) div 2
+            fin
+            i := i + 1
+        fin
+        devolver mc
+    fin
+
     público función periodo_tic_us(): nat64
-        variable t0, t, ta, c, ca, sdc, sdt, lím, ini: nat64
+        variable c0, c1, t0, t1, ini, n: nat64
         si tsc_hz = 0 o no tic_va entonces devolver 0 fin
         ini := nat64(apic_lee(0x380))
-        lím := tsc_hz div 5000
-        sdc := 0
-        sdt := 0
-        t0 := tsc()
-        ta := t0
-        ca := nat64(apic_lee(0x390))
-        mientras ta - t0 < tsc_hz * 3 div 100 hacer
-            c := nat64(apic_lee(0x390))
-            t := tsc()
-            si c <= ca y t - ta < lím entonces
-                sdc := sdc + (ca - c)
-                sdt := sdt + (t - ta)
+        n := 0
+        mientras n < 10 hacer
+            c0 := ccr_y_tsc()
+            t0 := ccr_tsc
+            ; (que no dé la vuelta en los 4 ms: si queda poco, se espera a la siguiente)
+            si c0 > ini div 2 entonces
+                mientras tsc() - t0 < tsc_hz div 250 hacer pausa() fin
+                c1 := ccr_y_tsc()
+                t1 := ccr_tsc
+                si c1 < c0 y t1 > t0 entonces
+                    ; ini cuentas, a (c0 - c1) cuentas por (t1 - t0) vueltas del TSC
+                    devolver muldiv(muldiv(ini, t1 - t0, c0 - c1), 1000000, tsc_hz)
+                fin
+            sino
+                mientras tsc() - t0 < tsc_hz div 500 hacer pausa() fin
             fin
-            ca := c
-            ta := t
+            n := n + 1
         fin
-        si sdc = 0 entonces devolver 0 fin
-        ; ini cuentas, a sdc cuentas por sdt vueltas del TSC
-        devolver muldiv(muldiv(ini, sdt, sdc), 1000000, tsc_hz)
+        devolver 0
     fin
 
     ; todo lo de las interrupciones del procesador que arranca

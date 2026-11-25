@@ -74,9 +74,10 @@ módulo Hispa64
     importar I2chid64
     importar PrMusl64
     importar Hda64, Disp64
+    importar Acpica64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.11.0"
+    constante VERSIÓN = "0.11.1"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
@@ -629,6 +630,81 @@ módulo Hispa64
         escribir("Puntero: ", n, " cambios; ", ptr_relativos, " del ratón y ", ptr_absolutos, " de la tableta, ", ptr_clics, " clics; teclas USB: ", uh_teclas, ", LED puestos: ", uh_leds, "\n")
     fin
 
+    ; [etapa 11 b] HWP (Intel, desde Skylake: CPUID 6, EAX bit 7): que el
+    ; procesador elija su frecuencia él solo, bajándola en reposo. Se pone
+    ; IA32_PM_ENABLE (0x770, una vez para todo el paquete) y, en cada
+    ; procesador (un hilo fijo en cada uno), IA32_HWP_REQUEST (0x774): del
+    ; más bajo al más alto de IA32_HWP_CAPABILITIES (0x771), sin «deseado»
+    ; (lo decide él) y, si lo tiene, la preferencia (EPP) a medias (0x80),
+    ; como Linux. Sin HWP, la frecuencia es la que deja el firmware (los
+    ; P-states de _PSS, para más adelante); en reposo, hlt o mwait.
+    variable hwp_pedido: nat64
+    variable hwp_hecho: arreglo [64] de nat32
+    función hwp_aquí(k: nat64)
+        pon_msr(0x774, hwp_pedido)
+        hwp_hecho[k] := 1
+    fin
+
+    función prepara_hwp()
+        variable cap, epp: nat64
+        variable alto, bajo, garantizado, eficiente, i, n, hechos: nat32
+        variable h: arreglo [64] de nat64
+        variable c: puntero a Cpu
+        cpuid(0, 0)
+        si ra < 6 entonces devolver fin
+        cpuid(6, 0)
+        si ra yb 0x80 = 0 entonces
+            escribir("Energía: sin HWP (el procesador no deja que elija él la frecuencia): la que deja el firmware; en reposo, hlt o mwait\n")
+            devolver
+        fin
+        epp := 0
+        si ra yb 0x400 <> 0 entonces epp := nat64(0x80) << 24 fin
+        pon_msr(0x770, 1)
+        cap := lee_msr(0x771)
+        alto := nat32(cap yb 0xFF)
+        garantizado := nat32((cap >> 8) yb 0xFF)
+        eficiente := nat32((cap >> 16) yb 0xFF)
+        bajo := nat32((cap >> 24) yb 0xFF)
+        hwp_pedido := nat64(bajo) ob (nat64(alto) << 8) ob epp
+        n := 0
+        i := 0
+        mientras i < n_cpus y i < 64 hacer
+            c := cpu(i)
+            hwp_hecho[i] := 0
+            si c.en_marcha <> 0 entonces
+                h[n] := nat64(crea(nat64(dirección(hwp_aquí)), nat64(i), "hwp", NORMAL, i))
+                n := n + 1
+            fin
+            i := i + 1
+        fin
+        i := 0
+        mientras i < n hacer
+            une(puntero(h[i]))
+            i := i + 1
+        fin
+        hechos := 0
+        i := 0
+        mientras i < 64 hacer
+            hechos := hechos + hwp_hecho[i]
+            i := i + 1
+        fin
+        escribir("Energía: HWP puesto (el procesador elige la frecuencia y la baja en reposo): rendimiento de ", bajo, " a ", alto, " (garantizado ", garantizado, ", el más eficiente ", eficiente, ")")
+        si epp <> 0 entonces escribir("; la preferencia (EPP), a medias") fin
+        escribir("; en ", hechos, " procesadores\n")
+    fin
+
+    ; [etapa 11 b] apagar: por ACPICA (_PTS(5), \_S5 y SLP_EN) si está en
+    ; marcha; si no (o si el equipo sigue encendido), lo de siempre (\_S5
+    ; buscado a ojo en la DSDT)
+    función apaga_todo()
+        si en_marcha_acpica entonces
+            escribir("Apagar: por ACPICA (_PTS(5), \\_S5 y SLP_EN)\n")
+            apaga_acpica()
+            escribir("Apagar: ACPICA no ha apagado el equipo; lo de siempre (\\_S5 de la DSDT)\n")
+        fin
+        apaga_equipo()
+    fin
+
     ; [etapa 5] antes de apagar: lo que quede sin escribir, al disco (sync)
     función al_apagar()
         variable n: nat64
@@ -1134,13 +1210,13 @@ módulo Hispa64
             mientras no botón y ahora_ns() - t0 < 30000000000 hacer espera_int() fin
             si botón entonces
                 escribir("Botón de encendido pulsado: se apaga el equipo (ACPI, S5).\n")
-                apaga_equipo()
+                apaga_todo()
             fin
             escribir("No se ha podido apagar.\n")
         fin
         si tiene("prueba=acpiapagar") entonces
             escribir("Prueba: apagar por ACPI (S5, SLP_TYP ", slp5a, ")...\n")
-            apaga_equipo()
+            apaga_todo()
             escribir("No se ha podido apagar.\n")
         fin
     fin
@@ -1231,7 +1307,7 @@ módulo Hispa64
             si intérprete() entonces
                 escribir("\nSe apaga el equipo.\n")
                 al_apagar()
-                apaga_equipo()
+                apaga_todo()
                 escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
             fin
         fin
@@ -1240,7 +1316,7 @@ módulo Hispa64
             si botón entonces
                 escribir("\nBotón de encendido pulsado: se apaga el equipo.\n")
                 al_apagar()
-                apaga_equipo()
+                apaga_todo()
                 escribir("No se ha podido apagar: mantenga pulsado el botón.\n")
                 apaga()
                 mientras cierto hacer espera_int() fin
@@ -1391,6 +1467,10 @@ módulo Hispa64
         si tiene("prueba=monton") entonces prueba_montón(100000, 1000) fin
         ; [etapa 3] los demás procesadores y el planificador
         etapa3()
+        ; [etapa 11 b] ACPICA, antes de las tarjetas (las rutas de las INTx de los _PRT)
+        si no tiene("sinacpica") entonces prepara_acpica(tiene("acpi=registro"), tiene("acpi=sinini")) fin
+        si tiene("prueba=acpica") entonces prueba_acpica() fin
+        si no tiene("sinhwp") entonces prepara_hwp() fin
         prepara_ratón()
         etapa5()
         prepara_i2chid(tiene("sini2c"), tiene("prueba=hid"), tiene("prueba=barcero"))     ; [etapa 6] HID (sus pruebas) e I2C-HID
@@ -1410,7 +1490,7 @@ módulo Hispa64
         si no tiene("sinpruebas") y no tiene("sinmusl") y tic_va entonces pruebas_musl() fin
         ; [etapa 9] la red
         si no tiene("sinpruebas") y no tiene("sinred") y tic_va entonces pruebas_red() fin
-        si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 + fallos9 > 0 entonces
+        si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 + fallos9 + fallos_acpica > 0 entonces
             pon_color(12, 0)
             escribir("Hispa-64 etapa 11: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)

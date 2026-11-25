@@ -18,7 +18,7 @@
 ; =============================================================================
 módulo Prt64
 
-    importar Cifras64, Es64, Acpi64, Apic64, Pci64, Aml64
+    importar Cifras64, Es64, Acpi64, Apic64, Pci64, Aml64, Acpica64
 
     constante MAX_GSI = 256
     constante NADA = 0xFFFFFFFF
@@ -28,6 +28,8 @@ módulo Prt64
     variable gsi_vector: arreglo [MAX_GSI] de nat32
     público variable prt_dueños_con_bus: nat32
     público variable prt_buscadas, prt_halladas, prt_giradas: nat32
+    público variable prt_por_acpica: nat32      ; [etapa 11 b] las tablas que ha resuelto ACPICA (las que Aml64 no)
+    público variable prt_enlaces_acpica: nat32  ; y sus entradas por un enlace (_CRS de un método)
 
     ; el bus de un dispositivo de ACPI (el de un puente raíz, o el secundario
     ; del puente de su _ADR); NADA si no se sabe
@@ -50,6 +52,53 @@ módulo Prt64
         devolver (lee32(pb, d, f, 0x18) >> 8) yb 0xFF
     fin
 
+    ; [etapa 11 b] las tablas que Aml64 no ha podido resolver (sus enlaces los
+    ; hace un método: el _CRS de los LNKA, que lee lo que hay programado en el
+    ; puente), las resuelve ACPICA si está en marcha: se añaden como las demás
+    función resuelve_con_acpica()
+        variable k, j, n, quedan: nat32
+        variable ruta: arreglo [64] de byte
+        variable r: puntero a Rutas
+        si no en_marcha_acpica entonces devolver fin
+        quedan := 0
+        k := 0
+        mientras k < prt_sin_resolver y k < MAX_DUEÑOS hacer
+            ruta_disp(ps_disp[k], dirección(ruta[0]), 64)
+            r := rutas_de(dirección(ruta[0]))
+            si r <> nulo y r.n > 0 y pd_n < MAX_DUEÑOS entonces
+                pd_disp[pd_n] := ps_disp[k]
+                pd_seg[pd_n] := 0x5452505F          ; «_PRT»
+                pd_total[pd_n] := r.n + r.sin_resolver
+                pd_directas[pd_n] := 0
+                pd_enlaces[pd_n] := 0
+                pd_candidatos[pd_n] := 0
+                j := 0
+                mientras j < r.n y prt_n < MAX_PRT hacer
+                    prt_dueño[prt_n] := pd_n
+                    prt_ranura[prt_n] := r.r[j * 5]
+                    prt_patilla[prt_n] := r.r[j * 5 + 1]
+                    prt_gsi[prt_n] := r.r[j * 5 + 2]
+                    prt_marcas[prt_n] := r.r[j * 5 + 3]
+                    si r.r[j * 5 + 4] <> 0 entonces
+                        pd_enlaces[pd_n] := pd_enlaces[pd_n] + 1
+                        prt_enlaces_acpica := prt_enlaces_acpica + 1
+                    sino
+                        pd_directas[pd_n] := pd_directas[pd_n] + 1
+                    fin
+                    prt_n := prt_n + 1
+                    j := j + 1
+                fin
+                pd_n := pd_n + 1
+                prt_por_acpica := prt_por_acpica + 1
+            sino
+                ps_disp[quedan] := ps_disp[k]
+                quedan := quedan + 1
+            fin
+            k := k + 1
+        fin
+        prt_sin_resolver := quedan
+    fin
+
     ; al arrancar (lo pide la red, la primera): las tablas, los _PRT y sus buses
     público función prepara_prt()
         variable i, k: nat32
@@ -63,6 +112,7 @@ módulo Prt64
             fin
         fin
         busca_prt()
+        resuelve_con_acpica()
         prt_dueños_con_bus := 0
         k := 0
         mientras k < pd_n hacer
@@ -203,6 +253,7 @@ módulo Prt64
         variable k, j, n: nat32
         prepara_prt()
         escribir("INTx: las rutas de ACPI (_PRT): ", pd_n, " tablas resueltas")
+        si prt_por_acpica > 0 entonces escribir(" (", prt_por_acpica, " por ACPICA, con ", prt_enlaces_acpica, " entradas por enlaces de _CRS hecho por un método)") fin
         si prt_sin_resolver > 0 entonces escribir(" (y ", prt_sin_resolver, " sin resolver: sus enlaces los hace un método)") fin
         escribir(", ", prt_n, " entradas\n")
         si no detalle entonces devolver fin
@@ -212,7 +263,11 @@ módulo Prt64
             escribe_disp(pd_disp[k])
             escribir(" (tabla ", disp_tabla(pd_disp[k]), "): ")
             escribe_trozo(pd_seg[k])
-            escribir(", ", pd_total[k], " entradas (", pd_directas[k], " con la GSI escrita, ", pd_enlaces[k], " por enlaces de _CRS fijo; de ", pd_candidatos[k], " paquetes nombrados)")
+            si pd_candidatos[k] = 0 entonces
+                escribir(", ", pd_total[k], " entradas (por ACPICA: ", pd_directas[k], " con la GSI escrita, ", pd_enlaces[k], " por enlaces, con su _CRS)")
+            sino
+                escribir(", ", pd_total[k], " entradas (", pd_directas[k], " con la GSI escrita, ", pd_enlaces[k], " por enlaces de _CRS fijo; de ", pd_candidatos[k], " paquetes nombrados)")
+            fin
             si pd_bus[k] = NADA entonces escribir("; el bus, no se sabe") sino escribir("; el bus ", pd_bus[k]) fin
             ; (las GSI distintas)
             n := 0

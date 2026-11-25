@@ -27,6 +27,7 @@ módulo Acpi64
 
     ; la RSDP y la raíz
     público variable hay_acpi: bool
+    público variable rsdp_v: nat64                    ; [etapa 11 b] la RSDP que se ha leído (virtual), o 0
     público variable acpi_rev: nat32
     público variable oem: arreglo [7] de byte
     público variable con_xsdt: bool
@@ -341,6 +342,7 @@ módulo Acpi64
         fin
         si rsdp = 0 entonces devolver fin
         si l32(rsdp) <> 0x20445352 o suma(rsdp, 20) <> 0 entonces devolver fin
+        rsdp_v := rsdp                  ; [etapa 11 b] (para ACPICA, que la quiere física: Acpica64)
         acpi_rev := l8(rsdp + 15)
         i := 0
         mientras i < 6 hacer

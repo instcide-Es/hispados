@@ -16,9 +16,9 @@ u32 mem_usada, mem_max;
 
 void mem_inicia(void *p, u32 tam)
 {
-	m_ini = (struct trozo *)(((u32)p + 7) & ~7u);
-	tam = (tam - ((u32)m_ini - (u32)p)) & ~7u;
-	m_fin = (struct trozo *)((u32)m_ini + tam);
+	m_ini = (struct trozo *)(((uptr)p + 7) & ~(uptr)7);
+	tam = (tam - (u32)((uptr)m_ini - (uptr)p)) & ~7u;
+	m_fin = (struct trozo *)((uptr)m_ini + tam);
 	m_ini->tam = tam;
 	m_ini->marca = MARCA;
 	m_ronda = m_ini;
@@ -27,7 +27,7 @@ void mem_inicia(void *p, u32 tam)
 
 static struct trozo *sig(struct trozo *t)
 {
-	return (struct trozo *)((u32)t + (t->tam & ~1u));
+	return (struct trozo *)((uptr)t + (t->tam & ~1u));
 }
 
 void *mem_pide(u32 tam)
@@ -50,7 +50,7 @@ void *mem_pide(u32 tam)
 			if (t->tam < tam)
 				continue;
 			if (t->tam >= tam + 32) {
-				s = (struct trozo *)((u32)t + tam);
+				s = (struct trozo *)((uptr)t + tam);
 				s->tam = t->tam - tam;
 				s->marca = MARCA;
 				t->tam = tam;
@@ -132,7 +132,9 @@ u32 reg_saca(char *b, u32 tam)
 	return n;
 }
 
-/* ---- divisiones de 64 bits (no hay biblioteca del compilador) ---- */
+/* ---- divisiones de 64 bits (no hay biblioteca del compilador; en Hispa-64
+ * las hace el procesador) ---- */
+#ifndef __x86_64__
 static u64 divmod64(u64 n, u64 d, u64 *resto)
 {
 	u64 c = 0, r = 0;
@@ -166,3 +168,4 @@ static u64 divmod64(u64 n, u64 d, u64 *resto)
 }
 u64 __udivdi3(u64 n, u64 d) { return divmod64(n, d, 0); }
 u64 __umoddi3(u64 n, u64 d) { u64 r; divmod64(n, d, &r); return r; }
+#endif

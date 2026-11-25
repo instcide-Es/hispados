@@ -8,15 +8,24 @@ typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
+/* [Hispa-64] las direcciones físicas y los punteros como números: de 32
+ * bits en Hispa-DOS y Hispa-Pentium, de 64 en Hispa-64 (acpi/hispa64/) */
+#ifdef __x86_64__
+typedef unsigned long long ufis;
+typedef unsigned long uptr;
+#else
+typedef u32 ufis;
+typedef u32 uptr;
+#endif
 
 /* ---- la máquina (maquina.c en el equipo; tests/acpi/maquina_sim.c en las pruebas) ---- */
 u32 mq_es_lee(u32 puerto, u32 octetos);
 void mq_es_escribe(u32 puerto, u32 octetos, u32 valor);
-void *mq_mapa(u32 fisica, u32 tam);	/* memoria física -> puntero del núcleo */
+void *mq_mapa(ufis fisica, u32 tam);	/* memoria física -> puntero del núcleo */
 void mq_desmapa(void *p, u32 tam);
 u64 mq_ahora_us(void);			/* microsegundos desde que arrancó el núcleo */
 void mq_espera_us(u32 us);		/* espera sin soltar el procesador */
-u32 mq_rsdp(void);			/* dirección física de la RSDP (0: no hay ACPI) */
+ufis mq_rsdp(void);			/* dirección física de la RSDP (0: no hay ACPI) */
 void mq_inicia(const struct ll_inicio *i);
 
 /* ---- base.c: memoria, registro ---- */
