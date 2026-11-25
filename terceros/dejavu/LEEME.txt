@@ -27,3 +27,8 @@ los programas de ventana (castel/nucleo32/controles.cas, ClicGest): no van
 como archivo .ttf, sino ya rasterizadas por castel/nucleo32/hazletrasuave.py
 en castel/nucleo32/letrasuave.cas (dos tamaños, 16 tonos por punto, las
 letras de la página de Ventanas). Misma licencia: ver LICENSE.
+
+Hispa-64 (desde la etapa 10, docs/64/HISPA-64.md, sección 16) lleva además
+DejaVuSans.ttf ENTERA, el original de arriba sin tocar (su SHA-256, el de la
+lista), para probar HarfBuzz y FreeType (MTEXTO: con GSUB, GPOS y kern, que
+las recortadas no tienen). Como no se ha cambiado, conserva su nombre.

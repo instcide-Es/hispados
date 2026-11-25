@@ -1,0 +1,13 @@
+FreeType 2.13.3 (https://freetype.org/), con la licencia que se elige de las
+dos que da: la GPL versión 2 (docs/GPLv2.TXT), que casa con la de Hispa
+(GPL-2.0 o posterior); la otra es la FTL (docs/FTL.TXT). Ver LICENSE.TXT.
+  freetype-2.13.3.tar.xz  (download.savannah.gnu.org/releases/freetype/)
+  SHA-256: 0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289
+
+Lo usa Hispa-64 desde la etapa 10 (docs/64/HISPA-64.md, sección 16): la
+letra de los programas de hoy (y del navegador, con HarfBuzz encima), en
+castel/nucleo64/programas/cxx/hazcxx.sh: compilada con musl, de una en una
+(make -j1 no hace falta: cada módulo es un .c), en build/freetype-obj.
+Aquí va, sin cambiar nada, lo que se compila: include/ entero y, de src/,
+base y los módulos de siempre (los de modules.cfg); sin los de compilar
+(builds/, los Makefile de cada carpeta) ni las pruebas.

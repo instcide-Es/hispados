@@ -1,0 +1,12 @@
+HarfBuzz 10.1.0 (https://harfbuzz.github.io/), licencia «Old MIT»: ver
+COPYING (y src/ms-use/COPYING, también MIT).
+  harfbuzz-10.1.0.tar.xz  (github.com/harfbuzz/harfbuzz/releases)
+  SHA-256: 6ce3520f2d089a33cef0fc48321334b8e0b72141f6a763719aaaecd2779ecb82
+
+Lo usa Hispa-64 desde la etapa 10 (docs/64/HISPA-64.md, sección 16): las
+formas del texto (GSUB y GPOS: ligaduras, kerning, las escrituras que lo
+piden) sobre FreeType, para el navegador. Se compila en un solo archivo
+(src/harfbuzz.cc) con cxx.sh (C++ con musl), en build/harfbuzz-obj
+(castel/nucleo64/programas/cxx/hazcxx.sh).
+Aquí va, sin cambiar nada, lo de src/ que hace falta para eso: los .cc, .hh
+y .h (con OT/ y graph/), sin los guiones de Python, meson ni las pruebas.
