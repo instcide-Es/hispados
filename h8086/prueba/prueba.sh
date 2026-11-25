@@ -8,6 +8,9 @@
 # Necesita qemu-system-i386, socat y mtools.
 set -u
 cd "$(dirname "$0")/.."
+# (las fechas que se ponen con touch y se leen con mtools, en la misma zona
+# horaria pase lo que pase en el equipo: con la de Madrid, 09:30 salía 11:30)
+export TZ=UTC
 T=$(mktemp -d)
 fail=0
 # MODO=alto ./prueba/prueba.sh pasa TODA la prueba con el núcleo en la memoria
