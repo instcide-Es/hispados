@@ -1472,9 +1472,9 @@ if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
   if [ "$(grep -c "^MCURL: http.*: 200, 1048576 octetos; sha256 = $SHA9 (https*, HTTP/1.1)$" <<< "$v")" = 5 ] \
      && grep -q "^MCURL: 5 direcciones a la vez en [0-9]* ms, 0 mal$" <<< "$v" \
      && grep -q "^CURL:200:1048576:5$" <<< "$v" && grep -q "^CURL:200:1048576:0$" <<< "$v" \
-     && grep -q "^Programa «=60 CURL .*»: acaba con el código 60, como debe" <<< "$v" \
-     && grep -q "^Programa «=22 CURL .*»: acaba con el código 22, como debe" <<< "$v" \
-     && { [ -z "$PD9" ] || { grep -q "^CURL:200:1048576:10.0.2.2$" <<< "$v" && grep -q "^Programa «=6 CURL .*»: acaba con el código 6, como debe" <<< "$v"; }; } \
+     && grep -q "^Programa «CURL -sS -o /dev/null --resolve .*»: acaba con el código 60, como debe" <<< "$v" \
+     && grep -q "^Programa «CURL -sSf -o /dev/null .*/no»: acaba con el código 22, como debe" <<< "$v" \
+     && { [ -z "$PD9" ] || { grep -q "^CURL:200:1048576:10.0.2.2$" <<< "$v" && grep -q "^Programa «CURL -sS http://noexiste.zz/»: acaba con el código 6, como debe" <<< "$v"; }; } \
      && ! grep -q "^Programa .*: acaba con el código [0-9]*$" <<< "$v" \
      && grep -q "^Después de la red: 0 sockets (.*0 objetos$" <<< "$v" \
      && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"; then
