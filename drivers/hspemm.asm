@@ -1769,6 +1769,19 @@ TSS_LEN     equ 104 + 8192 + 1
         add %1, eax
         pop eax
 %endmacro
+; V86CHK reg, n: ¿caben n octetos desde la dirección lineal reg (de V86PTR)
+; dentro del primer mega más la HMA (hasta FFFF:FFFF)? Si no, AH = A3h y se
+; vuelve: más allá (110000h) están el directorio de páginas, las tablas, la
+; IDT, la GDT y la TSS del monitor, y un programa con un fallo (ES:DI cerca
+; de FFFF:FFFF) las pisaría en anillo 0. MS EMM386 lo rechaza igual.
+V86_FIN     equ 0x10FFF0
+%macro V86CHK 2
+        push eax
+        lea eax, [%1 + %2]
+        cmp eax, V86_FIN
+        pop eax
+        ja ea3
+%endmacro
 
 mon_start:
         jmp mon_entry
@@ -3349,6 +3362,9 @@ e84:
 e8f:
         mov ah, 0x8F
         ret
+ea3:
+        mov ah, 0xA3
+        ret
 
 ; DX del programa -> ESI = handle abierto; CF y AH = 83h si no vale
 get_handle:
@@ -3586,6 +3602,7 @@ f4c:
         ret
 f4d:
         V86PTR edi, F_ES, P_EDI
+        V86CHK edi, 4*NHAND
         xor ebx, ebx
         xor ecx, ecx
         mov esi, handles
@@ -3616,6 +3633,11 @@ f4e:
         je .get
         ; poner (1) o leer y poner (2): primero se copia el mapa nuevo
         V86PTR esi, F_DS, P_ESI
+        cmp al, 2
+        jne .s1
+        V86PTR edi, F_ES, P_EDI
+        V86CHK edi, 16
+.s1:
         mov edi, tmp16
         mov ecx, 4
         rep movsd
@@ -3627,6 +3649,7 @@ f4e:
         jmp set_map16
 .get:
         V86PTR edi, F_ES, P_EDI
+        V86CHK edi, 16
         mov esi, curmap
         mov ecx, 4
         rep movsd
@@ -3666,6 +3689,7 @@ f4f:
         cmp al, 1
         je .set
         V86PTR edi, F_ES, P_EDI
+        V86CHK edi, 2 + 4*6
         movzx edx, word [esi]
         cmp edx, 4
         ja .e8b
@@ -3865,6 +3889,7 @@ f54:
         cmp al, 1
         je .search
         V86PTR edi, F_ES, P_EDI
+        V86CHK edi, 10*NHAND
         xor ebx, ebx
         xor ecx, ecx
         mov esi, handles
@@ -4165,6 +4190,15 @@ f57:
         mov edi, mv_d
         call .load
         jc .e98
+        ; una zona convencional ha de caber en el primer mega (antes se daba
+        ; por 1 MB seguido empezara donde empezara: desde FFFF:0010 se
+        ; escribía sobre el monitor). Como MS EMM386: A2h
+        mov ebx, mv_s
+        call .conv
+        jc .ea2
+        mov ebx, mv_d
+        call .conv
+        jc .ea2
 .loop:
         xor ah, ah
         cmp dword [mv_len], 0
@@ -4210,6 +4244,24 @@ f57:
 .e98:
         mov ah, 0x98
 .r:
+        ret
+.ea2:
+        mov ah, 0xA2
+        ret
+; EBX -> descripción convencional (o EMS: no se mira) -> CF si se sale del
+; primer mega
+.conv:
+        cmp byte [ebx+MV_TYPE], 0
+        jne .cok
+        mov eax, [ebx+MV_OFF]
+        add eax, [mv_len]
+        cmp eax, 0x100000
+        ja .cbad
+.cok:
+        clc
+        ret
+.cbad:
+        stc
         ret
 ; ESI -> descripción en la estructura del programa, EDI -> la nuestra
 .load:
@@ -4306,6 +4358,9 @@ v00:
 ; para su GDT (código y datos nuestros); EBX = punto de entrada.
 v01:
         V86PTR edi, F_ES, P_EDI
+        V86CHK edi, MONEND_PG * 4
+        V86PTR esi, F_DS, P_ESI
+        V86CHK esi, 24
         mov esi, PT0_LIN
         mov ecx, MONEND_PG
         rep movsd
@@ -4361,6 +4416,7 @@ v07:
         ret
 v08:
         V86PTR edi, F_ES, P_EDI
+        V86CHK edi, 32
         mov eax, dr0
         mov [edi], eax
         mov eax, dr1
