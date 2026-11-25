@@ -1785,8 +1785,8 @@ o_if:
         cmp al, 9
         ja .n2
         mov ah, 10
-        xchg ax, dx
-        mul ah
+        xchg ax, dx                 ; AL = lo que va, DH = 10 (era «mul ah»:
+        mul dh                      ; por 0, y solo valía la última cifra)
         xchg ax, dx
         add dl, al
         inc si
