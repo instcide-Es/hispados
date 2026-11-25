@@ -39,6 +39,14 @@
 ;   6  se acabó: los demás procesadores, dormidos otra vez (INIT) y la
 ;      memoria baja como estaba; la ventana, quitada -> 1
 ;   7  la línea del cargador, a ECX (hasta EDX octetos, sin el 0) -> su largo
+;   8  (INFORME-DISP, 0.8.12) la ficha del equipo, en texto, a ECX (hasta EDX
+;      octetos, con su 0): «clave=texto» por renglón, de las fichas 0 (la
+;      BIOS), 1 (el equipo) y 2 (la placa) del SMBIOS: el fabricante, el
+;      modelo, la versión, la familia y la BIOS. NUNCA el número de serie, ni
+;      el UUID, ni el SKU, ni la etiqueta de inventario: no salen del núcleo.
+;      -> los octetos puestos (sin el 0; 0: no hay SMBIOS). La puede pedir
+;      cualquiera (usuario.cas): es lo que dice la pegatina del equipo, y es
+;      para el informe de los dispositivos que fallan (DISPOSIT.BIN)
 ;  Una sola tarea a la vez (la primera que pide la 1 o la 5, hasta la 6 o
 ;  hasta que se acaba); las demás reciben NO_VALE.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -81,6 +89,10 @@ módulo Termoram
     ; el SMBIOS, ya buscado
     variable sm_buscado: bool
     variable sm_ep, sm_tabla, sm_largo, sm_ep_largo: nat32
+
+    ; (INFORME-DISP) lo que va poniendo ficha_equipo
+    variable fe_d: puntero a byte
+    variable fe_n, fe_cabe: nat32
 
     ; ---- los otros procesadores ----
     variable rp_base, rp_activos, rp_motivo, rp_lapic: nat32
@@ -375,6 +387,100 @@ módulo Termoram
             sm_tabla := mapear_aparato(dir, largo)
         fin
         si sm_tabla <> 0 entonces sm_largo := largo fin
+    fin
+
+    ; ---- (INFORME-DISP, 0.8.12) la ficha del equipo, sin números de serie ----
+    ; pone «clave=» y el texto número k de los de detrás de la ficha f (que
+    ; acaba antes de «tope»), solo con lo que se ve (32 a 126; lo raro,
+    ; «?»), sin los blancos de los lados y como mucho 64 letras; nada si k es
+    ; 0 o el texto está vacío
+    función fe_pon(clave: puntero a byte, f: puntero a byte, tope: nat32, k: nat32)
+        variable s: puntero a byte
+        variable i, j, ini, n0: nat32
+        si k = 0 entonces devolver fin
+        s := f + nat32(f[1])
+        mientras k > 1 y nat32(s) < tope hacer
+            mientras nat32(s) < tope y s[0] <> 0 hacer s := s + 1 fin
+            s := s + 1
+            k := k - 1
+        fin
+        si nat32(s) >= tope entonces devolver fin
+        si s[0] = 0 entonces devolver fin
+        n0 := fe_n
+        i := 0
+        mientras clave[i] <> 0 y fe_n + 2 < fe_cabe hacer
+            fe_d[fe_n] := clave[i]
+            fe_n := fe_n + 1
+            i := i + 1
+        fin
+        si fe_n + 2 < fe_cabe entonces
+            fe_d[fe_n] := '='
+            fe_n := fe_n + 1
+        fin
+        ; (sin los blancos de delante)
+        i := 0
+        mientras nat32(s) + i < tope y s[i] = ' ' hacer i := i + 1 fin
+        ini := fe_n
+        j := 0
+        mientras nat32(s) + i < tope y s[i] <> 0 y j < 64 y fe_n + 2 < fe_cabe hacer
+            si s[i] >= 32 y s[i] < 127 entonces fe_d[fe_n] := s[i] sino fe_d[fe_n] := '?' fin
+            fe_n := fe_n + 1
+            i := i + 1
+            j := j + 1
+        fin
+        mientras fe_n > ini y fe_d[fe_n - 1] = ' ' hacer fe_n := fe_n - 1 fin
+        si fe_n = ini entonces
+            fe_n := n0                          ; (vacío: ni la clave)
+            devolver
+        fin
+        fe_d[fe_n] := '\n'
+        fe_n := fe_n + 1
+    fin
+
+    ; la ficha del equipo (la 226, 8) en d: los octetos puestos (sin el 0)
+    función ficha_equipo(d: puntero a byte, cabe: nat32): nat32
+        variable f, s: puntero a byte
+        variable tope, vistas, clases: nat32
+        si no sm_buscado entonces busca_smbios() fin
+        si sm_tabla = 0 o sm_largo = 0 o cabe < 2 entonces devolver 0 fin
+        fe_d := d
+        fe_n := 0
+        fe_cabe := cabe
+        tope := sm_tabla + sm_largo
+        f := puntero(sm_tabla)
+        vistas := 0
+        clases := 0
+        ; (de cada clase, la primera; como mucho 512 fichas)
+        mientras nat32(f) + 4 <= tope y vistas < 512 hacer
+            si f[0] = 127 o f[1] < 4 entonces romper fin
+            si nat32(f) + nat32(f[1]) > tope entonces romper fin
+            si f[0] = 0 y f[1] >= 9 y clases yb 1 = 0 entonces
+                fe_pon("bios_fabricante", f, tope, nat32(f[4]))
+                fe_pon("bios_version", f, tope, nat32(f[5]))
+                fe_pon("bios_fecha", f, tope, nat32(f[8]))
+                clases := clases ob 1
+            sino si f[0] = 1 y f[1] >= 8 y clases yb 2 = 0 entonces
+                ; (f[7], el número de serie; f[8] a f[23], el UUID; f[25], el SKU: no)
+                fe_pon("fabricante", f, tope, nat32(f[4]))
+                fe_pon("modelo", f, tope, nat32(f[5]))
+                fe_pon("version", f, tope, nat32(f[6]))
+                si f[1] >= 0x1B entonces fe_pon("familia", f, tope, nat32(f[0x1A])) fin
+                clases := clases ob 2
+            sino si f[0] = 2 y f[1] >= 8 y clases yb 4 = 0 entonces
+                ; (f[7], el número de serie, y f[8], la etiqueta de inventario: no)
+                fe_pon("placa_fabricante", f, tope, nat32(f[4]))
+                fe_pon("placa_modelo", f, tope, nat32(f[5]))
+                fe_pon("placa_version", f, tope, nat32(f[6]))
+                clases := clases ob 4
+            fin
+            ; los textos de detrás acaban con dos ceros
+            s := f + nat32(f[1])
+            mientras nat32(s) + 1 < tope y (s[0] <> 0 o s[1] <> 0) hacer s := s + 1 fin
+            f := s + 2
+            vistas := vistas + 1
+        fin
+        d[fe_n] := 0
+        devolver fe_n
     fin
 
     ; ---- los otros procesadores ----
@@ -1024,6 +1130,10 @@ módulo Termoram
                     copiar_memoria(puntero(b), q, k)
                 fin
                 devolver k
+            caso 8:
+                ; (INFORME-DISP) la ficha del equipo, sin números de serie
+                si c < 2 o c > 4096 o no usuario_puede(actual.cr3, b, c, cierto) entonces devolver NO_VALE fin
+                devolver ficha_equipo(puntero(b), c)
             caso 6:
                 si dueño <> actual.id entonces devolver NO_VALE fin
                 duerme_ap()

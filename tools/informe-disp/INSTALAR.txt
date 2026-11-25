@@ -1,0 +1,49 @@
+(INFORME-DISP) EL RECEPTOR DE «ENVIAR INFORME DE LOS DISPOSITIVOS QUE FALLAN»
+==============================================================================
+
+Lo que hay aquí (tools/informe-disp/):
+  informe.php           el receptor (un POST con el informe en texto; contesta
+                        «OK número» o «ERROR motivo»)
+  nginx-location.txt    los dos «location» para el server de 443 de hispados.es
+  informe-mover.sh      el cron de root que lo pasa al FTP
+
+Va con lo del Termómetro (tools/termo-subida/INSTALAR.txt), que ya está
+puesto: el mismo usuario sin permisos (hispatermo), el mismo pool de PHP-FPM
+(hispados-termo.conf: open_basedir /www/hispados-termo y
+/www/hispados-subidas, sin exec ni nada parecido) y la misma carpeta de
+datos fuera de la web (/www/hispados-subidas, 0700 de hispatermo). El
+informe.php NO pide testigo (lo manda cualquier equipo instalado), así que
+lleva sus topes: solo POST y solo texto UTF-8 (text/plain; sin «<», sin
+caracteres de control, que empiece por la primera línea del informe), 256 KB
+como mucho (nginx corta en 300 KB), 5 informes por IP y día (IPv6: por su
+/64), 200 en total al día, y nada más si esperan al cron 2000 informes o
+100 MB. El nombre del archivo lo hace el guion (el número y el fabricante y
+el modelo, solo letras, cifras, «-» y «_»), 0600. El cron de root, cada 5
+min, lo pasa a
+/root/FTP/HispaDOS/Pruebas/Pendientes/Informes-dispositivos/<AAAAMMDD-HHMMSS>-<fabricante-modelo>/INFORME.TXT
+(de root, 0644), borra las cuentas de hace más de 3 días y rota el registro.
+
+Las órdenes (como root, desde esta carpeta):
+
+  install -o root -g root -m 0644 informe.php /www/hispados-termo/informe.php
+  install -d -o hispatermo -g hispatermo -m 0700 /www/hispados-subidas/informes /www/hispados-subidas/informes-cuotas
+  (nginx: añadir los dos «location» de nginx-location.txt al server de 443 de
+   hispados.es, junto a los del Termómetro; nginx -t && nginx -s reload)
+  install -o root -g root -m 0755 informe-mover.sh /root/hispados-tareas/informe-mover.sh
+  echo '*/5 * * * * root /root/hispados-tareas/informe-mover.sh >> /root/hispados-tareas/informe-mover.log 2>&1' > /etc/cron.d/informe-mover
+
+(No hace falta recargar PHP-FPM: el pool es el mismo y el guion se lee en
+cada petición.)
+
+Probar desde fuera:
+  printf 'Hispa-Pentium: informe de los dispositivos que fallan\r\nUna prueba a mano, con letras de más para llegar a 64.\r\n' > /tmp/INFORME.TXT
+  curl -s -H 'Content-Type: text/plain; charset=utf-8' --data-binary @/tmp/INFORME.TXT https://hispados.es/informe/enviar.php
+  -> «OK 20261125-153012-7F3A»; el registro: /www/hispados-subidas/registro/informes.log;
+     a los 5 minutos, en el FTP: Pendientes/Informes-dispositivos/20261125-153012-Sin-nombre/INFORME.TXT
+  (cuenta para los 5 de esa IP de hoy: si se prueba mucho, borrar
+   /www/hispados-subidas/informes-cuotas/ip-*-<hoy>)
+
+Quitarlo: borrar los dos «location» (y nginx -s reload), /etc/cron.d/informe-mover
+y /www/hispados-termo/informe.php.
+
+Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.

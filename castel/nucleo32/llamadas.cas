@@ -953,6 +953,22 @@ módulo Llamadas
         llamada(68, 3, nat32(destino), cabe)
     fin
 
+    ; (INFORME-DISP, 0.8.12) la ficha del equipo del SMBIOS, en texto
+    ; («clave=texto» por renglón: bios_fabricante, bios_version, bios_fecha,
+    ; fabricante, modelo, version, familia, placa_fabricante, placa_modelo,
+    ; placa_version), sin números de serie ni UUID: los octetos puestos (0:
+    ; no hay SMBIOS; un error: un núcleo de antes de la 0.8.12)
+    público función ficha_del_equipo(destino: puntero a byte, cabe: nat32): nat32
+        destino[0] := 0
+        devolver llamada(226, 8, nat32(destino), cabe)
+    fin
+
+    ; (INFORME-DISP) el registro del arranque del núcleo (lo de ARRANQUE.TXT,
+    ; en la memoria), hasta cabe octetos: los copiados (con los \r\n del DOS)
+    público función registro_del_arranque(destino: puntero a byte, cabe: nat32): nat32
+        devolver llamada(224, 5, nat32(destino), cabe)
+    fin
+
     ; ¿está el sistema instalado en el disco (y no arrancado de la memoria USB)?
     público función sistema_instalado(): bool
         devolver llamada(68, 2, 0, 0) = 1

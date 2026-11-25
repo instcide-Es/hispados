@@ -13,11 +13,20 @@
 ;                              o la primera unidad en la que se pueda escribir)
 ;    DISPOSIT /P BUS DIR       las propiedades de un dispositivo (las abre la
 ;                              ventana: General, Controlador y Recursos)
+;    DISPOSIT /ENVIAR [/SI] [/SERVIDOR=URL]
+;                              (INFORME-DISP, 0.8.12) el informe de lo que falla:
+;                              lo enseña, pregunta (con /SI, no) y lo manda a
+;                              hispados.es (tools/informe-disp/informe.php)
 ;
 ;  En la ventana: el árbol (Intro, dos clics o un clic en [+]/[-] abren y
 ;  cierran una categoría; Intro o dos clics en un dispositivo, sus
 ;  propiedades), y «Copiar informe» (al portapapeles) y «Guardar informe»
-;  (para mandar qué tiene cada portátil del taller). Lo que no tiene
+;  (para mandar qué tiene cada portátil del taller); y, (INFORME-DISP) abajo,
+;  «Enviar informe de los dispositivos que fallan» (también en Archivo): enseña
+;  antes, en texto, exactamente lo que se va a mandar (sin números de serie,
+;  ni claves, ni nombres de redes o de usuarios, ni rutas de documentos, ni
+;  IP públicas), «Enviar» o «Cancelar»; luego, «ENVIADO (número de informe
+;  ...)» o «NO ENVIADO: el motivo», y una copia en los Documentos (INFDISP.TXT). Lo que no tiene
 ;  controlador va con un «!», fondo naranja, una franja y la palabra; lo que
 ;  funciona, con «+» (y una marca en sus propiedades): nada depende solo del color.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -26,7 +35,7 @@ módulo UDisposi
 
     modelo usuario
 
-    importar Llamadas, Controles, Textos32, Formato, Redes
+    importar Llamadas, Controles, Textos32, Formato, Redes, Https, BlocPag
 
     constante MAX = 200
     constante N_CAT = 11
@@ -38,6 +47,11 @@ módulo UDisposi
     constante ID_PESTAÑAS = 20
     constante ID_CERRAR = 21
     constante ID_COPIAR_FICHA = 22
+    constante ID_ENVIAR = 14                    ; (INFORME-DISP) «Enviar informe de los dispositivos que fallan»
+    constante ID_V_TEXTO = 30                   ; (INFORME-DISP) la vista de lo que se manda
+    constante ID_V_ENVIAR = 31
+    constante ID_V_CANCELAR = 32
+    constante ID_V_VOLVER = 33
     constante ES_CATEGORÍA = 0x10000            ; el id de un renglón de categoría (más su número)
     constante MENÚS = "&Archivo|&Ver|A&yuda"
     constante CABE_INFORME = 60000
@@ -806,6 +820,1293 @@ módulo UDisposi
     fin
 
     ; =========================================================================
+    ;  (INFORME-DISP, 0.8.12) «Enviar informe de los dispositivos que fallan»
+    ;
+    ;  Lo que se manda (un texto, UTF-8 con los \r\n del DOS; el mismo que se
+    ;  enseña antes y que se guarda en los Documentos, INFDISP.TXT): la versión
+    ;  de Hispa-Pentium y de cada paquete, el equipo (la ficha del SMBIOS: el
+    ;  fabricante, el modelo y la BIOS, que da el núcleo sin el número de serie
+    ;  ni el UUID: la 226, 8), el procesador, la memoria, la lista de todo con
+    ;  su identificador y su estado y, de cada cosa que falla (sin controlador
+    ;  o con error), dónde está, su ficha, qué controlador se ha intentado y
+    ;  las líneas de ARRANQUE.TXT, RED.LOG, WIFI.LOG y BT.LOG que tocan a ese
+    ;  aparato (por su identificador, su sitio en el PCI o su ruta de ACPI; de
+    ;  la tarjeta Wi-Fi, del cable y del Bluetooth, también lo último de su
+    ;  registro). Cada línea pasa por sanea(): fuera las que puedan llevar
+    ;  una clave (contraseñas, PSK, testigos, galletas...), el número de serie,
+    ;  el UUID o la MSDM; los nombres de las redes («...» en lo del Wi-Fi y del
+    ;  Bluetooth), las MAC y los BSSID solo con su fabricante (los 3 primeros
+    ;  octetos), las IP públicas, las rutas que no son del sistema (los
+    ;  documentos, las carpetas de los usuarios), los nombres de los usuarios
+    ;  y el del equipo. Ninguna tabla de ACPI. «<» y «>», como «(» y «)» (el
+    ;  servidor no admite «<»: ni HTML ni PHP).
+    ;  Lo recibe tools/informe-disp/informe.php (https://hispados.es/informe/
+    ;  enviar.php), que contesta «OK número» o «ERROR motivo». No cambia nada
+    ;  del sistema: lo puede hacer un usuario normal.
+    ; =========================================================================
+    constante SERVIDOR_INFORME = "https://hispados.es/informe/enviar.php"
+    constante PRIMERA_LÍNEA = "Hispa-Pentium: informe de los dispositivos que fallan"
+    constante CABE_ENVÍO = 32000
+    constante CABE_UTF8 = 64000                ; (lo más que da la 437: dos octetos por letra)
+    constante MAX_LÍN = 4000
+    constante MAX_OCULTAR = 12
+    constante CABE_MEM = 16384
+    constante MAX_POR_FUENTE = 40              ; las líneas de un registro, por aparato
+    constante ÚLTIMAS = 30                     ; lo último del registro de la Wi-Fi / del Bluetooth
+    constante F_ARRANQUE = 0
+    constante F_RED = 1
+    constante F_WIFI = 2
+    constante F_BT = 3
+    constante V_ÁRBOL = 0
+    constante V_VISTA = 1
+    constante V_RESULTADO = 2
+    ; (las palabras que, si salen en una línea, la quitan entera)
+    constante QUITAR = "clave|contrase|password|passwd|passphrase|psk|pmk|ptk|gtk|secret|token|testigo|cookie|galleta|msdm|slic|uuid|serial|de serie|nº serie|n.º serie|número de serie|sku"
+
+    variable envío: arreglo [CABE_ENVÍO] de byte           ; en la 437, con \r\n
+    variable envío_lleno: bool
+    variable envío_utf8: arreglo [CABE_UTF8] de byte
+    variable n_utf8: nat32
+    variable respuesta: arreglo [1024] de byte
+    variable servidor: arreglo [200] de byte
+    variable modo_v: nat32
+    variable lín_ini: arreglo [MAX_LÍN] de nat32           ; (la vista) dónde empieza cada renglón
+    variable lín_n: arreglo [MAX_LÍN] de nat32             ; y cuánto lleva
+    variable n_lín, primera, cols_vista: nat32
+    variable resultado: arreglo [300] de byte
+    variable resultado2: arreglo [300] de byte
+    variable fue_enviado: bool
+    variable copia_en: arreglo [120] de byte
+    variable ocultar: arreglo [MAX_OCULTAR] de arreglo [32] de byte
+    variable n_ocultar: nat32
+    variable letra_sistema: byte
+    variable sa: arreglo [520] de byte                     ; la línea saneada
+    variable sm: arreglo [520] de byte                     ; en minúsculas (para buscar)
+    variable sx: arreglo [520] de byte
+    ; el registro que se lee (un archivo, o lo de la memoria)
+    variable rf_m: nat32
+    variable rf_en_memoria: bool
+    variable mem_reg: arreglo [CABE_MEM] de byte
+    variable mem_n, mem_i: nat32
+    variable rb: arreglo [4096] de byte
+    variable rb_n, rb_i: nat32
+    variable rl: arreglo [520] de byte
+    variable rf_nombre: arreglo [40] de byte
+    variable anillo: arreglo [ÚLTIMAS] de arreglo [200] de byte
+    variable anillo_ya: arreglo [ÚLTIMAS] de bool
+    variable smb: arreglo [1100] de byte
+    variable vista_al: ent32
+
+    ; ---- poner líneas en el informe ----
+    función env_pon(s: puntero a byte)
+        si envío_lleno entonces devolver fin
+        si longitud(envío) + longitud(s) + 64 >= CABE_ENVÍO entonces
+            concatenar(envío, "(el informe no cabe entero: aquí se corta)\r\n")
+            envío_lleno := cierto
+            devolver
+        fin
+        concatenar(envío, s)
+    fin
+
+    ; una línea nuestra, tal cual (sin sanear: los textos fijos del informe)
+    función env_fijo(s: puntero a byte)
+        env_pon(s)
+        env_pon("\r\n")
+    fin
+
+    ; una línea, saneada, con su \r\n (las que no pasan, no van)
+    función env_línea(s: puntero a byte)
+        si sanea(s, F_ARRANQUE, falso) entonces
+            env_pon(sa)
+            env_pon("\r\n")
+        fin
+    fin
+
+    ; ---- sanear ----
+    función en_minúsculas(d: puntero a byte, t: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 y i < 515 hacer
+            d[i] := minúscula(t[i])
+            i := i + 1
+        fin
+        d[i] := 0
+    fin
+
+    función es_hex(c: byte): bool
+        devolver (c >= '0' y c <= '9') o (c >= 'a' y c <= 'f') o (c >= 'A' y c <= 'F')
+    fin
+
+    función es_díg(c: byte): bool
+        devolver c >= '0' y c <= '9'
+    fin
+
+    ; ¿lleva alguna de las palabras de QUITAR (sm, en minúsculas)?
+    función lleva_palabra_mala(): bool
+        variable k: nat32
+        variable p: arreglo [24] de byte
+        k := 0
+        mientras cierto hacer
+            opción_de(QUITAR, k, p, 24)
+            si p[0] = 0 entonces devolver falso fin
+            si buscar(sm, p) <> nulo entonces devolver cierto fin
+            k := k + 1
+        fin
+        devolver falso
+    fin
+
+    ; ¿una MAC (o un BSSID) en t[i]? «hh:hh:hh:hh:hh:hh» (o con «-»)
+    función es_mac(t: puntero a byte, i: nat32): bool
+        variable k: nat32
+        variable sep: byte
+        para k desde 0 hasta 16 hacer
+            si t[i + k] = 0 entonces devolver falso fin
+        fin
+        si i > 0 y (es_hex(t[i - 1]) o t[i - 1] = ':' o t[i - 1] = '-') entonces devolver falso fin
+        sep := t[i + 2]
+        si sep <> ':' y sep <> '-' entonces devolver falso fin
+        para k desde 0 hasta 5 hacer
+            si no es_hex(t[i + k * 3]) o no es_hex(t[i + k * 3 + 1]) entonces devolver falso fin
+            si k < 5 y t[i + k * 3 + 2] <> sep entonces devolver falso fin
+        fin
+        si es_hex(t[i + 17]) o t[i + 17] = sep entonces devolver falso fin
+        devolver cierto
+    fin
+
+    ; ¿una IPv4 en t[i]? su largo (0: no) y sus cuatro números
+    función es_ip(t: puntero a byte, i: nat32, cu: puntero a nat32): nat32
+        variable k, j, v, cifras: nat32
+        si i > 0 y (es_díg(t[i - 1]) o t[i - 1] = '.') entonces devolver 0 fin
+        j := i
+        para k desde 0 hasta 3 hacer
+            v := 0
+            cifras := 0
+            mientras es_díg(t[j]) y cifras < 4 hacer
+                v := v * 10 + nat32(t[j] - '0')
+                j := j + 1
+                cifras := cifras + 1
+            fin
+            si cifras = 0 o cifras > 3 o v > 255 entonces devolver 0 fin
+            cu[k] := v
+            si k < 3 entonces
+                si t[j] <> '.' entonces devolver 0 fin
+                j := j + 1
+            fin
+        fin
+        si es_díg(t[j]) o (t[j] = '.' y es_díg(t[j + 1])) entonces devolver 0 fin
+        devolver j - i
+    fin
+
+    función ip_privada(cu: puntero a nat32): bool
+        si cu[0] = 10 o cu[0] = 127 o cu[0] = 0 entonces devolver cierto fin
+        si cu[0] = 192 y cu[1] = 168 entonces devolver cierto fin
+        si cu[0] = 172 y cu[1] >= 16 y cu[1] <= 31 entonces devolver cierto fin
+        si cu[0] = 169 y cu[1] = 254 entonces devolver cierto fin
+        si cu[0] = 255 y cu[1] = 255 y cu[2] = 255 y cu[3] = 255 entonces devolver cierto fin
+        si cu[0] = 255 y cu[1] = 255 entonces devolver cierto fin      ; (las máscaras)
+        devolver falso
+    fin
+
+    ; ¿dónde acaba una ruta que empieza en t[i]?
+    función fin_de_ruta(t: puntero a byte, i: nat32): nat32
+        mientras t[i] <> 0 y t[i] <> ' ' y t[i] <> 0xAF y t[i] <> 0xAE y t[i] <> '"' y t[i] <> 39 y t[i] <> ',' y t[i] <> ';' y t[i] <> ')' y t[i] <> '(' y t[i] <> '<' y t[i] <> '>' y t[i] <> 9 hacer
+            i := i + 1
+        fin
+        devolver i
+    fin
+
+    ; ¿es de las del sistema (la ruta t[i..j))? «X:\HISPA\...» o un archivo de la raíz
+    función ruta_del_sistema(t: puntero a byte, i: nat32, j: nat32): bool
+        variable k, barras: nat32
+        variable u: arreglo [12] de byte
+        k := 0
+        mientras k < 9 y i + k < j hacer
+            u[k] := mayúscula(t[i + k])
+            k := k + 1
+        fin
+        u[k] := 0
+        si empieza_por(dirección(u[1]), ":\\HISPA\\") o iguales(dirección(u[1]), ":\\HISPA") entonces devolver cierto fin
+        barras := 0
+        para k desde i hasta j - 1 hacer
+            si t[k] = '\\' entonces barras := barras + 1 fin
+        fin
+        devolver barras <= 1
+    fin
+
+    ; cambia en sa lo que va entre «» por «(quitado)»
+    función quita_comillas()
+        variable i, j: nat32
+        i := 0
+        j := 0
+        mientras sa[i] <> 0 hacer
+            sx[j] := sa[i]
+            j := j + 1
+            si sa[i] = 0xAE entonces
+                i := i + 1
+                mientras sa[i] <> 0 y sa[i] <> 0xAF hacer i := i + 1 fin
+                Textos32.copiar(dirección(sx[j]), "(quitado)")
+                j := j + 9
+                si sa[i] = 0xAF entonces
+                    sx[j] := 0xAF
+                    j := j + 1
+                    i := i + 1
+                fin
+            sino
+                i := i + 1
+            fin
+            si j > 500 entonces romper fin
+        fin
+        sx[j] := 0
+        Textos32.copiar(sa, sx)
+    fin
+
+    ; cambia en sa cada uno de los nombres de «ocultar» (sin mirar la caja) por «(nombre)»
+    función quita_nombres()
+        variable k, i, j, n: nat32
+        variable p: puntero a byte
+        para k desde 1 hasta n_ocultar hacer
+            n := longitud(ocultar[k - 1])
+            en_minúsculas(sm, sa)
+            p := buscar(sm, ocultar[k - 1])
+            mientras p <> nulo hacer
+                i := nat32(p) - nat32(dirección(sm[0]))
+                j := 0
+                mientras j < i hacer
+                    sx[j] := sa[j]
+                    j := j + 1
+                fin
+                sx[j] := 0
+                concatenar(sx, "(nombre)")
+                concatenar(sx, dirección(sa[i + n]))
+                copiar_hasta(sa, sx, 510)
+                en_minúsculas(sm, sa)
+                p := buscar(sm, ocultar[k - 1])
+            fin
+        fin
+    fin
+
+    ; sanea la línea t (de la fuente f) en sa; falso si no puede ir. Con
+    ; «de_red», lo de entre «» se quita (los nombres de las redes)
+    función sanea(t: puntero a byte, f: nat32, de_red: bool): bool
+        variable i, j, n, k: nat32
+        variable cu: arreglo [4] de nat32
+        variable c: byte
+        en_minúsculas(sm, t)
+        si lleva_palabra_mala() entonces devolver falso fin
+        ; (el nombre de una red sin comillas: fuera la línea; un BSSID sí va, cortado)
+        si buscar(sm, "ssid") <> nulo y buscar(sm, "bssid") = nulo entonces devolver falso fin
+        si f = F_WIFI o f = F_BT o buscar(sm, "wifi") <> nulo o buscar(sm, "wi-fi") <> nulo o buscar(sm, "ssid") <> nulo o buscar(sm, "bluetooth") <> nulo o buscar(sm, "red \xAE") <> nulo entonces de_red := cierto fin
+        i := 0
+        j := 0
+        mientras t[i] <> 0 y j < 500 hacer
+            c := t[i]
+            si es_hex(c) y es_mac(t, i) entonces
+                para k desde 0 hasta 7 hacer sa[j + k] := t[i + k] fin
+                j := j + 8
+                sa[j] := t[i + 2]
+                sa[j + 1] := 'x'
+                sa[j + 2] := 'x'
+                sa[j + 3] := t[i + 2]
+                sa[j + 4] := 'x'
+                sa[j + 5] := 'x'
+                sa[j + 6] := t[i + 2]
+                sa[j + 7] := 'x'
+                sa[j + 8] := 'x'
+                j := j + 9
+                i := i + 17
+            sino si es_díg(c) y es_ip(t, i, cu) > 0 entonces
+                n := es_ip(t, i, cu)
+                si ip_privada(cu) entonces
+                    para k desde 0 hasta n - 1 hacer sa[j + k] := t[i + k] fin
+                    j := j + n
+                sino
+                    sa[j] := 0
+                    concatenar(sa, "(IP pública)")
+                    j := longitud(sa)
+                fin
+                i := i + n
+            sino si es_letra(c) y t[i + 1] = ':' y t[i + 2] = '\\' entonces
+                n := fin_de_ruta(t, i)
+                si ruta_del_sistema(t, i, n) entonces
+                    mientras i < n y j < 500 hacer
+                        sa[j] := t[i]
+                        i := i + 1
+                        j := j + 1
+                    fin
+                sino
+                    sa[j] := 0
+                    concatenar(sa, "(ruta)")
+                    j := longitud(sa)
+                    i := n
+                fin
+            sino si c = '\\' y (empieza_por(dirección(sm[i]), "\\usuarios") o empieza_por(dirección(sm[i]), "\\document")) entonces
+                sa[j] := 0
+                concatenar(sa, "(ruta)")
+                j := longitud(sa)
+                i := fin_de_ruta(t, i)
+            sino
+                si c = '<' entonces c := '(' fin
+                si c = '>' entonces c := ')' fin
+                si c < 32 entonces c := ' ' fin
+                sa[j] := c
+                j := j + 1
+                i := i + 1
+            fin
+        fin
+        sa[j] := 0
+        si de_red entonces quita_comillas() fin
+        quita_nombres()
+        devolver cierto
+    fin
+
+    ; los nombres que no deben salir: los de los usuarios y el del equipo
+    función prepara_ocultar()
+        variable f: Ficha_usuario
+        variable i, k: nat32
+        variable t3: arreglo [80] de byte
+        n_ocultar := 0
+        i := 0
+        mientras n_ocultar + 2 < MAX_OCULTAR y i < 32 y ficha_usuario(i, f) hacer
+            si longitud(f.nombre) >= 3 entonces
+                en_minúsculas(t3, f.nombre)
+                copiar_hasta(ocultar[n_ocultar], t3, 32)
+                n_ocultar := n_ocultar + 1
+            fin
+            i := i + 1
+        fin
+        nombre_usuario(t3, 80)
+        si longitud(t3) >= 3 y n_ocultar < MAX_OCULTAR entonces
+            en_minúsculas(sm, t3)
+            copiar_hasta(ocultar[n_ocultar], sm, 32)
+            n_ocultar := n_ocultar + 1
+        fin
+        ; (el del equipo, salvo si es el fabricante o el modelo, «TOSHIBA»: eso ya va)
+        nombre_equipo(t3, 80)
+        en_minúsculas(sx, smb)
+        en_minúsculas(sm, t3)
+        si longitud(t3) >= 3 y n_ocultar < MAX_OCULTAR y buscar(sx, sm) = nulo entonces
+            copiar_hasta(ocultar[n_ocultar], sm, 32)
+            n_ocultar := n_ocultar + 1
+        fin
+        ; (los largos, antes: «portatil-de-maria» antes que «maria»)
+        para i desde 1 hasta n_ocultar hacer
+            para k desde 1 hasta n_ocultar - 1 hacer
+                si longitud(ocultar[k]) > longitud(ocultar[k - 1]) entonces
+                    Textos32.copiar(t3, ocultar[k])
+                    Textos32.copiar(ocultar[k], ocultar[k - 1])
+                    Textos32.copiar(ocultar[k - 1], t3)
+                fin
+            fin
+        fin
+    fin
+
+    ; ---- la unidad del sistema ----
+    función unidad_del_sistema(): byte
+        variable u: Info_unidad
+        variable k: nat32
+        k := 0
+        mientras info_unidad(k, u) hacer
+            si u.del_sistema = 1 y u.letra <> 0 entonces devolver u.letra fin
+            k := k + 1
+        fin
+        devolver 0
+    fin
+
+    ; «C:» y el resto (sin letra: tal cual)
+    función en_sistema(d: puntero a byte, resto: puntero a byte)
+        d[0] := 0
+        si letra_sistema <> 0 entonces
+            d[0] := letra_sistema
+            d[1] := ':'
+            d[2] := 0
+        fin
+        concatenar(d, resto)
+    fin
+
+    ; ---- leer un registro, línea a línea ----
+    función rf_abre(ruta: puntero a byte): bool
+        variable m: nat32
+        m := abrir(ruta)
+        si es_error(m) entonces devolver falso fin
+        rf_m := m
+        rf_en_memoria := falso
+        rb_n := 0
+        rb_i := 0
+        devolver cierto
+    fin
+
+    función rf_lee_octeto(ref c: byte): bool
+        variable k: nat32
+        si rf_en_memoria entonces
+            si mem_i >= mem_n entonces devolver falso fin
+            c := mem_reg[mem_i]
+            mem_i := mem_i + 1
+            devolver cierto
+        fin
+        si rb_i >= rb_n entonces
+            k := leer(rf_m, rb, 4096)
+            si es_error(k) o k = 0 entonces devolver falso fin
+            rb_n := k
+            rb_i := 0
+        fin
+        c := rb[rb_i]
+        rb_i := rb_i + 1
+        devolver cierto
+    fin
+
+    ; la línea siguiente, a rl (sin \r\n; las largas, cortadas a 500): falso al acabar
+    función rf_línea(): bool
+        variable c: byte
+        variable n: nat32
+        variable algo: bool
+        n := 0
+        algo := falso
+        mientras rf_lee_octeto(c) hacer
+            algo := cierto
+            si c = '\n' entonces romper fin
+            si c <> '\r' y n < 500 entonces
+                si c = 0 entonces c := ' ' fin
+                rl[n] := c
+                n := n + 1
+            fin
+        fin
+        rl[n] := 0
+        devolver algo
+    fin
+
+    función rf_cierra()
+        si no rf_en_memoria y rf_m <> 0 entonces cerrar(rf_m) fin
+        rf_m := 0
+    fin
+
+    ; abre la fuente f (el archivo, o lo que hay en la memoria): falso si no hay
+    función abre_fuente(f: nat32): bool
+        variable ruta: arreglo [40] de byte
+        rf_m := 0
+        según nat16(f)
+            caso F_ARRANQUE:
+                Textos32.copiar(rf_nombre, "ARRANQUE.TXT")
+                en_sistema(ruta, "\\ARRANQUE.TXT")
+                si rf_abre(ruta) entonces devolver cierto fin
+                mem_n := registro_del_arranque(mem_reg, CABE_MEM)
+                si es_error(mem_n) o mem_n = 0 entonces devolver falso fin
+                Textos32.copiar(rf_nombre, "registro del arranque")
+            caso F_RED:
+                Textos32.copiar(rf_nombre, "RED.LOG")
+                en_sistema(ruta, "\\HISPA\\RED.LOG")
+                si rf_abre(ruta) entonces devolver cierto fin
+                en_sistema(ruta, "\\RED.LOG")
+                si rf_abre(ruta) entonces devolver cierto fin
+                si estado_rápido(mem_i) = RED_NADA entonces devolver falso fin
+                mem_n := registro_red(mem_reg, CABE_MEM)
+                si es_error_red(mem_n) o mem_n = 0 entonces devolver falso fin
+                Textos32.copiar(rf_nombre, "RED.BIN")
+            caso F_WIFI:
+                Textos32.copiar(rf_nombre, "WIFI.LOG")
+                en_sistema(ruta, "\\HISPA\\WIFI.LOG")
+                si rf_abre(ruta) entonces devolver cierto fin
+                en_sistema(ruta, "\\WIFI.LOG")
+                devolver rf_abre(ruta)
+            si no:
+                Textos32.copiar(rf_nombre, "BT.LOG")
+                en_sistema(ruta, "\\HISPA\\BT.LOG")
+                si rf_abre(ruta) entonces devolver cierto fin
+                en_sistema(ruta, "\\BT.LOG")
+                devolver rf_abre(ruta)
+        fin
+        si mem_n > CABE_MEM entonces mem_n := CABE_MEM fin
+        rf_en_memoria := cierto
+        mem_i := 0
+        devolver cierto
+    fin
+
+    ; ¿toca la línea (sx, en mayúsculas) al aparato i?
+    función toca(i: nat32): bool
+        variable k: arreglo [80] de byte
+        variable a: nat32
+        identificador(i, k)
+        a_mayúsculas(k)
+        si longitud(k) >= 4 y buscar(sx, k) <> nulo entonces devolver cierto fin
+        si lista[i].bus = BUS_PCI entonces
+            a := lista[i].dirección
+            dd[0] := (a >> 16) yb 0xFF
+            dd[1] := (a >> 11) yb 0x1F
+            dd[2] := (a >> 8) yb 7
+            formatear(k, 80, "%02X:%02X.%u", dd)
+            si buscar(sx, k) <> nulo entonces devolver cierto fin
+        fin
+        si lista[i].bus = BUS_ACPI y lista[i].nombre[0] = '\\' y longitud(lista[i].nombre) >= 6 entonces
+            copiar_hasta(k, lista[i].nombre, 80)
+            a_mayúsculas(k)
+            si buscar(sx, k) <> nulo entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; lo de la fuente f que toca al aparato i, al informe; con «últimas», también
+    ; lo último del registro (las que no hayan salido ya). Cuántas ha puesto
+    función líneas_de(f: nat32, i: nat32, últimas: nat32): nat32
+        variable puestas, más, k, a, total: nat32
+        variable pre: arreglo [48] de byte
+        si no abre_fuente(f) entonces devolver 0 fin
+        puestas := 0
+        más := 0
+        a := 0
+        total := 0
+        para k desde 0 hasta ÚLTIMAS - 1 hacer
+            anillo[k][0] := 0
+            anillo_ya[k] := falso
+        fin
+        dd[0] := nat32(dirección(rf_nombre[0]))
+        formatear(pre, 48, "       %s: ", dd)
+        mientras rf_línea() hacer
+            Textos32.copiar(sx, rl)
+            a_mayúsculas(sx)
+            k := 0
+            si toca(i) entonces
+                si puestas < MAX_POR_FUENTE entonces
+                    si sanea(rl, f, falso) entonces
+                        env_pon(pre)
+                        env_pon(sa)
+                        env_pon("\r\n")
+                        puestas := puestas + 1
+                    fin
+                sino
+                    más := más + 1
+                fin
+                k := 1
+            fin
+            si últimas > 0 entonces
+                copiar_hasta(anillo[a], rl, 200)
+                anillo_ya[a] := k = 1
+                a := (a + 1) mod últimas
+                total := total + 1
+            fin
+        fin
+        rf_cierra()
+        si más > 0 entonces
+            dd[0] := más
+            formatear(sx, 120, "       (y %u líneas más que lo nombran)\r\n", dd)
+            env_pon(sx)
+        fin
+        si últimas > 0 y total > 0 entonces
+            dd[0] := nat32(dirección(rf_nombre[0]))
+            dd[1] := últimas
+            formatear(sx, 160, "       Lo último de %s (hasta %u líneas):\r\n", dd)
+            env_pon(sx)
+            si total < últimas entonces a := 0 fin
+            para k desde 0 hasta últimas - 1 hacer
+                si anillo[a][0] <> 0 y no anillo_ya[a] y sanea(anillo[a], f, falso) entonces
+                    env_pon("         ")
+                    env_pon(sa)
+                    env_pon("\r\n")
+                    puestas := puestas + 1
+                fin
+                a := (a + 1) mod últimas
+            fin
+        fin
+        devolver puestas
+    fin
+
+    ; ¿qué es? (para lo último de su registro)
+    función es_wifi(i: nat32): bool
+        variable nom: arreglo [80] de byte
+        si lista[i].bus = BUS_PCI y (lista[i].clase >> 8) = 0x0280 entonces devolver cierto fin
+        nombre_de(i, nom, 80)
+        devolver buscar(nom, "Wi-Fi") <> nulo o buscar(nom, "WLAN") <> nulo
+    fin
+
+    función es_bt(i: nat32): bool
+        variable nom: arreglo [80] de byte
+        si lista[i].bus = BUS_USB y (lista[i].clase >> 16) = 0xE0 entonces devolver cierto fin
+        si lista[i].bus = BUS_PCI y (lista[i].clase >> 8) = 0x0D11 entonces devolver cierto fin
+        nombre_de(i, nom, 80)
+        devolver buscar(nom, "Bluetooth") <> nulo
+    fin
+
+    función es_cable(i: nat32): bool
+        devolver lista[i].bus = BUS_PCI y (lista[i].clase >> 8) = 0x0200
+    fin
+
+    ; ---- las partes del informe ----
+    ; la versión de Hispa-Pentium y la de cada paquete instalado
+    función env_versiones()
+        variable m, k, i, n, pq: nat32
+        variable e: Entrada
+        variable ruta: arreglo [64] de byte
+        variable cab: arreglo [1024] de byte
+        variable nom: arreglo [16] de byte
+        variable ver: arreglo [20] de byte
+        variable p: puntero a byte
+        variable lin: arreglo [300] de byte
+        dd[0] := (dato(DATO_VERSIÓN) >> 8) yb 0xFF
+        dd[1] := dato(DATO_VERSIÓN) yb 0xFF
+        k := dato(DATO_ARREGLO)
+        si es_error(k) entonces k := 0 fin
+        dd[2] := k
+        formatear(t, 200, "Hispa-Pentium: %u.%u.%u", dd)
+        si sistema_instalado() entonces concatenar(t, " (instalado en el disco)") sino concatenar(t, " (arrancado de una memoria o un CD)") fin
+        env_línea(t)
+        en_sistema(ruta, "\\HISPA\\PAQUETES")
+        m := abrir(ruta)
+        si es_error(m) entonces
+            env_línea("Paquetes: ninguno instalado (no hay \\HISPA\\PAQUETES)")
+            devolver
+        fin
+        Textos32.copiar(lin, "Paquetes:")
+        pq := 0
+        mientras entrada(m, e) hacer
+            n := longitud(e.nombre)
+            si e.atributos yb CARPETA = 0 y n > 4 y iguales(dirección(e.nombre[n - 4]), ".PQI") entonces
+                en_sistema(ruta, "\\HISPA\\PAQUETES\\")
+                concatenar(ruta, e.nombre)
+                nom[0] := 0
+                ver[0] := 0
+                k := abrir(ruta)
+                si no es_error(k) entonces
+                    n := leer(k, cab, 1000)
+                    cerrar(k)
+                    si es_error(n) entonces n := 0 fin
+                    cab[n] := 0
+                    ; «nombre=...» y «version=...» de la cabecera
+                    p := buscar(cab, "\nnombre=")
+                    si p <> nulo entonces
+                        i := 0
+                        mientras p[8 + i] >= 32 y i < 14 hacer
+                            nom[i] := p[8 + i]
+                            i := i + 1
+                        fin
+                        nom[i] := 0
+                    fin
+                    p := buscar(cab, "\nversion=")
+                    si p <> nulo entonces
+                        i := 0
+                        mientras p[9 + i] >= 32 y i < 18 hacer
+                            ver[i] := p[9 + i]
+                            i := i + 1
+                        fin
+                        ver[i] := 0
+                    fin
+                fin
+                si nom[0] <> 0 entonces
+                    si longitud(lin) + longitud(nom) + longitud(ver) + 4 > 76 entonces
+                        env_línea(lin)
+                        Textos32.copiar(lin, "         ")
+                    fin
+                    si pq > 0 y lin[longitud(lin) - 1] <> ' ' entonces concatenar(lin, ",") fin
+                    concatenar(lin, " ")
+                    concatenar(lin, nom)
+                    concatenar(lin, " ")
+                    concatenar(lin, ver)
+                    pq := pq + 1
+                fin
+            fin
+        fin
+        cerrar(m)
+        si pq = 0 entonces concatenar(lin, " ninguno instalado") fin
+        env_línea(lin)
+    fin
+
+    ; un valor de la ficha del SMBIOS («clave=texto»), a d (vacío si no está)
+    función de_smbios(clave: puntero a byte, d: puntero a byte)
+        variable p: puntero a byte
+        variable i, n: nat32
+        variable pat: arreglo [32] de byte
+        d[0] := 0
+        pat[0] := '\n'
+        pat[1] := 0
+        concatenar(pat, clave)
+        concatenar(pat, "=")
+        p := buscar(smb, pat)
+        si p = nulo entonces devolver fin
+        n := longitud(pat)
+        i := 0
+        mientras p[n + i] <> '\n' y p[n + i] <> 0 y i < 70 hacer
+            d[i] := p[n + i]
+            i := i + 1
+        fin
+        d[i] := 0
+    fin
+
+    función env_smbios_uno(rótulo: puntero a byte, clave: puntero a byte)
+        variable v: arreglo [80] de byte
+        de_smbios(clave, v)
+        si v[0] = 0 entonces devolver fin
+        dd[0] := nat32(rótulo)
+        dd[1] := nat32(dirección(v[0]))
+        formatear(t, 200, "  %s: %s", dd)
+        env_fijo(t)
+    fin
+
+    función env_equipo()
+        variable r, i: nat32
+        variable a, b, c: arreglo [80] de byte
+        smb[0] := '\n'
+        r := ficha_del_equipo(dirección(smb[1]), 1090)
+        si es_error(r) entonces
+            env_línea("Equipo (SMBIOS): este núcleo no lo dice (hace falta la base 0.8.12)")
+            devolver
+        fin
+        si r = 0 entonces
+            env_línea("Equipo (SMBIOS): no hay SMBIOS (el equipo no lo trae, o no se encuentra)")
+            devolver
+        fin
+        ; (la 437 de casa: lo del SMBIOS va en ASCII; lo raro ya viene como «?»)
+        para i desde 1 hasta r hacer
+            si smb[i] = '<' entonces smb[i] := '(' fin
+            si smb[i] = '>' entonces smb[i] := ')' fin
+        fin
+        env_fijo("Equipo (SMBIOS; sin el número de serie ni el UUID):")
+        env_smbios_uno("Fabricante", "fabricante")
+        env_smbios_uno("Modelo", "modelo")
+        env_smbios_uno("Versión", "version")
+        env_smbios_uno("Familia", "familia")
+        de_smbios("placa_fabricante", a)
+        de_smbios("placa_modelo", b)
+        de_smbios("placa_version", c)
+        si a[0] <> 0 o b[0] <> 0 entonces
+            dd[0] := nat32(dirección(a[0]))
+            dd[1] := nat32(dirección(b[0]))
+            dd[2] := nat32(dirección(c[0]))
+            formatear(t, 200, "  Placa: %s %s %s", dd)
+            env_fijo(t)
+        fin
+        de_smbios("bios_fabricante", a)
+        de_smbios("bios_version", b)
+        de_smbios("bios_fecha", c)
+        si a[0] <> 0 o b[0] <> 0 entonces
+            dd[0] := nat32(dirección(a[0]))
+            dd[1] := nat32(dirección(b[0]))
+            dd[2] := nat32(dirección(c[0]))
+            formatear(t, 200, "  BIOS: %s, versión %s, del %s", dd)
+            env_fijo(t)
+        fin
+    fin
+
+    ; la ficha (las tres pestañas) del aparato i, sangrada
+    función env_ficha(i: nat32)
+        variable parte, k, j: nat32
+        variable r: arreglo [240] de byte
+        para parte desde 0 hasta 2 hacer
+            ficha_de(i, parte, ficha_t)
+            k := 0
+            mientras ficha_t[k] <> 0 hacer
+                Textos32.copiar(r, "       ")
+                j := longitud(r)
+                mientras ficha_t[k] <> 0 y ficha_t[k] <> '\n' y j < 236 hacer
+                    si ficha_t[k] = '\t' entonces
+                        r[j] := ':'
+                        r[j + 1] := ' '
+                        j := j + 2
+                    sino
+                        r[j] := ficha_t[k]
+                        j := j + 1
+                    fin
+                    k := k + 1
+                fin
+                r[j] := 0
+                si ficha_t[k] = '\n' entonces k := k + 1 fin
+                si no empieza_por(r, "       Tipo:") entonces env_línea(r) fin
+            fin
+        fin
+    fin
+
+    función falla(i: nat32): bool
+        devolver no oculto[i] y (lista[i].estado = EST_SIN_CONTROLADOR o lista[i].estado = EST_ERROR)
+    fin
+
+    ; todo el informe, en «envío»
+    función haz_envío()
+        variable i, f, nf, h, puestas: nat32
+        variable nom: arreglo [80] de byte
+        variable id: arreglo [24] de byte
+        variable dn: arreglo [120] de byte
+        variable cpu_hecho: bool
+        envío[0] := 0
+        envío_lleno := falso
+        letra_sistema := unidad_del_sistema()
+        smb[0] := 0
+        env_fijo(PRIMERA_LÍNEA)
+        env_fijo("(Lo manda el Administrador de dispositivos, con «Enviar informe de los dispositivos que fallan». No lleva números de serie, ni el UUID, ni contraseñas, ni nombres de redes o de usuarios, ni rutas de documentos, ni IP públicas.)")
+        f := dato(DATO_FECHA)
+        dd[0] := (f >> 16) yb 31
+        dd[1] := (f >> 21) yb 15
+        dd[2] := ((f >> 25) yb 127) + 1980
+        dd[3] := (f >> 11) yb 31
+        dd[4] := (f >> 5) yb 63
+        formatear(t, 200, "Fecha: %02u/%02u/%u %02u:%02u (la hora del equipo)", dd)
+        env_línea(t)
+        env_versiones()
+        env_equipo()
+        prepara_ocultar()
+        cpu_hecho := falso
+        para i desde 0 hasta n - 1 hacer
+            si lista[i].bus = BUS_CPU y no cpu_hecho entonces
+                nombre_de(i, nom, 80)
+                fabricante(i, dn)
+                dd[0] := nat32(dirección(nom[0]))
+                dd[1] := nat32(dirección(dn[0]))
+                formatear(t, 200, "Procesador: %s (%s)", dd)
+                env_línea(t)
+                cpu_hecho := cierto
+            fin
+        fin
+        dd[0] := dato(DATO_MARCOS) * 4 div 1024
+        dd[1] := dato(DATO_ANCHO_PANTALLA)
+        dd[2] := dato(DATO_ALTO_PANTALLA)
+        formatear(t, 200, "Memoria: %u MB   Pantalla: %u x %u", dd)
+        env_línea(t)
+        nf := cuenta(EST_SIN_CONTROLADOR) + cuenta(EST_ERROR)
+        dd[0] := n - cuenta_ocultos()
+        dd[1] := cuenta(EST_FUNCIONA) + cuenta(EST_NO_HACE_FALTA)
+        dd[2] := cuenta(EST_SIN_CONTROLADOR)
+        dd[3] := cuenta(EST_ERROR)
+        dd[4] := cuenta(EST_APAGADO)
+        formatear(t, 200, "Resumen: %u dispositivos; %u funcionan, %u SIN CONTROLADOR, %u CON ERROR, %u desactivados.", dd)
+        env_línea(t)
+        ; lo que falla, con todo lo suyo
+        h := 0
+        para i desde 0 hasta n - 1 hacer
+            si falla(i) entonces h := h + 1 fin
+        fin
+        dd[0] := h
+        formatear(t, 200, "== Lo que falla: %u ==", dd)
+        env_pon("\r\n")
+        env_fijo(t)
+        si h = 0 entonces env_línea("  Nada: todo lo que se ve tiene su controlador.") fin
+        para i desde 0 hasta n - 1 hacer
+            si falla(i) entonces
+                nombre_de(i, nom, 80)
+                identificador(i, id)
+                dd[0] := nat32(marca_informe(lista[i].estado))
+                dd[1] := nat32(dirección(nom[0]))
+                dd[2] := nat32(dirección(id[0]))
+                formatear(t, 200, "-- %s %s  [%s]", dd)
+                env_pon("\r\n")
+                env_línea(t)
+                si lista[i].controlador[0] <> 0 entonces
+                    dd[0] := nat32(dirección(lista[i].controlador[0]))
+                    formatear(t, 200, "       Controlador intentado: %s (no ha podido con él)", dd)
+                sino
+                    Textos32.copiar(t, "       Controlador intentado: ninguno (Hispa-Pentium no tiene uno para él)")
+                fin
+                env_línea(t)
+                env_ficha(i)
+                env_línea("       Lo que dicen los registros de él:")
+                puestas := líneas_de(F_ARRANQUE, i, 0)
+                si es_cable(i) entonces puestas := puestas + líneas_de(F_RED, i, 15) sino puestas := puestas + líneas_de(F_RED, i, 0) fin
+                si es_wifi(i) entonces puestas := puestas + líneas_de(F_WIFI, i, ÚLTIMAS) sino puestas := puestas + líneas_de(F_WIFI, i, 0) fin
+                si es_bt(i) entonces puestas := puestas + líneas_de(F_BT, i, ÚLTIMAS) sino puestas := puestas + líneas_de(F_BT, i, 0) fin
+                si puestas = 0 entonces env_línea("       (nada: ni ARRANQUE.TXT, ni RED.LOG, ni WIFI.LOG, ni BT.LOG lo nombran)") fin
+            fin
+        fin
+        ; y la lista de todo
+        env_pon("\r\n")
+        env_fijo("== Todos los dispositivos ==")
+        para i desde 0 hasta n - 1 hacer
+            si no oculto[i] entonces
+                nombre_de(i, nom, 80)
+                identificador(i, id)
+                dónde(i, dn)
+                dd[0] := nat32(marca_informe(lista[i].estado))
+                dd[1] := nat32(dirección(nom[0]))
+                dd[2] := nat32(dirección(id[0]))
+                dd[3] := nat32(dirección(dn[0]))
+                dd[4] := nat32(palabra_estado(lista[i].estado))
+                dd[5] := nat32(dirección(lista[i].controlador[0]))
+                si lista[i].controlador[0] = 0 entonces dd[5] := nat32("-") fin
+                si id[0] = 0 entonces dd[2] := nat32("-") fin
+                formatear(t, 200, "  %s %s  [%s; %s; %s; %s]", dd)
+                env_línea(t)
+            fin
+        fin
+        env_pon("\r\n")
+        env_fijo("== Fin del informe ==")
+    fin
+
+    ; ---- la copia en los Documentos ----
+    ; X:\USUARIOS\<CARPETA>\DOCUMENT\INFDISP.TXT (con usuarios), X:\DOCUMENT\INFDISP.TXT
+    ; (sin ellos) o, si ahí no se puede, la primera unidad en la que se pueda escribir
+    función guarda_copia(): bool
+        variable ruta: arreglo [120] de byte
+        variable c: arreglo [64] de byte
+        variable m, r, vuelta: nat32
+        para vuelta desde 0 hasta 1 hacer
+            si vuelta = 0 entonces
+                c[0] := 0
+                si mi_carpeta(c, 64) > 0 y c[0] = '\\' entonces
+                    en_sistema(ruta, c)
+                    concatenar(ruta, "\\DOCUMENT")
+                sino
+                    en_sistema(ruta, "\\DOCUMENT")
+                fin
+                crear_carpeta(ruta)
+                concatenar(ruta, "\\INFDISP.TXT")
+            sino
+                si no dónde_guardar(ruta) entonces devolver falso fin
+                ruta[3] := 0
+                concatenar(ruta, "INFDISP.TXT")
+            fin
+            m := crear(ruta)
+            si no es_error(m) entonces
+                r := escribir_archivo(m, envío_utf8, n_utf8)
+                cerrar(m)
+                si r = n_utf8 entonces
+                    copiar_hasta(copia_en, ruta, 120)
+                    devolver cierto
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; ---- mandarlo ----
+    función motivo_red(e: nat32, d: puntero a byte)
+        si e = SIN_RED o e = SIN_TARJETA o e = SIN_CABLE o e = SIN_IP entonces
+            Textos32.copiar(d, "no hay red (enchufe el cable o conecte el Wi-Fi en Configuración > Red y Wi-Fi)")
+        sino si e = NO_RESUELVE entonces
+            Textos32.copiar(d, "no se encuentra el servidor (hispados.es): ¿hay salida a Internet?")
+        sino si e = TIEMPO entonces
+            Textos32.copiar(d, "el servidor no contesta a tiempo")
+        sino si e = RECHAZADA o e = INALCANZABLE o e = CORTADA_RED o e = RED_CAMBIADA entonces
+            Textos32.copiar(d, "no se llega al servidor (se ha cortado o no contesta)")
+        sino si e = TLS_SIN_HORA entonces
+            Textos32.copiar(d, "el reloj del equipo no está en hora (hace falta para la conexión segura)")
+        sino si e = TLS_CERTIFICADO entonces
+            Textos32.copiar(d, "el certificado del servidor no vale (¿está el reloj en hora?)")
+        sino si e = SIN_TLS entonces
+            Textos32.copiar(d, "falta el servicio de conexiones seguras (TLS.BIN: el paquete tls)")
+        sino
+            copiar_hasta(d, https_texto_error(e), 200)
+        fin
+    fin
+
+    ; ¿«OK AAAAMMDD-HHMMSS-XXXX»? el número, a d
+    función número_de(d: puntero a byte): bool
+        variable i: nat32
+        si no empieza_por(respuesta, "OK ") entonces devolver falso fin
+        para i desde 0 hasta 19 hacer
+            si i = 8 o i = 15 entonces
+                si respuesta[3 + i] <> '-' entonces devolver falso fin
+            sino si no es_hex(respuesta[3 + i]) entonces
+                devolver falso
+            fin
+            d[i] := respuesta[3 + i]
+        fin
+        d[20] := 0
+        devolver cierto
+    fin
+
+    función manda_informe()
+        variable r: Respuesta_https
+        variable c, e, ip, k, i, perdidas: nat32
+        variable núm: arreglo [24] de byte
+        variable mot: arreglo [240] de byte
+        fue_enviado := falso
+        resultado2[0] := 0
+        copia_en[0] := 0
+        n_utf8 := pag_437_a_utf8(envío, longitud(envío), envío_utf8, CABE_UTF8 - 1)
+        si guarda_copia() entonces
+            dd[0] := nat32(dirección(copia_en[0]))
+            formatear(resultado2, 300, "Copia guardada en %s (para mandarla a mano, si hace falta).", dd)
+        sino
+            Textos32.copiar(resultado2, "No se ha podido guardar una copia (no hay dónde escribir).")
+        fin
+        si servidor[0] = 0 entonces Textos32.copiar(servidor, SERVIDOR_INFORME) fin
+        ; la red: si no hay, se espera un poco (el Wi-Fi tarda en tener IP)
+        e := estado_rápido(ip)
+        k := 0
+        mientras e <> RED_CONECTADA y e <> RED_NADA y k < 40 hacer
+            dormir(50)
+            e := estado_rápido(ip)
+            k := k + 1
+        fin
+        si e = RED_SIN_TARJETA o e = RED_SIN_CABLE o e = RED_BUSCANDO entonces
+            Textos32.copiar(resultado, "NO ENVIADO: no hay red (enchufe el cable o conecte el Wi-Fi en Configuración > Red y Wi-Fi)")
+            escribir("disposit: informe: NO ENVIADO (sin red)\n")
+            devolver
+        fin
+        dd[0] := nat32(dirección(servidor[0]))
+        dd[1] := n_utf8
+        imprimir("disposit: informe: lo mando a %s (%u octetos)\n", dd)
+        sin_galletas := cierto
+        c := https_post(servidor, "text/plain; charset=utf-8", envío_utf8, n_utf8, respuesta, 1000, r)
+        https_cerrar()
+        si r.error <> 0 o c = 0 entonces
+            e := r.error
+            si e = 0 entonces e := HTTPS_NO_VALE fin
+            motivo_red(e, mot)
+            dd[0] := nat32(dirección(mot[0]))
+            formatear(resultado, 300, "NO ENVIADO: %s", dd)
+            imprimir1("disposit: informe: %s\n", nat32(dirección(resultado[0])))
+            devolver
+        fin
+        si r.largo < 1000 entonces respuesta[r.largo] := 0 sino respuesta[999] := 0 fin
+        si c = 200 y número_de(núm) entonces
+            fue_enviado := cierto
+            dd[0] := nat32(dirección(núm[0]))
+            formatear(resultado, 300, "ENVIADO (número de informe %s)", dd)
+            imprimir1("disposit: informe: %s\n", nat32(dirección(resultado[0])))
+            devolver
+        fin
+        ; lo rechaza: su motivo, en llano (lo de después de «ERROR », en la 437)
+        mot[0] := 0
+        si empieza_por(respuesta, "ERROR ") entonces
+            i := 6
+            mientras respuesta[i] <> 0 y respuesta[i] <> '\n' y respuesta[i] <> '\r' y i < 200 hacer i := i + 1 fin
+            perdidas := pag_a_437(dirección(respuesta[6]), i - 6, mot, 200)
+        fin
+        para i desde 0 hasta longitud(mot) hacer
+            si mot[i] <> 0 y mot[i] < 32 entonces mot[i] := ' ' fin
+        fin
+        si mot[0] = 0 entonces
+            dd[0] := c
+            formatear(mot, 200, "contesta %u", dd)
+        fin
+        dd[0] := nat32(dirección(mot[0]))
+        dd[1] := c
+        formatear(resultado, 300, "NO ENVIADO: el servidor lo rechaza: %s (%u)", dd)
+        imprimir1("disposit: informe: %s\n", nat32(dirección(resultado[0])))
+    fin
+
+    ; ---- DISPOSIT /ENVIAR [/SI] [/SERVIDOR=url]: lo mismo, en la Consola ----
+    función enviar_en_texto(args: puntero a byte): byte
+        variable p: arreglo [220] de byte
+        variable k: nat32
+        variable sí_: bool
+        variable c: nat32
+        sí_ := falso
+        k := 1
+        mientras cierto hacer
+            p[0] := 0
+            palabra(args, k, p, 220)
+            si p[0] = 0 entonces romper fin
+            si iguales_sin_caja(p, "/SI") entonces sí_ := cierto fin
+            si empieza_por(p, "/SERVIDOR=") o empieza_por(p, "/servidor=") entonces copiar_hasta(servidor, dirección(p[10]), 200) fin
+            k := k + 1
+        fin
+        lee()
+        haz_envío()
+        escribir("==== Lo que se va a mandar (exactamente esto) ====\n")
+        k := 0
+        mientras envío[k] <> 0 hacer
+            si envío[k] <> '\r' entonces
+                p[0] := envío[k]
+                p[1] := 0
+                escribir(p)
+            fin
+            k := k + 1
+        fin
+        escribir("==== Fin de lo que se va a mandar ====\n")
+        si no sí_ entonces
+            escribir("¿Lo mando a hispados.es? Pulse S para enviarlo, o cualquier otra tecla para no enviar: ")
+            c := tecla()
+            escribir("\n")
+            si c <> 's' y c <> 'S' entonces
+                escribir("NO ENVIADO: cancelado (no se ha mandado nada)\n")
+                devolver 1
+            fin
+        fin
+        manda_informe()
+        escribir(resultado)
+        escribir("\n")
+        escribir(resultado2)
+        escribir("\n")
+        si fue_enviado entonces devolver 0 fin
+        devolver 1
+    fin
+
+    ; ---- la vista, en la ventana ----
+    ; los renglones de la vista: cada línea, partida a «cols» letras
+    función parte_renglones(cols: nat32)
+        variable i, ini, k, j: nat32
+        si cols < 20 entonces cols := 20 fin
+        n_lín := 0
+        i := 0
+        ini := 0
+        k := 0
+        mientras envío[i] <> 0 y n_lín < MAX_LÍN hacer
+            si envío[i] = '\r' y envío[i + 1] = '\n' entonces
+                lín_ini[n_lín] := ini
+                lín_n[n_lín] := k
+                n_lín := n_lín + 1
+                i := i + 2
+                ini := i
+                k := 0
+            sino
+                i := i + 1
+                k := k + 1
+                si k >= cols entonces
+                    ; (por el último blanco, si lo hay cerca: las palabras enteras)
+                    j := 0
+                    mientras j < 24 y j + 1 < k y envío[i - 1 - j] <> ' ' hacer j := j + 1 fin
+                    si j + 1 < k y envío[i - 1 - j] = ' ' entonces
+                        i := i - j
+                        k := k - j
+                    fin
+                    lín_ini[n_lín] := ini
+                    lín_n[n_lín] := k
+                    n_lín := n_lín + 1
+                    ini := i
+                    k := 0
+                fin
+            fin
+        fin
+        si k > 0 y n_lín < MAX_LÍN entonces
+            lín_ini[n_lín] := ini
+            lín_n[n_lín] := k
+            n_lín := n_lín + 1
+        fin
+        cols_vista := cols
+    fin
+
+    función caben_renglones(al: ent32): nat32
+        si al <= LT entonces devolver 1 fin
+        devolver nat32((al - 4 * E) div LT)
+    fin
+
+    función baja(k: ent32)
+        variable cab, máx: nat32
+        cab := caben_renglones(vista_al)
+        máx := 0
+        si n_lín > cab entonces máx := n_lín - cab fin
+        si k < 0 entonces
+            si nat32(-k) > primera entonces primera := 0 sino primera := primera - nat32(-k) fin
+        sino
+            primera := primera + nat32(k)
+            si primera > máx entonces primera := máx fin
+        fin
+    fin
+
+    función empieza_envío()
+        aviso[0] := 0
+        lee()
+        haz_envío()
+        modo_v := V_VISTA
+        primera := 0
+        cols_vista := 0
+        foco := ID_V_CANCELAR
+        dd[0] := longitud(envío)
+        imprimir("disposit: informe: la vista de lo que se manda (%u letras)\n", dd)
+    fin
+
+    función pinta_vista()
+        variable yy, x, al, an, y2: ent32
+        variable vueltas, k, j, cols, cab, cab2: nat32
+        variable r: arreglo [240] de byte
+        variable tinta: nat32
+        vueltas := 0
+        mientras vueltas < 2 hacer
+            empezar_controles()
+            caja(0, 0, ancho, alto, C_FONDO)
+            yy := 3 * E
+            si modo_v = V_RESULTADO entonces
+                tinta := C_ROJO
+                si fue_enviado entonces tinta := C_VERDE fin
+                yy := yy + párrafo(LA, yy, ancho - 2 * LA, resultado, tinta, cierto, cierto) + E
+                yy := yy + párrafo(LA, yy, ancho - 2 * LA, resultado2, C_TINTA, falso, cierto) + 2 * E
+            sino
+                negrita(LA, yy, "Enviar informe de los dispositivos que fallan", C_TINTA)
+                yy := yy + LT + E
+                dd[0] := longitud(envío)
+                formatear(r, 240, "Esto es exactamente lo que se va a mandar a hispados.es (%u letras). No lleva números de serie, ni contraseñas, ni nombres de redes o de usuarios, ni nada de sus documentos. Se guarda también una copia en sus Documentos.", dd)
+                yy := yy + párrafo(LA, yy, ancho - 2 * LA, r, C_TINTA, falso, cierto) + 2 * E
+            fin
+            ; el texto, con sus renglones
+            an := ancho - LA
+            al := alto - yy - alto_botón() - 10 * E - LT
+            si al < 2 * LT entonces al := 2 * LT fin
+            vista_al := al
+            caja(LA div 2, yy, an, al, C_PAPEL)
+            borde(LA div 2, yy, an, al, 1, C_BORDE)
+            apuntar(ID_V_TEXTO, K_LISTA, LA div 2, yy, an, al)
+            si foco = ID_V_TEXTO entonces marca_foco(LA div 2, yy, an, al) fin
+            cols := nat32((an - 2 * LA) * 95 div 100 div LA)
+            si cols <> cols_vista entonces
+                parte_renglones(cols)
+                baja(0)
+            fin
+            cab := caben_renglones(al)
+            y2 := yy + 2 * E
+            k := primera
+            mientras k < n_lín y k < primera + cab hacer
+                j := lín_n[k]
+                si j > 238 entonces j := 238 fin
+                para cab2 desde 0 hasta j hacer r[cab2] := envío[lín_ini[k] + cab2] fin
+                r[j] := 0
+                texto_corto(LA, y2, r, an - LA, C_TINTA, falso)
+                y2 := y2 + LT
+                k := k + 1
+            fin
+            dd[0] := primera + 1
+            dd[1] := primera + cab
+            si dd[1] > n_lín entonces dd[1] := n_lín fin
+            dd[2] := n_lín
+            formatear(r, 240, "Renglones %u a %u de %u (las flechas, Re Pág, Av Pág, Inicio, Fin o la rueda)", dd)
+            Controles.texto(LA div 2, yy + al + E, r, C_SUAVE)
+            ; los botones
+            y2 := alto - alto_botón() - 4 * E
+            si modo_v = V_RESULTADO entonces
+                botón(ID_V_VOLVER, LA, y2, "Volver a la lista", cierto, falso)
+            sino
+                x := LA
+                x := x + botón(ID_V_ENVIAR, x, y2, "Enviar", cierto, falso) + LA
+                botón(ID_V_CANCELAR, x, y2, "Cancelar", falso, falso)
+            fin
+            si no asegurar_foco() entonces romper fin
+            vueltas := vueltas + 1
+        fin
+        volcar()
+    fin
+
+    ; lo que hace un botón de la vista (cierto: se vuelve a la lista)
+    función hace_vista(id: nat32)
+        si id = ID_V_ENVIAR y modo_v = V_VISTA entonces
+            Textos32.copiar(resultado, "Enviando...")
+            resultado2[0] := 0
+            modo_v := V_RESULTADO
+            pinta_vista()
+            manda_informe()
+            foco := ID_V_VOLVER
+        sino si id = ID_V_CANCELAR entonces
+            modo_v := V_ÁRBOL
+            Textos32.copiar(aviso, "No se ha enviado nada")
+            escribir("disposit: informe: cancelado (no se ha mandado nada)\n")
+            foco := ID_ENVIAR
+        sino si id = ID_V_VOLVER entonces
+            modo_v := V_ÁRBOL
+            si fue_enviado entonces Textos32.copiar(aviso, "Informe enviado") sino Textos32.copiar(aviso, "Informe NO enviado") fin
+            foco := ID_ENVIAR
+        fin
+    fin
+
+    función tecla_vista(c: nat32)
+        variable cab: nat32
+        cab := caben_renglones(vista_al)
+        si c = 27 entonces
+            si modo_v = V_RESULTADO entonces hace_vista(ID_V_VOLVER) sino hace_vista(ID_V_CANCELAR) fin
+        sino si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+        sino si (c = '\n' o c = ' ') y foco <> ID_V_TEXTO entonces
+            hace_vista(foco)
+        sino si c = TECLA_ABAJO entonces baja(1)
+        sino si c = TECLA_ARRIBA entonces baja(-1)
+        sino si c = TECLA_AV_PÁG entonces baja(ent32(cab) - 1)
+        sino si c = TECLA_RE_PÁG entonces baja(1 - ent32(cab))
+        sino si c = TECLA_INICIO entonces primera := 0
+        sino si c = TECLA_FIN entonces baja(ent32(MAX_LÍN))
+        fin
+    fin
+
+    función clic_vista(x: ent32, yy: ent32)
+        variable id: nat32
+        id := control_en(x, yy)
+        si id = 0 entonces devolver fin
+        foco := id
+        si id <> ID_V_TEXTO entonces hace_vista(id) fin
+    fin
+
+    ; =========================================================================
     ;  La ventana: el árbol
     ; =========================================================================
     función llena_rejilla()
@@ -859,6 +2160,10 @@ módulo UDisposi
         variable yy, x: ent32
         variable vueltas: nat32
         variable est: arreglo [240] de byte
+        si modo_v <> V_ÁRBOL entonces
+            pinta_vista()
+            devolver
+        fin
         vueltas := 0
         mientras vueltas < 2 hacer
             empezar_controles()
@@ -873,7 +2178,9 @@ módulo UDisposi
             x := x + separador(x, yy)
             x := x + herramienta(ID_ACTUALIZAR, x, yy + 2, I_REFRESCAR, "Actualizar", falso) + 2
             yy := yy + alto_herramientas() + 4 * E
-            rejilla(g, ID_REJILLA, LA div 2, yy, ancho - LA, alto - alto_estado() - 4 * E - yy, "No hay dispositivos (¿el núcleo no da la lista?)")
+            rejilla(g, ID_REJILLA, LA div 2, yy, ancho - LA, alto - alto_estado() - alto_botón() - 10 * E - yy, "No hay dispositivos (¿el núcleo no da la lista?)")
+            ; (INFORME-DISP) el botón de mandar lo que falla
+            botón(ID_ENVIAR, LA div 2, alto - alto_estado() - alto_botón() - 4 * E, "Enviar informe de los dispositivos que fallan", falso, falso)
             dd[0] := n - cuenta_ocultos()
             dd[1] := cuenta(EST_SIN_CONTROLADOR)
             dd[2] := cuenta(EST_ERROR)
@@ -916,13 +2223,14 @@ módulo UDisposi
         si id = ID_PROPIEDADES o id = ID_REJILLA entonces abre_propiedades()
         sino si id = ID_COPIAR entonces copia()
         sino si id = ID_GUARDAR entonces guarda(nulo)
-        sino si id = ID_ACTUALIZAR entonces actualiza() fin
+        sino si id = ID_ACTUALIZAR entonces actualiza()
+        sino si id = ID_ENVIAR entonces empieza_envío() fin
     fin
 
     función abre_menú_n(k: nat32)
         abierto_m := ent32(k)
         según k
-            caso 0: abrir_menú_barra(0, "Propiedades|-|Copiar informe|Guardar informe|-|Cerrar", 0)
+            caso 0: abrir_menú_barra(0, "Propiedades|-|Copiar informe|Guardar informe|Enviar informe de los dispositivos que fallan...|-|Cerrar", 0)
             caso 1: abrir_menú_barra(1, "Actualizar|Abrir todas|Cerrar todas|-|Letra normal|Letra grande", 0)
             si no: abrir_menú_barra(2, "Acerca del Administrador de dispositivos", 0)
         fin
@@ -943,7 +2251,8 @@ módulo UDisposi
                 caso 0: abre_propiedades()
                 caso 2: copia()
                 caso 3: guarda(nulo)
-                caso 5: devolver cierto
+                caso 4: empieza_envío()                ; (INFORME-DISP)
+                caso 6: devolver cierto
             fin
         sino si cuál = 1 entonces
             según nat16(op)
@@ -993,7 +2302,11 @@ módulo UDisposi
             devolver falso
         fin
         id := rejilla_id(g)
-        si c = '\n' entonces
+        si c = '\t' o c = TECLA_MAYÚS_TAB entonces
+            pasar_foco(c = '\t')
+        sino si (c = '\n' o c = ' ') y foco = ID_ENVIAR entonces
+            empieza_envío()                      ; (INFORME-DISP)
+        sino si c = '\n' entonces
             abre_propiedades()
         sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y id >= ES_CATEGORÍA entonces
             abierta[id - ES_CATEGORÍA] := c = TECLA_DERECHA
@@ -1059,7 +2372,18 @@ módulo UDisposi
         foco := ID_REJILLA
         pinta()
         mientras suceso(v, s, cierto) hacer
-            si s.clase = EV_TECLA entonces
+            ; (INFORME-DISP) la vista de lo que se manda, y lo que ha pasado
+            si modo_v <> V_ÁRBOL y (s.clase = EV_TECLA o s.clase = EV_RATÓN_BAJA o s.clase = EV_RUEDA o s.clase = EV_MENÚ o s.clase = EV_UNIDADES) entonces
+                si s.clase = EV_TECLA entonces
+                    tecla_vista(s.a)
+                sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
+                    clic_vista(ent32(s.a), ent32(s.b))
+                sino si s.clase = EV_RUEDA y s.c yb CON_CONTROL = 0 entonces
+                    baja(0 - pasos_rueda(s.c) * 3)
+                fin
+                si modo_v = V_ÁRBOL entonces llena_rejilla() fin
+                pinta()
+            sino si s.clase = EV_TECLA entonces
                 si tecla_pulsada(s.a) entonces devolver 0 fin
                 pinta()
             sino si s.clase = EV_RATÓN_BAJA entonces
@@ -1234,6 +2558,13 @@ módulo UDisposi
         palabra(args, 0, p, 100)
         a_mayúsculas(p)
         si iguales(p, "/P") entonces devolver ventana_propiedades(args) fin
+        ; (INFORME-DISP) DISPOSIT /ENVIAR [/SI] [/SERVIDOR=url]: en la Consola
+        si iguales(p, "/ENVIAR") entonces devolver enviar_en_texto(args) fin
+        ; (y la ventana, con otro servidor: las pruebas)
+        si empieza_por(p, "/SERVIDOR=") entonces
+            palabra(args, 0, p, 100)
+            copiar_hasta(servidor, dirección(p[10]), 200)
+        fin
         si iguales(p, "/INFORME") entonces
             lee()
             haz_informe()
@@ -1251,7 +2582,7 @@ módulo UDisposi
             devolver 1
         fin
         si iguales(p, "/?") entonces
-            escribir("DISPOSIT [/INFORME | /GUARDAR [RUTA]]: el Administrador de dispositivos.\n")
+            escribir("DISPOSIT [/INFORME | /GUARDAR [RUTA] | /ENVIAR [/SI] [/SERVIDOR=url]]: el Administrador de dispositivos.\n")
             devolver 0
         fin
         r := ventana_principal()

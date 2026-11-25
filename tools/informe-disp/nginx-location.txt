@@ -1,0 +1,22 @@
+# (INFORME-DISP) «Enviar informe de los dispositivos que fallan»: el receptor
+# del Administrador de dispositivos de Hispa-Pentium (DISPOSIT.BIN). Va DENTRO
+# del server { listen 443 ssl; server_name hispados.es ...; } (el de
+# certificado bueno), al lado de los dos «location» del Termómetro
+# (tools/termo-subida/nginx-location.txt). DISPOSIT lo manda a:
+#   https://hispados.es/informe/enviar.php
+# Solo esa URL, solo POST, como mucho 300 KB (el guion corta en 256 KB), con
+# el pool de PHP del Termómetro (hispatermo); el guion está fuera de la
+# carpeta de la web (no se puede descargar su fuente) y no se ejecuta nada
+# de lo que llega. Lo demás de /informe/, 404.
+location = /informe/enviar.php {
+    limit_except POST { deny all; }
+    client_max_body_size 300k;
+    client_body_buffer_size 300k;
+    client_body_timeout 30s;
+    fastcgi_pass unix:/tmp/php-cgi-83-hispados-termo.sock;
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME /www/hispados-termo/informe.php;
+    fastcgi_param SCRIPT_NAME /informe/enviar.php;
+    access_log /www/wwwlogs/hispados-informe.log;
+}
+location ^~ /informe/ { return 404; }
