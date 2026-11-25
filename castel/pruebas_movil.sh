@@ -93,7 +93,7 @@ tr -d '\r' < $K/pri.sal > $K/pri.txt
 S=$K/pri.txt
 mira "cable y móvil: con enlace, el cable; sin enlace (set_link off), el móvil (y PING va); con enlace otra vez, el cable" \
   "^red: móvil por USB: en marcha; MAC 40:54:00:12$" "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000)" "red: la red va por el móvil por USB$" \
-  "^  Tarjeta . . . . . . . : el móvil por USB (Android, RNDIS) (USB 0525:A4A2)$" "^    Paquetes: enviados = 2, recibidos = 2, perdidos = 0" "^red: la red va por el cable$"
+  "^  Tarjeta . . . . . . . : el móvil por USB (Android, RNDIS) (USB 0525:A4A2)$" "^    Paquetes: enviados = 2, recibidos = 2, perdidos = 0" "red: la red va por el cable$"
 [ "$(grep -c "^  Tarjeta . . . . . . . : Intel PRO/1000 (e1000)" $S)" = 2 ] && ok "cable y móvil: IPCONFIG dice el cable antes y después" || ko "cable y móvil: IPCONFIG no dice el cable las dos veces"
 # 5. NCM y RNDIS con datos grabados
 cp $K/d.img $K/ncm.img
