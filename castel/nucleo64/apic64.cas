@@ -259,22 +259,40 @@ módulo Apic64
     ; ---- lo que se atiende ----
     interrupción función tic()
         variable c: puntero a Cpu
-        variable t, d, p: nat64
+        variable t, d, p, n: nat64
         c := yo()
         c.tics := c.tics + 1
         ; [etapa 11 b] si el procesador ha estado parado desde fuera (en una
         ; máquina virtual, el anfitrión cargado no le da su hilo), los tics del
         ; temporizador de ese rato se juntan en uno (el APIC no guarda más de
         ; uno pendiente): se cuentan los que faltan por el TSC, para que las
-        ; medidas del tiempo sepan qué parte no es del sistema
+        ; medidas del tiempo sepan qué parte no es del sistema. El
+        ; temporizador va a su paso (cada p, sin moverse): desde el último tic
+        ; que llegó a su hora (el «ancla»), tenían que haber llegado
+        ; redondeo((t - ancla) / p), y los que faltan se han perdido. Uno que
+        ; llega tarde pero llega no cuenta: el siguiente, a su hora, lo deja
+        ; en cero (antes se contaba cada hueco de más de tic y medio, y un tic
+        ; tarde seguido de uno a su hora salía como perdido)
         si tsc_hz <> 0 entonces
             t := tsc()
-            si c.tsc_tic <> 0 entonces
+            p := tsc_hz div HZ
+            si c.tsc_tic = 0 entonces
+                c.ancla_tsc := t
+                c.ancla_tics := c.tics
+                c.perdidos_ancla := c.perdidos
+            sino
                 d := t - c.tsc_tic
-                p := tsc_hz div HZ
-                si d > p + p div 2 entonces
-                    c.perdidos := c.perdidos + (d + p div 2) div p - 1
-                    c.huecos := c.huecos + 1
+                si d > p + p div 2 entonces c.huecos := c.huecos + 1 fin
+                n := (t - c.ancla_tsc + p div 2) div p
+                si n > c.tics - c.ancla_tics entonces
+                    c.perdidos := c.perdidos_ancla + n - (c.tics - c.ancla_tics)
+                sino
+                    c.perdidos := c.perdidos_ancla
+                fin
+                si d <= p + p div 4 entonces
+                    c.ancla_tsc := t
+                    c.ancla_tics := c.tics
+                    c.perdidos_ancla := c.perdidos
                 fin
             fin
             c.tsc_tic := t

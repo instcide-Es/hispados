@@ -57,6 +57,8 @@ módulo PorCpu64
         tsc_tic: nat64              ; el TSC del último tic (0: aún ninguno desde pon_tic)
         perdidos: nat64             ; los tics que tenían que haber llegado y no (los del temporizador que se juntan en uno)
         huecos: nat64               ; las veces que entre dos tics ha habido más de tic y medio
+        ancla_tsc, ancla_tics: nat64    ; el último tic que llegó a su hora: su TSC y cuántos iban
+        perdidos_ancla: nat64       ; los perdidos hasta él
     fin
 
     variable bsp: Cpu alineado 64           ; (en su línea de la caché)
