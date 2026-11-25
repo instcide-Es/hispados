@@ -11,6 +11,8 @@
 #             la misma memoria libre; a mano se queda y son 15 KB menos)
 #   memoria   el disquete de uso eligiendo «Juegos», tal cual: HMA, memoria
 #             superior, EMS, BLASTER y la memoria convencional libre
+#   juegosse  (0.9.31) la 4.ª opción, «Juegos sin EMS», con HD Audio: HSPEMM
+#             NOEMS, VCPI sí, EMS no, y más de 600 000 octetos libres
 #   juegos    «Juegos» con HSPUSB llevando el USB (/F) en modo V86 (HSPEMM):
 #             memoria USB (leer, escribir, fsck), teclado y ratón USB y un
 #             mando (tests/tools/usbmando.py), con EMS y sonido a la vez
@@ -252,6 +254,7 @@ fi
 c_normal() {
   check "    1. Normal"
   check "    2. Juegos (memoria expandida EMS y la mayor memoria libre)"
+  check "    4. Juegos sin EMS (más memoria libre; para los que no piden EMS)"
   check "la marcada en:"
   check "HSPXMS 0.1: gestor XMS 3.0"
   nocheck "HSPEMM 0.1"
@@ -352,6 +355,40 @@ if quiere memoria; then
     orden 'BIN\VCPITEST'
     orden 'SONAR /TONE 440 200'
     fin c_memoria
+  fi
+fi
+
+# ---- juegosse: (0.9.31) la 4.ª opción, «Juegos sin EMS», con HD Audio: el
+# marco de la EMS pasa a memoria superior y HSPSND (con la Sound Blaster
+# emulada, 56 KB) cabe arriba: más memoria libre que «Normal» y «Juegos»
+# (auditoría del 25/11/2026: 606 KB frente a 559 y 550) ----
+c_juegosse() {
+  check "CONFIG=JUEGOSSE"
+  check "HSPEMM 0.1"
+  nocheck "marco de página en "
+  check "Sound Blaster 16 emulada en 220h"
+  check "Bienvenido a Hispa-DOS. Escriba AYUDA para ver las órdenes."
+  check "VCPI test OK"
+  nocheck "EMS test OK"
+  nocheck "Error en CONFIG.SYS"
+  nocheck "Comando o nombre de archivo incorrecto"
+  n=$(libres)
+  if [ -n "$n" ] && [ "$n" -ge 600000 ]; then ok "memoria convencional libre con «Juegos sin EMS» y HD Audio: $n bytes"; else ko "memoria convencional libre con «Juegos sin EMS»: $n bytes (se esperaban 600000 o más)"; fi
+}
+if quiere juegosse; then
+  if [ ! -f $DISQ ]; then falta juegosse "$DISQ (make usb)"; else
+    caso "juegosse" $DISQ
+    mcopy -o -i $T/f.img $B/EMSTEST.COM $B/VCPITEST.COM ::BIN/
+    arranca -device intel-hda -device hda-duplex,audiodev=a0 -audiodev none,id=a0
+    espera 'Elija una opci'
+    printf '4\r' >&3
+    espera "$P"
+    orden 'MEM'
+    orden 'MEM /C'
+    orden 'SET'
+    orden 'BIN\EMSTEST'
+    orden 'BIN\VCPITEST'
+    fin c_juegosse
   fi
 fi
 
@@ -599,8 +636,12 @@ c_usb() {
       if [ $f = CONFIG.SYS ]; then
         if grep -q '^\[menu\]' $T/x && grep -q '^MENUITEM=JUEGOS,' $T/x && grep -q '^MENUDEFAULT=NORMAL,5' $T/x \
            && grep -q '^DOS=HIGH,UMB' $T/x && grep -q 'HSPEMM.SYS' $T/x; then ok "$f con menú en ${img%%@*}"; else ko "$f con menú en ${img%%@*}"; fi
+        # (0.9.31) la 4.ª opción, «Juegos sin EMS»: HSPEMM con NOEMS
+        if grep -q '^MENUITEM=JUEGOSSE,Juegos sin EMS' $T/x && grep -q '^\[juegosse\]' $T/x \
+           && sed -n '/^\[juegosse\]/,/^\[/p' $T/x | grep -q '^DEVICE=.*HSPEMM.SYS NOEMS'; then ok "$f con «Juegos sin EMS» (NOEMS) en ${img%%@*}"; else ko "$f con «Juegos sin EMS» en ${img%%@*}"; fi
       else
         if grep -q '%CONFIG%' $T/x && grep -q '^:JUEGOS' $T/x && grep -q '^LH .*HSPSND' $T/x; then ok "$f con %CONFIG% en ${img%%@*}"; else ko "$f con %CONFIG% en ${img%%@*}"; fi
+        if grep -q '^IF "%CONFIG%"=="JUEGOSSE" GOTO JUEGOS' $T/x; then ok "$f: JUEGOSSE va a :JUEGOS en ${img%%@*}"; else ko "$f: JUEGOSSE en ${img%%@*}"; fi
       fi
     done
   done
