@@ -943,6 +943,23 @@ configuración IP que guarda HSPRED.
 - No hay hilos: la pila avanza cada vez que el programa llama a una función.
   Las llamadas que esperan ceden el turno (`Sleep(0)`: dentro de Hispa
   Ventanas, a las demás tareas).
+- **El azar de la red** (desde la 0.9.31): el número de cada pregunta de
+  DNS y su puerto, el de DHCP y el primer puerto local salen de **ChaCha20**
+  (RFC 8439) como generador, con borrado de la clave (cada bloque da la
+  clave del siguiente: lo que sale no deja saber lo de antes ni lo de
+  después). La semilla, como la de HSPTLS: el contador de ciclos (TSC, si lo
+  hay), el del reloj (PIT), los tics, la hora, la MAC y `HSPTLS.SEM` (solo
+  se lee); y luego el momento en que llega cada trama. El **número inicial
+  de cada conexión TCP**, según el **RFC 6528**: un reloj de 4 µs más una
+  función con clave (ChaCha20 con una clave aparte) de las direcciones y los
+  puertos, así que un servidor no saca nada de él. Antes era un xorshift de
+  32 bits que daba su estado entero: con el número inicial de una conexión
+  cualquiera se sabía el de la siguiente pregunta de DNS y su puerto, y se
+  podía mentir en el DNS desde lejos.
+- **Una respuesta de DNS** solo vale si viene **del servidor al que se
+  preguntó**, desde el puerto 53, al puerto de la pregunta y con su número.
+  Prueba: `tests/run_red32_azar_tests.sh` (en el anfitrión, con gcc y el
+  código tal cual).
 - **Winsock 1.1**, por nombre: `WSAStartup`, `WSACleanup`,
   `WSAGetLastError`, `socket` (TCP y UDP), `connect`, `send`, `recv`,
   `sendto`, `recvfrom`, `bind`, `closesocket`, `shutdown`, `select`,
