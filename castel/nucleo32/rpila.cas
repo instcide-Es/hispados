@@ -482,6 +482,9 @@ módulo Rpila
             para i desde 0 hasta MAX_PING - 1 hacer
                 si pings[i].usado y pings[i].ip = de y pings[i].número = lee16(p + 6) entonces
                     t := ahora_us() - pings[i].salió
+                    ; (MÓVIL) el 8253 ya ha vuelto a empezar y su tic aún no ha
+                    ; llegado (ahora_us va unos ms atrás): salía «tiempo=4294961 ms»
+                    si t >= 0x80000000 entonces t := 0 fin
                     contestar(pings[i].hueco, pings[i].serie, t, 0, ttl, nulo, 0)
                     pings[i].usado := falso
                 fin

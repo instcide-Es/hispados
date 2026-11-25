@@ -274,8 +274,15 @@ VERSION_0810 = '0.8.10'
 # entrado; y el diagnóstico del Wi-Fi en WIFI.LOG sin «Registro=SI». Suben
 # base, paquetes 1.8, red (RED.BIN: «/OTRA» al relanzar WIFI.BIN) y wifi
 VERSION_0811 = '0.8.11'
+# (MÓVIL, 0.8.12, 25/11/2026, rama usb-movil: el sábado 28/11, en el mercadillo,
+# portátiles sin Wi-Fi que valga) el móvil por USB, el «Anclaje de USB» de
+# Android: RNDIS y CDC-NCM (usbmovil.cas en el núcleo, la llamada 101, y
+# rmovil.cas en RED.BIN), con la prioridad cable > móvil > Wi-Fi. Suben base
+# (el núcleo), red (RED.BIN, IPCONFIG) y wifi (REDWIFI dice «por el móvil»).
+# La red de la 0.8.12 con una base de antes sigue yendo, sin el móvil.
+VERSION_0812 = '0.8.12'
 SISTEMA = [
-    ('base', VERSION_0811, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_0812, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'), ('RATON.BIN', r'\HISPA\RATON.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
@@ -314,7 +321,8 @@ SISTEMA = [
     # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
     # (0.8.10) la RTL8111/8168 (rrtl.cas) y RED.LOG con Registro=SI
     # (0.8.11) RED.BIN: WIFI.BIN otra vez en el mismo arranque, con «/OTRA» (WIFI.LOG sigue)
-    ('red', VERSION_0811, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    # (0.8.12) (MÓVIL) el móvil por USB (rmovil.cas: RNDIS y CDC-NCM; con una base de antes, sin él)
+    ('red', VERSION_0812, 'La red: el servicio de red (RED.BIN; el cable, el Wi-Fi y el móvil por USB), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
@@ -327,7 +335,8 @@ SISTEMA = [
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia
     # (0.8.10) (INTEL) la Intel 7265, etapa 1: encuentra las redes (sin el firmware de Intel, que no va en el paquete)
     # (0.8.11) (SIN-ADMIN) el diagnóstico en WIFI.LOG sin Registro=SI, y la ventana dice dónde está
-    ('wifi', VERSION_0811, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    # (0.8.12) (MÓVIL) la ventana dice «la red va por el móvil por USB»
+    ('wifi', VERSION_0812, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),

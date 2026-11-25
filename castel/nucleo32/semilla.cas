@@ -684,6 +684,7 @@ módulo Semilla
         ; el USB: las controladoras, lo que hay enchufado, los teclados y
         ; ratones y las memorias (con «sinusb», se queda como lo dejó la BIOS)
         si buscar(línea_del_cargador(), "sinusb") = nulo entonces
+            Usbalm.prueba_asinc := buscar(línea_del_cargador(), "usbasinc") <> nulo     ; (MÓVIL) las pruebas
             Usb.prepara()
             si controladoras <> 0 entonces
                 Usb.enseña()

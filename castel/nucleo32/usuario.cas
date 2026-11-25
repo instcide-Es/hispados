@@ -171,7 +171,7 @@ módulo Usuario
     ; de las pruebas mira que sea la misma que la de hpq.py)
     ; (PANEL) la 0.8.7: el Panel de control y la hora por Internet
     ; (TOUCHPAD) la 0.8.9 (antes, 0.8.8)
-    público constante VERSIÓN_TEXTO = "0.8.11"
+    público constante VERSIÓN_TEXTO = "0.8.12"                 ; (MÓVIL) la 0.8.12: el móvil por USB
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----

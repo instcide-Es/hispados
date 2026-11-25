@@ -433,6 +433,7 @@
 #   SOLO=compat ./pruebas.sh      la primera y la 49 ((COMPAT) el Asistente de compatibilidad; pruebas_compat.sh)
 #   SOLO=touchpad ./pruebas.sh    la primera y la 50 (TOUCHPAD: el touchpad; pruebas_touchpad.sh)
 #   SOLO=sdhci ./pruebas.sh       la primera y la 53 (SDHCI: las tarjetas SD y el eMMC; pruebas_sdhci.sh)
+#   SOLO=movil ./pruebas.sh       la primera y la 55 (MÓVIL: el móvil por USB, el anclaje de USB de Android; pruebas_movil.sh)
 #   SOLO=punteros ./pruebas.sh    la primera y la 51 (PUNTEROS: los punteros del ratón; pruebas_punteros.sh)
 #   SOLO=i2chid ./pruebas.sh      la primera y la 52 (I2CHID: los touchpads HID sobre I2C; pruebas_i2chid.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
@@ -504,6 +505,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_sdhci.sh           # (SDHCI) la parte 53, como parte_sdhci
 . $AQUI/pruebas_punteros.sh        # (PUNTEROS) la parte 51, como parte_punteros
 . $AQUI/pruebas_i2chid.sh          # (I2CHID) la parte 52, como parte_i2chid
+. $AQUI/pruebas_movil.sh           # (MÓVIL) la parte 55, como parte_movil
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -526,7 +528,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -6106,6 +6108,8 @@ if parte08 sdhci; then parte_sdhci; else echo "  (SOLO=${SOLO08:-$SOLO}: sin las
 if parte08 punteros; then parte_punteros; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los punteros del ratón)"; fi
 # ------------------------- 52. (I2CHID) los touchpads HID sobre I2C (pruebas_i2chid.sh)
 if parte08 i2chid; then parte_i2chid; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los touchpads HID sobre I2C)"; fi
+# ------------------------- 55. (MÓVIL) el móvil por USB (pruebas_movil.sh)
+if parte08 movil; then parte_movil; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el móvil por USB)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0
