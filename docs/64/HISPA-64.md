@@ -2975,13 +2975,20 @@ Interrupciones de los discos: NVMe 62 (0 esperas sin aviso), AHCI 4412 (0 sin av
 
 ### Cómo se ha probado
 
-`castel/nucleo64/pruebas.sh`: **124 pruebas** (eran 118). En la vuelta con
-el núcleo de ahora, 122 bien y 2 mal: una de la propia prueba (el
-intérprete buscaba «a medias^C» con un `^` sin escapar, que el grep de hoy
-toma por ancla: arreglado) y una **por la carga del servidor** (con
-`ocioso=mwait`, el interactivo que duerme 10 ms se pasó de media 32 ms, el
-límite es 25: el TCG de QEMU, con el servidor a 5,6 de carga con otras
-sesiones, pierde tics; ese mismo arranque, todo lo demás bien). Lo de la
+`castel/nucleo64/pruebas.sh`: **124 pruebas** (eran 118). Tres vueltas
+seguidas con el servidor cargado (otras sesiones con QEMU y KVM, carga de
+4 a 6 en 4 procesadores), cada una con 122 bien y 2 mal, **y los mal,
+distintos cada vez y todos del reloj del TCG de QEMU bajo carga**: con
+`ocioso=mwait`, el interactivo se pasó de media 32 ms (el límite, 25); sin
+HPET, 43 tics en 1 s (el mínimo, 50); por UEFI con `-cpu max`, 31 tics en 1
+s. Lo demás de esos mismos arranques, bien. Y dos de las propias pruebas,
+arreglados por el camino: el intérprete buscaba «a medias^C» con el `^`
+sin escapar (el grep de hoy lo toma por ancla), y una conexión con
+virtio-net que no se cerraba a tiempo (en la recuperación rápida no se
+repetía el FIN: arreglado en `tcp64.cas`). `SOLO=castel64`: **79 bien y 1
+mal** (CASTEL64 y ENSAMB64 sacan el núcleo de la 11 igual, octeto a octeto;
+el mal, `nucleo64/pruebas.sh` dentro, con la conexión de virtio-net de
+antes del arreglo del FIN). Unos 75 minutos cada vuelta. Lo de la
 etapa 11:
 
 - **El planificador**: «Despertar en bucle» con 1, 2, 4 y 8 procesadores
