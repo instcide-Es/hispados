@@ -158,6 +158,13 @@
 #      Configuración, las pestañas de las propiedades, copiar y guardar el
 #      informe en X:); en un «q35» (RTL8139, xHCI con concentrador) el
 #      informe en texto; y con «sinusb» y «sinacpi», lo desactivado.
+#  19 bis. (INFORME-DISP) Hispa-Pentium 0.8.12: «Enviar informe de los
+#      dispositivos que fallan» (DISPOSIT.BIN; pruebas_informe.sh): el
+#      receptor (tools/informe-disp/informe.php) con curl y su cron hasta el
+#      FTP de prueba; en QEMU, como un usuario normal, por HTTPS: ENVIADO, el
+#      tope (429) y demasiado grande (413), sin números de serie, ni UUID, ni
+#      claves, ni redes, ni nombres (se buscan a propósito); sin red; y en el
+#      escritorio, el botón, la vista, «Cancelar» y «Enviar».
 #  20. SSH, WireGuard y Tailscale (SOLO=ssh): SSH.BIN y SSHD.BIN (en C, con
 #      Monocypher) contra OpenSSH de aquí; WG.BIN contra el WireGuard del
 #      núcleo Linux y TAILSCAL.BIN contra Headscale y un tailscaled (estas
@@ -399,7 +406,8 @@
 #   SOLO=cd ./pruebas.sh          la primera y la decimosexta (el CD y las actualizaciones por Internet)
 #   SOLO=pantalla ./pruebas.sh    la primera y la decimoséptima (la medida de la pantalla)
 #   SOLO=navegador ./pruebas.sh   la primera y la decimoctava (el Navegador: NAVEGA.BIN)
-#   SOLO=dispositivos ./pruebas.sh  la primera y la 19 (el Administrador de dispositivos)
+#   SOLO=dispositivos ./pruebas.sh  la primera y la 19 (el Administrador de dispositivos) y la 19 bis
+#   SOLO=informe ./pruebas.sh     la primera y la 19 bis (INFORME-DISP: «Enviar informe de los dispositivos que fallan»)
 #   SOLO=ssh ./pruebas.sh         la primera y la 20 (SSH, WireGuard y Tailscale; con HEADSCALE=binario, también Tailscale)
 #   SOLO=lectores ./pruebas.sh    la primera y la 21 (los CD y DVD, y las imágenes de disco)
 #   SOLO=win32 ./pruebas.sh       la primera y la 22 (los programas de Windows y DirectX)
@@ -493,6 +501,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_oficina.sh         # (OFICINA2) la parte 40, como parte_oficina
 . $AQUI/pruebas_correo.sh          # (CORREO) la parte 42, como parte_correo
 . $AQUI/pruebas_termo.sh           # (TERMO) la parte 46, como parte_termo
+. $AQUI/pruebas_informe.sh         # (INFORME-DISP) la parte 19 bis, como informe_disp
 . $AQUI/pruebas_uefi.sh            # (UEFI) la parte 48, como parte_uefi
 . $AQUI/pruebas_agenda.sh          # (AGENDA) la parte 43, como parte_agenda
 . $AQUI/pruebas_cuentas.sh         # (CUENTAS32) la parte 44, como parte_cuentas
@@ -526,7 +535,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -3939,7 +3948,7 @@ mkfs.fat -C -F 16 -n SATA $Y/sata.img 65536 > /dev/null
 USBS="-device usb-ehci,id=e -device usb-kbd,bus=e.0 -device usb-mouse,bus=e.0 -device usb-tablet,bus=e.0 -drive id=mu,file=$Y/mem.img,format=raw,if=none -device usb-storage,bus=e.0,drive=mu"
 CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DISPOSIT.BIN,$Y/EQUIPO.BIN,$Y/RED.BIN ARRANQUE="escritorio escritura=usb unidad=M acpicada=1" \
   QEMU_MAS="-S $SSDT -nic user,model=e1000 $USBS" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${PUESTA[@]}" ":monitor cont" ":pausa 7" \
-  ":clicd 63 40" ":pausa 1" ":captura dv1" ":clic 100 70" ":pausa 4" ":captura dv2" ":clic 395 81" ":pausa 3" ":captura dv3" \
+  ":clicd 63 40" ":pausa 1" ":captura dv1" ":clic 100 70" ":pausa 4" ":captura dv2a" ":tecla shift-bracket_right" ":pausa 1" ":captura dv2" ":clic 395 81" ":pausa 3" ":captura dv3" \
   ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
   ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
   ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
@@ -3950,7 +3959,10 @@ mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos.
   "^escritorio: lanzo .DISPOSIT.BIN (la tarea [0-9]*)$"
 [ "$(grep -c '^escritorio: lanzo .DISPOSIT.BIN' $S)" = 2 ] && ok "(dos veces: desde Mi equipo y desde Configuración)" || ko "DISPOSIT.BIN no se lanza dos veces: $(grep -c '^escritorio: lanzo .DISPOSIT' $S)"
 miracap "el botón secundario en Mi equipo: «Abrir» y «Propiedades»" dv1 texto 60 30 200 100 Abrir texto 60 30 200 100 Propiedades
-miracap "la ventana: el árbol por categorías, con el controlador de cada cosa" dv2 \
+miracap "(RECOGIDO) al abrirla: lo que funciona entero, recogido y dicho en palabra; lo que tiene algo que no va, abierto, con lo que falla a la vista" dv2a \
+  negrita 40 120 400 520 "[+] Pantalla (2)" negrita 40 120 400 520 "[+] Discos (2)" negrita 40 120 400 520 "[+] Red (1)" texto 380 120 620 160 "todo funciona" \
+  negrita 40 120 400 520 "[-] Teclado y ratón" texto 380 120 620 520 "1 NO VA" negrita 40 120 760 520 "! QEMU USB Tablet" texto 300 120 720 520 "SIN CONTROLADOR"
+miracap "con «*», desplegado todo: el árbol por categorías, con el controlador de cada cosa" dv2 \
   negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (2)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
   texto 400 120 760 520 RED.BIN texto 400 120 760 520 ahci.cas texto 30 60 700 100 "Guardar informe"
 miracap "las categorías se cierran con la flecha izquierda; la tableta USB, «SIN CONTROLADOR» con su «!», fondo naranja y su franja" dv10 \
@@ -4020,6 +4032,12 @@ else ko "el núcleo se ha quejado:"; cat $Y/q35.sal $Y/sin.sal | grep "excepció
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin el Administrador de dispositivos)"
 fi   # el Administrador de dispositivos
+# ------------------------- 19 bis. (INFORME-DISP) Hispa-Pentium 0.8.12: el informe de lo que falla
+# «Enviar informe de los dispositivos que fallan» (DISPOSIT.BIN) y su receptor
+# (tools/informe-disp): pruebas_informe.sh, informe_disp
+if parte08 dispositivos || parte08 informe; then
+  informe_disp
+fi
 # ------------------------------------------- 20. SSH, WireGuard y Tailscale
 # (ssh; docs/PENTIUM.md §14 quinquies) Los programas en C de
 # nucleo32/hispac/ (hacer.sh): SSHD contra el cliente OpenSSH de aquí (QEMU

@@ -1006,8 +1006,10 @@ módulo Usuario
             caso 226:
                 ; (0.8.10, seguridad) la ventana sobre la RAM alta deja leer lo
                 ; que haya quedado en la memoria: solo con «termo» en la línea
-                ; del cargador (la memoria del Termómetro) o en el modo administrador
-                si no termo_o_admin() entonces devolver NO_VALE fin
+                ; del cargador (la memoria del Termómetro) o en el modo administrador.
+                ; (INFORME-DISP, 0.8.12) Salvo la 8, la ficha del equipo (el
+                ; fabricante, el modelo y la BIOS, sin números de serie): cualquiera
+                si a <> 8 y no termo_o_admin() entonces devolver NO_VALE fin
                 devolver atender_ram(a, b, c)          ; (RAM) la prueba de la memoria RAM del Termómetro (termoram.cas)
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)

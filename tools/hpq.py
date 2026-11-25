@@ -280,6 +280,10 @@ VERSION_0811 = '0.8.11'
 # otro— y la carga fuerte, SSE2, del Termómetro en los demás procesadores; la
 # 224 con EBX = 8). Sube la base; con ella, termo 1.2 (termo/paquete.sh:
 # «base >= 0.8.12»)
+# (0.8.12, 25/11/2026, rama informe-disp) «Enviar informe de los dispositivos
+# que fallan» en el Administrador de dispositivos (DISPOSIT.BIN, el paquete
+# equipo 0.9.6) y la llamada 226, 8 del núcleo (la ficha del equipo del
+# SMBIOS, sin números de serie ni UUID). Sube base
 VERSION_0812 = '0.8.12'
 SISTEMA = [
     ('base', VERSION_0812, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
@@ -295,7 +299,8 @@ SISTEMA = [
     # (REPRODUCTOR) la 0.9.3: la música (.MP3, .OGG, .FLAC, .WAV, .CUE...) se abre con el Reproductor si está
     # (0.8.8) la 0.9.4: una sola «Editar con Pintura» (Pintura 2 o, sin ella, la de la oficina)
     # (0.8.9) 0.9.5: (COMPAT) «Comprobar compatibilidad» en el menú de un .EXE o de una carpeta
-    ('equipo', '0.9.5', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
+    # (0.8.12) 0.9.6: (INFORME-DISP) «Enviar informe de los dispositivos que fallan» (DISPOSIT.BIN)
+    ('equipo', '0.9.6', 'Mi equipo, el explorador de archivos (carpetas, vistas, copiar y pegar, la Papelera, buscar y las miniaturas) y el Administrador de dispositivos', 'base >= 0.8.4', [
         ('EQUIPO.BIN', r'\HISPA\EQUIPO.BIN'), ('MINIAT.BIN', r'\HISPA\MINIAT.BIN'), ('DISPOSIT.BIN', r'\HISPA\DISPOSIT.BIN')]),
     ('ejemplos', VERSION_085, 'Programas de ejemplo: HOLA, ECO, PRUEBA, BUCLE y MUESTRA (los controles de las ventanas)', 'base >= 0.8.4', [
         ('HOLA.BIN', r'\HISPA\HOLA.BIN'), ('ECO.BIN', r'\HISPA\ECO.BIN'),

@@ -1550,6 +1550,12 @@ controles de `controles.cas`).
   franja** a la izquierda, y su palabra: **nada depende solo del color**
   (Carlos es daltónico). Lo que funciona lleva un «+» (la letra del sistema no
   tiene «√»).
+- **Al abrirla** (desde el 25/11, «(RECOGIDO)», lo pidió Carlos: «Mejor todo
+  lo que funcione que esté recogido»): las categorías en las que todo funciona,
+  **recogidas** («[+] Red (1)» y, en Estado, «todo funciona»); las que tienen
+  algo sin controlador, con error o desactivado, **abiertas** («1 NO VA», «3 NO
+  VAN»), con lo que falla a la vista y marcado en palabra. «*» despliega todo
+  y «/» lo recoge (y en Ver: «Desplegar todo», «Recoger todo»).
 - **Las propiedades** (Intro o dos clics): otra ventana (el mismo programa, con
   `/P BUS DIRECCIÓN`), con las pestañas **General** (tipo, fabricante, dónde
   está, el estado en una frase y el detalle: la MAC y el enlace de la tarjeta
@@ -1619,6 +1625,95 @@ nombres PnP) van en unas tablas de texto de `udisposi.cas`: lo que se conoce
 (QEMU, VirtualBox, VMware, Intel PIIX/ICH7/ICH9/NM10/Bay Trail, las Wi-Fi de
 Intel, Broadcom y Atheros, Realtek, Marvell, VIA, SiS...) y, si no está, el
 fabricante y la clase («Realtek: Tarjeta de red (Ethernet)»).
+
+### Enviar informe de los dispositivos que fallan (25/11, la 0.8.12, «(INFORME-DISP)»)
+
+Lo pidió Carlos el 25/11: «En Configuración de sistema, dentro de
+Dispositivos, necesitamos un botón que envíe información de todos los
+dispositivos que fallan al servidor.» En el Administrador de dispositivos
+(Configuración › Dispositivos y Mi equipo › Propiedades), **abajo, el botón
+«Enviar informe de los dispositivos que fallan»** (también en Archivo). Al
+pulsarlo:
+
+1. **Se enseña antes, en texto, exactamente lo que se va a mandar** (la misma
+   ventana: el informe entero, con las flechas, Re Pág, Av Pág, Inicio, Fin
+   y la rueda), con **«Enviar»** y **«Cancelar»** (Esc). Cancelar no manda
+   nada.
+2. **«Enviar»**: se guarda una copia en los **Documentos** del que lo manda
+   (`\USUARIOS\<CARPETA>\DOCUMENT\INFDISP.TXT`; sin usuarios,
+   `\DOCUMENT\INFDISP.TXT`; si ahí no se puede escribir, la primera unidad
+   en la que se pueda) y se manda por HTTPS a
+   `https://hispados.es/informe/enviar.php`. En la ventana, en grande:
+   **«ENVIADO (número de informe 20261125-093117-2070)»** en verde, o
+   **«NO ENVIADO: <el motivo en llano>»** en rojo: no hay red (y cómo
+   conectar), no se encuentra el servidor, no contesta, el reloj no está en
+   hora, el certificado no vale, falta TLS.BIN, o «el servidor lo rechaza:
+   <lo que dice>» (el tope del día, demasiado grande...), y dónde está la
+   copia, para mandarla a mano. «Volver a la lista».
+
+Lo hace **cualquier usuario** (no hace falta el modo administrador: no cambia
+nada del sistema; solo lee lo que ya se puede leer y escribe en sus
+Documentos). En la Consola: `DISPOSIT /ENVIAR` (lo enseña y pregunta: S para
+enviar), `DISPOSIT /ENVIAR /SI` (sin preguntar) y `/SERVIDOR=URL` (otro
+receptor: las pruebas).
+
+**Lo que lleva** (UTF-8, con los `\r\n` del DOS; el texto que se enseña es
+el que se manda y el de la copia, octeto a octeto):
+
+- la versión de Hispa-Pentium (`0.8.12`, instalado o de una memoria) y la de
+  **cada paquete instalado** (de `\HISPA\PAQUETES\*.PQI`);
+- **el equipo, del SMBIOS**: el fabricante, el modelo, la versión, la
+  familia, la placa y la BIOS (con su fecha). Lo da **el núcleo** (la llamada
+  226, 8, nueva en la 0.8.12, de cualquiera: `termoram.cas`,
+  `ficha_equipo`): lee las fichas 0, 1 y 2 y copia solo esos textos;
+  **el número de serie, el UUID, el SKU y la etiqueta de inventario no salen
+  del núcleo**;
+- el procesador, la memoria, la pantalla y el resumen;
+- **de cada cosa que falla** (sin controlador o con error): su nombre, su
+  identificador, qué controlador se ha intentado («ninguno», o el que no ha
+  podido con él), su ficha entera (las tres pestañas de las propiedades) y
+  **las líneas de ARRANQUE.TXT, RED.LOG, WIFI.LOG y BT.LOG que tocan a ese
+  aparato** (las que lo nombran por su identificador `8086:4229`, su sitio en
+  el PCI `02:00.0` o su ruta de ACPI; hasta 40 por registro); de la tarjeta
+  Wi-Fi, además, lo último de WIFI.LOG (30 líneas); de la del cable, lo último
+  de RED.LOG (15); y del Bluetooth, lo último de BT.LOG (30). Si no hay
+  ARRANQUE.TXT, lo que el núcleo tiene en la memoria (la 224, 5); si no hay
+  RED.LOG, lo de RED.BIN;
+- **la lista de todo**: cada aparato con su estado, su identificador, dónde
+  está y su controlador.
+
+**Lo que NO lleva** (cada línea pasa por `sanea()`): fuera la línea entera si
+lleva una clave («clave», «contraseña», «password», «PSK», «PMK», «testigo»,
+«token», «cookie»...), «MSDM» o «SLIC», el UUID o un número de serie, o un
+nombre de red sin comillas («SSID»); **los nombres de las redes** (lo de
+entre «» en lo del Wi-Fi y del Bluetooth), «(quitado)»; **las MAC y los
+BSSID**, solo sus 3 primeros octetos (el fabricante): `11:22:33:xx:xx:xx`;
+**las IP públicas**, «(IP pública)» (las de casa, 10.x, 192.168.x, 172.16-31.x,
+sí); **las rutas que no son del sistema** (los documentos, las carpetas de los
+usuarios), «(ruta)»; **los nombres de los usuarios y el del equipo** (el de
+HISPA.INI, salvo si es la marca, «TOSHIBA»), «(nombre)». Ninguna tabla de
+ACPI. Y «<» y «>» como «(» y «)»: el receptor no admite «<».
+
+**El receptor** (`tools/informe-disp/`, lo instala Carlos: `INSTALAR.txt`):
+`informe.php`, con el pool de PHP-FPM y el usuario del Termómetro
+(`hispatermo`, `open_basedir`, sin exec) y **sin testigo** (lo manda
+cualquier equipo), así que con topes: solo POST; solo `text/plain` UTF-8 bien
+hecho, sin caracteres de control ni «<» (ni HTML ni PHP), que empiece por la
+primera línea del informe; 256 KB como mucho (nginx corta en 300 KB); 5
+informes por IP y día (IPv6, por su /64) y 200 en total al día; y si lo que
+espera al cron pasa de 2000 informes o de 100 MB, nada más (el disco no se
+llena aunque el cron se pare). El nombre del archivo lo hace él (el número y
+el fabricante y el modelo, solo letras, cifras, «-» y «_»), 0600, fuera de la
+web. Contesta «OK número» o «ERROR motivo» (405, 411, 413, 415, 429, 503).
+`informe-mover.sh` (cron de root, cada 5 min) lo pasa a
+`/root/FTP/HispaDOS/Pruebas/Pendientes/Informes-dispositivos/<AAAAMMDD-HHMMSS>-<fabricante-modelo>/INFORME.TXT`
+(la hora, la del servidor en UTC), de root y 0644; borra las cuentas de
+hace más de 3 días y rota el registro (sin el informe: la hora, la IP y el
+resultado; hasta 4 MB).
+
+**Las pruebas**: la parte 19 bis (`SOLO=informe`, o con
+`SOLO=dispositivos`; `pruebas_informe.sh`)): `SOLO=dispositivos` **103/0** (25/11, en el VPS
+con `nice`: la 19 sin cambios y la 19 bis, 18/0).
 
 ### El explorador de archivos: `EQUIPO.BIN` (21/11)
 
@@ -4828,6 +4923,19 @@ Los paquetes: base **0.8.11**, paquetes **1.8**, red **0.8.11** (RED.BIN, el
 escritorio), `wifi` 107/0 (con «4 quater»), `paquetes` 108/0, `programas`
 92/0 y `compat` 89/0 (estas tres, por lo que lanza ACTUALIZ /BANDEJA y el
 PAQUETES nuevo).
+
+**La 0.8.12** (25/11, rama `informe-disp`, sobre la 0.8.11). «Enviar informe
+de los dispositivos que fallan» en Configuración › Dispositivos (sección
+«Enviar informe de los dispositivos que fallan», en la del Administrador de
+dispositivos): el botón, la vista de lo que se manda, «Enviar»/«Cancelar»,
+«ENVIADO (número de informe ...)» o «NO ENVIADO: ...» y la copia en los
+Documentos; la llamada **226, 8** (la ficha del equipo del SMBIOS, sin el
+número de serie, el UUID, el SKU ni el inventario: de cualquiera); y el
+receptor `tools/informe-disp/` (`informe.php`, `informe-mover.sh`, el bloque de
+nginx e `INSTALAR.txt`; sin instalar: lo pone Carlos). Los paquetes: base
+**0.8.12** (el núcleo) y equipo **0.9.6** (DISPOSIT.BIN). Las pruebas:
+`SOLO=dispositivos` 104/0 (con la 19 bis nueva, `SOLO=informe`, y el árbol recogido).
+
 
 **La 0.8.10** (24/11, rama `pentium-0810`: las ramas `termometro` —la de
 después de la 0.8.9: la batería que se relee, SMBIOS 3, MSDM fuera, las zonas
