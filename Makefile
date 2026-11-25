@@ -259,7 +259,7 @@ $(B)/HTTPS.EXE: w32/https.c $(B)/crt0.o $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MS
 # dom.js (el preludio, que va dentro del programa como texto)
 NAVSRC = w32/navega/navega.c w32/navega/pagina.c w32/navega/html.c w32/navega/http.c w32/navega/imagen.c w32/navega/dom.c w32/navega/script.c
 NAVOBJ = $(patsubst w32/navega/%.c,$(B)/nav_%.o,$(NAVSRC)) $(B)/nav_formatos.o
-$(B)/nav_%.o: w32/navega/%.c w32/navega/nav.h w32/navega/dom.h | $(B)
+$(B)/nav_%.o: w32/navega/%.c w32/navega/nav.h w32/navega/dom.h w32/navega/cors.h | $(B)
 	$(CC32) -march=i486 -Wall -Wextra -Wno-parentheses -Wno-sign-compare -c $< -o $@
 # las imágenes: el núcleo de Mirador tal cual (programas/mirador, programas/comun)
 $(B)/nav_formatos.o: w32/navega/imagen.asm $(wildcard programas/mirador/*.inc) programas/comun/desinfla_t.inc programas/comun/jpeg.inc | $(B)

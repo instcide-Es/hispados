@@ -35,12 +35,14 @@ $(B)/surf/surf_js.h: w32/navega/dom.js w32/surf/surf.js
 	@mkdir -p $(B)/surf
 	python3 -c "import sys; f = lambda n, a: 'static const char %s[] = {' % n + ','.join(str(b) for b in open(a, 'rb').read()) + ',0};'; print(f('dom_js', sys.argv[1])); print(f('surf_js', sys.argv[2]))" $^ > $@
 $(B)/surf/w32/surf/guion.o: $(B)/surf/surf_js.h w32/surf/guion.h terceros/quickjs/quickjs.h
+# (CORS, 0.9.31) las reglas de lo que puede pedir una página
+$(B)/surf/w32/surf/guion.o $(B)/surf/w32/surf/red.o: w32/navega/cors.h
 $(B)/surf/w32/surf/selector.o $(B)/surf/w32/surf/rehaz.o: w32/surf/guion.h
 $(B)/surf/w32/surf/svgimagen.o $(B)/anf/w32/surf/svgimagen.o: terceros/nanosvg/nanosvg.h terceros/nanosvg/nanosvgrast.h
 $(B)/surf/http.o: w32/navega/http.c w32/navega/nav.h w32/surf/surf.mk | $(B)
 	@mkdir -p $(B)/surf
 	$(CC32) -march=i486 $(SURF_UA) -c $< -o $@
-$(B)/surf/red_http.o: w32/surf/red_http.c w32/surf/rh.h w32/navega/nav.h w32/surf/surf.mk | $(B)
+$(B)/surf/red_http.o: w32/surf/red_http.c w32/surf/rh.h w32/navega/nav.h w32/navega/cors.h w32/surf/surf.mk | $(B)
 	@mkdir -p $(B)/surf
 	$(CC32) -march=i486 $(SURF_UA) -c $< -o $@
 $(B)/NAVEGA2.EXE: $(SURF_OBJ) $(B)/HSPJS.DLL $(B)/HSPTLS.DLL $(B)/WSOCK32.DLL $(B)/MSVCRT.DLL ventanas/win32.inc tools/elf2pe.py
