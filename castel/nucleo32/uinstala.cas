@@ -1489,6 +1489,9 @@ módulo Instala
             copia_archivo(i - 1, destinos[i - 1])
             si iguales(nombres[i - 1], "LEEME.TXT") entonces copia_archivo(i - 1, A_RAÍZ) fin
             si iguales(nombres[i - 1], "SDHCI.TXT") y destinos[i - 1] <> A_RAÍZ entonces copia_archivo(i - 1, A_RAÍZ) fin    ; (0.8.10)
+            ; (RTL8723BS, 0.8.12) y \SDIO.TXT (lo que aprendió ACPI.BIN del Wi-Fi
+            ; por SDIO): WIFI.BIN y el núcleo lo buscan en la raíz del sistema
+            si iguales(nombres[i - 1], "SDIO.TXT") y destinos[i - 1] <> A_RAÍZ entonces copia_archivo(i - 1, A_RAÍZ) fin
         fin
         letras_en(10, 12, AZUL, ' ', 60)
         haz_cfg()

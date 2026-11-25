@@ -61,6 +61,10 @@
 # grub-pc-bin (grub-install --target=i386-pc); (UEFI) y grub-efi-amd64-bin
 # y grub-efi-ia32-bin (grub-mkimage).
 set -eu
+# (RTL8723BS, 0.8.12) con PRUEBA_SDHCI y PRUEBA_WIFI_SDIO a la vez (la memoria
+# de instalar del Acer One 10), las del eMMC y la SD son la 1 a la 4 y las del
+# Wi-Fi, la 5 a la 7
+if [ -n "${PRUEBA_SDHCI:-}" ]; then W1="5. "; W2="6. "; W3="7. "; else W1="1. "; W2="2. "; W3="3. "; fi
 export LC_ALL=C.UTF-8
 AQUI=$(dirname "$(readlink -f "$0")")
 OUT=${1:?uso: usb.sh IMAGEN}
@@ -225,16 +229,16 @@ G
     # (SDHCI) con PRUEBA_SDHCI=1, la memoria de prueba del eMMC y la tarjeta SD
     # (las tabletas Bay Trail: Acer One 10, Medion S2217), primero: sin ACPI
     # (el Acer se congela con ACPI.BIN), con ACPI, la consola y por PIO
-    if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
-      menu_efi "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred" "$M2" auto
-      menu_efi "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred" "$M2" auto
-      menu_efi "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred" "$M2" auto
-    fi
     if [ -n "${PRUEBA_SDHCI:-}" ]; then
       menu_efi "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi" "$M2" auto
       menu_efi "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N" "$M2" auto
       menu_efi "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi" "$M2" auto
       menu_efi "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento" "$M2" auto
+    fi
+    if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
+      menu_efi "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred" "$M2" auto
+      menu_efi "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred" "$M2" auto
+      menu_efi "${W3}Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred" "$M2" auto
     fi
     menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (la medida de la pantalla, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "$M2" auto '  if [ "$modo" = auto ]; then
     set gfxpayload=auto
@@ -304,16 +308,16 @@ G
     entrada "Termometro + prueba COMPLETA de la memoria RAM (sola al abrirse; de 15 min a 1 h)" ESCRIT8.BIN "escritorio $N termo ramcompleta" "1920x1080x32,1920x1080x24,1366x768x32,1366x768x24,1024x768x32,1024x768x24,auto"
   fi
   # (SDHCI) la memoria de prueba del eMMC y la SD, por la BIOS (el Medion con la HispaBIOS)
-  if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
-    entrada "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred"
-    entrada "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred"
-    entrada "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred"
-  fi
   if [ -n "${PRUEBA_SDHCI:-}" ]; then
     entrada "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi"
     entrada "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N"
     entrada "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi"
     entrada "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento"
+  fi
+  if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
+    entrada "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred"
+    entrada "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred"
+    entrada "${W3}Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred"
   fi
   # [EDID] la primera, con la medida de PANTALLA.ENV si la hay (y lo dice
   # antes de arrancar); «a la medida», con «amedida» (el núcleo sabe así
