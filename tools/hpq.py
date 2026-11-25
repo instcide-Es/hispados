@@ -263,8 +263,17 @@ VERSION_PUNTEROS = VERSION_089
 # Usuario.VERSIÓN_TEXTO («0.8.10»). Suben base, red (rrtl.cas, RED.LOG),
 # wifi (la 7265), paquetes 1.7 (el GRUB.CFG de UEFI) y termo 1.1
 VERSION_0810 = '0.8.10'
+# (0.8.11, 25/11/2026, rama sin-admin: el HP Mini de la asociación con solo
+# «Biblio2», normal, y ningún administrador) la pantalla de entrada ofrece
+# crear un administrador (o hacerlo a uno con contraseña) cuando no hay
+# ninguno, en la pantalla de verdad; el último administrador no se quita ni
+# se degrada; un usuario normal pone al día lo instalado con el catálogo
+# firmado (la llamada 200, 6); lo que lanza ACTUALIZ /BANDEJA es del que ha
+# entrado; y el diagnóstico del Wi-Fi en WIFI.LOG sin «Registro=SI». Suben
+# base, paquetes 1.8, red (RED.BIN: «/OTRA» al relanzar WIFI.BIN) y wifi
+VERSION_0811 = '0.8.11'
 SISTEMA = [
-    ('base', VERSION_0810, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_0811, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'), ('RATON.BIN', r'\HISPA\RATON.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
@@ -296,12 +305,14 @@ SISTEMA = [
     # «Programas y actualizaciones» (PROGRAMA.BIN, con los controles: base 0.8.2)
     # (0.8.9) 1.6: (COMPAT) los ganchos del Asistente al instalar o actualizar win32 (PAQUETES y ACTUALIZ /BANDEJA)
     # (0.8.10) 1.7: (SDHCI, UEFI) el «núcleo de antes» también en un GRUB.CFG con multiboot2 (lo instalado en SD/eMMC por UEFI)
-    ('paquetes', '1.7', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    # (0.8.11) 1.8: (SIN-ADMIN) un usuario normal pone al día lo instalado con el catálogo firmado (sin /FORZAR)
+    ('paquetes', '1.8', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
     # (0.8.10) la RTL8111/8168 (rrtl.cas) y RED.LOG con Registro=SI
-    ('red', VERSION_0810, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    # (0.8.11) RED.BIN: WIFI.BIN otra vez en el mismo arranque, con «/OTRA» (WIFI.LOG sigue)
+    ('red', VERSION_0811, 'La red: el servicio de red (RED.BIN), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
@@ -313,7 +324,8 @@ SISTEMA = [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia
     # (0.8.10) (INTEL) la Intel 7265, etapa 1: encuentra las redes (sin el firmware de Intel, que no va en el paquete)
-    ('wifi', VERSION_0810, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    # (0.8.11) (SIN-ADMIN) el diagnóstico en WIFI.LOG sin Registro=SI, y la ventana dice dónde está
+    ('wifi', VERSION_0811, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),

@@ -5835,6 +5835,21 @@ mira "(BCM4313) WIFISIM.BIN con el modelo de la BCM4313: se encuentra (14E4:4727
   "^wifi: PASO 3 de 3 hecho: radio en marcha" "^red: Wi-Fi Broadcom BCM4313$"
 mira "(BCM4313) y con ella: WPA2, DHCP y cinco PING sin perder ninguno" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" \
   "red: DHCP: IP 192\.168\.77\.10" "^    Paquetes: enviados = 5, recibidos = 5, perdidos = 0"
+# 4 quater. (0.8.11, SIN-ADMIN) la BCM4313 que no se pone en marcha (aquí, sin
+# su microcódigo): WIFI.LOG lleva el DIAGNÓSTICO sin «Registro=SI» y la
+# ventana dice qué tarjeta y dónde está el diagnóstico
+cp $Wf/d.img $Wf/k5.img
+mcopy -o -i $Wf/k5.img $Wf/WIFISIM4313.BIN ::WIFI.BIN && mcopy -o -i $Wf/k5.img $Wf/RED.INI :: && mdel -i $Wf/k5.img ::BCM43XX.FW
+MEMORIA=64 ESCRIBE=1 DISCO=$Wf/k5.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 3" "ipconfig" ":pausa 12" "redwifi /estado" ":pausa 3" > $Wf/k5.sal 2>&1
+tr -d '\r' < $Wf/k5.sal > $Wf/k5.txt
+S=$Wf/k5.txt
+mira "(SIN-ADMIN) la BCM4313 sin poder ponerse en marcha: el DIAGNÓSTICO (la tarjeta, dónde está en el PCI, el controlador) sin Registro=SI" \
+  "^wifi: ==== DIAGN.STICO: la tarjeta está, pero no se ha podido poner en marcha ====$" "^wifi: Tarjeta: Broadcom 14E4:4727 en el PCI [0-9a-f:.]*; controlador: Broadcom" \
+  "^wifi: Este archivo está en .WIFI.LOG: cópielo a una memoria USB y páseselo a quien le ayude\.$" "^wifi: ==== FIN DEL DIAGN.STICO ====$"
+mira "(SIN-ADMIN) y REDWIFI /ESTADO (lo mismo que la ventana): qué tarjeta no se ha podido usar y dónde está el diagnóstico" \
+  "^No se ha podido usar la tarjeta Broadcom 14E4:4727\.$" "^  El diagnóstico está en [A-Z]:.WIFI.LOG: páseselo a quien le ayude\.$"
+if saca $Wf/k5.img WIFI.LOG $Wf/k5.log && grep -aq "FIN DEL DIAGN" $Wf/k5.log && ! grep -aq "clave de prueba" $Wf/k5.log; then ok "(SIN-ADMIN) y WIFI.LOG, en el disco, con el diagnóstico (y sin contraseñas)"
+else ko "(SIN-ADMIN) WIFI.LOG no lleva el diagnóstico"; fi
 # 4 bis. (seguridad) una red ABIERTA falsa con el nombre de la WPA2 (WifiSimulada=GEMELA:
 # en el canal 1, se ve antes): se conecta a la WPA2, la lista enseña las dos
 # por separado, la abierta no se usa ni rebaja la recordada, y al arrancar

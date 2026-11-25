@@ -59,6 +59,7 @@ módulo Rwifi
     variable registro_guardado: nat32
     variable registro_fallo: bool
     variable lanzado: bool
+    variable veces: nat32                       ; (SIN-ADMIN) las veces que se ha lanzado WIFI.BIN en este arranque
     variable hay_tarjeta: bool                  ; una de las que lleva WIFI.BIN, en el PCI
     variable cola: arreglo [COLA] de arreglo [TRAMA] de byte
     variable cola_largo: arreglo [COLA] de nat32
@@ -214,6 +215,12 @@ módulo Rwifi
         args := nulo
         si simulada y no chip entonces args := "/SIMULA" fin
         si gemela entonces args := "/SIMULA /GEMELA" fin
+        ; (0.8.11, SIN-ADMIN) otra vez en este arranque: que siga WIFI.LOG
+        ; detrás (el diagnóstico de la primera vez no se borra)
+        si veces > 0 entonces
+            si gemela entonces args := "/SIMULA /GEMELA /OTRA" sino si simulada y no chip entonces args := "/SIMULA /OTRA" sino args := "/OTRA" fin
+        fin
+        veces := veces + 1
         t := lanzar_suelto("\\WIFI.BIN", args)
         si es_error(t) entonces t := lanzar_suelto("\\HISPA\\WIFI.BIN", args) fin
         si es_error(t) entonces

@@ -4762,6 +4762,39 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.11** (25/11, rama `sin-admin`, empezada: este arreglo). El HP Mini
+de la asociación con la 0.8.10 instalada y un solo usuario, «Biblio2»,
+normal, sin ningún administrador; y su BCM4313 que «sigue sin encontrar
+Wi-Fi», sin que Biblio2 pueda poner `Registro=SI`:
+
+- **Sin ningún administrador** (sección 14 tredecies, «Sin ningún
+  administrador»): la pantalla de entrada (y la entrada en texto) ofrece
+  crear uno o hacer administrador a uno con contraseña, solo en la pantalla
+  de verdad, y queda en `\HISPA\USUARIOS.LOG`; el núcleo ya no hace
+  administrador al primero por su cuenta; el último administrador no se
+  quita ni se hace normal (núcleo y Configuración › Usuarios).
+- **Un usuario normal pone al día lo instalado** con el catálogo firmado
+  (PAQUETES 1.8 y la llamada 200, 6); lo demás de PAQUETES, solo un
+  administrador.
+- **Lo que lanza ACTUALIZ /BANDEJA** («Verlas») es del que ha entrado, no del
+  sistema (un usuario normal instalaba y quitaba por ahí).
+- **El diagnóstico del Wi-Fi** (sección del Wi-Fi, «El diagnóstico, sin
+  Registro=SI»): `WIFI.LOG` con un DIAGNÓSTICO al final cuando algo sale
+  mal, que no se borra si `WIFI.BIN` arranca otra vez (RED.BIN: «/OTRA»), y
+  la ventana dice qué tarjeta y dónde está.
+- **Cómo pudo pasar** (mirado en el código de la 0.8.10, sin el disco del HP
+  Mini delante): ni el Asistente ni INSTALAR crean usuarios (dejan el de
+  `HISPA.INI`, administrador); la 201 ya no dejaba quitar ni degradar al
+  último; y al leer un USUARIOS.TXT sin ningún «A», el núcleo hacía
+  administrador al primero (solo en la memoria). Por esas vías no se llega a
+  «ninguno»; sí, con un USUARIOS.TXT cuya línea del administrador no se lee
+  (cortada o estropeada) o con un administrador
+  cuya contraseña nadie sabe o no se puede comprobar (sin `ARGON2.BIN`). Al
+  arrancar la 0.8.11, el registro dice cuántos administradores ve.
+
+Los paquetes: base **0.8.11**, paquetes **1.8**, red **0.8.11** (RED.BIN, el
+«/OTRA»), wifi **0.8.11** (WIFI.BIN y REDWIFI.BIN).
+
 **La 0.8.10** (24/11, rama `pentium-0810`: las ramas `termometro` —la de
 después de la 0.8.9: la batería que se relee, SMBIOS 3, MSDM fuera, las zonas
 PCI de 64 bits movidas debajo de los 4 GB, SMI_COUNT, Machine Check, el
@@ -6691,7 +6724,42 @@ rev. 24, **PHY LCN** rev. 1 con la radio **2064**; 802.11b/g/n, 1x1, solo
   lleva). La prueba la explica el `LEEME.TXT` de la memoria (EL WI-FI,
   «PRUEBA DE LA BROADCOM BCM4313»): `Registro=SI` en `RED.INI`, buscar,
   conectar, `PING`, una descarga y 10 minutos conectado; devolver
-  `WIFI.LOG` y `RED.LOG`.
+  `WIFI.LOG` y `RED.LOG`. (Desde la 0.8.11, `WIFI.LOG` no necesita
+  `Registro=SI`, que solo puede poner un administrador: abajo, «El
+  diagnóstico, sin Registro=SI».)
+
+### El diagnóstico, sin Registro=SI (la 0.8.11, «(SIN-ADMIN)»)
+
+*El HP Mini de la asociación con la BCM4313 «sigue sin encontrar Wi-Fi» con
+la 0.8.10, y su único usuario es normal: no puede poner `Registro=SI` en
+`RED.INI`.*
+
+- **`WIFI.LOG` va siempre** en `\HISPA` (lo escribe `WIFI.BIN`; lo lee
+  cualquiera y lo puede copiar a una memoria USB: no es un secreto),
+  **nuevo en cada arranque**: si RED.BIN pone en marcha `WIFI.BIN` otra vez
+  en el mismo arranque (elegir Wi-Fi después de Cable...), le pasa «/OTRA» y
+  el registro sigue detrás («---- WIFI.BIN otra vez en este arranque ----»),
+  así no se pierde el de la primera vez. `Registro=SI` sigue siendo para
+  `RED.LOG` (lo de RED.BIN).
+- **El DIAGNÓSTICO**, al final, una vez por cada cosa que sale mal: la
+  tarjeta está pero no se pone en marcha (no se monta el controlador o el
+  PHY, no enciende la radio), **dos búsquedas seguidas sin ninguna red**, o no
+  conecta por algo que no es la contraseña. Lleva la tarjeta («Broadcom
+  14E4:4727», ya desde que se encuentra), dónde está en el PCI, el
+  controlador, cuánto llevaba, el estado y el fallo de 802.11, las redes
+  vistas, lo enviado y recibido, lo que cuenta la radio y su resumen (las
+  Atheros); arriba quedan, paso a paso, los datos de fábrica, el PHY y sus
+  calibraciones. Sin claves ni contraseñas; de los BSSID, como siempre, solo
+  los dos últimos octetos.
+- **La ventana del Wi-Fi** (y `REDWIFI /ESTADO`): «No se ha podido usar la
+  tarjeta Broadcom 14E4:4727.» y debajo «El diagnóstico está en
+  C:\HISPA\WIFI.LOG: páseselo a quien le ayude.»; con la tarjeta en marcha y
+  sin redes, «No se ve ninguna red. Pulse «Buscar» (el diagnóstico, en
+  C:\HISPA\WIFI.LOG).»
+- **Prueba**: la parte 27, «4 quater»: la BCM4313 de mentira sin su
+  microcódigo (no se pone en marcha): el diagnóstico en el registro y en
+  `WIFI.LOG`, y lo que dice `REDWIFI /ESTADO`. Las búsquedas vacías y el
+  no conectar no se ven en QEMU (el modelo siempre tiene redes).
 
 ### Lo que falta
 
@@ -7491,14 +7559,16 @@ azar), `ucuentas.cas` (`USUARIOS.BIN`) y `hispac/argon2.c` (`ARGON2.BIN`).*
   denegado» al abrirla, verla, escribir, borrar, llevarse algo, lanzar un
   programa de ella); `\USUARIOS` se mira, pero solo el núcleo hace carpetas en
   él. Quitar un usuario no borra su carpeta.
-- **Tipos**: el **administrador** instala y quita programas (PAQUETES:
-  «solo un administrador puede instalar, actualizar o quitar programas»; y el
+- **Tipos**: el **administrador** instala, repara y quita programas (PAQUETES:
+  «solo un administrador puede instalar, reparar o quitar programas»; y el
   núcleo, además, no deja a un PAQUETES lanzado por uno normal escribir en
   `\HISPA`, salvo su serie y lo bajado), cambia la hora (la 67), pide el modo
   administrador (la 157, **con su contraseña**: en la ventanita del núcleo,
   en la consola o en el terminal de SSH; sin contraseña, el «Sí, dárselo» de
-  antes), da de alta a los demás y enciende SSHD. El **normal**, lo suyo. Siempre
-  queda al menos un administrador. Lo que escribe un programa del sistema
+  antes), da de alta a los demás y enciende SSHD. El **normal**, lo suyo, y
+  (desde la 0.8.11) **poner al día** lo instalado con el catálogo firmado
+  (abajo, «Sin ningún administrador»). Siempre
+  queda al menos un administrador (abajo). Lo que escribe un programa del sistema
   lanzado por un usuario normal tampoco vale en lo delicado: `GRUB.CFG`,
   `GRUBENV` (qué núcleo arranca) y `HISPA.INI` (ASISTE, ACTUALIZ:
   `regla_admin`), la configuración de SSHD, WG y TAILSCAL, toda la zona de
@@ -7508,6 +7578,76 @@ azar), `ucuentas.cas` (`USUARIOS.BIN`) y `hispac/argon2.c` (`ARGON2.BIN`).*
   lo que lanza el escritorio, del que ha entrado; lo que pone en marcha el
   núcleo (los servicios, lo del arranque), 0, el sistema (que no entra en
   ninguna carpeta de usuario).
+
+### Sin ningún administrador (la 0.8.11, rama `sin-admin`, «(SIN-ADMIN)»)
+
+*El HP Mini de la asociación, con la 0.8.10 instalada en el disco: un solo
+usuario, «Biblio2», normal, y ningún administrador. Nadie podía cambiar
+`C:\HISPA` (`RED.INI` para `Registro=SI`), ni dar de alta a nadie, ni
+encender SSHD.*
+
+- **Nunca más**: el núcleo (la 201) no quita ni hace normal al **último
+  administrador con el que se pueda entrar** (sin contraseña o con un resumen
+  que se entiende: uno con la contraseña rota no cuenta), y Configuración ›
+  Usuarios ni le deja cambiar el tipo ni enseña «Quitar usuario»
+  («No se puede: es usted, el que está dentro o el único administrador»). El
+  Asistente y una instalación nueva no tienen USUARIOS.TXT: su usuario (el de
+  `HISPA.INI`) es administrador, como siempre.
+- **Antes**, si USUARIOS.TXT no tenía ningún «A», el núcleo hacía
+  administrador al primero, sin que nadie lo decidiera y sin guardarlo. Ya
+  no: lo decide quien está delante.
+- **Recuperarlo** (`Cuentas.sin_administrador`): con usuarios y sin ningún
+  administrador con el que se pueda entrar, **nadie entra solo** y la
+  pantalla de entrada pone arriba «Este equipo no tiene ningún
+  administrador» con dos botones: **«Crear un administrador (F2)»** (el
+  nombre y la contraseña dos veces, al menos 4 letras; Tab, Intro, Esc) y,
+  si el usuario elegido tiene contraseña, **«Hacer administrador a X
+  (F3)»** escribiendo antes su contraseña. Al acabar, entra él. Sin
+  escritorio, lo mismo en la consola de texto («1 crear un administrador
+  nuevo / 2 hacer administrador a un usuario que tiene contraseña /
+  Intro: ahora no»). Quien no quiera, entra como siempre (Biblio2 sigue
+  siendo normal y, en cuanto hay administrador, vuelve a entrar sola).
+- **Solo en la pantalla de verdad**: lo hace el núcleo (`entrada.cas` y
+  `Usuario.recupera_admin_nuevo` / `recupera_admin_de`) con el teclado y la
+  pantalla del equipo; no hay llamada al sistema para esto, así que ni un
+  programa, ni SSH, ni la red pueden pedirlo. Y solo mientras no haya
+  ninguno.
+- **Lo que se exige, y por qué**: para hacer administrador a uno que ya
+  está, **su contraseña** (que es él); **a uno sin contraseña, no** (Biblio2
+  entra sola: sería darle el equipo entero a quien lo encienda en la
+  biblioteca; para eso, crear uno nuevo, con contraseña). Para crear uno no
+  se puede pedir más que estar delante: el disco no está cifrado y quien
+  tiene el equipo en la mano ya puede arrancar otra cosa y leerlo todo
+  («Lo que no cubre»), así que esto no abre nada que no estuviera abierto, y
+  se cierra en cuanto hay un administrador.
+- **Queda apuntado**: en el registro del núcleo («cuentas: no había ningún
+  administrador: se crea «Carlos» (administrador, con contraseña) en la
+  pantalla de entrada») y en **`\HISPA\USUARIOS.LOG`** (con la fecha y la
+  hora; lo lee cualquiera, solo lo escribe el núcleo). Al arrancar, el
+  registro dice cuántos administradores hay («cuentas: 1 usuarios
+  (USUARIOS.TXT); administradores: 0»).
+- **Un usuario normal pone al día el sistema** (`PAQUETES ACTUALIZA`, «Actualizar
+  todo» de Programas y actualizaciones): solo instala lo que ha firmado el
+  proyecto, así que no da poder a nadie, y así un equipo con solo usuarios
+  normales recibe los arreglos. Con un catálogo **firmado** (también el de
+  una carpeta: sin `CATALOGO.FIR`, no) y con su serie sin ir atrás (tampoco
+  el de una carpeta); sin `/FORZAR`; nada de `INSTALA`, `QUITA` ni `REPARA`.
+  PAQUETES se lo dice al núcleo (la **llamada 200, 6**, solo con el sello de
+  PAQUETES) tras comprobar la firma, y desde ahí esa tarea escribe en la zona
+  del sistema (`Tarea.firmada`, permisos.cas). Con una base de antes, la 200, 6
+  no está y PAQUETES 1.8 lo dice.
+- **Lo que lanza ACTUALIZ /BANDEJA es del que ha entrado**: ACTUALIZ /BANDEJA
+  lo pone en marcha el núcleo al arrancar (es «del sistema», el usuario 0) y su
+  «Verlas» abría «Programas y actualizaciones» también como el sistema: un
+  usuario normal podía instalar y quitar lo que quisiera (también de una
+  carpeta sin firma). Desde la 0.8.11, lo que lanza un programa del usuario 0
+  que no es un servicio, con alguien dentro, es de ese alguien.
+- **Para el HP Mini, con la 0.8.10**: PAQUETES 1.7 no deja poner al día a
+  Biblio2... salvo por ese «Verlas»: con el cable puesto, al arrancar, la
+  ventanita de abajo a la derecha «Hay actualizaciones» (sale en cuanto hay
+  red, hasta 90 s, y se va sola al medio minuto) › **«Verlas»** › **«Actualizar
+  todo»**, y reiniciar; al arrancar con la 0.8.11, la pantalla de entrada
+  ofrece crear el administrador.
 
 ### Las contraseñas
 
@@ -7579,7 +7719,7 @@ cada uno. Encender, apagar y el puerto, solo un administrador.
 
 | | |
 |---|---|
-| 200 | lo de los usuarios: 0, cuántos (0: sin usuarios); 1, la ficha número ECX (64 octetos: `Ficha_usuario`) a EDX; 2, el número del de la tarea; 3, ¿administrador?; 4, su carpeta; 5, el que ha entrado |
+| 200 | lo de los usuarios: 0, cuántos (0: sin usuarios); 1, la ficha número ECX (64 octetos: `Ficha_usuario`) a EDX; 2, el número del de la tarea; 3, ¿administrador?; 4, su carpeta; 5, el que ha entrado; 6 (0.8.11, solo PAQUETES), un usuario normal pone al día con el catálogo firmado: desde ahí escribe en la zona del sistema |
 | 201 | (solo `USUARIOS.BIN`) crear, quitar, cambiar, la contraseña: un `Pedido_usuario` |
 | 202 | (solo `SSHD.BIN`) ¿es esa su contraseña? / el de una llave ya comprobada: el siguiente programa que lance será suyo |
 | 209 | (solo el `ARGON2.BIN` que pone el núcleo) el pedido y el resumen |
