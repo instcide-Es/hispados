@@ -301,7 +301,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
 if [ $c = 85 ] && hay $S "^Hispa-64 0.10.0 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
-   && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 12[0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9,]* [KM]B usados por el núcleo$" \
+   && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 1[12][0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
    && hay $S "^Páginas: de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día); de 2 MB, también; de 1 GB, no (el procesador no las tiene)$" \
@@ -1313,8 +1313,8 @@ if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
   red9_ok "$T/e9a.txt" "e1000 (la de VirtualBox), 1 procesador, DHCP"
   RTC9=utc red9 "$T/e9b.txt" e1000e 2 "cmos=utc zona=UTC red=pierde"
   red9_ok "$T/e9b.txt" "e1000e (82574L, con MSI), 2 procesadores, [etapa 10] tirando uno de cada 23 segmentos que llegan (red=pierde)"
-  if serie "$T/e9b.txt" | grep -qE "^  TCP \[etapa 10\]: [0-9]+ conexiones con escala de ventana, [1-9][0-9]* trozos desordenados guardados y [1-9][0-9]* juntados"; then
-    ok "etapa 10, TCP: lo desordenado (red=pierde), guardado en su sitio y juntado al llegar lo que faltaba: $(serie "$T/e9b.txt" | grep -o '[0-9]* trozos desordenados guardados y [0-9]* juntados'), y las descargas, con su sha256"
+  if serie "$T/e9b.txt" | grep -qE "^  TCP \[etapa 10\], después de la red: [0-9]+ conexiones con escala de ventana, [1-9][0-9]* trozos desordenados guardados y [1-9][0-9]* juntados"; then
+    ok "etapa 10, TCP: lo desordenado (red=pierde), guardado en su sitio y juntado al llegar lo que faltaba: $(serie "$T/e9b.txt" | grep -o '[0-9]* trozos desordenados guardados y [0-9]* juntados' | tail -1), y las descargas, con su sha256"
   else ko "etapa 10, TCP no guarda lo desordenado: $(serie "$T/e9b.txt" | grep '^  TCP \[')"; fi
   if [ -n "$PD9" ]; then
     red9 "$T/e9c.txt" virtio-net-pci 4 "ip=10.0.2.15/24,10.0.2.2,10.0.2.2 sindhcp" dns

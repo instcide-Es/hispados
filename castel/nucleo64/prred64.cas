@@ -134,6 +134,7 @@ módulo PrRed64
             escribir("  la hora, puesta ", puesta_veces, " veces; el CMOS, escrito ", cmos_escrito, " veces: va ", desvío_cmos(), " s del reloj")
             si cmos_local entonces escribir(" (en hora local)\n") sino escribir(" (en UTC)\n") fin
         fin
+        escribir("  TCP [etapa 10], después de la red: ", tcp_escaladas, " conexiones con escala de ventana, ", tcp_guardados, " trozos desordenados guardados y ", tcp_juntados, " juntados, ", tcp_sack, " ACK con SACK\n")
         escribir("Después de la red: ", socks_vivos, " sockets (", socks_hechos, " hechos), ", vivos, " procesos; IP ", ip_rx, " recibidos y ", ip_tx, " enviados, ", ip_malos, " malos; TCP: ", tcp_abiertas, " conexiones, ", tcp_retx, " repeticiones, ", tcp_rst_tx, " RST; UDP ", udp_rx, " y ", udp_tx, "; ", eventos_vivos + tempos_vivos + textos_vivos, " objetos\n")
         si socks_vivos <> 0 entonces mal("quedan sockets") fin
         si eventos_vivos + tempos_vivos + textos_vivos <> 0 entonces mal("quedan eventfd, timerfd o textos") fin
