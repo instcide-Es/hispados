@@ -1031,14 +1031,14 @@ fat_vuelca:
 fat_octeto:
         push ax
         push cx
+        mov si, bx                  ; (antes de fat_trae: este AND borraba su
+        and si, 511                 ; CF, y con un sector de la FAT ilegible
+        add si, fat                 ; se escribía la FAT en el sector FFFFh)
         mov ax, bx
         mov cl, 9
         shr ax, cl
         add ax, [res_sec]
-        call fat_trae
-        mov si, bx
-        and si, 511
-        lea si, [fat+si]
+        call fat_trae               ; (su CF llega tal cual: POP no lo toca)
         pop cx
         pop ax
         ret
