@@ -39,3 +39,46 @@ if cmp -s <(mtype -i $T/a.img ::BASIC.COM) build/BASIC.COM && cmp -s <(mtype -i 
   ok "n.º 1: desde fuera, los cuatro archivos están intactos, octeto a octeto"; else ko "n.º 1: algún archivo ha quedado cortado"; mdir -i $T/a.img :: ::G; fi
 if fsck.fat -n $T/a.img > $T/fsck.txt 2>&1 && mdir -i $T/a.img ::X > /dev/null 2>&1; then ok "n.º 1 y 3: fsck.fat no encuentra errores y X sigue ahí"; else ko "n.º 1 y 3: fsck.fat encuentra errores"; cat $T/fsck.txt; fi
 }
+
+# llena el disquete $1 con RELLENO.BIN hasta que solo queden unos $2 octetos
+llena() {
+  local libre=$(mdir -i $1 :: | awk '/bytes free/ { gsub(/ /, "", $0); sub(/bytesfree/, "", $0); print }')
+  head -c $((libre - $2)) /dev/zero > $T/RELLENO.BIN
+  mcopy -o -i $1 $T/RELLENO.BIN ::
+}
+
+# ---- n.º 5: CUENTAS guarda en un temporal; una hoja que no se ha podido abrir
+# entera se queda sin nombre ----
+p_auditoria_cuentas() {
+echo "== Hispa-8086: auditoría 1, CUENTAS con el disco lleno y una hoja rota =="
+cp $IMG/hispa8086-360.img $T/a.img
+cp $IMG/oficina8086-360.img $T/b.img
+local i; for ((i=1; i<=150; i++)); do printf '%d;%d,5;=A%d*B%d;texto de la fila %d\r\n' $i $((i*3)) $i $i $i; done > $T/E.CSV
+mcopy -o -i $T/b.img $T/E.CSV ::
+QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
+escribe "limpiar"; escribe "b:cuentas b:e.csv /g b:h.cta"; sleep 5
+escribe "b:cuentas b:e.csv /g b:h.cta"; sleep 5; escribe "dir b:h.*"
+pantalla k1
+noesta k1 "CUENTAS: no se ha podido" "n.º 5: guardar encima de una hoja que ya existe: "
+noesta k1 'H.$$$' "n.º 5: y no queda el temporal: "
+apaga
+mtype -i $T/b.img ::H.CTA > $T/h_bien.cta
+local tam=$(stat -c %s $T/h_bien.cta)
+if [ "$tam" -gt 2048 ]; then ok "n.º 5: la hoja de la prueba ocupa $tam octetos (más de dos grupos)"; else ko "n.º 5: la hoja de la prueba es muy pequeña ($tam)"; fi
+head -c $((tam / 2)) $T/h_bien.cta > $T/ROTO.CTA
+for ((i=1; i<=300; i++)); do printf '%d;%d,5;=A%d*B%d;otro texto, más largo, de la fila %d\r\n' $i $((i*3)) $i $i $i; done > $T/E2.CSV
+mcopy -o -i $T/b.img $T/ROTO.CTA $T/E2.CSV ::
+llena $T/b.img 3072
+QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
+escribe "limpiar"; escribe "b:cuentas b:e2.csv /g b:h.cta"; sleep 8
+pantalla k2
+esta k2 "CUENTAS: no se ha podido leer o escribir el archivo." "n.º 5: con el disco lleno, guardar falla y lo dice: "
+escribe "limpiar"; escribe "b:cuentas b:roto.cta"; sleep 3; tecla slash s; sleep 1
+pantalla k3
+esta k3 "Hay cambios sin guardar." "n.º 5: una hoja que no se ha podido abrir entera: Salir pregunta: "
+tecla n; sleep 1
+pantalla k4
+apaga
+if cmp -s <(mtype -i $T/b.img ::H.CTA) $T/h_bien.cta; then ok "n.º 5: con el disco lleno, la hoja vieja sigue entera"; else ko "n.º 5: el disco lleno ha estropeado la hoja vieja ($(mtype -i $T/b.img ::H.CTA | wc -c) octetos)"; fi
+if ! mdir -i $T/b.img '::H.$$$' > /dev/null 2>&1 && fsck.fat -n $T/b.img > $T/fsck.txt 2>&1; then ok "n.º 5: no queda H.\$\$\$ y fsck.fat no encuentra errores"; else ko "n.º 5: queda el temporal o hay errores"; cat $T/fsck.txt; fi
+}

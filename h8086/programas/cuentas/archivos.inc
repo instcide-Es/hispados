@@ -237,6 +237,10 @@ carga:
         mov byte [cambios], 0
         mov byte [sucio], 2
         popf
+        jnc .r
+        mov byte [nombre], 0        ; a medias: sin nombre y con cambios, para
+        mov byte [cambios], 1       ; que no se guarde encima sin querer (y
+        stc                         ; que Salir pregunte)
 .r:
         ret
 
@@ -840,10 +844,57 @@ d_txt       db "1,0", 13, 10, 0
 ; =============================================================================
 ;  Guardar `nombre` (en el formato de su extensión). CF si no se ha podido
 ; =============================================================================
+; Si el archivo ya existe, se escribe en NOMBRE.$$$ y solo cuando está
+; entero se borra el viejo y el temporal pasa a llamarse como él: con el disco
+; lleno, el viejo queda como estaba. Si no existe (o es un dispositivo), se
+; escribe directamente, y si falla se borra lo escrito
 guarda:
+        mov si, nombre              ; nombre3: el temporal (la extensión, $$$)
+        mov di, nombre3
+        call copia_cad
+        call extension
+        jnc .e
+        lea si, [di+1]              ; (sin extensión: se le pone)
+        mov byte [di + nombre3 - nombre], '.'
+.e:
+        add si, nombre3 - nombre
+        mov word [si], '$$'
+        mov word [si+2], '$'
         mov dx, nombre
+        mov ax, 0x4300              ; ¿existe ya (y es un archivo)?
+        int 0x21
+        jnc .tmp
+        mov word [g_nom], nombre
+        jmp short .crea
+.tmp:
+        mov word [g_nom], nombre3
+.crea:
+        mov dx, [g_nom]
         call crea_esc
         jc .r
+        call .escribe
+        mov dx, [g_nom]
+        jc .borra                   ; no ha salido: fuera lo escrito
+        cmp dx, nombre
+        je .r                       ; (era nuevo: ya está)
+        mov dx, nombre              ; el viejo, fuera, y el nuevo, en su sitio
+        mov ah, 0x41
+        int 0x21
+        jc .borra_tmp
+        mov dx, nombre3
+        mov di, nombre
+        mov ah, 0x56
+        int 0x21
+        ret
+.borra_tmp:
+        mov dx, nombre3
+.borra:
+        mov ah, 0x41
+        int 0x21
+        stc
+.r:
+        ret
+.escribe:
         call que_formato
         cmp al, 1
         jb .cta
@@ -857,8 +908,6 @@ guarda:
         call guarda_cta
 .fin:
         jmp cierra_esc
-.r:
-        ret
 
 guarda_cta:
         mov si, c_cab

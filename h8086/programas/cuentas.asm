@@ -2762,6 +2762,7 @@ anch        resb NCOL
 nombre      resb 80
 nombre2     resb 80
 nombre3     resb 80
+g_nom       resw 1                  ; dónde escribe guarda (nombre o nombre3)
 destino     resb 80
 nr          resb 20 + 256 + 4       ; el registro que se está haciendo
 ftxt        resb 256
