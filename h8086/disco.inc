@@ -1645,6 +1645,11 @@ ruta_copia:
         inc si
         inc di
         loop .c
+        cmp byte [es:si], 0         ; ¿no cabía? Se cortaba en silencio, y
+        je .f                       ; «...\DATOS.TXT» podía quedar en «...\DATOS.»
+        mov word [ruta], 0x5CFF     ; (otro archivo). Ahora es «ÿ\X», que no
+        mov byte [ruta+2], 'X'      ; existe: todo da el error 3, como en DOS
+        mov di, ruta + 3
 .f:
         mov byte [di], 0
         pop di

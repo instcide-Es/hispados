@@ -474,7 +474,7 @@ toma_red:
         je .f
         cmp al, '<'
         je .f
-        cmp bx, RUTA_MAX - 1
+        cmp bx, RUTA_MAX + 1         ; (81: así el núcleo ve que no cabe y da el error 3)
         jae .f
         mov [di+bx], al
         inc bx
@@ -676,7 +676,7 @@ toma_arg:
         mov al, [si]
         cmp al, ' '
         jbe .f
-        cmp bx, RUTA_MAX - 1
+        cmp bx, RUTA_MAX + 1         ; (81: así el núcleo ve que no cabe y da el error 3)
         jae .f
         mov [di+bx], al
         inc bx
@@ -3459,7 +3459,7 @@ fcb2        resb 11
 cp_dta      resb 44
 ej_pref     resb RUTA_MAX
 cp_dir      resb RUTA_MAX + 16
-cp_pat      resb 16
+cp_pat      resb RUTA_MAX + 2       ; (un nombre de más de 15 letras se salía)
 cp_org      resb RUTA_MAX + 16
 cp_dst      resb RUTA_MAX + 16
             alignb 2
