@@ -2803,6 +2803,7 @@ en_c2       resb 1
 w_mal       resb 1
 csv_sep     resb 1
 csv_com     resb 1
+c_sobra     resb 1                  ; más columnas de las que caben (col_sig)
 csv_par     resb 1
 en_texto    resb 1
 sin_calc    resb 1

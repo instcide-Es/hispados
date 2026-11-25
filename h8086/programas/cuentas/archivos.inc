@@ -263,6 +263,12 @@ carga_cta:
         call lee_c
         jc .r
         xor bh, bh
+        dec al                      ; (de 1 a 75: con más, ajusta_vista no
+        cmp al, 74                  ; acababa, y con 0 se pintaba basura)
+        jbe .a1
+        mov al, ANCHO0 - 1
+.a1:
+        inc ax
         mov [anch + bx], al
         loop .a
 .celdas:
@@ -353,6 +359,7 @@ carga_csv:
         xor ax, ax
         mov [en_f2], ax
         mov [en_c2], al
+        mov [c_sobra], al
 .campo:
         xor bx, bx                  ; BX = letras del campo
         mov byte [csv_com], 0
@@ -383,6 +390,8 @@ carga_csv:
         jne .c4
         dec byte [csv_par]
 .c4:
+        cmp al, 10                  ; (un paréntesis sin cerrar solo anula el
+        je .fin_linea               ; separador: se tragaba el resto del archivo)
         cmp byte [csv_par], 0
         jg .mete
 .c2:
@@ -408,11 +417,12 @@ carga_csv:
         jmp .c
 .fin_campo:
         call pon_campo
-        inc byte [en_c2]
+        call col_sig
         jmp .campo
 .fin_linea:
         call pon_campo
         mov byte [en_c2], 0
+        mov byte [c_sobra], 0
         inc word [en_f2]
         cmp word [en_f2], NFIL
         jb .campo
@@ -423,7 +433,19 @@ carga_csv:
 .vacio:
         clc
         ret
+; la columna siguiente de lo que se lee (CSV y DIF): pasada la 256, se queda
+; en ella y [c_sobra] dice que lo de más no se mete (daba la vuelta y se
+; escribía en la columna A)
+col_sig:
+        inc byte [en_c2]
+        jnz .r
+        dec byte [en_c2]
+        mov byte [c_sobra], 1
+.r:
+        ret
 pon_campo:
+        cmp byte [c_sobra], 0       ; (más allá de la columna 256: fuera)
+        jne .r
         mov byte [ebuf + bx], 0
         test bx, bx
         jz .r
@@ -630,6 +652,7 @@ carga_dif:
         call lee_linea
         mov word [en_f2], 0xFFFF
         mov byte [en_c2], 0
+        mov byte [c_sobra], 0
 .l:
         call lee_linea              ; «tipo,número» y luego el texto
         jc .bien
@@ -670,6 +693,8 @@ carga_dif:
 .cero:
         call acc_cero
 .num:
+        cmp byte [c_sobra], 0
+        jne .otro
         mov ax, [en_f2]
         mov [en_f], ax
         mov al, [en_c2]
@@ -683,9 +708,11 @@ carga_dif:
         mov cx, 14
         call pon_dif
 .otro:
-        inc byte [en_c2]
+        call col_sig
         jmp .l
 .texto:
+        cmp byte [c_sobra], 0
+        jne .otro
         mov ax, [en_f2]
         mov [en_f], ax
         mov al, [en_c2]
@@ -726,6 +753,7 @@ carga_dif:
         jne .eod
         inc word [en_f2]
         mov byte [en_c2], 0
+        mov byte [c_sobra], 0
         cmp word [en_f2], NFIL
         jb .l
 .eod:

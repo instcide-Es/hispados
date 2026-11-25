@@ -8,7 +8,7 @@ csv_dos() { printf '%s\r\n' "$@"; }
 p_cuentas() {
 echo "== Hispa-8086: CUENTAS (la hoja de cálculo) =="
 cp $IMG/hispa8086-360.img $T/a.img
-cp build/oficina8086-360.img $T/b.img
+cp $IMG/oficina8086-360.img $T/b.img
 # las cuentas: 0,1 + 0,2; un tercio por tres; redondeos de moneda; fechas;
 # un círculo; las fórmulas a la manera de VisiCalc y 1-2-3; SI, MEDIA...
 csv_dos '0,1;0,2;=A1+B1;=C1=0,3' \
@@ -71,7 +71,7 @@ atributo() {
 p_cuentas_pantalla() {
 echo "== Hispa-8086: CUENTAS en la pantalla =="
 cp $IMG/hispa8086-360.img $T/a.img
-cp build/oficina8086-360.img $T/b.img
+cp $IMG/oficina8086-360.img $T/b.img
 QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
 escribe "limpiar"; escribe "b:cuentas"; sleep 2
 pantalla c1
@@ -124,7 +124,7 @@ if grep -q '^  0,30 EUR' $T/p.txt; then ok "lo guardado en .CTA conserva el form
 p_cuentas_ordenar() {
 echo "== Hispa-8086: CUENTAS, ordenar, formatos y anchos =="
 cp $IMG/hispa8086-360.img $T/a.img
-cp build/oficina8086-360.img $T/b.img
+cp $IMG/oficina8086-360.img $T/b.img
 QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
 escribe "limpiar"; escribe "b:cuentas"; sleep 2
 escribe "pera"; escribe "Manzana"; escribe "naranja"; escribe "uva"
