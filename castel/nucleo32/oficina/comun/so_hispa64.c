@@ -362,7 +362,7 @@ void so_ahora(int *ano, int *mes, int *dia, int *hora, int *min, int *seg)
 	time_t t = time(NULL);
 	struct tm m;
 
-	gmtime_r(&t, &m);
+	localtime_r(&t, &m);	/* la hora local (la zona, de TZ y /etc/localtime), la que ve quien la usa */
 	*ano = m.tm_year + 1900;
 	*mes = m.tm_mon + 1;
 	*dia = m.tm_mday;

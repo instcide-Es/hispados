@@ -1148,8 +1148,10 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
     -drive file="$T/e8fat.img",format=raw,if=none,id=d1 -device ide-hd,drive=d1,bus=ide.1 \
     -drive file="$T/e8exfat.img",format=raw,if=none,id=d2 -device ide-hd,drive=d2,bus=ide.2 \
     -device qemu-xhci,id=xhci -device usb-tablet,bus=xhci.0 -display none -serial file:"$S8" \
-    -monitor unix:"$M8",server,nowait -qmp unix:"$Q8",server,nowait $DBG -no-reboot -nic none > /dev/null 2>&1 &
+    -monitor unix:"$M8",server,nowait -qmp unix:"$Q8",server,nowait $DBG -no-reboot -nic none -rtc base=localtime > /dev/null 2>&1 &
   q=$!
+  # [etapa 11 b] la hora de Madrid al empezar (el reloj de la barra tiene que dar esta o una de después)
+  H8A=$(TZ=Europe/Madrid date +%s)
   espera8() {   # PATRÓN SEGUNDOS: hasta que la salida lo tenga (o se acabe el plazo)
     local i
     for i in $(seq 1 $(( $2 * 5 ))); do serie "$S8" | grep -q "$1" && return 0; sleep 0.2; done
@@ -1222,6 +1224,7 @@ PY
   teclas8 'salir{intro}'
   wait $q; c=$?
   V8=$(serie "$S8")
+  H8B=$(TZ=Europe/Madrid date +%s)
   # lo que se ve, en los pantallazos
   r() { $PZ "$@" 2> /dev/null || echo 0; }
   n_tit=$(r cuenta "$T/e8-notas.ppm" 40 21 768 24 1F3F6E)          # el título de la activa (oscuro)
@@ -1250,6 +1253,18 @@ PY
      && mdir -b -i "$T/e8fat.img" ::/DOCUMENT 2> /dev/null | grep -qi 'libro' && fsck.fat -n "$T/e8fat.img" > /dev/null 2>&1; then
     ok "etapa 8, la oficina de Hispa-Pentium con so_hispa64.c: Pluma 2 (desde el menú Inicio; escrito y guardado en FAT32: DOCUMENT/carta.PLU, $(mdir -i "$T/e8fat.img" ::/DOCUMENT/carta.PLU 2> /dev/null | grep -i carta | awk '{print $3}') octetos), Cuentas 2 (12, 30 y =A1*A2+1; guardado: $(mdir -b -i "$T/e8fat.img" ::/DOCUMENT | grep -i libro | sed 's|.*/||')), Alt+F4; fsck.fat sin quejas"
   else ko "etapa 8, Pluma o Cuentas no hacen lo que deben: página $n_plu, letra $n_plt, celdas $n_cue; $(grep -E '^pluma|^cuentas|parado' <<< "$V8" | tail -6 | paste -sd '|'); $(mdir -b -i "$T/e8fat.img" ::/DOCUMENT 2>&1 | paste -sd ' ')"; fi
+  # [etapa 11 b] el reloj de la barra: la hora local (zona Europa/Madrid, la de omisión; el CMOS en hora local), no la UTC
+  RB8=$(grep -o '^VENTANAS: la barra: el reloj, las [0-9][0-9]:[0-9][0-9]$' <<< "$V8" | head -1 | grep -o '[0-9:]*$')
+  RV8=0
+  if [ -n "$RB8" ]; then
+    for h in $(seq $(( H8A / 60 )) $(( H8B / 60 ))); do
+      [ "$(TZ=Europe/Madrid date -d @$(( h * 60 )) +%H:%M)" = "$RB8" ] && RV8=1
+    done
+  fi
+  VER8=$(sed -n 's/^ *constante VERSIÓN = "\(.*\)"$/\1/p' "$AQUI/hispa64.cas")
+  if [ $RV8 = 1 ] && grep -q "^VENTANAS: ventana nueva" <<< "$V8" && grep -q "^VENTANAS: el fondo: Hispa-64, versión $VER8$" <<< "$V8"; then
+    ok "etapa 11 b, el reloj de la barra del escritorio: las $RB8, la hora de Madrid (localtime, no la UTC: $(TZ=UTC date -d @"$H8A" +%H:%M) en UTC al empezar); el fondo dice «versión $VER8» (la de uname)"
+  else ko "etapa 11 b, el reloj de la barra no da la hora de Madrid o el fondo no dice la versión: «$RB8» (entre $(TZ=Europe/Madrid date -d @"$H8A" +%H:%M) y $(TZ=Europe/Madrid date -d @"$H8B" +%H:%M)); $(grep '^VENTANAS: el fondo' <<< "$V8")"; fi
   if [ $bien8 = 1 ] && [ "$n_con" -gt 20000 ] && [ "$n_cls" -lt 400 ] && [ "$n_cls" -gt 20 ] && [ "$n_cur" = 16 ] \
      && grep -q "^VENTANAS: fuera; la pantalla vuelve a la consola$" <<< "$V8"; then
     ok "etapa 8, salir del escritorio: la consola vuelve entera ($n_con puntos grises); cls la borra de verdad (quedan $n_cls: «/> » y el cursor, una raya de 8 x 2 debajo de la casilla)"

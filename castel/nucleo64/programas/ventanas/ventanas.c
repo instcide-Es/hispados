@@ -34,6 +34,7 @@
 #include <spawn.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/utsname.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -582,6 +583,8 @@ static void pinta_ventana(int i)
 			lz_linea(&L, (w->x + w->an - 3 - f * 4) * 16, (w->y + w->al - 2) * 16, (w->x + w->an - 2) * 16, (w->y + w->al - 3 - f * 4) * 16, 16, 0x80868E);
 }
 
+static char reloj_dicho[8];
+
 static void pinta_barra(void)
 {
 	int y = AL - BARRA, x, k, an;
@@ -620,9 +623,13 @@ static void pinta_barra(void)
 			lz_ui(&b, x + 8, y + 22, w->titulo, 0xFFFFFF);
 		x += an + 6;
 	}
-	/* el reloj */
-	gmtime_r(&s, &m);
+	/* el reloj, en la hora local (la zona llega en TZ y /etc/localtime) */
+	localtime_r(&s, &m);
 	fmt(t, sizeof t, "%02d:%02d", m.tm_hour, m.tm_min);
+	if (strcmp(t, reloj_dicho)) {	/* (para las pruebas: lo que se pinta, por el puerto serie) */
+		strcpy(reloj_dicho, t);
+		di("la barra: el reloj, las %s", t);
+	}
 	lz_ui_negrita(&L, AN - 12 - lz_ui_ancho_negrita(t), y + 22, t, 0xFFFFFF);
 }
 
@@ -773,6 +780,8 @@ static void hace_tapiz(void)
 	int f, c;
 	lienzo t;
 	int cara;
+	struct utsname u;
+	char ver[48];
 
 	for (f = 0; f < AL; f++) {
 		u32 a = 0x2B5E91, b = 0x0D2238;
@@ -797,9 +806,14 @@ static void hace_tapiz(void)
 	}
 	cara = letra_cara(FAM_SANS, 1, 0, NULL);
 	lz_texto(&t, cara, 44 * 4, 0, AN - 40 - lz_ancho(cara, 44 * 4, 0, "Hispa-64"), AL - BARRA - 40, "Hispa-64", 0xB8D0EA);
+	/* la versión del sistema (la de uname: VERSIÓN del núcleo) */
+	if (uname(&u) == 0)
+		fmt(ver, sizeof ver, "versión %s", u.release);
+	else
+		strcpy(ver, "versión ?");
+	di("el fondo: Hispa-64, %s", ver);
 	cara = letra_cara(FAM_SANS, 0, 0, NULL);
-	lz_texto(&t, cara, 13 * 4, 0, AN - 40 - lz_ancho(cara, 13 * 4, 0, "etapa 8: las ventanas y la oficina"), AL - BARRA - 18,
-		 "etapa 8: las ventanas y la oficina", 0x9FB8D2);
+	lz_texto(&t, cara, 13 * 4, 0, AN - 40 - lz_ancho(cara, 13 * 4, 0, ver), AL - BARRA - 18, ver, 0x9FB8D2);
 }
 
 /* ---- el ratón ---- */
