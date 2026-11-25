@@ -801,6 +801,7 @@ errores:
         db 64, "Nombre de archivo no válido", 0
         db 66, "Sentencia directa en el archivo", 0
         db 67, "Demasiados archivos", 0
+        db 70, "Permiso denegado", 0
         db 0
 
 %include "tokens.inc"

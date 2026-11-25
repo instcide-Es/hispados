@@ -210,6 +210,7 @@ b_num       resb 48                 ; un número escrito
 b_cifras    resb 24                 ; las cifras de un número (num_a_texto)
 b_nom       resb 44                 ; un nombre de variable (largo y letras)
 b_arch      resb 68                 ; un nombre de archivo (ASCIZ)
+b_tmp       resb 68                 ; el temporal de SAVE (NOMBRE.$$$)
 b_ent       resb LIN_TAM            ; la entrada (handle 0)
 N_NOMS      equ 8
 v_nom_pila  resb 42 * N_NOMS        ; nombres guardados (matrices anidadas)

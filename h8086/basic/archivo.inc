@@ -307,9 +307,17 @@ sent_save:
         mov byte [v_aux2], 1
 .ya:
         push si
-        mov dx, b_arch
-        xor cx, cx
-        mov ah, 0x3C
+        mov dx, b_arch              ; ¿uno que ya está y es de solo leer?
+        mov ax, 0x4300
+        int 0x21
+        jc .nuevo
+        test cl, 1
+        jnz .prot
+.nuevo:
+        call tmp_nombre             ; se escribe en NOMBRE.$$$, y solo cuando
+        mov dx, b_tmp               ; está entero se borra el viejo y se
+        xor cx, cx                  ; renombra (vaciaba el .BAS antes: con el
+        mov ah, 0x3C                ; disco lleno, el del disco se perdía)
         int 0x21
         jc .no
         cmp byte [v_aux2], 0
@@ -336,15 +344,16 @@ sent_save:
         mov cx, 1
         mov ah, 0x40
         int 0x21
+        jc .b_mal
         mov ah, 0x3E
         int 0x21
+        call sustituye
         pop si
         ret
 .b_mal:
         mov ah, 0x3E
         int 0x21
-        mov al, 61
-        jmp error
+        jmp sin_sitio
 .texto:
         mov [v_sal_h], ax
         mov word [v_sal_n], 0
@@ -365,11 +374,82 @@ sent_save:
         mov word [v_sal_h], 0
         mov ah, 0x3E
         int 0x21
+        call sustituye
         pop word [v_col]
         pop si
         ret
 .no:
+        cmp ax, 5                   ; protegido (acceso denegado, o el disco):
+        je .prot                    ; «Permiso denegado», y no «Nombre de
+        cmp ax, 19                  ; archivo no válido», que despistaba
+        je .prot
         mov al, 64
+        jmp error
+.prot:
+        mov al, 70
+        jmp error
+; b_tmp = b_arch con la extensión $$$ (b_arch siempre la lleva)
+tmp_nombre:
+        mov si, b_arch
+        mov di, b_tmp
+        xor bx, bx
+.c:
+        mov al, [si]
+        mov [di], al
+        cmp al, '.'
+        jne .c1
+        mov bx, di
+.c1:
+        cmp al, '\'
+        jne .c2
+        xor bx, bx
+.c2:
+        inc si
+        inc di
+        test al, al
+        jnz .c
+        test bx, bx
+        jnz .c3
+        lea bx, [di-1]
+.c3:
+        mov word [bx], '.$'
+        mov word [bx+2], '$$'
+        mov byte [bx+4], 0
+        ret
+; lo escrito en b_tmp pasa a ser b_arch: el viejo, fuera (si no se puede
+; borrar, «Permiso denegado»), y el temporal, con su nombre
+sustituye:
+        mov dx, b_arch
+        mov ah, 0x41
+        int 0x21
+        jnc .ren
+        cmp ax, 2                   ; (no había: nada que borrar)
+        je .ren
+        call borra_tmp
+        mov al, 70
+        jmp error
+.ren:
+        push es
+        push ds
+        pop es
+        mov dx, b_tmp
+        mov di, b_arch
+        mov ah, 0x56
+        int 0x21
+        pop es
+        jnc .x
+        call borra_tmp
+        jmp sin_sitio
+.x:
+        ret
+borra_tmp:
+        mov dx, b_tmp
+        mov ah, 0x41
+        int 0x21
+        ret
+sin_sitio:
+        call borra_tmp
+        mov al, 61
         jmp error
 ; escribe al archivo lo que haya en su búfer (b_disco)
 vacia_salida:
@@ -398,8 +478,7 @@ vacia_salida:
         mov word [v_sal_h], 0
         mov ah, 0x3E
         int 0x21
-        mov al, 61
-        jmp error
+        jmp sin_sitio
 ; un carácter al archivo de SAVE
 pon_car_archivo:
         push bx

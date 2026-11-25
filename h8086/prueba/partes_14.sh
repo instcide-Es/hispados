@@ -336,3 +336,36 @@ apaga
 if [ "$(mtype -i $T/b.img ::PAR2.CSV | sed -n 2p | tr -d '\r')" = "7;8" ]; then ok "n.º 19: una fórmula sin cerrar el paréntesis no se traga las líneas de detrás"; else ko "n.º 19: CSV con paréntesis sin cerrar: $(mtype -i $T/b.img ::PAR2.CSV | head -3 | tr '\r\n' '  ')"; fi
 if [ "$(mtype -i $T/b.img ::ANCHA2.CSV | head -1 | tr -d '\r' | cut -d';' -f1)" = 1 ] && [ "$(mtype -i $T/b.img ::ANCHA2.CSV | head -1 | tr -d '\r' | awk -F';' '{print $256}')" = 256 ]; then ok "n.º 19: un CSV de 300 columnas: la A sigue siendo la 1 y la última, la 256"; else ko "n.º 19: CSV de 300 columnas: $(mtype -i $T/b.img ::ANCHA2.CSV | head -c 60)"; fi
 }
+
+# ---- n.º 20: SAVE de BASIC por un temporal, y PLUMA con poca memoria ----
+p_auditoria_save() {
+echo "== Hispa-8086: auditoría 1, SAVE de BASIC con el disco lleno o protegido, y PLUMA con poca memoria =="
+cp $IMG/hispa8086-360.img $T/a.img
+local i; for ((i=1; i<=40; i++)); do printf '%d PRINT "linea %d de un programa para guardar con el disco lleno"\r\n' $((i * 10)) $i; done > $T/PROG.BAS
+printf '10 PRINT "solo leer"\r\n' > $T/RO.BAS
+mcopy -i $T/a.img $T/PROG.BAS $T/RO.BAS ::; mattrib -i $T/a.img +r ::RO.BAS
+llena $T/a.img 0
+arranca $T/a.img 486
+escribe "limpiar"; escribe "basic"; sleep 2
+escribe "load \"prog\""; sleep 1; escribe "1000 rem una linea mas, para que no quepa"; escribe "save \"prog\",a"; sleep 2
+escribe "save \"ro\""; sleep 1
+pantalla v1
+esta v1 "Disco lleno" "n.º 20: SAVE con el disco lleno: "
+esta v1 "Permiso denegado" "n.º 20: SAVE sobre uno de solo leer: «Permiso denegado» (no «Nombre de archivo no válido»): "
+escribe "system"; sleep 1
+apaga
+if cmp -s <(mtype -i $T/a.img ::PROG.BAS) $T/PROG.BAS && cmp -s <(mtype -i $T/a.img ::RO.BAS) $T/RO.BAS && ! mdir -i $T/a.img '::*.$$$' > /dev/null 2>&1; then ok "n.º 20: los dos .BAS siguen como estaban, sin temporales"; else ko "n.º 20: SAVE ha estropeado un .BAS o ha dejado un temporal"; mdir -i $T/a.img :: | tail -5; fi
+# PLUMA con menos de 64 K libres (un disco en memoria de 512 K y tres
+# intérpretes, uno dentro de otro, se comen el resto)
+cp $IMG/hispa8086-360.img $T/a.img
+mcopy -i $T/a.img $IMG/PLUMA.COM ::
+printf 'DEVICE=\\DISCORAM.SYS 512\r\n' > $T/CONFIG.SYS
+mcopy -o -i $T/a.img $T/CONFIG.SYS ::
+arranca $T/a.img 486
+escribe "command"; sleep 1; escribe "command"; sleep 1; escribe "command"; sleep 1; escribe "memoria"; sleep 1
+escribe "limpiar"; escribe "memoria"; escribe "pluma"; sleep 3; escribe "eco sigue vivo"
+pantalla v2
+esta v2 "PLUMA necesita 64 K de memoria libres." "n.º 20: PLUMA con poca memoria lo dice: "
+esta v2 "sigue vivo" "n.º 20: y no se cuelga: "
+apaga
+}
