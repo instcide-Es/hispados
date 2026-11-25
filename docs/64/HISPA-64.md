@@ -2972,3 +2972,43 @@ Despertar en bucle: uno interactivo que espera un suceso en bucle, señalado 100
 MSONIDO: todo bien (15 pruebas)
 Interrupciones de los discos: NVMe 62 (0 esperas sin aviso), AHCI 4412 (0 sin aviso); GSI tapadas por no apagarse: 0   (sinmsix sinmsi)
 ```
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **124 pruebas** (eran 118). En la vuelta con
+el núcleo de ahora, 122 bien y 2 mal: una de la propia prueba (el
+intérprete buscaba «a medias^C» con un `^` sin escapar, que el grep de hoy
+toma por ancla: arreglado) y una **por la carga del servidor** (con
+`ocioso=mwait`, el interactivo que duerme 10 ms se pasó de media 32 ms, el
+límite es 25: el TCG de QEMU, con el servidor a 5,6 de carga con otras
+sesiones, pierde tics; ese mismo arranque, todo lo demás bien). Lo de la
+etapa 11:
+
+- **El planificador**: «Despertar en bucle» con 1, 2, 4 y 8 procesadores
+  (1000 despertares, una expropiación por señal); con el `despierta_todos`
+  de antes, el sistema se queda ahí (probado a propósito: no acaba). Y
+  MSENALES (alarm, setitimer) con «alarmas» INTERACTIVO y 1 procesador.
+- **El intérprete**: cada orden tecleada al ver el indicador, y el
+  teclado USB igual.
+- **TCP**: de Hispa-64 a Hispa-64 por 127.0.0.1 con `red=pierde`: las
+  recuperaciones rápidas (NewReno) y que acaban, los ACK con SACK leídos,
+  la ventana de congestión, y los 256 KB de ida y vuelta, iguales; las
+  descargas con pérdidas (e1000e), con su sha256.
+- **La INTx**: q35 con `sinmsix sinmsi`: los dos NVMe, la AHCI y el xHCI
+  por la GSI de su `_PRT`, con sus interrupciones, ARCHIVOS en los siete
+  volúmenes y fsck.fat y miraexfat.py desde el anfitrión; el segundo xHCI
+  de la prueba de dos controladoras, por su INTx.
+- **select y poll** de 100 tuberías (MPROCESOS: 28 pruebas) e
+  **ITIMER_VIRTUAL y PROF**, getrusage y CLOCK_PROCESS_CPUTIME_ID
+  (MSENALES: 48), estáticos y dinámicos, con 1, 4 y 8 procesadores.
+- **El sonido**: `intel-hda` con `hda-output` (2 procesadores) e
+  `ich9-intel-hda` con `hda-duplex` (1): MSONIDO (15 pruebas) y lo que
+  graba QEMU (`-audiodev wav`), mirado con `nucleo32/sonido/oye.py`: dos
+  ráfagas, 1002 ms a 440 Hz y 501–504 ms a 1000 Hz (por los pasos por cero,
+  435 y 985–995), **sin cortes**, al nivel escrito (9000).
+- **Con KVM** (nuevo, si hay /dev/kvm): `-cpu host` con 4 procesadores
+  (las etapas 4 y 7 enteras), el procesador por omisión con 1 y «sinred»
+  (MRED por «lo»), y por UEFI con el disco de la imagen: todo en orden.
+  Con el núcleo de la 10, el primero da el doble fallo de siempre.
+- Lo de las etapas 0 a 10, igual (la unidad en memoria lleva 40 archivos;
+  uname 0.11.0).

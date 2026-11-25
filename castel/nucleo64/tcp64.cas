@@ -468,7 +468,18 @@ módulo Tcp64
         variable off, vuelo: nat64
         off := nat64(seq - s.snd_una)
         vuelo := en_vuelo(s)
-        si off >= vuelo entonces devolver fin
+        si off >= vuelo entonces
+            ; (lo que falta es el FIN: otra vez, ya; antes de la recuperación
+            ; con NewReno, el tercer ACK repetido lo volvía a mandar todo, el
+            ; FIN también; sin esto, esperaba al plazo —doblado: segundos— y
+            ; la conexión tardaba en cerrarse)
+            si s.marcas yb M_FIN_ENVIADO <> 0 y seq = s.snd_max - 1 entonces
+                manda(s, F_FIN ob F_ACK, seq, 0, 0)
+                s.retx_total := s.retx_total + 1
+                pon_retx(s)
+            fin
+            devolver
+        fin
         largo := mín(mín(largo, vuelo - off), carga_máx(s))
         si largo = 0 entonces devolver fin
         manda(s, F_ACK ob F_PSH, seq, off, nat32(largo))
