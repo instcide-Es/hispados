@@ -83,6 +83,7 @@ NCB         equ 16                  ; callbacks de modo real
 NHOOK       equ 19                  ; vectores que se reflejan de real a protegido
 RM_STACK    equ 0x0C00              ; pila de modo real del servidor
 RM_CHUNK    equ 0x0180              ; lo que se reserva por nivel
+RM_MAXW     equ 64                  ; palabras de pila que se copian como mucho (0300h)
 MAXLEVEL    equ 100
 
 ; ---- marco de registros en la pila de anillo 0 (BP -> marco) ----
@@ -1509,6 +1510,23 @@ hook_ret:       ; BP -> marco; encima: ESP0 anterior, rm_free, vector, SI, DX
 ;  Callbacks de modo real (0303h)
 ; =============================================================================
 cb_entry:
+        ; un callback de un cliente que ya no está (la rutina de ratón de
+        ; INT 33h/0Ch que queda puesta tras salir un juego): se vuelve sin
+        ; más (RETF, lo habitual), en vez de saltar a modo protegido con
+        ; una entrada ya libre
+        push bx
+        mov bx, sp
+        mov bx, [ss:bx+2]
+        sub bx, cb_stubs+3
+        shl bx, 2                   ; (4 octetos por stub, 16 por entrada)
+        push ax
+        mov al, [cs:cb_tab+bx]
+        test al, al
+        jz .dead
+        cmp al, [cs:level]
+        ja .dead
+        pop ax
+        pop bx
         pushf
         cli
         pushad
@@ -1520,6 +1538,11 @@ cb_entry:
         mov si, sp
         mov bx, cb_pm
         jmp go_pm
+.dead:
+        pop ax
+        pop bx
+        add sp, 2                   ; la vuelta al stub
+        retf
 
 cb_pm:
         movzx ebx, dx
@@ -2602,8 +2625,14 @@ kill_client:
         jmp go_rm
 .rm:
         cmp byte [kb_killed], 0     ; [SB-VGA2] antes de abrir las
-        je .si                      ; interrupciones: la SB callada y los
+        je .ne                      ; interrupciones: la SB callada y los
         call kb_rmstop              ; vectores y el 8259 como antes del programa
+        jmp .si
+.ne:
+        ; muerto por una excepción, quizá en mitad de su manejador de una
+        ; IRQ: ese manejador ya no va a dar el EOI y, sin él, el teclado (o
+        ; el reloj) se quedaba muerto al volver a DOS
+        call pic_eoi_all
 .si:
         sti
         ; [SB-VGA] si el programa estaba en modo gráfico (Doom: 320x200 sin
@@ -3121,12 +3150,7 @@ kb_rmstop:
         jb .fm
         ; el 8259: lo que quede en servicio (los manejadores que no van a
         ; volver), y sus máscaras
-        mov cx, 8
-.eoi:
-        mov al, 0x20
-        out 0xA0, al
-        out 0x20, al
-        loop .eoi
+        call pic_eoi_all
         mov ax, [pic_save]
         out 0x21, al
         mov al, ah
@@ -3135,6 +3159,21 @@ kb_rmstop:
         ; servidor)
         pop es
         pop ds
+        ret
+
+; los dos 8259: fin de lo que quede en servicio (ocho EOI no específicos en
+; cada uno; de más no hacen nada)
+pic_eoi_all:
+        push ax
+        push cx
+        mov cx, 8
+.eoi:
+        mov al, 0x20
+        out 0xA0, al
+        out 0x20, al
+        loop .eoi
+        pop cx
+        pop ax
         ret
 
 ; (modo real, interrupciones abiertas) el informe a \HISPADOS\CUELGUE.TXT
@@ -4388,6 +4427,20 @@ sim:
         call cli_esdi
         mov bl, [bp+CF_EBX]
         mov cx, [bp+CF_ECX]
+        ; con SS:SP = 0 se usa la pila del servidor (RM_CHUNK octetos por
+        ; nivel): copiar 2·CX octetos sin límite pisaba cb_tab y rm_old. La
+        ; norma DPMI garantiza 30 palabras; aquí, hasta RM_MAXW (si no, 8021h)
+        cmp cx, RM_MAXW
+        jbe .cxok
+        mov dx, [es:edi+0x30]
+        or dx, [es:edi+0x2E]
+        jnz .cxok
+        push ds
+        pop es
+        mov ax, 0x8021
+        stc
+        ret
+.cxok:
         call rm_call
         push ds
         pop es
