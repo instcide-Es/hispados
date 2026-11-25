@@ -487,6 +487,7 @@ guarda_escribe:
 ; ---- abrir: el archivo ESI (acabado en 0) ----
 cargar:
         pushad
+        mov byte [car_rec], 0
         mov [car_ruta], esi
         xor al, al
         HV dos_abrir
@@ -555,6 +556,12 @@ cargar:
         jnz .nm
 .nmx:
         mov byte [edi], 0
+        cmp byte [car_rec], 0       ; [0.9.31] no cabía entero: se dice, y sin
+        je .entero                  ; nombre, para que Guardar no lo escriba
+        mov byte [nombre], 0        ; recortado encima (pide uno nuevo)
+        mov esi, t_recortado
+        call aviso
+.entero:
         call al_principio
         cmp dword [barra_v], 0
         je .sinv
@@ -713,8 +720,11 @@ lee_hoj:
         jz .ct2
         inc esi
         cmp edi, aj_buf + CEL_MAX - 1
-        jae .ct1
+        jae .ct_rec
         stosb
+        jmp .ct1
+.ct_rec:
+        mov byte [car_rec], 1       ; [0.9.31] la celda no cabe entera
         jmp .ct1
 .ct2:
         mov byte [edi], 0
@@ -765,8 +775,11 @@ lee_csv:
 .pon:
         mov byte [car_ini], 0
         cmp edi, aj_buf + CEL_MAX - 1
-        jae .pl
+        jae .rec
         stosb
+        jmp .pl
+.rec:
+        mov byte [car_rec], 1       ; [0.9.31] la celda no cabe entera
         jmp .pl
 .sep:
         call .celda
@@ -786,15 +799,18 @@ lee_csv:
         cmp byte [edi], 0
         je .cx
         cmp ecx, NCOL
-        jae .cx
+        jae .cxr
         cmp edx, NFIL
-        jae .cx
+        jae .cxr
         push esi
         mov esi, aj_buf
         call cel_pon
         call fecha_auto
         pop esi
 .cx:
+        ret
+.cxr:
+        mov byte [car_rec], 1       ; [0.9.31] fuera de la hoja: se dirá
         ret
 
 ; la celda ECX, EDX acaba de recibir el texto ESI: si es una fecha
@@ -931,6 +947,7 @@ car_ruta    resd 1
 car_tam     resd 1
 car_buf     resd 1
 car_mango   resd 1
+car_rec     resb 1                  ; [0.9.31] al abrir, algo no cabía (filas, columnas o letras)
 car_h       resd 1
 rl          resb RL_TAM             ; los registros de una interrupción
 esc_mal     resb 1                  ; algo no se ha podido escribir

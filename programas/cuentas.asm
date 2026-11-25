@@ -805,6 +805,11 @@ t_err_circ  db "#CIRC", 0
 t_err_ref   db "#REF", 0
 t_cambios   db "La hoja tiene cambios sin guardar.", 10, "¿Quiere guardarlos?", 0
 t_no_abrir  db "No se ha podido abrir el archivo.", 0
+t_recortado db "El archivo es demasiado grande para Cuentas (como mucho,", 10
+            db "64 columnas, 1.000 filas y 127 letras por celda):", 10
+            db "se ha abierto solo lo que cabe.", 10
+            db "Para no perder el resto, la hoja se queda sin nombre:", 10
+            db "al guardarla se pedirá uno nuevo.", 0
 t_no_guardar db "No se ha podido guardar la hoja.", 10
             db "Compruebe que el disco no está lleno ni protegido.", 0
 t_csv_pierde db "Un archivo .CSV solo guarda lo escrito en las celdas de la hoja que", 10

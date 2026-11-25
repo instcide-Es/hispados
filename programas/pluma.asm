@@ -554,7 +554,9 @@ t_cambios   db "El documento tiene cambios sin guardar.", 10, "¿Quiere guardarl
 t_no_abrir  db "No se ha podido abrir el archivo.", 0
 t_no_guardar db "No se ha podido guardar el documento.", 0
 t_largo     db "El documento es demasiado largo para Pluma:", 10
-            db "se han abierto solo las primeras 30.000 letras.", 0
+            db "se han abierto solo las primeras 30.000 letras.", 10
+            db "Para no perder el resto, se queda sin nombre:", 10
+            db "al guardarlo se pedirá uno nuevo.", 0
 t_lleno     db "No cabe más texto en el documento (30.000 letras).", 0
 t_impreso   db "El documento se ha enviado a la impresora.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
@@ -4123,6 +4125,7 @@ cargar:
         loop .t
         jmp .tf
 .largo:
+        mov byte [recortado], 1     ; [0.9.31] y el nombre fuera (en .fin)
         mov esi, t_largo
         call aviso
 .tf:
@@ -4179,6 +4182,11 @@ cargar:
         mov esi, nom_tmp
         mov edi, nombre
         call copia
+        cmp byte [recortado], 0     ; [0.9.31] recortado: sin nombre, para que
+        je .fin1                    ; Guardar no lo escriba encima del entero
+        mov byte [nombre], 0        ; (pide uno nuevo)
+        mov byte [recortado], 0
+.fin1:
         call compone
         call pon_titulo
         call pon_barra
@@ -5742,6 +5750,7 @@ titulo      resb 100
 nombre      resb 96
 nom_tmp     resb 96
 nom_ant     resb 96                 ; (OFICINA2) el nombre de antes de «Guardar como»
+recortado   resb 1                  ; [0.9.31] el archivo no cabía entero
 busca_txt   resb 44
 reemp_txt   resb 44
 num_txt     resb 12
