@@ -249,7 +249,7 @@ e7_bien() {   # SALIDA N [avx]
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  un productor y 8 consumidores (pthread_cond_wait, signal y broadcast): la suma, 2001000 (exacta)$" <<< "$v")" = 2 ] \
-    && [ "$(grep -c "^MSENALES: todo bien (26 pruebas)$" <<< "$v")" = 2 ] \
+    && [ "$(grep -c "^MSENALES: todo bien (38 pruebas)$" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  un hijo que no llama al sistema, cerrado con SIGTERM y con SIGINT$" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^MPROCESOS: todo bien (24 pruebas)$" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  posix_spawn (clone con CLONE_VM y CLONE_VFORK) de /MHOLA, con su salida por una tubería; y de uno que no está, ENOENT$" <<< "$v")" = 2 ] \

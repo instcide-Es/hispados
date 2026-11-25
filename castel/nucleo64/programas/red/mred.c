@@ -544,7 +544,7 @@ static void pruebas_azar(void)
 
 static void parado(int s)
 {
-	static const char m[] = "  MAL: MRED lleva 20 s parado en una llamada (SIGALRM)\nMRED: mal (parado)\n";
+	static const char m[] = "  MAL: MRED lleva 120 s parado en una llamada (SIGALRM)\nMRED: mal (parado)\n";
 	(void)s;
 	write(1, m, sizeof m - 1);
 	_exit(1);
@@ -554,7 +554,7 @@ int main(void)
 {
 	double t0 = ms_ahora();
 	signal(SIGALRM, parado);
-	alarm(20);
+	alarm(120);
 	printf("MRED: las llamadas de red, por 127.0.0.1 (sin tarjeta), eventfd, timerfd y el azar; %s\n", cómo());
 	fflush(stdout);
 	pruebas_sockets();

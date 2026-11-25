@@ -167,6 +167,8 @@ módulo Procesos
         ini_másc: nat64             ; (fork) la máscara del hilo que lo ha hecho
         ini_alt_sp, ini_alt_tam, ini_alt_marcas: nat64
         ini_fpu: nat64              ; el bloque de los registros del primer hilo
+        ; [etapa 10] setitimer (ITIMER_REAL) y alarm: cuándo se le manda SIGALRM (ns de ahora_ns; 0: nunca) y cada cuánto
+        alarma, alarma_int: nat64
     fin
 
     ; [etapa 7] lo que arranca un hilo nuevo (clone con CLONE_THREAD)
@@ -2034,6 +2036,8 @@ módulo Procesos
         q.vfork_padre := 0
         q.esperando_vfork := 0
         q.ini_fpu := 0
+        q.alarma := 0                   ; (fork: las alarmas no se heredan; execve las guarda)
+        q.alarma_int := 0
     fin
 
     ; arranca el programa de la línea («HOLA uno dos»: el archivo HOLA de la
@@ -2765,6 +2769,80 @@ módulo Procesos
     fin
 
     ; lo que hace falta para los programas (en el que arranca, con el planificador en marcha)
+    ; ---- [etapa 10] setitimer (38), getitimer (36) y alarm (37): ITIMER_REAL ----
+    ; Cada proceso lleva cuándo vence su alarma y su intervalo; el hilo del
+    ; núcleo «alarmas» duerme hasta la primera que venza (o hasta que alguien
+    ; la cambie: al_suceso) y manda SIGALRM (SI_KERNEL) a las vencidas.
+    público constante SIGALRM = 14
+    variable al_suceso: Suceso
+    variable al_hilo: puntero a Hilo
+    público variable alarmas_dadas: nat64
+
+    función hilo_alarmas(nada: nat64)
+        variable b, ahora, próx: nat64
+        variable i: nat32
+        variable q: puntero a Proceso
+        mientras cierto hacer
+            rearma(dirección(al_suceso))
+            ahora := ahora_ns()
+            próx := 0
+            b := toma(dirección(procs_cerrojo))
+            i := 0
+            mientras i < MAX_PROC hacer
+                si tabla[i] <> 0 entonces
+                    q := puntero(tabla[i])
+                    si q.terminado = 0 y q.alarma <> 0 entonces
+                        si q.alarma <= ahora entonces
+                            señala_proceso_(q, SIGALRM, 0x80, 0)
+                            alarmas_dadas := alarmas_dadas + 1
+                            si q.alarma_int = 0 entonces
+                                q.alarma := 0
+                            sino
+                                q.alarma := q.alarma + q.alarma_int
+                                si q.alarma <= ahora entonces q.alarma := ahora + q.alarma_int fin
+                            fin
+                        fin
+                        si q.alarma <> 0 y (próx = 0 o q.alarma < próx) entonces próx := q.alarma fin
+                    fin
+                fin
+                i := i + 1
+            fin
+            suelta(dirección(procs_cerrojo), b)
+            si próx = 0 entonces
+                espera(dirección(al_suceso))
+            sino si próx > ahora entonces
+                espera_plazo(dirección(al_suceso), próx - ahora)
+            fin
+        fin
+    fin
+
+    ; lo que le queda a la alarma de p y su intervalo (en ns; 0: no hay)
+    público función alarma_de(p: puntero a Proceso, ref queda: nat64, ref int_: nat64)
+        variable a, ahora: nat64
+        a := p.alarma
+        int_ := p.alarma_int
+        queda := 0
+        si a <> 0 entonces
+            ahora := ahora_ns()
+            si a > ahora entonces queda := a - ahora sino queda := 1 fin
+        fin
+    fin
+
+    ; pone la alarma de p: dentro de «en» ns (0: quitarla), y luego cada int_ ns
+    público función pon_alarma(p: puntero a Proceso, en: nat64, int_: nat64)
+        variable b: nat64
+        b := toma(dirección(procs_cerrojo))
+        si en = 0 entonces
+            p.alarma := 0
+            p.alarma_int := 0
+        sino
+            p.alarma := ahora_ns() + en
+            p.alarma_int := int_
+        fin
+        suelta(dirección(procs_cerrojo), b)
+        señala(dirección(al_suceso))
+    fin
+
     público función prepara_procesos()
         variable c: puntero a Cpu
         c := yo()
@@ -2785,6 +2863,7 @@ módulo Procesos
         al_fallo_usuario := nat64(dirección(al_fallo_))
         al_cambiar := nat64(dirección(al_cambiar_))
         al_volver := nat64(dirección(al_volver_))
+        al_hilo := crea(nat64(dirección(hilo_alarmas)), 0, "alarmas", INTERACTIVO, CUALQUIERA)
     fin
 
 fin Procesos.

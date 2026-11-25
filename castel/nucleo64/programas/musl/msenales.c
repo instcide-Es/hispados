@@ -7,7 +7,9 @@
  * las señales (sigaltstack), los registros de coma flotante intactos al
  * volver, SA_RESTART y EINTR, SIGCHLD, sigsuspend, SIG_IGN, SIGPIPE,
  * pthread_kill (tgkill) y un hijo que no llama al sistema cerrado con kill
- * (SIGTERM y SIGINT: le llega en el tic). Estático y dinámico. */
+ * (SIGTERM y SIGINT: le llega en el tic); [etapa 10] alarm y setitimer
+ * (SIGALRM: una vez y con intervalo, getitimer, lo que quedaba, quitarla,
+ * y que el hijo de fork no la hereda). Estático y dinámico. */
 #include "comun.h"
 #include <stdlib.h>
 #include <signal.h>
@@ -18,6 +20,7 @@
 #include <pthread.h>
 #include <sys/wait.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 
 static volatile sig_atomic_t veces, último, código_, pid_;
 static volatile void *dir_;
@@ -218,5 +221,48 @@ int main(void)
 	pthread_join(ph, 0);
 	MIRA(veces == 1 && tid_ == su_tid, "pthread_kill: la atiende ese hilo");
 	printf("  pthread_kill (tgkill): la señal la atiende el hilo %ld\n", (long)su_tid);
+	/* [etapa 10] alarm y setitimer (ITIMER_REAL) */
+	{
+		struct itimerval it, vi;
+		struct timespec a, b;
+		long ms;
+		unsigned q;
+		pon(SIGALRM, atiende, 0);
+		veces = 0;
+		MIRA(alarm(0) == 0, "alarm(0) sin alarma: 0");
+		clock_gettime(CLOCK_MONOTONIC, &a);
+		alarm(1);
+		while (!veces) pause();
+		clock_gettime(CLOCK_MONOTONIC, &b);
+		ms = (b.tv_sec - a.tv_sec) * 1000 + (b.tv_nsec - a.tv_nsec) / 1000000;
+		MIRA(veces == 1 && último == SIGALRM && código_ == SI_KERNEL && ms >= 990 && ms < 3000, "alarm(1): SIGALRM al segundo");
+		q = alarm(5);
+		MIRA(q == 0, "alarm: la de antes ya había vencido (0)");
+		q = alarm(0);
+		MIRA(q >= 4 && q <= 5, "alarm(0): lo que le quedaba a la de 5 s, y quitada");
+		memset(&it, 0, sizeof it);
+		it.it_value.tv_usec = 50000;
+		it.it_interval.tv_usec = 20000;
+		veces = 0;
+		clock_gettime(CLOCK_MONOTONIC, &a);
+		MIRA(setitimer(ITIMER_REAL, &it, 0) == 0, "setitimer: 50 ms y luego cada 20 ms");
+		MIRA(getitimer(ITIMER_REAL, &vi) == 0 && vi.it_interval.tv_usec == 20000 && vi.it_value.tv_sec == 0 && vi.it_value.tv_usec > 0 && vi.it_value.tv_usec <= 50000, "getitimer: el intervalo y lo que queda");
+		while (veces < 5) pause();
+		clock_gettime(CLOCK_MONOTONIC, &b);
+		memset(&it, 0, sizeof it);
+		MIRA(setitimer(ITIMER_REAL, &it, &vi) == 0 && vi.it_interval.tv_usec == 20000, "setitimer a cero: la quita y da la de antes");
+		ms = (b.tv_sec - a.tv_sec) * 1000 + (b.tv_nsec - a.tv_nsec) / 1000000;
+		MIRA(ms >= 125, "cinco SIGALRM con intervalo: 50 + 4 x 20 ms como poco");
+		veces = 0;
+		usleep(100000);
+		MIRA(veces == 0, "quitada: no llega ninguna más");
+		MIRA(setitimer(ITIMER_VIRTUAL, &it, 0) == -1 && errno == EINVAL, "ITIMER_VIRTUAL: EINVAL (aún no)");
+		alarm(10);
+		h = fork();
+		if (h == 0) _exit(alarm(0) == 0 ? 0 : 1);
+		MIRA(waitpid(h, &st, 0) == h && WIFEXITED(st) && WEXITSTATUS(st) == 0, "fork: el hijo no hereda la alarma");
+		MIRA(alarm(0) >= 9, "y la del padre sigue");
+		printf("  alarm y setitimer: SIGALRM a su tiempo (%ld ms las cinco del intervalo)\n", ms);
+	}
 	return acaba("MSENALES");
 }

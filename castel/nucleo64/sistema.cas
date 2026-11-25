@@ -1699,6 +1699,9 @@ módulo Sistema
             caso 32: r := duplica(p, a1, -1, 0)
             caso 33: r := duplica(p, a1, ent64(a2), 0)
             caso 35: r := duerme_(p, a1, a2)
+            caso 36: r := itimer_(p, a1, 0, a2)              ; [etapa 10] getitimer
+            caso 37: r := alarma_(p, a1)                      ; alarm
+            caso 38: r := itimer_(p, a1, a2, a3)              ; setitimer
             caso 39: r := ent64(p.id)
             caso 186: r := ent64(h.tid)
             caso 60: sal_hilo(a1)
@@ -2038,6 +2041,46 @@ módulo Sistema
         tv[1] := (ns mod 1000000000) div 1000
         si no copia_a(p, v, nat64(dirección(tv[0])), 16) entonces devolver EFAULT fin
         devolver 0
+    fin
+
+    ; [etapa 10] setitimer (nuevo <> 0) y getitimer (nuevo = 0, viejo): el
+    ; itimerval de Linux (it_interval y it_value, timeval); solo ITIMER_REAL
+    ; (las de tiempo de procesador, ITIMER_VIRTUAL y ITIMER_PROF, dan EINVAL)
+    función itimer_(p: puntero a Proceso, cuál: nat64, nuevo: nat64, viejo: nat64): ent64
+        variable v: arreglo [4] de nat64
+        variable queda, int_: nat64
+        si cuál <> 0 entonces devolver EINVAL fin
+        si nuevo <> 0 entonces
+            si no copia_de(p, nat64(dirección(v[0])), nuevo, 32) entonces devolver EFAULT fin
+            si v[1] >= 1000000 o v[3] >= 1000000 o v[0] >= nat64(1) << 40 o v[2] >= nat64(1) << 40 entonces devolver EINVAL fin
+        fin
+        alarma_de(p, queda, int_)
+        si nuevo <> 0 entonces pon_alarma(p, v[2] * 1000000000 + v[3] * 1000, v[0] * 1000000000 + v[1] * 1000) fin
+        si viejo <> 0 entonces
+            v[0] := int_ div 1000000000
+            v[1] := (int_ mod 1000000000 + 999) div 1000
+            v[2] := queda div 1000000000
+            v[3] := (queda mod 1000000000 + 999) div 1000
+            si v[3] >= 1000000 entonces
+                v[2] := v[2] + 1
+                v[3] := 0
+            fin
+            si v[1] >= 1000000 entonces
+                v[0] := v[0] + 1
+                v[1] := 0
+            fin
+            si no copia_a(p, viejo, nat64(dirección(v[0])), 32) entonces devolver EFAULT fin
+        fin
+        devolver 0
+    fin
+
+    ; alarm(s): lo que le quedaba a la de antes, en segundos (redondeado arriba)
+    función alarma_(p: puntero a Proceso, s: nat64): ent64
+        variable queda, int_: nat64
+        alarma_de(p, queda, int_)
+        si s >= nat64(1) << 32 entonces s := (nat64(1) << 32) - 1 fin
+        pon_alarma(p, s * 1000000000, 0)
+        devolver ent64((queda + 999999999) div 1000000000)
     fin
 
     ; [etapa 7] getrusage: a cero
