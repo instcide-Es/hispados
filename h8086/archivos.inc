@@ -45,6 +45,8 @@ f_ruta_nombre:
         jc .x
         cmp byte [nom11], ' '
         je .mal
+        cmp byte [nom11], '.'       ; ni «.» ni «..» (RD X\. soltaba el grupo
+        je .mal                     ; de X, que seguía en uso)
         push cx
         push di
         mov di, nom11

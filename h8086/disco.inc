@@ -1461,6 +1461,8 @@ nombre_fat:
 .pt:
         cmp byte [si], '.'
         jne .x
+        cmp di, nom11 + 2           ; (como mucho «..»: no se sale de nom11)
+        je .x
         movsb
         jmp .pt
 .nom:
