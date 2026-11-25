@@ -1175,6 +1175,7 @@ int servicio_principal(void)
 			 * (llamada 160): el eMMC y la microSD de las tabletas Bay Trail */
 			if (!tiene(args, "sinsdhci")) {
 				static struct pe_sdhci sd[SDHCI_MAX];
+				sdhci_sin_sdio = tiene(args, "sinsdio") != 0;	/* (RTL8723BS) */
 				int k, m = sdhci_busca(sd, SDHCI_MAX);
 
 				for (k = 0; k < m; k++)

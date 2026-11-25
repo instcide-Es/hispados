@@ -1421,7 +1421,7 @@ int rtl_arranca(const struct sdio_plat *p, struct radio **r)
 	hl_log(2, "rtl: chip RTL8723B%s, corte %c (SYS_CFG %08X); EFUSE %s (%d octetos usados), encapsulado %u\n",
 	       (sys_cfg & BIT(23)) ? " de pruebas" : "", 'A' + ((sys_cfg >> 12) & 0xF), sys_cfg,
 	       autoload_mal ? "SIN CARGAR (MAC de fábrica de Realtek)" : "bien", u, paquete);
-	hl_log(2, "rtl: MAC %02X:%02X:%02X:%02X:%02X:%02X; cristal %02X; antena %s (%s), Bluetooth %s; potencias CCK %02X, OFDM %02X%+d\n",
+	hl_log(2, "rtl: MAC %02X:%02X:%02X:%02X:%02X:%02X; cristal %02X; antena %s (%s), Bluetooth %s; potencias CCK %02X, OFDM %02X (dif. %d)\n",
 	       rtl.mac[0], rtl.mac[1], rtl.mac[2], rtl.mac[3], rtl.mac[4], rtl.mac[5], cristal,
 	       ant_path ? "S0 (la auxiliar)" : "S1 (la principal)", ant_num1 ? "una, compartida" : "dos",
 	       bt_existe ? "en el chip" : "no", idx_cck[0], idx_bw40[0], dif_ofdm);

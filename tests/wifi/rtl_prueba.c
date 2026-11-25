@@ -201,7 +201,7 @@ int main(int argc, char **argv)
 	comprueba(dijo("lista: 4 bits, 50000 kHz (alta velocidad)"), "4 bits y alta velocidad (50 MHz)");
 	comprueba(e == 0 && radio->mac[0] == 0x40 && radio->mac[1] == 0x9F && radio->mac[5] == 0x01, "la MAC, del EFUSE (40:9F:38:8B:23:01)");
 	comprueba(dijo("cristal 22") && dijo("antena S1 (la principal) (una, compartida), Bluetooth en el chip"), "el EFUSE: el cristal, la antena y el Bluetooth");
-	comprueba(dijo("potencias CCK 2A, OFDM 26+2"), "el EFUSE: las potencias");
+	comprueba(dijo("potencias CCK 2A, OFDM 26 (dif. 2)"), "el EFUSE: las potencias");
 	if (e)
 		return 1;
 	/* sin firmware no se enciende (se prueba antes de dárselo... aquí ya lo

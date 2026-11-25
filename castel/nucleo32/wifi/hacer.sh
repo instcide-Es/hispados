@@ -12,7 +12,8 @@
 # Con «chip», WIFISIM.BIN, el de las pruebas: el mismo, con el modelo de la
 # tarjeta de tests/wifi/tarjeta_sim.c dentro (el controlador de verdad contra
 # una BCM43224 de mentira; en build/wifi-pentium-chip/). Con «chip4313», contra
-# una BCM4313 de mentira (en build/wifi-pentium-chip4313/).
+# una BCM4313 de mentira (en build/wifi-pentium-chip4313/). Con «chiprtl», contra
+# la Realtek RTL8723BS por SDIO de mentira (tests/wifi/rtl_sim.c).
 set -e
 # (0.8.6) la fecha que pone __DATE__ (servicio.c y wifi/nucleo/nucleo.c): la
 # del paquete wifi 0.8.5, para que WIFI.BIN salga igual octeto a octeto cada
@@ -28,18 +29,23 @@ CHIP=
 if [ "${2:-}" = chip ]; then O=build/wifi-pentium-chip; CHIP="-DHL_SIMULA_ES -DCHIP_SIMULADO -Itests/wifi"; fi
 # (BCM4313) «chip4313»: el mismo, con el modelo de la BCM4313 (PHY LCN) en vez del de la 43224
 if [ "${2:-}" = chip4313 ]; then O=build/wifi-pentium-chip4313; CHIP="-DHL_SIMULA_ES -DCHIP_SIMULADO -DTSIM_4313 -Itests/wifi"; fi
+# (RTL8723BS) «chiprtl»: el SDIO y el controlador de la RTL8723BS contra el
+# modelo de la controladora, la tarjeta y el chip (tests/wifi/rtl_sim.c; QEMU
+# no tiene SDIO), en build/wifi-pentium-chiprtl/
+RTLSIM=
+if [ "${2:-}" = chiprtl ]; then O=build/wifi-pentium-chiprtl; CHIP="-DRTL_SIMULADO -Itests/wifi"; RTLSIM=tests/wifi/rtl_sim.c; fi
 mkdir -p $O
 BASEF="-m32 -std=gnu11 -march=i586 -Os -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
        -fno-strict-aliasing -fno-common -mno-80387 -nostdinc -isystem $(gcc -m32 -print-file-name=include)
        -ffunction-sections -fdata-sections -D__HISPA__ -DHL_PENTIUM $CHIP"
 WINC="-Iwifi/compat -Iwifi/compat/include -Iwifi/linux/include -Iwifi/linux/brcminc -Iwifi/linux/brcmsmac
-      -Iwifi/linux/brcmsmac/phy -Iwifi/linux/bcma -Iwifi/linux -Iwifi/nucleo"
+      -Iwifi/linux/brcmsmac/phy -Iwifi/linux/bcma -Iwifi/linux -Iwifi/nucleo -Iwifi/linux/rtl8723bs"
 WCF="$BASEF $WINC -DCONFIG_BCMA_HOST_PCI -DCONFIG_BCMA_HOST_PCI_POSSIBLE -DCONFIG_BCMA_DRIVER_PCI"
 AINC="-Iwifi/compat -Iwifi/compat/include -Iwifi/linux/include -Iwifi/linux/ath -Iwifi/linux/ath/ath9k -Iwifi/linux -Iwifi/nucleo"
 ACF="$BASEF $AINC -DCONFIG_ATH_DEBUG -DCONFIG_ATH9K_RFKILL"
 # las cabeceras: si cambia alguna, todo otra vez
 CABS=$(ls tests/wifi/*.h wifi/compat/*.h wifi/nucleo/*.h wifi/linux/brcmsmac/*.h wifi/linux/brcmsmac/phy/*.h wifi/linux/bcma/*.h \
-       wifi/linux/include/linux/bcma/*.h wifi/linux/ath/*.h wifi/linux/ath/ath9k/*.h castel/nucleo32/wifi/*.h)
+       wifi/linux/include/linux/bcma/*.h wifi/linux/ath/*.h wifi/linux/ath/ath9k/*.h castel/nucleo32/wifi/*.h wifi/linux/rtl8723bs/*.h)
 NUEVA=0
 for h in $CABS; do [ -f $O/.hecho ] && [ $h -nt $O/.hecho ] && NUEVA=1; done
 [ -f $O/.hecho ] || NUEVA=1
@@ -60,8 +66,10 @@ for f in wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil
   cc $(basename $f .c).o $f $WCF $LINUXF
 done
 PROPIOS="wifi/compat/base.c wifi/nucleo/radio_brcm.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c wifi/nucleo/sim.c castel/nucleo32/wifi/servicio.c
-         wifi/nucleo/radio_iwl.c wifi/nucleo/radio_iwl_pc.c wifi/nucleo/iwl_fw.c"   # (INTEL) las Intel 7265
-[ -n "$CHIP" ] && PROPIOS="$PROPIOS tests/wifi/tarjeta_sim.c"
+         wifi/nucleo/radio_iwl.c wifi/nucleo/radio_iwl_pc.c wifi/nucleo/iwl_fw.c
+         wifi/nucleo/sdio.c wifi/nucleo/radio_rtl.c wifi/nucleo/radio_rtl_pc.c wifi/linux/rtl8723bs/tablas_8723b.c"   # (INTEL) las Intel 7265; (RTL8723BS) la Realtek por SDIO
+[ -n "$CHIP" ] && [ -z "$RTLSIM" ] && PROPIOS="$PROPIOS tests/wifi/tarjeta_sim.c"
+[ -n "$RTLSIM" ] && PROPIOS="$PROPIOS $RTLSIM"
 for f in $PROPIOS; do
   # shellcheck disable=SC2086
   cc $(basename $f .c).o $f $WCF $PROPIAF

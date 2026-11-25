@@ -79,7 +79,9 @@ módulo Rwifi
     fin
 
     función busca_tarjeta(): bool
-        variable bus, ap, fu, a, id: nat32
+        variable bus, ap, fu, a, id, m: nat32
+        variable sd: bool
+        sd := falso
         para bus desde 0 hasta 31 hacer
             para ap desde 0 hasta 31 hacer
                 para fu desde 0 hasta 7 hacer
@@ -96,8 +98,31 @@ módulo Rwifi
                         apunta4("Wi-Fi: tarjeta %04X:%04X en el bus PCI %02X:%02X", id yb 0xFFFF, id >> 16, bus, ap)
                         devolver cierto
                     fin
+                    ; (RTL8723BS) la controladora SDIO de las tabletas Bay Trail
+                    ; (8086:0F15) o Cherry Trail (8086:2295): detrás, la Realtek
+                    si id = 0x0F158086 o id = 0x22958086 entonces
+                        apunta4("Wi-Fi: controladora SDIO %04X:%04X en el bus PCI %02X:%02X (Wi-Fi por SDIO)", id yb 0xFFFF, id >> 16, bus, ap)
+                        devolver cierto
+                    fin
+                    si (pci_leer(a, 8) >> 16) = 0x0805 entonces sd := cierto fin
                     si fu = 0 y pci_leer(a, 0x0C) yb 0x00800000 = 0 entonces romper fin
                 fin
+            fin
+        fin
+        ; (RTL8723BS) una tableta Bay Trail o Cherry Trail con las controladoras
+        ; SD escondidas del PCI («modo ACPI», el Acer One 10), o con lo que
+        ; aprendió ACPI.BIN (\SDIO.TXT): el Wi-Fi irá por SDIO (WIFI.BIN lo busca)
+        id := pci_leer(0, 0)
+        si id = 0x0F008086 o id = 0x22808086 entonces
+            m := abrir("\\SDIO.TXT")
+            si no es_error(m) entonces
+                cerrar(m)
+                apunta("Wi-Fi: \\SDIO.TXT (lo aprendido de ACPI): el Wi-Fi va por SDIO")
+                devolver cierto
+            fin
+            si no sd entonces
+                apunta4("Wi-Fi: Bay Trail/Cherry Trail (%04X:%04X) sin controladoras SD en el PCI: el Wi-Fi irá por SDIO", id yb 0xFFFF, id >> 16, 0, 0)
+                devolver cierto
             fin
         fin
         devolver falso

@@ -52,6 +52,7 @@ int ath_enciende(void);
 void ath_cuentas(d32 *bien, d32 *mal, int *vel);
 void ath_resumen(void);
 #include "iwl.h"			/* (INTEL) wifi/nucleo/radio_iwl.c */
+#include "rtl.h"			/* (RTL8723BS) wifi/nucleo/radio_rtl.c, por SDIO */
 int vsnprintf(char *buf, size_t tam, const char *f, va_list ap);
 int snprintf(char *b, size_t n, const char *f, ...);
 
@@ -68,6 +69,9 @@ static const struct conductor conductores[] = {
 	{ "Broadcom BCM43224/43225/4313 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL },
 	{ "Atheros AR9285/AR9280/AR9287 (ath9k)", ath_busca, ath_monta, ath_enciende, ath_cuentas, ath_resumen },
 	{ "Intel Wireless-AC 7265/3165 (como iwlwifi/MVM; con su firmware en X:\\FIRMWARE, \\FIRMWARE o \\HISPA\\FIRMWARE)", iwl_busca, iwl_monta, iwl_enciende, iwl_cuentas, iwl_resumen },
+	/* (RTL8723BS) la última: no está en el PCI (va por SDIO, la tercera
+	 * controladora SDHCI de las tabletas Bay Trail) */
+	{ "Realtek RTL8723BS por SDIO (las tabletas Bay Trail; rtl8723bs de Linux; con su firmware rtl8723bs_nic.bin en X:\\FIRMWARE, \\FIRMWARE o \\HISPA\\FIRMWARE)", rtl_busca, rtl_monta, rtl_enciende, rtl_cuentas, rtl_resumen },
 };
 static const struct conductor *cond;
 static const u16 ids_brcm[] = { 0x4353, 0x4357, 0x4727, 0x0576, 0xa8d8, 0 };
@@ -85,12 +89,26 @@ static void (*sondear_real)(void);
 static int canal_sim(int c) { if (!tsim_4313) tsim_canal = c; return canal_real(c); }	/* (en la BCM4313, el canal lo saca el modelo del PHY) */
 static void sondear_sim(void) { ap_sim->canal(tsim_canal); ap_sim->sondear(); sondear_real(); }
 #endif
+#ifdef RTL_SIMULADO
+/* (RTL8723BS) WIFISIM.BIN con «chiprtl»: el SDIO y el controlador de la
+ * RTL8723BS de verdad contra el modelo de la controladora, la tarjeta y el
+ * chip de tests/wifi/rtl_sim.c, con el punto de acceso de mentira detrás */
+#include "rtl_sim.h"
+static struct radio *ap_sim;
+static void (*sondear_real)(void);
+static void sondear_sim(void) { ap_sim->canal(rtl_canal); ap_sim->sondear(); sondear_real(); }
+static void espera_sim(d32 us) { hl_udelay(us); }
+static d32 ms_sim(void) { return hl_jiffies(); }
+#endif
 
 static struct radio *la_radio;
 static int listo, simulada;
 extern int sim_ausente, sim_ip_otra;	/* (CORTES) (wifi/nucleo/sim.c) */
 static u32 sim_vuelve;			/* (CORTES) el tic en que vuelve el punto de acceso simulado */
 static u32 aparato = 0xFFFFFFFF;	/* la tarjeta en el PCI (bus << 16 | aparato << 11 | función << 8) */
+static int hay_sdio;			/* (RTL8723BS) la tarjeta está, por SDIO (no en el PCI) */
+static int rtl_otra_vez;		/* (RTL8723BS) volver a buscarla (ACPI.BIN puede aprenderla en este arranque) */
+static int rtl_intentos;		/* (RTL8723BS) las veces que se ha vuelto a buscar */
 static char nombre_tarjeta[48] = "Wi-Fi";
 static u32 hz = 100;
 static char carpeta[16] = "\\";		/* «\HISPA\» o «\» */
@@ -222,6 +240,23 @@ static int escribe_archivo(const char *nombre, const void *d, u32 n, int al_fina
 	e = sc(SC_ESCRIBIR_ARCHIVO, m, (u32)d, n);
 	sc(SC_CERRAR, m, 0, 0);
 	return ES_ERROR(e) || e != n ? -1 : 0;
+}
+
+/* (RTL8723BS) un archivo de texto con su ruta entera («\\SDIO.TXT»,
+ * «X:\\SDHCI.TXT»); -1 si no está. Lo usa wifi/nucleo/radio_rtl_pc.c */
+int hl_lee_texto(const char *r, char *d, int cabe)
+{
+	u32 m, n;
+
+	m = sc(SC_ABRIR, (u32)r, 0, 0);
+	if (ES_ERROR(m))
+		return -1;
+	n = sc(SC_LEER, m, (u32)d, cabe - 1);
+	sc(SC_CERRAR, m, 0, 0);
+	if (ES_ERROR(n))
+		return -1;
+	d[n] = 0;
+	return (int)n;
 }
 
 /* ============================================ la memoria y los registros */
@@ -1397,6 +1432,94 @@ static int carga_fw_intel(void)
 	return -1;
 }
 
+/* (RTL8723BS) el firmware de la Realtek: rtl8723bs_nic.bin de linux-firmware
+ * (rtlwifi/; allí es un enlace a rtl8723bu_nic.bin); no va con el sistema
+ * (su licencia deja repartirlo, pero va aparte). Se busca en las mismas
+ * carpetas que el de Intel; sin el nombre largo, cualquier .BIN de ellas que
+ * lleve la cabecera de la 8723B (53xxh). Se lee una vez (se queda en el
+ * montón). */
+static int fw_rtl_hecho;
+static int prueba_fw_rtl(const char *r)
+{
+	u32 m, n, l;
+	u8 *b;
+
+	m = sc(SC_ABRIR, (u32)r, 0, 0);
+	if (ES_ERROR(m))
+		return 0;
+	l = sc(SC_LARGO, m, 0, 0);
+	if (l < 1024 || l > 0x8000) {
+		sc(SC_CERRAR, m, 0, 0);
+		return 0;
+	}
+	b = hl_malloc(l + 16);
+	n = b ? sc(SC_LEER, m, (u32)b, l) : 0;
+	sc(SC_CERRAR, m, 0, 0);
+	if (!b || n != l) {
+		hl_log(0, "No se puede leer %s\n", r);
+		return -1;
+	}
+	if (!rtl_es_fw(b, l)) {
+		hl_free(b);
+		return 0;
+	}
+	hl_log(2, "Firmware de la Realtek: %s, %u octetos (versión %u.%u)\n", r, l, b[4] | (b[5] << 8), b[6] | (b[7] << 8));
+	return rtl_pon_fw(b, l, r) == 0 ? 1 : -1;
+}
+
+static int carga_fw_rtl(void)
+{
+	const char *const *nombres = rtl_nombres_fw();
+	char r[112];
+	struct entrada_fat e;
+	u32 m;
+	int i, k, v, j;
+
+	if (fw_rtl_hecho)
+		return 0;
+	for (i = 0; nombres && nombres[i]; i++)
+		for (k = 0; carpetas_fw[k]; k++) {
+			snprintf(r, sizeof r, "%s\\%s", carpetas_fw[k], nombres[i]);
+			v = prueba_fw_rtl(r);
+			if (v) {
+				fw_rtl_hecho = v > 0;
+				return v > 0 ? 0 : -1;
+			}
+		}
+	for (k = 0; carpetas_fw[k]; k++) {
+		m = sc(SC_ABRIR, (u32)carpetas_fw[k], 0, 0);
+		if (ES_ERROR(m))
+			continue;
+		while (sc(SC_ENTRADA, m, (u32)&e, 0) == 1) {
+			e.nombre[12] = 0;
+			j = strlen(e.nombre);
+			if (j < 5 || (e.atributos & 0x18) || e.nombre[j - 4] != '.' || (e.nombre[j - 3] | 0x20) != 'b' ||
+			    (e.nombre[j - 2] | 0x20) != 'i' || (e.nombre[j - 1] | 0x20) != 'n')
+				continue;
+			snprintf(r, sizeof r, "%s\\%s", carpetas_fw[k], e.nombre);
+			v = prueba_fw_rtl(r);
+			if (v) {
+				sc(SC_CERRAR, m, 0, 0);
+				fw_rtl_hecho = v > 0;
+				return v > 0 ? 0 : -1;
+			}
+		}
+		sc(SC_CERRAR, m, 0, 0);
+	}
+	hl_log(0, "FALTA EL FIRMWARE de la Realtek RTL8723BS (rtl8723bs_nic.bin: es de Realtek; no va con Hispa-DOS).\n");
+	{
+		static char t[300];
+		int q = 0;
+
+		for (k = 0; carpetas_fw[k] && q < 250; k++)
+			q += snprintf(t + q, sizeof t - q, " %s", carpetas_fw[k]);
+		hl_log(0, "  Se ha buscado rtl8723bs_nic.bin (y cualquier .BIN con su cabecera) en:%s\n", t);
+	}
+	hl_log(0, "  Póngalo en X:\\FIRMWARE\\rtl8723bs_nic.bin de la memoria USB. Se baja de linux-firmware:\n");
+	hl_log(0, "  https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/tree/rtlwifi (rtl8723bu_nic.bin, con el nombre rtl8723bs_nic.bin)\n");
+	return -1;
+}
+
 static int arranca(void)
 {
 	u32 r, t, u, pk;
@@ -1431,6 +1554,14 @@ static int arranca(void)
 	ap_sim = sim_radio();
 	tarjeta_sim_monta(ap_sim);
 #endif
+#ifdef RTL_SIMULADO
+	hl_log(2, "NÚCLEO DE PRUEBAS: Realtek RTL8723BS por SDIO simulada, red «HispaPrueba» en el canal 6\n");
+	sim_configura("HispaPrueba", "clave de prueba", 6);
+	sim_renovar_pares_cada = 6000;
+	sim_renovar_grupo_cada = 9000;
+	ap_sim = sim_radio();
+	rtl_plat_prueba = rtl_sim_monta(ap_sim, espera_sim, ms_sim);
+#endif
 	busca_aparato();
 	mira_vtd();
 	for (k = 0; k < (int)ARRAY_SIZE(conductores) && e == 1; k++) {
@@ -1438,6 +1569,13 @@ static int arranca(void)
 		if (e == 0)
 			cond = &conductores[k];
 	}
+	if (e == 0 && cond->busca == rtl_busca) {	/* (RTL8723BS) */
+		hay_sdio = 1;
+		strcpy(nombre_tarjeta, "Realtek RTL8723BS (SDIO)");
+	}
+	/* (RTL8723BS) en una tableta Bay Trail sin la controladora del SDIO a la
+	 * vista: ACPI.BIN puede aprenderla en este mismo arranque (\SDIO.TXT) */
+	rtl_otra_vez = e == 1 && (hl_pci_lee(0, 0, 0) == 0x0F008086 || hl_pci_lee(0, 0, 0) == 0x22808086);
 	vuelca_registro();
 	if (e == 1) {
 		hl_log(0, "no hay ninguna tarjeta Wi-Fi de las admitidas:\n");
@@ -1456,7 +1594,11 @@ static int arranca(void)
 	}
 	if (cond->busca == iwl_busca && carga_fw_intel() < 0)		/* (INTEL) */
 		return -1;
+	if (cond->busca == rtl_busca && carga_fw_rtl() < 0)		/* (RTL8723BS) */
+		return -1;
 	e = cond->monta(&la_radio);
+	if (cond->busca == rtl_busca && e == -2)
+		rtl_otra_vez = 1;	/* (RTL8723BS) el chip apagado: ACPI.BIN puede encenderlo */
 	hl_monton_info(&t, &u, &pk);
 	if (e) {
 		hl_log(0, "PASO 2 de 3: el controlador no se ha podido montar (%d)\n", e);
@@ -1475,6 +1617,10 @@ static int arranca(void)
 	canal_real = la_radio->canal; la_radio->canal = canal_sim;
 	sondear_real = la_radio->sondear; la_radio->sondear = sondear_sim;
 #endif
+#ifdef RTL_SIMULADO
+	sondear_real = la_radio->sondear; la_radio->sondear = sondear_sim;
+#endif
+	rtl_otra_vez = 0;
 	w80211_inicia(la_radio);
 	listo = 1;
 	hl_monton_info(&t, &u, &pk);
@@ -1552,7 +1698,7 @@ int servicio_wifi(void)
 	vuelca_registro();
 	if (arranca() < 0) {
 		hl_log(0, "El Wi-Fi no se ha podido poner en marcha. Mande el archivo %sWIFI.LOG para arreglarlo.\n", carpeta);
-		if (aparato != 0xFFFFFFFF)
+		if (aparato != 0xFFFFFFFF || hay_sdio)
 			diagnostico(DIAG_ARRANQUE, "la tarjeta está, pero no se ha podido poner en marcha");
 		listo = 0;
 		dilo();
@@ -1572,6 +1718,28 @@ int servicio_wifi(void)
 	for (;;) {
 		struct pedido *p = (struct pedido *)pedido;
 		int hubo = 0, k;
+
+		/* (RTL8723BS) la tableta sin la controladora del SDIO a la vista, o
+		 * con el chip apagado: ACPI.BIN, si está, la aprende y lo enciende
+		 * (\SDIO.TXT, el _PS0) al poco de arrancar: otra vez cada 5 s, el
+		 * primer minuto */
+		if (rtl_otra_vez && !listo && hl_pentium_tics() - ultimo_tic >= 5 * hz) {
+			ultimo_tic = hl_pentium_tics();
+			if (++rtl_intentos > 11) {
+				rtl_otra_vez = 0;
+			} else {
+				hl_log(2, "---- otra vez a por el Wi-Fi por SDIO (%d de 11) ----\n", rtl_intentos);
+				cada_linea = 1;
+				if (arranca() == 0) {
+					w80211_barrer();
+					if (con_red)
+						ponerse_en_red();	/* (ahora con la MAC) */
+					hl_log(2, "El Wi-Fi por SDIO, en marcha a la %d.ª vez\n", rtl_intentos + 1);
+				}
+				cada_linea = 0;
+				vuelca_registro();
+			}
+		}
 
 		if (sim_ausente && (int)(hl_pentium_tics() - sim_vuelve) >= 0) {
 			sim_ausente = 0;	/* (CORTES) */

@@ -6734,6 +6734,108 @@ rev. 24, **PHY LCN** rev. 1 con la radio **2064**; 802.11b/g/n, 1x1, solo
   `Registro=SI`, que solo puede poner un administrador: abajo, «El
   diagnóstico, sin Registro=SI».)
 
+### La Realtek RTL8723BS por SDIO (las tabletas Bay Trail; 25/11, rama `wifi-sdio`, marcado «(RTL8723BS)»)
+
+El Wi-Fi del **Acer One 10 S1002** y del **Medion S2217** (Atom Z3735F) es
+una **Realtek RTL8723BS** (802.11b/g/n 1x1 y Bluetooth en el mismo chip) que
+no va por el PCI sino por **SDIO**: la **tercera controladora SDHCI** de Bay
+Trail (ACPI `80860F14` con `_UID 2`, o `INT33BB`; en el PCI, si el firmware
+no la esconde, `8086:0F15`), con el chip como hijo ACPI (`OBDA8723`).
+
+- **El SDIO** (`wifi/nucleo/sdio.c`, propio, según las normas públicas «SD
+  Host Controller 3.00» y «SDIO 3.00»; la manera de arrancar la controladora
+  es la de `sdhci.cas`): reinicio, la patilla de «hay tarjeta» forzada (la
+  ranura del Wi-Fi no la tiene), la tensión, 400 kHz; CMD52 de reinicio de
+  la E/S, CMD0, **CMD5** (el OCR: si no contesta, «la tarjeta no contesta a
+  CMD5: ... el chip del Wi-Fi está apagado»), CMD3, CMD7; el **CCCR**, el
+  **CIS** (`CISTPL_MANFID`: Realtek `024C`, `B723`) y el FBR de la función
+  1; **4 bits** y **alta velocidad** (50 MHz) si los dos los saben; la
+  función 1 encendida, con bloques de 512. **CMD52** (un octeto) y **CMD53**
+  (de octeto en octeto hasta 512; por bloques si son más), por PIO. Sin
+  interrupciones: se mira la de la tarjeta (DAT1) en el registro de avisos y,
+  por si acaso, cada 20 ms el HISR del chip.
+- **El controlador** (`wifi/nucleo/radio_rtl.c`) **sale del de Linux**,
+  `drivers/staging/rtl8723bs` de **Linux 6.6** (GPL-2.0, Copyright Realtek y
+  los contribuidores de Linux: el aviso va en el archivo). No entero (son
+  58.000 líneas con su propia gestión 802.11, el modo punto de acceso, el
+  ahorro de energía y la coexistencia con el Bluetooth): lo mínimo, con sus
+  mismos registros, valores y orden, y en cada paso la función de Linux de la
+  que sale. La traducción de direcciones de `sdio_ops.c` (local, IOREG, las
+  colas HIQ/MIQ/LOQ y RX0) y su regla de CMD52/CMD53; encender
+  (`CardEnable`: las secuencias `CARDDIS_TO_CARDEMU` y `CARDEMU_TO_ACT` de
+  `hal_pwr_seq.h`); el **EFUSE** (los paquetes al mapa de 512: la **MAC**,
+  las potencias, el cristal, la antena y el encapsulado); el **firmware**
+  (`rtl8723b_FirmwareDownload`: por páginas de 4 K, de 4 en 4 octetos, el
+  «checksum» y el arranque del 8051); el MAC, el BB y la radio con las
+  **tablas** (`wifi/linux/rtl8723bs/tablas_8723b.c`: MAC_REG, PHY_REG,
+  AGC_TAB y RadioA, tal cual de `HalHWImg8723B_*.c`), la radio por el LSSI
+  (siempre con escrituras de 32 bits), la calibración LC, las colas, el LLT,
+  la recepción con el estado del PHY; la **antena compartida con el
+  Bluetooth**, para el Wi-Fi (`EXhalbtc8723b1ant_PowerOnSetting` e
+  `InitHwConfig` «solo Wi-Fi», con sus órdenes al firmware 65h, 60h y 6Eh);
+  el canal (RF 18h) y sus potencias; recibir (`RX0_REQ_LEN`, los
+  descriptores de 24 octetos y la señal del estado del PHY: CCK por el LNA y
+  el VGA, OFDM por el PWDB) y mandar (el descriptor de 40 octetos de
+  `rtl8723b_fill_default_txdesc`: gestión por HIQ, datos por LOQ, a la
+  velocidad que se dice, con la secuencia por hardware), con las páginas
+  libres mirando antes. El **cifrado CCMP, por software** (`wpa.c`, como con
+  las Broadcom y las Atheros): el chip, sin claves. La gestión 802.11 y WPA2
+  (con sus renovaciones) son las de siempre (`w80211.c`, `wpa.c`).
+- **Lo que no hace aún** (Linux sí): la **calibración IQ**
+  (`PHY_IQCalibrate_8723B`, unas 1.000 líneas), el control dinámico (DIG,
+  la potencia por temperatura), las potencias por velocidad (PHY_REG_PG),
+  802.11n, el cifrado por hardware y el ahorro de energía. Los datos van a
+  una velocidad fija (la mejor del punto de acceso hasta 24 Mbit/s; si se
+  pierden, el chip baja solo). Si en la tableta se oye poco o se pierde
+  mucho, lo primero será traer la IQK.
+- **El firmware**: `rtl8723bs_nic.bin` de **linux-firmware** (`rtlwifi/`;
+  allí es un enlace a `rtl8723bu_nic.bin`; 32.108 octetos, versión 35.0, SHA-256
+  `a52b5a7be4841b4b2839eddf5122b3300a3610866abe4bb3c3c9e444c8ab7969`). Su
+  licencia (`LICENCE.rtlwifi_firmware.txt`) deja repartirlo sin cambiarlo,
+  pero **no va con el sistema** (ni en el repositorio): se busca como el de
+  Intel, en `X:\FIRMWARE`, `\FIRMWARE`, `\HISPA\FIRMWARE`, `C:\FIRMWARE` y
+  `C:\HISPA\FIRMWARE`, con su nombre largo o como cualquier `.BIN` con la
+  cabecera de la 8723B (`53xxh`). Si falta, `WIFI.LOG` dice dónde ha mirado y
+  de dónde se baja.
+- **Dónde está la controladora** (`wifi/nucleo/radio_rtl_pc.c`): en el PCI
+  (`8086:0F15`/`2295`: el Medion), o **lo que aprendió ACPI.BIN** en un
+  arranque con ACPI (`\SDIO.TXT`, de este equipo). No se busca a ciegas: en
+  un Bay Trail, leer los registros de un aparato apagado cuelga el equipo.
+  **RED.BIN** pone en marcha `WIFI.BIN` en una tableta Bay Trail o Cherry
+  Trail (`8086:0F00`/`2280`) sin controladoras SD en el PCI (el «modo
+  ACPI»), con `\SDIO.TXT` o con la `0F15` en el PCI; y `WIFI.BIN`, si aún no
+  la sabe o el chip no contesta, lo intenta otra vez cada 5 s durante un
+  minuto (ACPI.BIN puede aprenderla en ese mismo arranque).
+- **Encender el chip** (`acpi/pentium/sdio.c`): como Linux
+  (`acpi_device_fix_up_power_extended`), **ACPI.BIN** ejecuta el `_PS0` de la
+  controladora y el de sus hijos. En las DSDT de Intel, el de la
+  controladora la pone en D0 (el PMCSR de su configuración PCI, que se ve en
+  su «BAR1») y el del chip sube su patilla **WL_EN** por una región
+  **GeneralPurposeIo**, que ACPICA no sabe atender: ACPI.BIN la atiende para
+  las controladoras GPIO de Bay Trail (`INT33FC`: SCORE, NCORE y SUS, por su
+  `_UID`), como `pinctrl-baytrail` de Linux (el registro `PAD_VAL` de cada
+  patilla, como salida con su nivel; los números, datos del hardware
+  comprobados con Linux). Y lo **aprende**: `\SDIO.TXT` lleva el equipo, la
+  controladora (`sdio=`) y su BAR1 (`sdio1=`), el chip (`hijo=`) y cada
+  escritura en las patillas (`gpio=`), con lo que se esperó entre una y otra
+  (`espera=`). Sin ACPI (el Acer se congela con ACPI.BIN), `WIFI.BIN` pone la
+  controladora en D0 por su BAR1 y repite las escrituras antes de tocarla.
+  `sinsdio` en la línea del cargador: ACPI.BIN no toca la SDIO.
+- **Probado** (parte 55, `SOLO=rtl`, `castel/pruebas_rtl.sh`), contra un
+  **modelo** de la controladora, la tarjeta SDIO y lo esencial del chip
+  (`tests/wifi/rtl_sim.c`: las esperas de las secuencias, el EFUSE, la
+  descarga del firmware comparada octeto a octeto, el LSSI, el LLT, las
+  órdenes al firmware, los filtros de recepción, las colas con sus
+  descriptores) con el punto de acceso de mentira detrás: en el anfitrión
+  (`build/rtl_prueba`: 30 comprobaciones, de CMD5 a WPA2 con renovaciones;
+  con el firmware de verdad también) y en QEMU (`WIFISIM.BIN` con
+  «chiprtl»: buscar, WPA2, DHCP y cinco PING; sin firmware, el aviso y el
+  diagnóstico); y ACPI.BIN con una SSDT de tableta (`hazsdhci.py ... sdio`),
+  que aprende la patilla con su espera de 20 ms, y `WIFI.BIN`, que lo lee
+  sin ACPI. **El modelo dice lo que el controlador espera del chip, no lo que
+  el chip hace**: lo de verdad, en el Acer (memoria de prueba en
+  `Pruebas/Pendientes/Acer-One-10/Wifi-RTL8723BS/`).
+
 ### El diagnóstico, sin Registro=SI (la 0.8.11, «(SIN-ADMIN)»)
 
 *El HP Mini de la asociación con la BCM4313 «sigue sin encontrar Wi-Fi» con

@@ -9,6 +9,8 @@ dónde sale.
 | `compat/` | Lo que los fuentes de Linux esperan de su núcleo, hecho para Hispa-486 | Hispa-DOS | GPL-2.0 o posterior |
 | `linux/brcmsmac/`, `linux/brcmutil/`, `linux/brcminc/` | El controlador de las Broadcom 802.11n *softMAC* | Broadcom y contribuidores de Linux | ISC (el texto, al principio de cada archivo) |
 | `linux/bcma/`, `linux/include/linux/bcma/`, `linux/include/linux/ssb/`, `linux/cordic.c`, `linux/include/linux/cordic.h` | El bus interno de los chips de Broadcom, las definiciones de la SPROM y el cálculo CORDIC | contribuidores de Linux | GPL-2.0 (la del núcleo de Linux: «solo versión 2»; el texto, en `/LICENSE`) |
+| `nucleo/sdio.c`, `nucleo/radio_rtl_pc.c` | (RTL8723BS) El SDIO sobre una controladora SDHCI y dónde está la de la Realtek en un equipo de verdad | Hispa-DOS | GPL-2.0 o posterior |
+| `nucleo/radio_rtl.c`, `linux/rtl8723bs/` | (RTL8723BS) El controlador de la Realtek RTL8723BS (SDIO) y sus tablas (MAC_REG, PHY_REG, AGC_TAB, RadioA): lo mínimo de `drivers/staging/rtl8723bs` de **Linux 6.6** (etiqueta `v6.6`), con sus registros, valores y orden; las tablas, tal cual de `hal/HalHWImg8723B_*.c` | Realtek (Copyright(c) 2007 - 2012 Realtek Corporation) y contribuidores de Linux | GPL-2.0 («solo versión 2»: el aviso, al principio de cada archivo) |
 | `firmware/` | El microcódigo de la tarjeta | Broadcom | `firmware/LICENCE.broadcom_bcm43xx`: se puede usar y repartir completo y sin modificar; no es software libre |
 
 ## Los fuentes de Linux

@@ -20,7 +20,7 @@ CF="-m32 -std=gnu11 -march=i586 -ffreestanding -fno-pic -fno-stack-protector -fn
     -D__HISPA__ -DHISPA_PENTIUM -Iacpi/acpica/include -Iacpi/nucleo -Iacpi/pentium -Os -ffunction-sections
     -fdata-sections -fexec-charset=CP437 -Wall -Wno-unused"
 DEP="acpi/nucleo/*.h acpi/pentium/*.h acpi/acpica/include/*.h"
-for f in acpi/pentium/servicio.c acpi/pentium/maquina.c acpi/pentium/i2chid.c acpi/pentium/sdhci.c acpi/nucleo/nucleo.c; do
+for f in acpi/pentium/servicio.c acpi/pentium/maquina.c acpi/pentium/i2chid.c acpi/pentium/sdhci.c acpi/pentium/sdio.c acpi/nucleo/nucleo.c; do
   o=$O/$(basename $f .c).o
   # (solo lo que ha cambiado)
   if [ ! -f $o ] || [ -n "$(find $f $DEP -newer $o 2>/dev/null | head -1)" ]; then
@@ -32,5 +32,5 @@ nasm -f elf32 acpi/pentium/entrada.asm -o $O/entrada.o
 OBJ=$(ls build/acpi/*.o | grep -v -e '/maquina\.o$' -e '/nucleo\.o$' -e '/entrada\.o$')
 # shellcheck disable=SC2086
 ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T acpi/pentium/pentium.ld -o $O/acpi.elf \
-  $O/entrada.o $O/servicio.o $O/maquina.o $O/i2chid.o $O/sdhci.o $O/nucleo.o $OBJ
+  $O/entrada.o $O/servicio.o $O/maquina.o $O/i2chid.o $O/sdhci.o $O/sdio.o $O/nucleo.o $OBJ
 objcopy -O binary $O/acpi.elf "$SAL"
