@@ -2725,7 +2725,10 @@ MTEXTO: HarfBuzz 10.1.0 sobre FreeType, con /DEJAVU.TTF
 
 ### Cómo se ha probado
 
-`castel/nucleo64/pruebas.sh`: **CIFRAS_PRUEBAS**. Lo de la etapa 10:
+`castel/nucleo64/pruebas.sh`: **118 pruebas** (eran 110); en la última vuelta,
+117 bien y 1 mal **intermitente** (abajo); en la de antes, todas las demás bien
+(los dos fallos de aquella, de las propias pruebas, arreglados). Unos 65
+minutos con el servidor cargado. Lo de la etapa 10:
 
 - **MSENALES** (38 pruebas: eran 26): alarm (al segundo, lo que quedaba,
   quitarla), setitimer con intervalo (cinco SIGALRM), getitimer, ITIMER_VIRTUAL
@@ -2764,7 +2767,16 @@ MTEXTO: HarfBuzz 10.1.0 sobre FreeType, con /DEJAVU.TTF
 - Lo de las etapas 0 a 9, igual (la unidad en memoria lleva 39 archivos;
   uname 0.10.0, «etapa 10 (C++ y la red de hoy)»).
 
-`SOLO=castel64`: **CIFRAS_CASTEL64**.
+`SOLO=castel64`: **79 bien y 1 mal**: CASTEL64 y ENSAMB64 sacan el núcleo de
+la etapa 10 igual, octeto a octeto; el «mal» es `nucleo64/pruebas.sh` dentro,
+con un solo fallo intermitente (abajo).
+
+**Dos fallos intermitentes** (con el servidor cargado; cada uno ha salido una
+vez y bien en las demás vueltas, y repetidos a mano salen bien): MDISP en
+el CD por BIOS («lo copiado está en la pantalla»: la consola dibuja a la vez
+en la misma pantalla) y el intérprete (una tecla mandada mientras CUENTA
+aún escribe sale antes de su línea). Son de la etapa 8 y la 6; quedan
+apuntados abajo.
 
 Las imágenes de la carpeta del taller
 (`Pruebas/Pendientes/VirtualBox/Hispa-64-etapa-10/`): el disco (`.vdi` y
@@ -2797,6 +2809,10 @@ el arranque; NTP y el CMOS).
   INTERACTIVO y no lo hace (sus avisos llegan con otro camino); hay que
   encontrar la causa de fondo en Hilos64 (la expropiación al volver de
   `syscall`).
+- Los dos intermitentes de las pruebas (MDISP y la pantalla de la consola
+  a la vez; las teclas que se adelantan en el intérprete): que MDISP pare la
+  consola mientras mira, y que la prueba del intérprete espere al indicador
+  antes de cada orden.
 - ITIMER_VIRTUAL e ITIMER_PROF (contar el tiempo de procesador de cada
   hilo); `select` de más de 64 descriptores.
 - Lo de la sección 15 que sigue: las I219 en el taller (ULP y K1), el
