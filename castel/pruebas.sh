@@ -2154,8 +2154,8 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     monu quit 0.5; wait $QPID 2> /dev/null; QPID=
     tr -d '\r' < $N/gsin.sal | iconv -f CP437 -t UTF-8 > $N/gsin.txt
     S=$N/gsin.txt
-    # (0.8.7) 43: los de la 0.8.6 y USUARIOS, ARGON2, PANEL y HORARED; (TOUCHPAD) 44, con RATON
-    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 44 archivos que ha traído el cargador hacen de unidad M:" $S \
+    # (0.8.7) 43: los de la 0.8.6 y USUARIOS, ARGON2, PANEL y HORARED; (TOUCHPAD) 44, con RATON; (BLUETOOTH) 45, con BT
+    if ! grep -q "^usb:" $S && ! grep -q "^disco " $S && grep -q "^sin disco: los 45 archivos que ha traído el cargador hacen de unidad M:" $S \
       && grep -q "escritorio: lanzo .BLOC.BIN" $S; then
       ok "la entrada «sin tocar el USB, los discos ni la red»: ni una línea de USB ni de discos, la unidad del sistema es M: (en memoria) y de ella se lanza el Bloc de notas"
     else ko "la entrada «sin tocar el USB ni los discos» no arranca como la 0.5:"; sed 's/^/        /' $S | head -10; fi
@@ -3889,13 +3889,14 @@ mira "con la VMSVGA, 1200 x 800 (que su BIOS no da por VBE: GRUB pone otra) la p
 miracap "y el escritorio, a 1200 x 800" vb3 tam 1200 800 negrita 30 770 46 780 Inicio
 # 5. (EDID) lo que dice la pantalla de sí misma: con QEMU -device VGA y un
 # EDID de 1024 x 600 (un netbook), uno de 1366 x 768 y sin EDID; el
-# Administrador de dispositivos dice el monitor
+# Administrador de dispositivos dice el monitor ((0.8.12) con «*»: ahora se abre
+# con lo que funciona recogido)
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/udisposi.cas -o $V/udisposi.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $V/udisposi.asm -o $V/DISPOSIT.BIN
 cp $P/d16.img $V/de.img; mcopy -o -i $V/de.img $V/DISPOSIT.BIN ::DISPOSIT.BIN
 for e in 1024:600 1366:768 no; do
   if [ $e = no ]; then o="edid=off"; else o="xres=${e%:*},yres=${e#*:}"; fi
   CAPTURAS=$G MEMORIA=128 DISCO=$V/de.img ARRANQUE=escritorio MODULOS= VGA=none QEMU_MAS="-device VGA,$o" $AQUI/nucleo32/probar.sh $V/SEMILLA.BIN ":pausa 2" \
-    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 336 422" ":pausa 3" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
+    ":clic 40 585" ":clic 300 238" ":raton 700 470" ":clic 336 230" ":pausa 1" ":captura ed${e%:*}" ":clic 594 441" ":clic 336 422" ":pausa 3" ":tecla shift-bracket_right" ":pausa 1" ":captura dv${e%:*}" > $V/edid$e.sal 2>&1
 done
 S=$V/edid1024:600.sal
 mira "con un EDID de 1024 x 600 (un netbook), el núcleo lo lee y lo apunta en el registro del arranque" "pantalla: EDID: «QEMU Monitor», hecha para 1024 x 600 (la tarjeta de QEMU)"
@@ -5173,7 +5174,7 @@ for i in range(1, 401): sys.stdout.write('linea %03d de un texto largo\r\n' % i)
     "equipo c:\\muchos" ":pausa 4" ":raton 400 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru5" \
     ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 -1" ":pausa 2" ":captura ru6" \
     ":tecla f8" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru7" ":clic 775 21" ":pausa 1" \
-    "disposit" ":pausa 4" ":raton 400 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru8" ":clic 745 31" ":pausa 1" \
+    "disposit" ":pausa 4" ":tecla shift-bracket_right" ":pausa 1" ":raton 400 300" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru8" ":clic 745 31" ":pausa 1" \
     "muestra normal" ":pausa 4" ":raton 400 350" ":monitor mouse_move 0 0 -1" ":pausa 1" ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura ru9" \
     ":monitor sendkey ctrl 1500" ":monitor mouse_move 0 0 1" ":pausa 2" ":captura ru10" ":tecla down" ":pausa 1" ":tecla down" ":pausa 1" ":captura ru11" > $W/r.sal 2>&1
   tr -d '\r' < $W/r.sal > $W/r.txt
