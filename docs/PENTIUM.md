@@ -4795,6 +4795,12 @@ Wi-Fi», sin que Biblio2 pueda poner `Registro=SI`:
 Los paquetes: base **0.8.11**, paquetes **1.8**, red **0.8.11** (RED.BIN, el
 «/OTRA»), wifi **0.8.11** (WIFI.BIN y REDWIFI.BIN).
 
+**Las pruebas** (25/11, en el VPS, una a una con `nice`): `usuarios` 109/0
+(la sección 5 nueva: el HP Mini con solo Biblio2, en texto y con el
+escritorio), `wifi` 107/0 (con «4 quater»), `paquetes` 108/0, `programas`
+92/0 y `compat` 89/0 (estas tres, por lo que lanza ACTUALIZ /BANDEJA y el
+PAQUETES nuevo).
+
 **La 0.8.10** (24/11, rama `pentium-0810`: las ramas `termometro` —la de
 después de la 0.8.9: la batería que se relee, SMBIOS 3, MSDM fuera, las zonas
 PCI de 64 bits movidas debajo de los 4 GB, SMI_COUNT, Machine Check, el
