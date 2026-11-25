@@ -63,7 +63,7 @@ renglon $1m "${q}z" "$2: la línea larga llega entera a la orden: "
 }
 # ---- BASIC: las líneas del programa, EDIT e INKEY$ ----
 flechas_basic() {
-escribe "limpiar"; escribe "basic"; sleep 2
+escribe "limpiar"; escribe "basic"; espera $1b0 "octetos libres" 20; sleep 0.5   # (con el equipo cargado, 2 s no bastaban: BASIC vacía el teclado al empezar)
 teclea "10 print 125"; tecla $L; teclea "34"; tecla ret; sleep 0.4
 escribe "20 print 77"
 tecla $U $U $H $S $S; teclea "30"; tecla ret; sleep 0.4
@@ -75,7 +75,7 @@ renglon $1c "30 PRINT 12345" "$2: BASIC, arriba, Inicio y Supr (una línea hecha
 renglon $1c "20 PRINT 78" "$2: BASIC, EDIT deja la línea para corregirla: " 2
 renglon $1c " 12345" "$2: BASIC, el programa corregido funciona: " 2
 renglon $1c " 78" "$2: BASIC, y la línea de EDIT: "
-escribe "system"; sleep 1; escribe "limpiar"; escribe "basic tecla.bas"; sleep 2
+escribe "system"; sleep 1; escribe "limpiar"; escribe "basic tecla.bas"; espera $1d0 "octetos libres" 20; sleep 0.5
 tecla $L $R $U $D $H $E $S $I a z; sleep 1.5
 pantalla $1d
 local c
@@ -85,7 +85,7 @@ renglon $1d "LETRA z" "$2: INKEY\$: "
 }
 # ---- EDITAR ----
 flechas_editar() {
-escribe "limpiar"; escribe "editar f.txt"; sleep 1
+escribe "limpiar"; escribe "editar f.txt"; espera $1e0 "F2 Guardar" 15; sleep 0.3
 tecla a b c ret d e f; tecla $U $H x $D $E y $L $L $S; sleep 0.5
 pantalla $1e
 renglon $1e "xabc" "$2: EDITAR, arriba e Inicio: "

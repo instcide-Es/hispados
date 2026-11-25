@@ -19,7 +19,26 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 **Etapas 0 a 4 y 6 hechas, y la 5 casi** (`h8086/`, noviembre de 2026).
 Versión 0.14.
 
-**Lo nuevo en la 0.14**: los arreglos de la primera auditoría (25-11-2026),
+**Lo nuevo en la 0.14**, para quien lo usa:
+
+- **El teclado, en español desde el principio.** El disquete arranca ya con
+  el teclado español (la ñ, el «;», los acentos...), sin hacer nada; lo
+  instalado en el disco duro, también. Quien quiera el americano escribe
+  `TECLADO EE.UU.`.
+- **INSTALAR**: pone Hispa-8086 en el disco duro paso a paso, desde el
+  disquete del sistema. Avisa de que se borrará el disco y pide confirmarlo;
+  prepara el disco (la partición y el formato, sin reiniciar), copia las
+  órdenes y pregunta si se instalan también la **Oficina** (Pluma y Cuentas,
+  en C:\OFICINA) y los **Juegos** (Derribo y Marcianada, en C:\JUEGOS),
+  pidiendo su disquete cuando toca (vale con una sola disquetera). Si el
+  disco ya tiene C:, pregunta si se formatea o se instala encima.
+- **MENU**: una lista de las aplicaciones que hay en el disco (Editar,
+  BASIC, Pluma, Cuentas, Derribo, Marcianada y «Volver a la línea de
+  órdenes»), que se elige con las flechas o con el número. Al salir de cada
+  programa se vuelve al menú. INSTALAR pregunta si se quiere que salga al
+  arrancar.
+
+Y los arreglos de la primera auditoría (25-11-2026),
 que buscó fallos en todo Hispa-8086. Ninguno era nuevo de la 0.13; los más
 graves:
 
@@ -156,8 +175,9 @@ el Makefile ya no hace los disquetes si se pasa).
   mismas cuatro medidas): **DERRIBO**, de pala, pelota y ladrillos, y
   **MARCIANADA**, de marcianitos, con sus instrucciones en `JUEGOS.TXT`
   (ver «Juegos», más abajo).
-- **Prueba automática** (`make -C h8086 prueba`): 825 comprobaciones en
-  QEMU, en treinta y tres partes (con las de PLUMA, CUENTAS y los juegos) (y la batería entera se pasa también con el
+- **Prueba automática** (`make -C h8086 prueba`): 932 comprobaciones en
+  QEMU, en cincuenta y una partes (con las de PLUMA, CUENTAS, los juegos,
+  INSTALAR, el menú y las de la auditoría de la 0.14; unas hora y cuarto) (y la batería entera se pasa también con el
   núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
   discos partidos y formateados por el propio sistema, disquetes de siete
   medidas, una sola disquetera cambiando de disquete, discos estropeados a
