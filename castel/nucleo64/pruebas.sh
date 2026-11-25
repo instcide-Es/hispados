@@ -986,7 +986,7 @@ if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 
    && grep -q "^No hay ninguna orden ni ningún programa que se llame «noexiste»" <<< "$v" \
    && grep -q "^canción ñandú pingüino àlex a@b#c$" <<< "$v" \
    && grep -q "^hola$" <<< "$v" && [ "$(grep -c "^mundo$" <<< "$v")" = 2 ] && grep -q "^limpio$" <<< "$v" && grep -q "^Hola ABCÑdef$" <<< "$v" \
-   && grep -q "a medias^C$" <<< "$v" \
+   && grep -q "a medias\^C$" <<< "$v" \
    && grep -q "^  leído: una línea$" <<< "$v" && grep -q "^(HIJOS se ha cerrado por la señal 2, SIGINT: Ctrl+C)$" <<< "$v" \
    && grep -q "^  leído: otra$" <<< "$v" && grep -q "^HIJOS lee: fin del archivo$" <<< "$v" \
    && grep -q "^LUA: todo bien (16 pruebas); hoy es " <<< "$v" && grep -q "^Lua 5.5.1  Copyright (C) 1994-2026 Lua.org, PUC-Rio$" <<< "$v" \

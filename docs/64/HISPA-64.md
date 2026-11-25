@@ -2940,3 +2940,35 @@ el arranque; NTP y el CMOS).
   se calculaba con el alto de la letra y de los controles (U y H) antes de
   que `nuevo_cuadro` los pusiera (los argumentos se calculan antes), así
   que, si era el primer cuadro, con 0: los botones tapaban la pregunta.
+
+### Qué hace
+
+Hispa-64 0.11.0. Los módulos y programas nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `hilos64.cas` | `despierta_todos` y `despierta_uno` con el cerrojo de la espera; `expropia_aquí` (los puntos de expropiar); el tiempo de procesador de cada hilo en el tic |
+| `sistema.cas`, `procesos.cas` | expropiar al acabar la llamada y al volver de una interrupción al programa; «alarmas», INTERACTIVO; ITIMER_VIRTUAL y PROF, getrusage, CLOCK_*_CPUTIME_ID; `select` y `poll` de más de 64 |
+| `entradas.cas`, `porcpu64.cas` | STAR con el RPL 3 (KVM en AMD); la entrada apunta si la interrupción llega del anillo 3 (`desde_usuario`) |
+| `pant64.cas` | la consola deja la pantalla con el mutex del pintor |
+| `tcp64.cas`, `redcom64.cas` | NewReno, los SACK de la otra punta y los huecos; SACK con datos |
+| `prt64.cas`, `msi64.cas`, `xhci64.cas`, `ahci64.cas`, `nvme64.cas` | la INTx del `_PRT` (`intx_prt`, `intx_vacía`, CON_INTX); `pon_intx` no pisa la GSI de otro |
+| `hda64.cas` | HD Audio (nuevo) |
+| `disp64.cas` | /dev/dsp (OSS) |
+| `ip64.cas`, `hispa64.cas` | «sinred» con «lo» |
+| `prsmp64.cas` | «Despertar en bucle» |
+| `programas/musl/msonido.c` | MSONIDO (nuevo); MSENALES con ITIMER_VIRTUAL y PROF; MPROCESOS con select y poll de 100 tuberías |
+| `programas/teclas.py` | `{indicador}` y `--serie` |
+| `nucleo32/oficina/{pluma,cuentas,pintura}/dialogos.c` | el cuadro «¿Guardar los cambios?» |
+
+Lo que dice al arrancar (QEMU, q35, `intel-hda` y `hda-output`):
+
+```
+Sonido: 00:02.0 8086:2668, HD Audio (GCAP 4401), el códec 1AF4:0012 (con las órdenes inmediatas); el pin 3 (línea) desde el DAC 2; /dev/dsp
+Despertar en bucle: uno interactivo que espera un suceso en bucle, señalado 1000 veces por uno normal en el procesador 0: despierta 1000 veces y pasa por delante (1002 expropiaciones), en 6 ms
+  ITIMER_VIRTUAL y ITIMER_PROF: SIGVTALRM y SIGPROF al gastar el procesador (50 ms medidos con CLOCK_PROCESS_CPUTIME_ID)
+  select y poll de 100 tuberías (descriptores hasta el 201)
+  TCP [etapa 11]: 26 recuperaciones rápidas (NewReno), 26 acabadas; 237 ACK con SACK leídos, 0 huecos repetidos por ellos; la ventana de congestión, hasta 28 KB
+MSONIDO: todo bien (15 pruebas)
+Interrupciones de los discos: NVMe 62 (0 esperas sin aviso), AHCI 4412 (0 sin aviso); GSI tapadas por no apagarse: 0   (sinmsix sinmsi)
+```
