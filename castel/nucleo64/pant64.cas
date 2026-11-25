@@ -555,7 +555,19 @@ módulo Pant64
     público función pon_modo_gráfico(sí_: bool)
         si no abierta entonces devolver fin
         si sí_ entonces
-            modo_gráfico := cierto
+            ; [etapa 11] con el mutex del pintor: el hilo «pantalla» mira
+            ; modo_gráfico al empezar a dibujar, y una vuelta ya empezada (toda
+            ; la pantalla: unos milisegundos, o más si se le quita el
+            ; procesador a medias) seguía pintando encima de lo del programa
+            ; (MDISP, a veces: «lo copiado está en la pantalla»). Con el mutex,
+            ; al volver de aquí ya no pinta nadie
+            si con_hilo y parada_de = 0 entonces
+                cierra_mutex(dirección(pintor))
+                modo_gráfico := cierto
+                abre_mutex(dirección(pintor))
+            sino
+                modo_gráfico := cierto
+            fin
             devolver
         fin
         si no modo_gráfico entonces devolver fin

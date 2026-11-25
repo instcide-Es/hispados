@@ -10,8 +10,15 @@
 # {bloqmayus} {bloqnum} {f1}... {pausa} (medio segundo sin teclas); [etapa 8] {ctrl-LETRA}, {alt-f4},
 # {logo}, {ctrl-esc}. Va igual para el teclado PS/2
 # y para uno USB (QEMU manda sendkey al teclado que haya).
-#   teclas.py MONITOR.sock TEXTO...    (los textos, seguidos)
+# [etapa 11] {indicador}: espera a que el intérprete vuelva a dar su
+# indicador (una línea más que empiece por «/...> » en la salida del puerto
+# serie, --serie SALIDA) antes de seguir: como una persona, que no escribe
+# la orden siguiente hasta ver acabada la de antes. Sin eso, lo tecleado
+# mientras un programa aún escribía salía (con el eco de la terminal, como
+# en Linux) en medio de su salida, a veces.
+#   teclas.py [--serie SALIDA] MONITOR.sock TEXTO...    (los textos, seguidos)
 #   teclas.py -n TEXTO...              dice las teclas, sin mandarlas
+import re
 import socket
 import sys
 import time
@@ -34,7 +41,7 @@ ACENTOS = {'á': '´a', 'é': '´e', 'í': '´i', 'ó': '´o', 'ú': '´u', 'Á'
 ESPECIALES = {'intro': 'ret', 'retro': 'backspace', 'supr': 'delete', 'izq': 'left', 'der': 'right',
               'arriba': 'up', 'abajo': 'down', 'inicio': 'home', 'fin': 'end', 'tab': 'tab', 'esc': 'esc',
               'ctrl-c': 'ctrl-c', 'ctrl-d': 'ctrl-d', 'ctrl-u': 'ctrl-u', 'bloqmayus': 'caps_lock',
-              'bloqnum': 'num_lock', 'pausa': None}
+              'bloqnum': 'num_lock', 'pausa': None, 'indicador': 'INDICADOR'}
 for i in range(1, 13):
     ESPECIALES[f'f{i}'] = f'f{i}'
 # [etapa 8] Control con cualquier letra ({ctrl-g}, {ctrl-s}...), Alt+F4, la tecla del logo
@@ -81,14 +88,34 @@ def teclas(texto):
     return t
 
 
-def manda(sock, lista):
+INDICADOR = re.compile(rb'^/[^ \r\n]*> ', re.M)
+
+
+def indicadores(serie):
+    try:
+        with open(serie, 'rb') as f:
+            return len(INDICADOR.findall(f.read()))
+    except OSError:
+        return 0
+
+
+def manda(sock, lista, serie=None):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(sock)
     s.settimeout(5)
     time.sleep(0.3)
+    visto = indicadores(serie) if serie else 0
     for k in lista:
         if k is None:
             time.sleep(0.5)
+            continue
+        if k == 'INDICADOR':
+            if not serie:
+                raise SystemExit('teclas.py: {indicador} sin --serie')
+            visto += 1
+            hasta = time.time() + 60
+            while indicadores(serie) < visto and time.time() < hasta:
+                time.sleep(0.05)
             continue
         s.sendall(f'sendkey {k} 30\n'.encode())
         time.sleep(0.07)
@@ -97,10 +124,15 @@ def manda(sock, lista):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        raise SystemExit('uso: teclas.py MONITOR.sock TEXTO...  (o -n TEXTO...)')
-    lista = teclas(''.join(sys.argv[2:]))
-    if sys.argv[1] == '-n':
-        print(' '.join('(pausa)' if k is None else k for k in lista))
+    a = sys.argv[1:]
+    serie = None
+    if len(a) >= 2 and a[0] == '--serie':
+        serie = a[1]
+        a = a[2:]
+    if len(a) < 2:
+        raise SystemExit('uso: teclas.py [--serie SALIDA] MONITOR.sock TEXTO...  (o -n TEXTO...)')
+    lista = teclas(''.join(a[1:]))
+    if a[0] == '-n':
+        print(' '.join('(pausa)' if k is None else k for k in lista if k != 'INDICADOR'))
     else:
-        manda(sys.argv[1], lista)
+        manda(a[0], lista, serie)

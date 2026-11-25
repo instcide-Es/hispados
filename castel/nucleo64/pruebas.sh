@@ -928,21 +928,24 @@ con_interprete() {   # SALIDA TEXTO [opciones de QEMU]: «apagar sinpruebas escr
     -monitor unix:"$T/mon7.sock",server,nowait $DBG -no-reboot -nic none -m 256 -machine q35 -smp 4 "$@" > /dev/null 2>&1 &
   q=$!
   for _ in $(seq 1 300); do grep -q "^/> " "$s" 2> /dev/null && break; sleep 0.2; done
-  manda_teclas "$T/mon7.sock" "$x"
+  manda_teclas --serie "$s" "$T/mon7.sock" "$x"
   wait $q; c=$?
   return $c
 }
 mkdir -p "$T/w7"; rm -f "$T/w7/fat.img"
 truncate -s 48M "$T/w7/fat.img" && mkfs.fat -F 32 -n ESCRIBIR "$T/w7/fat.img" > /dev/null
-TECLAS7='ver{intro}dir /{intro}cd /sata0{intro}mkdir prueba{intro}cd prueba{intro}echo hola desde el teclado > saludo.txt{intro}'
-TECLAS7+='type saludo.txt{intro}cp saludo.txt copia.txt{intro}dir{intro}mkdir /nada{intro}cd /{intro}HOLA uno dos{intro}CUENTA 3{intro}'
-TECLAS7+='noexiste{intro}echo canción ñandú pingüino àlex a@b#c{intro}echo holx{retro}a{intro}echo mudo{izq}{izq}n{intro}{arriba}{intro}'
-TECLAS7+='basura{ctrl-u}echo limpio{intro}echo Hola {bloqmayus}abcñ{bloqmayus}def{intro}a medias{ctrl-c}{pausa}'
-TECLAS7+='HIJOS lee{intro}{pausa}una línea{intro}{pausa}{ctrl-c}{pausa}'
-TECLAS7+='HIJOS lee{intro}{pausa}otra{intro}{ctrl-d}{pausa}'
+# ([etapa 11] {indicador}: la orden siguiente, cuando el intérprete ha vuelto a dar
+# su indicador: lo tecleado antes salía, con el eco, en medio de lo que aún escribía
+# la de antes, a veces)
+TECLAS7='ver{intro}{indicador}dir /{intro}{indicador}cd /sata0{intro}{indicador}mkdir prueba{intro}{indicador}cd prueba{intro}{indicador}echo hola desde el teclado > saludo.txt{intro}{indicador}'
+TECLAS7+='type saludo.txt{intro}{indicador}cp saludo.txt copia.txt{intro}{indicador}dir{intro}{indicador}mkdir /nada{intro}{indicador}cd /{intro}{indicador}HOLA uno dos{intro}{indicador}CUENTA 3{intro}{indicador}'
+TECLAS7+='noexiste{intro}{indicador}echo canción ñandú pingüino àlex a@b#c{intro}{indicador}echo holx{retro}a{intro}{indicador}echo mudo{izq}{izq}n{intro}{indicador}{arriba}{intro}{indicador}'
+TECLAS7+='basura{ctrl-u}echo limpio{intro}{indicador}echo Hola {bloqmayus}abcñ{bloqmayus}def{intro}{indicador}a medias{ctrl-c}{indicador}'
+TECLAS7+='HIJOS lee{intro}{pausa}una línea{intro}{pausa}{ctrl-c}{indicador}'
+TECLAS7+='HIJOS lee{intro}{pausa}otra{intro}{ctrl-d}{indicador}'
 # [etapa 7] Lua (el de verdad, con musl) con un guion y a mano; MBUCLE, que no llama al sistema, parado con Ctrl+C
-TECLAS7+='LUA /PRUEBA.LUA uno dos{intro}{pausa}{pausa}{pausa}{pausa}LUA{intro}{pausa}{pausa}print(6 * 7, "ñandú"){intro}{pausa}{ctrl-d}{pausa}{pausa}'
-TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{pausa}{pausa}salir{intro}'
+TECLAS7+='LUA /PRUEBA.LUA uno dos{intro}{indicador}LUA{intro}{pausa}{pausa}print(6 * 7, "ñandú"){intro}{pausa}{ctrl-d}{indicador}'
+TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{indicador}salir{intro}'
 con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
 v=$(serie "$T/e7.txt")
 if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.10.0, etapa 10 " <<< "$v" \
@@ -967,7 +970,7 @@ if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 
   ok "etapa 6, el intérprete ORDENES con las teclas del monitor de QEMU (PS/2, mapa español, $(manda_teclas -n "$TECLAS7" | wc -w) teclas): ver, dir, cd, mkdir, echo > archivo, type, cp (en el disco: fsck.fat bien), EROFS, HOLA uno dos, CUENTA 3 (código 30), una que no está, «canción ñandú pingüino àlex a@b#c», Bloq Mayús, Retroceso, las flechas, la historia, Ctrl+U, Ctrl+C (en el indicador y a HIJOS: 130), Ctrl+D; [etapa 7] Lua con un guion y a mano (print(6 * 7)), y Ctrl+C a MBUCLE, que no llama al sistema; salir"
 else ko "etapa 6, el intérprete no hace lo que debe (código $c): $(sed -n '/^ORDENES, el/,$p' <<< "$v" | tr -d '\b' | cut -c1-80 | paste -sd '|' | cut -c1-1500)"; fi
 # lo mismo por un teclado USB (sin 8042: todo llega por tecla_hid)
-TECLAS7U='echo canción ñandú a@b{intro}echo holx{retro}a{intro}echo Hola {bloqmayus}abc{bloqmayus}d{intro}HOLA uno{intro}salir{intro}'
+TECLAS7U='echo canción ñandú a@b{intro}{indicador}echo holx{retro}a{intro}{indicador}echo Hola {bloqmayus}abc{bloqmayus}d{intro}{indicador}HOLA uno{intro}{indicador}salir{intro}'
 con_interprete "$T/e7u.txt" "$TECLAS7U" -machine q35,i8042=off -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0; c=$?
 v=$(serie "$T/e7u.txt")
 if [ $c = 85 ] && grep -q "^Teclado PS/2: no hay 8042" <<< "$v" && grep -q "^canción ñandú a@b$" <<< "$v" && grep -q "^hola$" <<< "$v" \
