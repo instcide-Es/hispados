@@ -4418,13 +4418,15 @@ sim:
         ; con SS:SP = 0 se usa la pila del servidor (RM_CHUNK octetos por
         ; nivel): copiar 2·CX octetos sin límite pisaba cb_tab y rm_old. La
         ; norma DPMI garantiza 30 palabras; aquí, hasta RM_MAXW (si no, 8021h)
-        cmp cx, RM_MAXW + 1
-        cmc
-        mov ax, 0x8021
-        jc .r
+        cmp cx, RM_MAXW + 1         ; (AL, el modo, no se toca)
+        jnc .big
         call rm_call
         jnc .r
         mov ax, 0x8012
+        jmp .r
+.big:
+        mov ax, 0x8021
+        stc
 .r:
         push ds
         pop es
