@@ -184,8 +184,37 @@ inicio:
 ; =============================================================================
 ;  Recibir
 ; =============================================================================
+; se recibe en NOMBRE.$$$, y solo cuando ha llegado entero se borra el que
+; había y el temporal pasa a llamarse como él: si nadie contesta, se cancela o
+; se llena el disco, el que había no se pierde
 recibir:
-        mov dx, nombre
+        mov si, nombre              ; el temporal: el nombre con la extensión $$$
+        mov di, tmpn
+        xor bx, bx
+.t:
+        lodsb
+        cmp al, '.'
+        jne .t1
+        mov bx, di
+.t1:
+        cmp al, '\'
+        jne .t2
+        xor bx, bx
+.t2:
+        stosb
+        test al, al
+        jnz .t
+        dec di
+        test bx, bx
+        jz .t3
+        mov di, bx
+.t3:
+        mov ax, '.$'
+        stosw
+        mov ax, '$$'
+        stosw
+        mov byte [di], 0
+        mov dx, tmpn
         xor cx, cx
         DOS 0x3C
         jnc .creado
@@ -338,6 +367,13 @@ recibir:
 .cierra:
         mov bx, [arch]
         DOS 0x3E
+        jc r_disco1
+        mov dx, nombre              ; el que había, fuera, y el nuevo, en su
+        DOS 0x41                    ; sitio
+        mov dx, tmpn
+        mov di, nombre
+        DOS 0x56
+        jc r_disco1
         DI_TXT m_recibido
         jmp fin_cuenta
 r_disco:
@@ -354,9 +390,13 @@ r_nadie:
 r_borra:
         mov bx, [arch]              ; lo que haya llegado a medias no vale
         DOS 0x3E
-        mov dx, nombre
+r_borra1:
+        mov dx, tmpn
         DOS 0x41
         jmp fin_mal
+r_disco1:
+        DI_TXT m_e_disco
+        jmp r_borra1
 ; (interna) escribe el bloque anterior, si lo hay. CF=1 si falla el disco
 escribe_ant:
         cmp byte [hay_ant], 0
@@ -751,3 +791,6 @@ nombre      times 80 db 0
 pal         times 80 db 0
 datos       times 128 db 0
 anterior    times 128 db 0
+
+            absolute $
+tmpn        resb 82                 ; el temporal de recibir (NOMBRE.$$$)

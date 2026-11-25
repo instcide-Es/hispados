@@ -117,3 +117,21 @@ teclea "0123456789"; tecla f2; sleep 2; tecla esc; sleep 1
 apaga
 if [ "$(mtype -i $T/a.img ::N.TXT | head -c 10)" = 0123456789 ] && [ "$(mtype -i $T/a.img ::N.TXT | wc -c)" = $((3070 + 10)) ] && ! mdir -i $T/a.img '::N.$$$' > /dev/null 2>&1; then ok "n.º 6: con sitio, F2 guarda (y no queda el temporal)"; else ko "n.º 6: con sitio no ha guardado bien"; mdir -i $T/a.img ::; fi
 }
+
+# ---- n.º 7: PASAR RECIBIR ya no borra el archivo que había si no llega ----
+p_auditoria_pasar() {
+echo "== Hispa-8086: auditoría 1, PASAR RECIBIR sobre un archivo que ya existe =="
+cp $IMG/hispa8086-360.img $T/a.img
+arranca $T/a.img 486
+escribe "limpiar"; escribe "pasar recibir leeme.txt"; sleep 2; tecla esc; sleep 2
+pantalla s1
+esta s1 "Se deja (Esc)." "n.º 7: PASAR RECIBIR LEEME.TXT, y Esc: "
+python3 -c "import sys; sys.stdout.buffer.write(bytes((i * 7 + 3) & 255 for i in range(1500)))" > $T/nuevo.bin
+escribe "pasar recibir hola.com"
+if python3 prueba/xmodem.py $T/serie enviar $T/nuevo.bin; then ok "n.º 7: recibir encima de uno que ya existe"; else ko "n.º 7: PASAR RECIBIR encima de HOLA.COM"; fi
+sleep 2
+apaga
+if cmp -s <(mtype -i $T/a.img ::LEEME.TXT) build/LEEME.TXT; then ok "n.º 7: tras el Esc, LEEME.TXT sigue entero"; else ko "n.º 7: tras el Esc, LEEME.TXT se ha perdido"; fi
+if cmp -s <(mtype -i $T/a.img ::HOLA.COM) $T/nuevo.bin; then ok "n.º 7: y lo recibido encima ha sustituido al que había"; else ko "n.º 7: HOLA.COM no es lo recibido"; fi
+if ! mdir -i $T/a.img '::*.$$$' > /dev/null 2>&1 && fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "n.º 7: no quedan temporales y fsck.fat no encuentra errores"; else ko "n.º 7: quedan temporales o hay errores"; mdir -i $T/a.img ::; cat $T/fsck.txt; fi
+}
