@@ -150,6 +150,13 @@ con él encendido simplemente no arranca esta memoria.
      enseña el resultado: cuánto subió, cuánto bajó en el primer minuto y qué
      le parece (por ejemplo, «el ventilador y el disipador sacan bien el
      calor» o «baja muy despacio: polvo o pasta seca»).
+  6. Se pueden hacer varias pruebas seguidas sin apagar (por ejemplo,
+     Calentar enchufado, Rendimiento, Memoria RAM y Calentar con la
+     batería): abajo sale la que está en marcha; al acabar cada una, su
+     resultado y la lista de todas las de este arranque, con la hora y su
+     veredicto en una línea (la tecla P la vuelve a enseñar). INFORME.TXT las
+     lleva todas, en orden, cada una con su parte, y si hay dos o más de
+     Calentar, una tabla que las compara (enchufado frente a con batería).
 
   QUÉ ES NORMAL
     En reposo: entre 40 y 55 °C (hasta 60 °C en un portátil «gamer» es pasable).

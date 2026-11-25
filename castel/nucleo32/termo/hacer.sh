@@ -30,4 +30,6 @@ nasm -f elf32 -DPRINCIPAL=principal $C/entrada.asm -o $O/entrada.o
 ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $C/pentium.ld -o $O/TERMO.elf \
   $O/entrada.o $O/juego.o $O/dibujo.o $O/sintes.o $O/base.o $O/termo.o $O/veredicto.o $O/envio.o $O/rendimiento.o $O/disco.o $O/nvidia.o $O/potencia.o $O/ram.o $O/ram_alg.o
 objcopy -O binary $O/TERMO.elf "$SAL"
-if objdump -d $O/TERMO.elf | grep -qE '\scmov|\sfcomi|\sfucomi'; then echo "hacer.sh: TERMO.BIN lleva instrucciones de después del Pentium"; exit 1; fi
+# (TERMO 1.1.1) desde «salto» (0x40000018): la cabecera HPU3 son datos (con _fin_bss
+# en 0x400F1720, «0f 40» salía como un cmovo que no es)
+if objdump -d --start-address=0x40000018 $O/TERMO.elf | grep -qE '\scmov|\sfcomi|\sfucomi'; then echo "hacer.sh: TERMO.BIN lleva instrucciones de después del Pentium"; exit 1; fi

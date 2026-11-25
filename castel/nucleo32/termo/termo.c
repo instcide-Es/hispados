@@ -758,9 +758,38 @@ static void lee_hallado(void)
 		while (j < n && r[j] != '\r' && r[j] != '\n')
 			j++;
 		if (!strncmp(r + i, "usb:", 4) || !strncmp(r + i, "unidades:", 9) || !strncmp(r + i, "disco ", 6) || !strncmp(r + i, "arranque:", 9) || !strncmp(r + i, "pci:", 4)) {
-			k = j - i < sizeof hallado[0] - 1 ? j - i : (u32)sizeof hallado[0] - 1;
-			memcpy(hallado[nhallado], r + i, k);
-			hallado[nhallado++][k] = 0;
+			/* (TERMO 1.1.1) en UTF-8: \ARRANQUE.TXT puede traer letras del DOS
+			 * (CP437: «l\xA1nea», en el ASUS GL553VD), que en INFORME.TXT
+			 * salían como un octeto suelto y rompían el UTF-8 */
+			static const char *const cp[] = { "\xC3\xBC", "\xC3\xA9", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "\xC3\x89" };	/* 81h ü, 82h é; 90h É */
+			static const char *const cpa[] = { "\xC3\xA1", "\xC3\xAD", "\xC3\xB3", "\xC3\xBA", "\xC3\xB1", "\xC3\x91", 0, 0, "\xC2\xBF", 0, 0, 0, 0, "\xC2\xA1" };	/* A0h-ADh */
+			u32 q = 0, x;
+
+			for (x = i; x < j && q < sizeof hallado[0] - 4; x++) {
+				u8 c = (u8)r[x];
+				const char *u = 0;
+
+				if (c < 0x80) {
+					hallado[nhallado][q++] = (char)c;
+					continue;
+				}
+				if (c >= 0xC2 && c <= 0xDF && x + 1 < j && ((u8)r[x + 1] & 0xC0) == 0x80) {	/* (ya era UTF-8) */
+					hallado[nhallado][q++] = (char)c;
+					hallado[nhallado][q++] = r[++x];
+					continue;
+				}
+				if (c >= 0x81 && c <= 0x90)
+					u = cp[c - 0x81];
+				else if (c >= 0xA0 && c <= 0xAD)
+					u = cpa[c - 0xA0];
+				if (u) {
+					hallado[nhallado][q++] = u[0];
+					hallado[nhallado][q++] = u[1];
+				} else
+					hallado[nhallado][q++] = '?';
+			}
+			(void)k;
+			hallado[nhallado++][q] = 0;
 		}
 		while (j < n && (r[j] == '\r' || r[j] == '\n'))
 			j++;
@@ -1546,6 +1575,175 @@ static int puede_enviar, puede_terminal, enviando;	/* (TERMO) */
 static u32 t_envio;
 static char aviso_envio[420];
 
+/* ---------------------------------------------------------------- (TERMO 1.1.1) las pruebas de este arranque
+ * Carlos, 25/11/2026, en un ASUS GL553VD (Calentar enchufado, Rendimiento,
+ * la RAM y Calentar con la batería, en el mismo arranque): «después de
+ * finalizar una prueba, al comenzar otra se queda el resultado de la primera
+ * en pantalla». El cuadro del resultado iba con «fase == F_RESULTADO», que
+ * solo cambiaba Calentar: Rendimiento y la RAM empezaban y acababan debajo
+ * de él, sin pintarse; y el INFORME.TXT de las dos de Calentar salía
+ * mezclado (las cuentas de la batería, los frenos y la potencia, de todo el
+ * arranque). Ahora cada prueba es una ficha: cuándo, qué, su veredicto en
+ * una línea y su sección del informe, guardada tal cual al acabar; lo
+ * contado (frenos, vatios, parones, batería) vuelve a 0 para la siguiente.
+ * En la pantalla: la que está en marcha, en la franja de abajo; al acabar,
+ * su resultado y la lista de todas (tecla P: verla otra vez) */
+#define MAX_HECHAS 24
+enum { PR_CALENTAR, PR_RENDIMIENTO, PR_RAM, PR_DISCOS };
+struct hecha {
+	int tipo, en_marcha, num;
+	int ca, ca_cambio;	/* (Calentar) 1 enchufado, 0 con la batería, -1 no se sabe; si ha cambiado en medio */
+	char hora[6], hora_fin[6], hms[10];
+	char nombre[56];
+	char linea[300];	/* el veredicto, en una línea */
+	int b_ini, b_len;	/* su sección del INFORME.TXT, en archivo[] (-1 ninguna, -2 no cabía) */
+	/* (Calentar) para la tabla que las compara */
+	int t_ini, t_max, mw, mw_max, mhz, pct_fr, seg, bat_ini, bat_fin, bat_mw, seguridad, esc;
+};
+static struct hecha HE[MAX_HECHAS];
+static int nhechas, hechas_total, he_cal = -1, he_mide = -1, he_ram = -1, he_vista = -1, ver_cuadro, discos_en_lista;
+static char archivo[100000];	/* las secciones de cada prueba, una detrás de otra */
+static int narchivo;
+static u32 cuadro_dicho;	/* (para las pruebas: lo que enseña el cuadro, por el puerto serie, una vez) */
+static void reinicia_durante(void);
+static void reinicia_despues(void);
+
+static void he_corre(int *i)
+{
+	*i = *i > 0 ? *i - 1 : -1;
+}
+
+static int he_nueva(int tipo, const char *nombre, int cierra)
+{
+	struct hecha *h;
+	u32 a, me, d, hh, mi, se;
+	char t[200];
+
+	if (nhechas == MAX_HECHAS) {	/* (la más vieja sale de la lista; su sección se queda en el informe) */
+		memmove(HE, HE + 1, sizeof HE[0] * (MAX_HECHAS - 1));
+		nhechas--;
+		he_corre(&he_cal), he_corre(&he_mide), he_corre(&he_ram), he_corre(&he_vista);
+	}
+	h = &HE[nhechas];
+	memset(h, 0, sizeof *h);
+	h->tipo = tipo;
+	h->en_marcha = 1;
+	h->num = ++hechas_total;
+	h->ca = -1;
+	h->b_ini = -1;
+	h->bat_ini = h->bat_fin = h->bat_mw = h->mw = h->mw_max = h->pct_fr = -1;
+	fecha_hora(&a, &me, &d, &hh, &mi, &se);
+	snprintf(h->hora, sizeof h->hora, "%02u:%02u", hh, mi);
+	snprintf(h->hms, sizeof h->hms, "%02u:%02u:%02u", hh, mi, se);
+	snprintf(h->nombre, sizeof h->nombre, "%s", nombre);
+	snprintf(h->linea, sizeof h->linea, "en marcha");
+	if (cierra) {
+		ver_cuadro = 0;
+		if (fase == F_RESULTADO)
+			fase = F_REPOSO;
+	}
+	snprintf(t, sizeof t, "===== PRUEBA %d de este arranque: %s, empieza a las %s =====", h->num, nombre, h->hms);
+	log_escribe("PRUEBA", t);
+	serie("termo: prueba %d: empieza «%s»\n", h->num, nombre);
+	jg_cambio = 1;
+	motivo_pinta = 1;
+	return nhechas++;
+}
+
+/* acabada: su línea, su sección (si la hay) y, si «ver», el cuadro del resultado */
+static void he_acaba(int i, const char *linea, const char *bloque, int nb, int ver)
+{
+	struct hecha *h;
+	u32 a, me, d, hh, mi, se;
+	char t[480];
+	int k, j = 0;
+
+	if (i < 0 || i >= nhechas)
+		return;
+	h = &HE[i];
+	h->en_marcha = 0;
+	fecha_hora(&a, &me, &d, &hh, &mi, &se);
+	snprintf(h->hora_fin, sizeof h->hora_fin, "%02u:%02u", hh, mi);
+	for (k = 0; linea[k] && j < (int)sizeof h->linea - 1; k++)	/* (en una línea: sin saltos ni espacios dobles) */
+		if (linea[k] == '\r' || linea[k] == '\n' || linea[k] == ' ') {
+			if (j && h->linea[j - 1] != ' ')
+				h->linea[j++] = ' ';
+		} else
+			h->linea[j++] = linea[k];
+	while (j && h->linea[j - 1] == ' ')
+		j--;
+	h->linea[j] = 0;
+	if (bloque && nb > 0) {
+		if (narchivo + nb <= (int)sizeof archivo) {
+			memcpy(archivo + narchivo, bloque, (size_t)nb);
+			h->b_ini = narchivo;
+			h->b_len = nb;
+			narchivo += nb;
+		} else
+			h->b_ini = -2;
+	}
+	snprintf(t, sizeof t, "===== PRUEBA %d: %s, acaba a las %02u:%02u:%02u: %s =====", h->num, h->nombre, hh, mi, se, h->linea);
+	log_escribe("PRUEBA", t);
+	serie("termo: prueba %d: acaba «%s»: %s\n", h->num, h->nombre, h->linea);
+	if (ver) {
+		he_vista = i;
+		ver_cuadro = 1;
+	}
+	jg_cambio = 1;
+	motivo_pinta = 1;
+}
+
+/* la última de Calentar acabada (la del «resumen»): -1 si no hay */
+static int ultima_calentar(void)
+{
+	int i;
+
+	for (i = nhechas - 1; i >= 0; i--)
+		if (HE[i].tipo == PR_CALENTAR && !HE[i].en_marcha)
+			return i;
+	return -1;
+}
+
+/* un texto de la carpeta \TERMO (RENDIMIE.TXT...): octetos, 0 si no está */
+static int lee_de_carpeta(const char *nombre, char *d, int cabe)
+{
+	char r[120];
+	u32 m, n;
+
+	d[0] = 0;
+	if (!carpeta[0] || cabe < 2)
+		return 0;
+	snprintf(r, sizeof r, "%s\\%s", carpeta, nombre);
+	m = sc(SC_ABRIR, (u32)r, PARA_LEER, 0);
+	if (ES_ERROR(m))
+		return 0;
+	n = sc(SC_LEER, m, (u32)d, (u32)cabe - 1);
+	sc(SC_CERRAR, m, 0, 0);
+	if (ES_ERROR(n))
+		return 0;
+	d[n] = 0;
+	return (int)n;
+}
+
+/* «  Calentar con batería...» con tantas letras (UTF-8) como «ancho»: recortado o con espacios */
+static const char *columna(char *d, int cabe, const char *s, int ancho)
+{
+	int n = 0, letras = 0;
+
+	for (; *s && n < cabe - 1; s++) {
+		if ((*s & 0xC0) != 0x80) {
+			if (letras == ancho)
+				break;
+			letras++;
+		}
+		d[n++] = *s;
+	}
+	while (letras < ancho && n < cabe - 1)
+		d[n++] = ' ', letras++;
+	d[n] = 0;
+	return d;
+}
+
 static int en_reposo(void)
 {
 	return fase == F_REPOSO || fase == F_RESULTADO;
@@ -1779,6 +1977,23 @@ static void empieza(void)
 	pico = t_ini;
 	por_seguridad = por_esc = 0;
 	motivo[0] = 0;
+	/* (TERMO 1.1.1) su ficha en la lista de las pruebas de este arranque
+	 * (enchufado o con la batería, como estaba al empezar), y lo que se
+	 * cuenta «durante la prueba», a 0: lo de una no se mezcla con la otra */
+	{
+		char nm[56], dm[16];
+		int ca = hay_bateria && en.pct <= 100 ? (en.ca == 1 ? 1 : en.ca == 0 ? 0 : -1) : -1;
+
+		if (dura_s % 60)
+			snprintf(dm, sizeof dm, "%d s", dura_s);
+		else
+			snprintf(dm, sizeof dm, "%d min", dura_s / 60);
+		snprintf(nm, sizeof nm, "Calentar%s (%s)", ca == 1 ? " enchufado" : ca == 0 ? " con batería" : "", dm);
+		he_cal = he_nueva(PR_CALENTAR, nm, 1);
+		HE[he_cal].ca = ca;
+		HE[he_cal].bat_ini = hay_bateria && en.pct <= 100 ? (int)en.pct : -1;
+		reinicia_durante();
+	}
 	{
 		struct ve_sensor vs[VE_MAXS];
 		int t[VE_MAXS], k;
@@ -2204,8 +2419,7 @@ static void mira_mca(int al_final)
 		nuevo = al_final && (lo != mca_st0[i][0] || hi != mca_st0[i][1]);
 		if (al_final && !nuevo)
 			continue;
-		if (!al_final)
-			mca_st0[i][0] = lo, mca_st0[i][1] = hi;
+		mca_st0[i][0] = lo, mca_st0[i][1] = hi;	/* (TERMO 1.1.1) también al acabar: la prueba siguiente no lo vuelve a contar */
 		if (hi & (1u << 26))
 			lee_msr(0x402 + 4 * (u32)i, &a, &ah);
 		if (hi & (1u << 27))
@@ -2245,6 +2459,22 @@ static int bat_mv_reposo, bat_mv_min_carga, bat_pct_ca_ini = -1, bat_pct_ca_min 
 static void mira_alimentacion(void)
 {
 	int mv = hay_zonas ? (int)za.t.bat_mv : 0;
+
+	/* (TERMO 1.1.1) la ficha de la prueba de esfuerzo en marcha: la batería
+	 * al acabar, lo que daba sin enchufar y si se ha enchufado o
+	 * desenchufado en medio */
+	if (he_cal >= 0 && he_cal < nhechas && HE[he_cal].en_marcha && hay_bateria && en.pct <= 100) {
+		struct hecha *h = &HE[he_cal];
+		int ca = en.ca == 1 ? 1 : en.ca == 0 ? 0 : -1;
+
+		h->bat_fin = (int)en.pct;
+		if (ca >= 0 && h->ca >= 0 && ca != h->ca && !h->ca_cambio) {
+			h->ca_cambio = 1;
+			suceso_log("OJO: durante la prueba de esfuerzo se ha %s el cargador: esta prueba no compara bien con las demás", ca ? "enchufado" : "desenchufado");
+		}
+		if (fase == F_CARGA && ca == 0 && hay_zonas && za.t.bat_mw != NO && (za.t.bat_estado & 1) && (int)za.t.bat_mw > h->bat_mw)
+			h->bat_mw = (int)za.t.bat_mw;
+	}
 
 	if (mv > 0 && mv < 100000) {
 		if (fase == F_REPOSO)
@@ -2308,35 +2538,37 @@ static void informe_autonomia(char *b, size_t cabe)
 		m += snprintf(b + m, cabe - (size_t)m, "  Para medir la autonomía aquí hace falta al menos 3 minutos sin enchufar.\r\n");
 }
 
-static void escribe_informe(void)
+/* (TERMO 1.1.1) la sección de una prueba de esfuerzo, hecha al acabarla con
+ * lo suyo (antes iba directa al INFORME.TXT y la siguiente la pisaba; las
+ * cuentas de la batería, de los frenos y de la potencia eran de todo el
+ * arranque): el ASUS GL553VD decía a la vez «sin enchufar» y «con el
+ * cargador puesto, la batería no ha bajado» */
+static int bloque_calentar(char *t, int cabe, const struct hecha *h, const char *fin)
 {
-	static char t[48000];	/* (TERMO) los discos, (NVIDIA) «GRÁFICAS», (POTENCIA) y (RAM, hasta 17000): todo junto */
-	char r[120], g1[24], g2[24], g3[24];
-	u32 a, me, d, h, mi, se;
+	char g1[24], g2[24], g3[24], c1[120], w[16];
 	int n = 0, k;
-#define IN(...) (n += snprintf(t + n, sizeof t - (size_t)n, __VA_ARGS__), n = n < (int)sizeof t ? n : (int)sizeof t - 1)
+#define IN(...) (n += snprintf(t + n, (size_t)(cabe - n), __VA_ARGS__), n = n < cabe ? n : cabe - 1)
 
-	if (!carpeta[0] || csv_malo)
-		return;
-	fecha_hora(&a, &me, &d, &h, &mi, &se);
-	IN("\xEF\xBB\xBFINFORME DEL TERMÓMETRO DE HISPA-PENTIUM\r\n");
-	IN("=======================================\r\n\r\n");
-	IN("Fecha y hora de la prueba: %02u/%02u/%04u %02u:%02u (la del reloj del equipo%s)\r\n", d, me, a, h, mi, fecha_mala ? ": PARECE MAL" : "");
-	IN("Equipo: %s %s %s\r\n", za.t.fabricante, za.t.producto, za.t.version_eq);
-	IN("Placa: %s %s   BIOS: %s\r\n", za.t.placa_fab, za.t.placa, za.t.bios);
-	IN("Procesador: %s (TjMax %d °C, %s)\r\n", cpu.marca, cpu.tjmax, cpu.tj_de_msr ? "la que dice el procesador" : "de tabla");
-	if (ap_cargados)
-		IN("Núcleos: %s (%d procesadores)\r\n", topologia_texto(), ap_cargados + 1);
-	IN("Prueba de esfuerzo: %s, %d s%s; carga de coma flotante en %d %s\r\n", por_seguridad ? "PARADA DE SEGURIDAD" : por_esc ? "parada a mano (Esc)" : VP.carga_cortada ? "con la carga rota (ver abajo)" : "completa",
-	   seg_carga, por_seguridad ? "" : "", 1 + ap_cargados, ap_cargados ? "procesadores (hilos)" : "núcleo (Hispa-Pentium usa uno)");
+	IN("\r\n=====================================================================\r\n");
+	IN("PRUEBA %d DE ESTE ARRANQUE: %s, de %s a %s\r\n", h->num, h->nombre, h->hms, fin);
+	IN("=====================================================================\r\n");
+	IN("Alimentación: %s%s\r\n", h->ca == 1 ? "enchufado a la corriente" : h->ca == 0 ? "con la batería (sin enchufar)" :
+	   hay_bateria ? "no se sabe si estaba enchufado" : "a la corriente (no se ve batería)",
+	   h->ca_cambio ? "; OJO: se ha enchufado o desenchufado durante la prueba (no compara bien con las demás)" : "");
+	IN("Prueba de esfuerzo: %s, %d s; carga de coma flotante en %d %s\r\n", por_seguridad ? "PARADA DE SEGURIDAD" : por_esc ? "parada a mano (Esc)" :
+	   VP.carga_cortada ? "con la carga rota (ver abajo)" : "completa", seg_carga, 1 + ap_cargados, ap_cargados ? "procesadores (hilos)" : "núcleo (Hispa-Pentium usa uno)");
+	IN("Carga usada: x87 (la coma flotante de siempre, raíz y seno, en cada procesador): es ligera; en un procesador de hoy no llega a los vatios que deja la BIOS (PL1), "
+	   "así que no dice si la fuente o el cargador darían para el máximo.\r\n");
 	if (por_seguridad)
 		IN("Motivo de la parada: %s\r\n", motivo);
 	IN("\r\nSENSOR                                  REPOSO    MÁXIMA    AL ACABAR  NOTA\r\n");
 	for (k = 0; k < ns && k < VE_MAXS; k++) {
 		const char *nota = S[k].no_fiable ? "lectura no fiable (no cuenta)" : S[k].fija ? "fija (no cambia; no cuenta)" :
 				   VP.n[k] == 0 ? "sin dato" : k == VP.ref ? "con este se mide" : "";
+		char c2[40], c3[40], c4[40];
 
-		IN("%-38.38s  %-8s  %-8s  %-9s  %s\r\n", S[k].nombre, ve_grados(g1, VP.ini[k]), ve_grados(g2, VP.pico[k]), ve_grados(g3, S[k].t), nota);
+		IN("%s  %s  %s  %s  %s\r\n", columna(c1, sizeof c1, S[k].nombre, 38), columna(c2, sizeof c2, ve_grados(g1, VP.ini[k]), 8),
+		   columna(c3, sizeof c3, ve_grados(g2, VP.pico[k]), 8), columna(c4, sizeof c4, ve_grados(g3, S[k].t), 9), nota);
 	}
 	{
 		char fr[1500];
@@ -2397,8 +2629,9 @@ static void escribe_informe(void)
 			int caida = (bat_mv_reposo - bat_mv_min_carga) * 1000 / bat_mv_reposo;
 
 			if (caida >= 50) {
-				nf += snprintf(f + nf, sizeof f - (size_t)nf, "  + El voltaje de la batería cae en la carga: de %d,%02d V en reposo a %d,%02d V (un %d,%d %% menos).\r\n", bat_mv_reposo / 1000,
-					       bat_mv_reposo % 1000 / 10, bat_mv_min_carga / 1000, bat_mv_min_carga % 1000 / 10, caida / 10, caida % 10);
+				nf += snprintf(f + nf, sizeof f - (size_t)nf, "  + El voltaje de la batería cae en la carga: de %d,%02d V en reposo a %d,%02d V (un %d,%d %% menos)%s.\r\n", bat_mv_reposo / 1000,
+					       bat_mv_reposo % 1000 / 10, bat_mv_min_carga / 1000, bat_mv_min_carga % 1000 / 10, caida / 10, caida % 10,
+					       h->ca == 0 ? "; sin enchufar, la batería lo da todo: que baje algo es normal" : "");
 				fav++;
 			} else {
 				nc += snprintf(c + nc, sizeof c - (size_t)nc, "  - El voltaje de la batería aguanta en la carga (de %d,%02d V a %d,%02d V como mucho).\r\n", bat_mv_reposo / 1000,
@@ -2417,7 +2650,7 @@ static void escribe_informe(void)
 			nc += snprintf(c + nc, sizeof c - (size_t)nc, "  · Los límites de potencia PL1/PL2 son los vatios que deja la BIOS: frenarse por ellos es normal y no dice nada de la alimentación.\r\n");
 		if (bloqueos || parones)
 			nc += snprintf(c + nc, sizeof c - (size_t)nc, "  · Los parones (ver PARONES DEL EQUIPO) no son de la alimentación por sí mismos: apuntan al firmware o a la memoria USB; si fueran cortes de corriente, el equipo se reiniciaría.\r\n");
-		IN("\r\nQUÉ APUNTA A LA ALIMENTACIÓN Y QUÉ NO (sin sacar conclusiones antes de tiempo)\r\n");
+		IN("\r\nQUÉ APUNTA A LA ALIMENTACIÓN Y QUÉ NO, EN ESTA PRUEBA (sin sacar conclusiones antes de tiempo)\r\n");
 		IN("A favor de un problema de alimentación:\r\n%s", fav ? f : "  (nada visto)\r\n");
 		IN("En contra, o que no dice nada de ella:\r\n%s", c[0] ? c : "  (nada visto)\r\n");
 		if (ram_resultado() < 0)	/* (RAM) la de la memoria, si ya se ha hecho: ver MEMORIA RAM; la lectura de los discos, en DISCOS */
@@ -2444,6 +2677,175 @@ static void escribe_informe(void)
 			IN("  La carga se paró por eso y se volvió a poner en marcha %d %s%s.\r\n", carga_vueltas, carga_vueltas == 1 ? "vez" : "veces",
 			   VP.carga_cortada ? "; al final NO quedó entera: el resultado no da por buena la temperatura en carga" : "");
 	}
+	if (h->bat_ini >= 0) {
+		IN("\r\nLa batería en esta prueba: del %d %% al %d %%", h->bat_ini, h->bat_fin >= 0 ? h->bat_fin : h->bat_ini);
+		if (h->bat_mw > 0)
+			IN("; sin enchufar, en la carga daba hasta %s W (lo dice la batería, ACPI _BST)", vatios(w, h->bat_mw));
+		IN(".\r\n");
+	}
+	IN("\r\nResultado de esta prueba:\r\n%s\r\n", resumen);
+#undef IN
+	return n;
+}
+
+/* el veredicto de una prueba de esfuerzo, en una línea (para la lista) */
+static void linea_calentar(char *d, int cabe, const struct hecha *h)
+{
+	static const char *const EST[] = { "SIN DATO", "BIEN", "TEMPLADO", "CALIENTE", "PELIGRO" };
+	char a[24], b[24], w[16];
+	int m;
+
+	if (por_seguridad)
+		m = snprintf(d, (size_t)cabe, "PARADA DE SEGURIDAD: %s", motivo);
+	else if (VP.ref < 0 || h->t_max == NO || h->t_ini == NO)
+		m = snprintf(d, (size_t)cabe, "SIN JUZGAR: ningún sensor del procesador ha medido bien la carga (ver su sección)");
+	else {
+		int e = estado_de(h->t_max, S[VP.ref].limite), sube = (h->t_max - h->t_ini) / 10;
+
+		m = snprintf(d, (size_t)cabe, "%s: llegó a %s (empezó en %s, %s%d °C)", EST[e], grados(a, h->t_max), grados(b, h->t_ini), sube >= 0 ? "+" : "", sube);
+	}
+#define LC(...) (m += snprintf(d + m, (size_t)(cabe > m ? cabe - m : 0), __VA_ARGS__), m = m < cabe ? m : cabe - 1)
+	if (h->mw >= 0)
+		LC("; el procesador, %s W de media", vatios(w, h->mw));
+	if (h->mhz > 0)
+		LC("; %d MHz", h->mhz);
+	if (h->pct_fr >= 0)
+		LC("; frenado el %d %% de la carga", h->pct_fr);
+	if (h->bat_mw > 0)
+		LC("; la batería daba hasta %s W", vatios(w, h->bat_mw));
+	if (por_esc)
+		LC("; parada a mano (Esc)");
+	if (VP.carga_cortada)
+		LC("; la carga se rompió (ver PARONES DEL EQUIPO)");
+	if (h->ca_cambio)
+		LC("; se enchufó o desenchufó en medio");
+#undef LC
+}
+
+/* (TERMO 1.1.1) la tabla que compara las de Calentar (enchufado frente a
+ * con la batería: el caso del MSI GT80, ¿lo frena la fuente?) */
+static int compara_calentar(char *t, int cabe)
+{
+	char c[10][64], v[10][40];
+	int n = 0, i, j, ult[2] = { -1, -1 }, cuantas = 0;
+	static const char *const cab[] = { "N.º", "HORA", "ALIMENTACIÓN", "DURACIÓN", "MÁXIMA", "SUBIDA", "PROCESADOR (media/máx.)", "MHz", "FRENADO", "BATERÍA" };
+	static const int an[] = { 4, 6, 14, 9, 9, 7, 24, 6, 8, 8 };
+#define IN(...) (n += snprintf(t + n, (size_t)(cabe - n), __VA_ARGS__), n = n < cabe ? n : cabe - 1)
+
+	for (i = 0; i < nhechas; i++)
+		if (HE[i].tipo == PR_CALENTAR && !HE[i].en_marcha)
+			cuantas++;
+	if (cuantas < 2)
+		return 0;
+	IN("\r\nCOMPARACIÓN DE LAS PRUEBAS DE ESFUERZO DE ESTE ARRANQUE (cada «Calentar»)\r\n ");
+	for (j = 0; j < 10; j++)
+		IN(" %s", columna(c[j], sizeof c[j], cab[j], an[j]));
+	IN("\r\n");
+	for (i = 0; i < nhechas; i++) {
+		const struct hecha *h = &HE[i];
+		char w1[16], w2[16];
+
+		if (h->tipo != PR_CALENTAR || h->en_marcha)
+			continue;
+		if (h->ca == 1 || h->ca == 0)
+			ult[h->ca] = i;
+		snprintf(v[0], sizeof v[0], "%d", h->num);
+		snprintf(v[1], sizeof v[1], "%s", h->hora);
+		snprintf(v[2], sizeof v[2], "%s%s", h->ca == 1 ? "enchufado" : h->ca == 0 ? "con batería" : "no se sabe", h->ca_cambio ? " (!)" : "");
+		snprintf(v[3], sizeof v[3], "%d s", h->seg);
+		grados(v[4], h->t_max);
+		if (h->t_max != NO && h->t_ini != NO)
+			snprintf(v[5], sizeof v[5], "%s%d °C", h->t_max >= h->t_ini ? "+" : "", (h->t_max - h->t_ini) / 10);
+		else
+			strcpy(v[5], "--");
+		if (h->mw >= 0)
+			snprintf(v[6], sizeof v[6], "%s / %s W", vatios(w1, h->mw), vatios(w2, h->mw_max));
+		else
+			strcpy(v[6], "no lo dice");
+		if (h->mhz > 0)
+			snprintf(v[7], sizeof v[7], "%d", h->mhz);
+		else
+			strcpy(v[7], "--");
+		if (h->pct_fr >= 0)
+			snprintf(v[8], sizeof v[8], "%d %%", h->pct_fr);
+		else
+			strcpy(v[8], "--");
+		if (h->bat_mw > 0)
+			snprintf(v[9], sizeof v[9], "%s W", vatios(w1, h->bat_mw));
+		else
+			strcpy(v[9], "--");
+		IN(" ");
+		for (j = 0; j < 10; j++)
+			IN(" %s", columna(c[j], sizeof c[j], v[j], an[j]));
+		IN("%s\r\n", h->seguridad ? "  PARADA DE SEGURIDAD" : h->esc ? "  (parada a mano)" : "");
+	}
+	IN("  PROCESADOR: los vatios del procesador entero en la carga (RAPL, el paquete); MHz: la frecuencia media en la carga; FRENADO: el %% de la carga en que el procesador se ha frenado "
+	   "(por potencia, por la placa o por temperatura); BATERÍA: lo más que daba la batería en la carga, si era sin enchufar (ACPI _BST). Con «(!)»: se enchufó o desenchufó en medio.\r\n");
+	if (ult[0] >= 0 && ult[1] >= 0) {
+		const struct hecha *e = &HE[ult[1]], *b = &HE[ult[0]];
+		char g1[24], g2[24], w1[16], w2[16];
+
+		IN("  Enchufado (prueba %d) frente a con la batería (prueba %d): máxima %s frente a %s", e->num, b->num, grados(g1, e->t_max), grados(g2, b->t_max));
+		if (e->mw >= 0 && b->mw >= 0)
+			IN("; el procesador, %s W frente a %s W", vatios(w1, e->mw), vatios(w2, b->mw));
+		if (e->mhz > 0 && b->mhz > 0)
+			IN("; %d MHz frente a %d MHz", e->mhz, b->mhz);
+		if (e->pct_fr >= 0 && b->pct_fr >= 0)
+			IN("; frenado el %d %% frente al %d %%", e->pct_fr, b->pct_fr);
+		IN(". (Con la carga x87, ligera, puede que ninguna llegue al límite de la BIOS: entonces no se ve si la fuente frena.)\r\n");
+	}
+#undef IN
+	return n;
+}
+
+static void escribe_informe(void)
+{
+	static char t[150000];	/* (TERMO 1.1.1) cada prueba del arranque, con su sección (archivo[]), y lo de siempre */
+	char r[120];
+	u32 a, me, d, h, mi, se;
+	int n = 0, i, hay_ram = 0, hay_rend = 0;
+#define IN(...) (n += snprintf(t + n, sizeof t - (size_t)n, __VA_ARGS__), n = n < (int)sizeof t ? n : (int)sizeof t - 1)
+
+	if (!carpeta[0] || csv_malo)
+		return;
+	fecha_hora(&a, &me, &d, &h, &mi, &se);
+	IN("\xEF\xBB\xBFINFORME DEL TERMÓMETRO DE HISPA-PENTIUM\r\n");
+	IN("=======================================\r\n\r\n");
+	IN("Fecha y hora del informe: %02u/%02u/%04u %02u:%02u (la del reloj del equipo%s)\r\n", d, me, a, h, mi, fecha_mala ? ": PARECE MAL" : "");
+	IN("Equipo: %s %s %s\r\n", za.t.fabricante, za.t.producto, za.t.version_eq);
+	IN("Placa: %s %s   BIOS: %s\r\n", za.t.placa_fab, za.t.placa, za.t.bios);
+	IN("Procesador: %s (TjMax %d °C, %s)\r\n", cpu.marca, cpu.tjmax, cpu.tj_de_msr ? "la que dice el procesador" : "de tabla");
+	if (ap_cargados)
+		IN("Núcleos: %s (%d procesadores)\r\n", topologia_texto(), ap_cargados + 1);
+	IN("\r\nPRUEBAS DE ESTE ARRANQUE (en el orden en que se han hecho; cada una, con su sección más abajo)\r\n");
+	if (hechas_total > nhechas)
+		IN("  (Las %d primeras ya no caben en esta lista: están en el .LOG.)\r\n", hechas_total - nhechas);
+	for (i = 0; i < nhechas; i++) {
+		const struct hecha *x = &HE[i];
+
+		IN("  %d. %s a %s  %s%s\r\n", x->num, x->hora, x->en_marcha ? "(en marcha)" : x->hora_fin, x->nombre,
+		   x->b_ini == -2 ? " (su sección no cabe en el informe: ver el .LOG)" : "");
+		if (x->tipo == PR_RAM && !x->en_marcha)
+			hay_ram = 1;
+		if (x->tipo == PR_RENDIMIENTO && !x->en_marcha)
+			hay_rend = 1;
+	}
+	if (!nhechas)
+		IN("  Ninguna acabada todavía.\r\n");
+	if (ruta_log[0])
+		IN("  (El .LOG de este arranque, %s, lo tiene todo seguido: cada prueba empieza y acaba con una línea «PRUEBA».)\r\n", ruta_log);
+	/* las secciones de cada una, tal cual se escribieron al acabarla */
+	for (i = 0; i < nhechas; i++)
+		if (HE[i].b_ini >= 0 && n + HE[i].b_len < (int)sizeof t - 45000) {
+			memcpy(t + n, archivo + HE[i].b_ini, (size_t)HE[i].b_len);
+			n += HE[i].b_len;
+		} else if (HE[i].b_ini >= 0)
+			IN("\r\n(La sección de la prueba %d no cabe en el informe: ver el .LOG.)\r\n", HE[i].num);
+	n += compara_calentar(t + n, (int)sizeof t - n);
+	n = n < (int)sizeof t ? n : (int)sizeof t - 1;
+	IN("\r\n=====================================================================\r\n");
+	IN("LO DEL EQUIPO (al escribir este informe, %02u:%02u)\r\n", h, mi);
+	IN("=====================================================================\r\n");
 	if (hay_bateria && en.pct <= 100) {
 		IN("\r\nBatería: %u %%, %s", en.pct, en.ca == 1 ? "enchufado a la corriente" : en.ca == 0 ? "sin enchufar" : "");
 		if (en.salud_pct <= 150)
@@ -2474,18 +2876,16 @@ static void escribe_informe(void)
 		IN("\r\nGuardado también, para Carlos: %c:\\TERMO\\EQUIPO (%u tablas ACPI tal cual%s): solo lo que dice el equipo de sí mismo, sin datos personales.\r\n",
 		   unidad, za.t.equipo_tablas, za.t.equipo_pci ? " y la lista PCI, PCI.TXT" : "");
 	if (nhallado) {
-		int i;
-
 		IN("\r\nLO QUE HA ENCONTRADO EL SISTEMA AL ARRANCAR\r\n");
 		for (i = 0; i < nhallado; i++)
 			IN("  %s\r\n", hallado[i]);
 	}
-	{
+	if (!hay_rend) {
 		char r2[120];
 
 		snprintf(r2, sizeof r2, "%s\\RENDIMIE.TXT", carpeta);
 		if (existe(r2))
-			IN("\r\nRENDIMIENTO: lo medido con «Rendimiento» está en RENDIMIE.TXT (con la tabla de los equipos medidos).\r\n");
+			IN("\r\nRENDIMIENTO: lo medido con «Rendimiento» (otra vez) está en RENDIMIE.TXT (con la tabla de los equipos medidos).\r\n");
 	}
 	if (cpu.aproximada)
 		IN("Nota: el sensor de este procesador (Atom) es aproximado.\r\n");
@@ -2495,17 +2895,24 @@ static void escribe_informe(void)
 	n = n < (int)sizeof t ? n : (int)sizeof t - 1;
 	if (!NV.n)
 		IN("No se puede leer sin su controlador la temperatura de las tarjetas gráficas que no son NVIDIA Maxwell o Pascal (AMD...), salvo que la BIOS la dé como zona ACPI.\r\n");
-	{	/* (RAM) la memoria: su sección y, en el resultado, lo que dice */
+	if (!hay_ram) {	/* (RAM) sin prueba de la memoria en este arranque: lo de siempre (no se ha probado, o la vez anterior) */
 		static char ri[17000];
 
 		ram_informe(ri, sizeof ri);
 		IN("%s", ri);
 	}
-	IN("\r\nRESULTADO\r\n---------\r\n%s\r\n", resumen);
+	IN("\r\nRESULTADO\r\n---------\r\n");
+	IN("(Una línea por prueba, en orden; el detalle de cada una, en su sección.)\r\n");
+	for (i = 0; i < nhechas; i++)
+		IN("%d. %s %s: %s\r\n", HE[i].num, HE[i].hora, HE[i].nombre, HE[i].linea);
 	{
-		char rv[400];
+		char rv[1600];
 
 		if (ram_veredicto(rv, sizeof rv))
+			IN("%s\r\n", rv);
+		rv[0] = 0;
+		disco_veredicto(carpeta, rv, (int)sizeof rv, parones || bloqueos);	/* (TERMO) lo de los discos */
+		if (rv[0])
 			IN("%s\r\n", rv);
 	}
 	IN("\r\nLos datos son los que dan los sensores del propio equipo; el registro completo (cada 2 s) está en los .CSV y .LOG de esta carpeta, y la pantalla con la gráfica en INFORME.BMP.\r\n");
@@ -2527,12 +2934,13 @@ static int frenado_en_carga(void);
 
 static void escribe_resumen(void)
 {
+	static char bl[24000];
 	int k;
 
 	VP.frenado = frenado_en_carga() || po_frenado_carga();
 	mira_mca(1);
 	ve_resumen(&VP, resumen, (int)sizeof resumen, seg_carga, por_seguridad, motivo, por_esc, simula);
-	disco_veredicto(carpeta, resumen, (int)sizeof resumen, parones || bloqueos);	/* (TERMO) lo de los discos */
+	/* (los discos, ya no aquí: son otra prueba de la lista, con su línea; y en el RESULTADO del informe) */
 	nv_veredicto(&NV, resumen + strlen(resumen), (int)(sizeof resumen - strlen(resumen)));	/* (NVIDIA) más de 90 °C, no responde */
 	{
 		char pv[600];	/* (TERMO) la potencia (potencia.c), si cabe */
@@ -2544,6 +2952,26 @@ static void escribe_resumen(void)
 	}
 	for (k = 0; k < ns && k < VE_MAXS; k++)
 		S[k].fija = ve_fija(&VP, k) && k != VP.ref;
+	if (he_cal >= 0 && he_cal < nhechas) {	/* (TERMO 1.1.1) su ficha y su sección, antes de que la siguiente lo cambie */
+		struct hecha *h = &HE[he_cal];
+		char fin[12], ln[300];
+		int nb;
+
+		h->t_ini = t_ini;
+		h->t_max = pico;
+		h->mhz = ve_mhz_carga(&VP);
+		h->seg = seg_carga;
+		h->seguridad = por_seguridad;
+		h->esc = por_esc;
+		po_cifras(&h->mw, &h->mw_max, &h->pct_fr);
+		if (hay_bateria && en.pct <= 100)
+			h->bat_fin = (int)en.pct;
+		hora_texto(fin, sizeof fin);
+		linea_calentar(ln, sizeof ln, h);
+		nb = bloque_calentar(bl, (int)sizeof bl, h, fin);
+		he_acaba(he_cal, ln, bl, nb, 1);
+		he_cal = -1;
+	}
 	escribe_informe();
 	disco_pausa(carpeta, 0);	/* (TERMO) acabada la prueba (y el enfriamiento): los discos, otra vez */
 	serie("termo: resumen: %s\n", resumen);
@@ -2562,6 +2990,7 @@ static void escribe_resumen(void)
 		if (!escribe(ruta_txt, t, (u32)n, 0))
 			escribe(ruta_txt, t, (u32)n, 1);
 	}
+	reinicia_despues();
 }
 
 /* lo de la prueba, cada segundo */
@@ -2908,6 +3337,37 @@ static int informe_frenos(char *d, int cabe)
 	return n;
 }
 
+/* (TERMO 1.1.1) al empezar una prueba de esfuerzo: lo que se cuenta
+ * «durante la prueba» (la batería con el cargador, el voltaje en la carga,
+ * los parones, los SMI, los Machine Check nuevos), a 0 */
+static int mca_len_antes = -1;
+
+static void reinicia_durante(void)
+{
+	bat_mv_min_carga = 0;
+	bat_pct_ca_ini = -1;
+	bat_pct_ca_min = 101;
+	bat_baja_dicho = 0;
+	parones = paron_peor_ms = parado_total_ms = parones_smi = 0;
+	bloqueos = bloqueo_peor_ms = 0;
+	cmos_atras = cmos_atras_dicho = 0;
+	smi_total = 0;
+	mca_nuevos = 0;
+	if (mca_len_antes < 0)
+		mca_len_antes = (int)strlen(mca_texto);
+	else if (mca_len_antes < (int)sizeof mca_texto)
+		mca_texto[mca_len_antes] = 0;
+}
+
+/* y al acabarla (su sección ya escrita): lo contado por fases (los frenos y
+ * la potencia), a 0; así el reposo de la siguiente es el de después de esta */
+static void reinicia_despues(void)
+{
+	memset(frenos_cuenta, 0, sizeof frenos_cuenta);
+	freno_frio = 0;
+	po_nueva_prueba();
+}
+
 /* ---------------------------------------------------------------- la potencia
  * (TERMO) potencia.c: los vatios (RAPL), los límites de la BIOS (PL1, PL2,
  * TDP), por qué se frena (19Ch, 1B1h, 690h, 6B0h, 6B1h, 64Fh, cada 2 s y
@@ -3046,9 +3506,19 @@ static void pulso(void)
 
 			if (disco_mira(carpeta, ad, sizeof ad)) {
 				suceso_log("%s", ad);
-				if (disco_acabado() && fase == F_RESULTADO && informe_dicho[0]) {
-					disco_veredicto(carpeta, resumen, (int)sizeof resumen, parones || bloqueos);
-					escribe_informe();
+				/* (TERMO 1.1.1) acabada: a la lista de las pruebas (sin tapar
+				 * el cuadro de otra) y, si ya hay informe, otra vez entero */
+				if (disco_acabado() && !discos_en_lista) {
+					const char *x = busca(ad, "Hecho: ");
+
+					discos_en_lista = 1;
+					if (x && x[7] >= '1' && x[7] <= '9') {	/* (con algún disco: sin ninguno, nada en la lista) */
+						int i = he_nueva(PR_DISCOS, "Discos (se leen solos al abrir)", 0);
+
+						he_acaba(i, x + 7, 0, 0, 0);
+					}
+					if (informe_dicho[0])
+						escribe_informe();
 				}
 			}
 		}
@@ -3350,6 +3820,88 @@ static int nota(int y, const char *t, u32 c)
 	return lz_parrafo(&LZ, 14, y, LZ.an - 28, t, c, 1, 16);
 }
 
+/* una línea de la lista, recortada (sin partir una letra) para que quepa en «max» puntos */
+static void recorta(char *d, int max)
+{
+	int n = (int)strlen(d);
+
+	if (ancho_texto(d, 1) <= max)
+		return;
+	while (n > 0 && ancho_texto(d, 1) + ancho_texto("...", 1) > max) {
+		n--;
+		while (n > 0 && (d[n] & 0xC0) == 0x80)
+			n--;
+		d[n] = 0;
+	}
+	strcpy(d + n, "...");
+}
+
+static void pinta_cuadro(int W, int ym)
+{
+	const struct hecha *v = &HE[he_vista];
+	char tit[160], l[480];
+	const char *txt = v->tipo == PR_CALENTAR && resumen[0] && he_vista == ultima_calentar() ? resumen : v->linea;
+	int an = W - 80, rx = 40, lt, ll = nhechas, esc, al, ry, i, y, desde = 0, cabe = ym - 10 - 84, corto = 0;
+	u32 firma;
+
+	snprintf(tit, sizeof tit, "Resultado: %s (prueba %d, %s a %s)", v->nombre, v->num, v->hora, v->hora_fin);
+	esc = ancho_texto(tit, 2) <= an - 28 ? 2 : 1;
+	lt = lz_parrafo(0, 0, 0, an - 28, txt, 0, 1, 18);
+	al = 26 + 8 * esc * 2 + 6 + 18 * lt + 10 + 20 + 18 * ll + 30;
+	if (al > cabe && txt != v->linea) {	/* (no cabe todo: el resultado en una línea; el entero, en INFORME.TXT) */
+		txt = v->linea;
+		corto = 1;
+		lt = lz_parrafo(0, 0, 0, an - 28, txt, 0, 1, 18);
+		al = 26 + 8 * esc * 2 + 6 + 18 * lt + 10 + 20 + 18 * ll + 30;
+	}
+	while (al > cabe && ll > 1) {	/* (y si aún no cabe, las últimas de la lista) */
+		ll--;
+		desde++;
+		al -= 18;
+	}
+	ry = ym - al - 10;
+	if (ry < 84)
+		ry = 84;
+	lz_rect(&LZ, rx + 4, ry + 4, an, al, 0x9A948A);
+	lz_rect(&LZ, rx, ry, an, al, 0xFFFDF5);
+	lz_marco(&LZ, rx, ry, an, al, C_TINTA);
+	lz_marco(&LZ, rx + 1, ry + 1, an - 2, al - 2, C_TINTA);
+	lz_negrita(&LZ, rx + 14, ry + 10, tit, C_TINTA, esc);
+	y = ry + 10 + 8 * esc * 2 + 6;
+	lz_parrafo(&LZ, rx + 14, y, an - 28, txt, C_TINTA, 1, 18);
+	y += 18 * lt + 10;
+	lz_rect(&LZ, rx + 14, y - 4, an - 28, 1, C_RAYA);
+	snprintf(l, sizeof l, "Pruebas de este arranque (%d)%s:", nhechas, desde ? ", las últimas" : "");
+	lz_negrita(&LZ, rx + 14, y, l, C_TINTA, 1);
+	y += 20;
+	for (i = desde; i < nhechas; i++, y += 18) {
+		const struct hecha *h = &HE[i];
+
+		snprintf(l, sizeof l, "%s%d. %s a %s  %s: %s", i == he_vista ? "> " : "  ", h->num, h->hora, h->en_marcha ? "..." : h->hora_fin, h->nombre, h->linea);
+		recorta(l, an - 28);
+		if (i == he_vista)
+			lz_negrita(&LZ, rx + 14, y, l, C_TINTA, 1);
+		else
+			lz_texto(&LZ, rx + 14, y, l, C_TINTA, 1);
+	}
+	lz_texto(&LZ, rx + 14, ry + al - 22, corto ? "Intro o un clic: cerrar. P: volver a verlo. (El resultado entero, en INFORME.TXT de \\TERMO.)" :
+		 "Intro o un clic: cerrar. P: volver a verlo. (Todo queda en INFORME.TXT de \\TERMO.)", C_GRIS, 1);
+	/* (las pruebas: lo que enseña, por el puerto serie, cada vez que cambia) */
+	firma = (u32)he_vista * 7919u + (u32)nhechas * 131u + (u32)desde * 17u + (u32)corto;
+	for (i = 0; i < nhechas; i++)
+		firma = firma * 31u + (u32)HE[i].en_marcha + (u32)strlen(HE[i].linea);
+	if (firma != cuadro_dicho) {
+		static char b[3000];
+		int m;
+
+		cuadro_dicho = firma;
+		m = snprintf(b, sizeof b, "termo: pantalla: cuadro «%s»; lista:", tit);
+		for (i = desde; i < nhechas && m < (int)sizeof b - 200; i++)
+			m += snprintf(b + m, sizeof b - (size_t)m, " %s%d. %s %s: %s |", i == he_vista ? ">" : "", HE[i].num, HE[i].hora, HE[i].nombre, HE[i].linea);
+		serie("%s\n", b);
+	}
+}
+
 static void pinta(void)
 {
 	int W = LZ.an, H = LZ.al, y, k, fila = 30, cn, ca, cmi, cma, cli, ce, ance, lineas;
@@ -3549,6 +4101,18 @@ static void pinta(void)
 			lz_rect(&LZ, 10, ym, W - 20, 26, C_BIEN);
 			lz_rect(&LZ, 14, ym + 4, ancho_texto(a, 1) + 8, 18, 0xFFFFFF);
 			lz_negrita(&LZ, 18, ym + 5, a, C_TINTA, 1);
+		} else if (midiendo || ram_activa()) {	/* (TERMO 1.1.1) la que está en marcha, aunque no sea Calentar */
+			int i = midiendo ? he_mide : he_ram;
+
+			snprintf(a, sizeof a, "EN MARCHA%s%s: %s  ·  Esc para parar", i >= 0 && i < nhechas ? ", prueba " : "",
+				 i >= 0 && i < nhechas ? (snprintf(g, sizeof g, "%d", HE[i].num), g) : "", midiendo ? aviso_mide : ram_aviso());
+			lz_rect(&LZ, 10, ym, W - 20, 26, C_TEMPLADO);
+			trama(10, ym, W - 20, 26, E_TEMPLADO, aclara(C_TEMPLADO, -60));
+			lz_rect(&LZ, 14, ym + 4, LIMITA(ancho_texto(a, 1) + 8, 0, W - 28), 18, 0xFFFFFF);
+			lz_negrita(&LZ, 18, ym + 5, a, C_TINTA, 1);
+		} else if (nhechas) {
+			snprintf(a, sizeof a, "Pruebas hechas en este arranque: %d (P: verlas con su resultado). Calentar (C), Rendimiento (R), Memoria RAM (M).", nhechas);
+			lz_texto(&LZ, 14, ym + 5, a, C_TINTA, 1);
 		} else {
 			lz_texto(&LZ, 14, ym + 5, "Prueba de esfuerzo: elija el tiempo y pulse «Calentar» (C). Se para sola si se calienta.", C_TINTA, 1);
 		}
@@ -3617,20 +4181,12 @@ static void pinta(void)
 			lz_parrafo(&LZ, rx + 14, ry + 54, an - 28, anterior, C_TINTA, 1, 18);
 			lz_texto(&LZ, rx + 14, ry + al - 22, "Intro, Esc o un clic: cerrar este aviso.", C_GRIS, 1);
 		}
-		/* el resultado, encima de la gráfica */
-		if (fase == F_RESULTADO) {
-			int an = W - 80, rx = 40, al = 90 + 18 * lz_parrafo(0, 0, 0, an - 28, resumen, 0, 1, 18), ry = ym - al - 10;
-
-			if (ry < 84)
-				ry = 84;
-			lz_rect(&LZ, rx + 4, ry + 4, an, al, 0x9A948A);
-			lz_rect(&LZ, rx, ry, an, al, 0xFFFDF5);
-			lz_marco(&LZ, rx, ry, an, al, C_TINTA);
-			lz_marco(&LZ, rx + 1, ry + 1, an - 2, al - 2, C_TINTA);
-			lz_negrita(&LZ, rx + 14, ry + 10, "Resultado de la prueba", C_TINTA, 2);
-			lz_parrafo(&LZ, rx + 14, ry + 46, an - 28, resumen, C_TINTA, 1, 18);
-			lz_texto(&LZ, rx + 14, ry + al - 22, "Intro o un clic: cerrar este cuadro. (El resumen también queda en el .TXT de \\TERMO.)", C_GRIS, 1);
-		}
+		/* el resultado de la última prueba acabada, encima de la gráfica, y
+		 * (TERMO 1.1.1) la lista de todas las de este arranque, para
+		 * compararlas sin salir: todo en palabras (el daltonismo), la de
+		 * este cuadro marcada con «>» */
+		if (ver_cuadro && he_vista >= 0 && he_vista < nhechas)
+			pinta_cuadro(W, ym);
 	}
 	vuelca_cambios();
 }
@@ -3710,9 +4266,11 @@ static void lanza_ram(int completa)
 {
 	if (ram_activa() || midiendo || fase == F_CARGA || fase == F_ENFRIA || !carpeta[0])
 		return;
-	if (ram_lanza(carpeta, completa, ram_simula))
+	if (ram_lanza(carpeta, completa, ram_simula)) {
+		he_ram = he_nueva(PR_RAM, completa ? "Memoria RAM (la completa)" : "Memoria RAM (la rápida)", 1);
 		suceso_log("EMPIEZA la prueba de la memoria RAM (TERMO.BIN /RAM%s; %s; Esc la para)", completa ? " /COMPLETA" : "",
 			   completa ? "la completa: dos pasadas de todo" : "la rápida: menos de 2 min");
+	}
 	jg_cambio = 1;
 }
 
@@ -3724,8 +4282,25 @@ static void mira_ram(void)
 	if (!ram_mira(t, sizeof t, &acabada))
 		return;
 	suceso_log("memoria RAM: %s", t);
-	if (acabada)
-		ram_pon_en_informe(carpeta);
+	if (acabada) {	/* (TERMO 1.1.1) su ficha, con su sección (lo de RAM.TXT de esta vez) y el informe entero */
+		static char ri[17500];
+		char ban[200];
+		int nb = 0, i = he_ram;
+
+		if (i >= 0 && i < nhechas) {
+			char fin[12];
+
+			hora_texto(fin, sizeof fin);
+			nb = snprintf(ri, sizeof ri, "\r\n=====================================================================\r\n"
+				      "PRUEBA %d DE ESTE ARRANQUE: %s, de %s a %s\r\n=====================================================================",
+				      HE[i].num, HE[i].nombre, HE[i].hms, fin);
+			nb += ram_informe(ri + nb, (int)sizeof ri - nb);
+			snprintf(ban, sizeof ban, "%s", !strncmp(t, "Hecho: ", 7) ? t + 7 : t);
+			he_acaba(i, ban, ri, nb, 1);
+		}
+		he_ram = -1;
+		escribe_informe();
+	}
 	jg_cambio = 1;
 }
 
@@ -3770,6 +4345,7 @@ static void lanza_mide(void)
 		return;
 	}
 	midiendo = 1;
+	he_mide = he_nueva(PR_RENDIMIENTO, "Rendimiento", 1);
 	disco_pausa(carpeta, 1);	/* (TERMO) los discos esperan al rendimiento */
 	t_mide = jg_tics();
 	snprintf(aviso_mide, sizeof aviso_mide, "Rendimiento: empezando...");
@@ -3782,6 +4358,39 @@ static void para_mide(void)
 
 	snprintf(r, sizeof r, "%s\\MIDE.PAR", carpeta);
 	escribe(r, "parar", 5, 1);
+}
+
+/* (TERMO 1.1.1) acabada la medida: su ficha, con su sección (RENDIMIE.TXT de esta vez) */
+static void acaba_mide(const char *linea, int hecha)
+{
+	static char rb[7000];
+	char fin[12];
+	int nb = 0, i = he_mide;
+
+	he_mide = -1;
+	if (i < 0 || i >= nhechas)
+		return;
+	hora_texto(fin, sizeof fin);
+	nb = snprintf(rb, sizeof rb, "\r\n=====================================================================\r\n"
+		      "PRUEBA %d DE ESTE ARRANQUE: %s, de %s a %s\r\n=====================================================================\r\n"
+		      "RENDIMIENTO\r\n-----------\r\n", HE[i].num, HE[i].nombre, HE[i].hms, fin);
+	if (hecha) {
+		int k = lee_de_carpeta("RENDIMIE.TXT", rb + nb, (int)sizeof rb - nb - 80);
+		const char *p = rb + nb;
+
+		if (k >= 3 && !strncmp(p, "\xEF\xBB\xBF", 3)) {	/* (sin la marca UTF-8 de en medio) */
+			memmove(rb + nb, rb + nb + 3, (size_t)k - 2);
+			k -= 3;
+		}
+		nb += k > 0 ? k : 0;
+		if (k <= 0)
+			nb += snprintf(rb + nb, sizeof rb - (size_t)nb, "  (RENDIMIE.TXT no se puede leer: %s)\r\n", linea);
+	} else
+		nb += snprintf(rb + nb, sizeof rb - (size_t)nb, "  %s\r\n", linea);
+	if (nb > 0 && rb[nb - 1] != '\n')
+		nb += snprintf(rb + nb, sizeof rb - (size_t)nb, "\r\n");
+	he_acaba(i, linea, rb, nb, 1);
+	escribe_informe();
 }
 
 static void mira_mide(void)
@@ -3807,12 +4416,14 @@ static void mira_mide(void)
 			if (fase != F_CARGA && fase != F_ENFRIA)
 				disco_pausa(carpeta, 0);
 			suceso_log("medida del rendimiento: %s", t);
+			acaba_mide(!strncmp(t, "Hecho: ", 7) ? t + 7 : t, busca(t, "Hecho") != 0);
 		}
 	}
 	if ((int)(jg_tics() - t_mide) > 300 * (int)jg_hz && midiendo) {
 		midiendo = 0;
 		if (fase != F_CARGA && fase != F_ENFRIA)
 			disco_pausa(carpeta, 0);
+		acaba_mide("no ha dicho nada en 5 minutos: se da por perdida", 0);
 	}
 }
 
@@ -3924,6 +4535,10 @@ static void haz(int id)
 			suceso_log("Calentar: espere a que acabe la prueba de la memoria RAM (Esc la para)");
 			break;
 		}
+		if (midiendo) {	/* (TERMO 1.1.1) ni con «Rendimiento» en marcha: se falsearían las dos */
+			suceso_log("Calentar: espere a que acabe «Rendimiento» (Esc la para)");
+			break;
+		}
 		if (fase != F_CARGA) {
 			fase = F_REPOSO;
 			empieza();
@@ -3987,17 +4602,32 @@ static void suceso(const struct suceso *s)
 		case 't': case 'T': if (puede_terminal) lanza_terminal(); break;
 		case 'r': case 'R': lanza_mide(); break;
 		case 'm': case 'M': lanza_ram(0); break;
+		case 'p': case 'P':	/* (TERMO 1.1.1) la lista de las pruebas, otra vez */
+			if (nhechas) {
+				int i;
+
+				for (i = nhechas - 1; i > 0 && HE[i].en_marcha; i--)
+					;
+				he_vista = i;
+				ver_cuadro = !ver_cuadro || he_vista < 0 ? 1 : 0;
+				jg_cambio = 1;
+			}
+			break;
 		default:
-			if (ES_INTRO(s->a) && fase == F_RESULTADO) {
-				fase = F_REPOSO;
+			if (ES_INTRO(s->a) && (ver_cuadro || fase == F_RESULTADO)) {
+				ver_cuadro = 0;
+				if (fase == F_RESULTADO)
+					fase = F_REPOSO;
 				jg_cambio = 1;
 			}
 		}
 	} else if (s->clase == EV_RATON_BAJA) {
 		int x = (int)(int32_t)s->a, y = (int)(int32_t)s->b;
 
-		if (fase == F_RESULTADO) {
-			fase = F_REPOSO;
+		if (ver_cuadro || fase == F_RESULTADO) {
+			ver_cuadro = 0;
+			if (fase == F_RESULTADO)
+				fase = F_REPOSO;
 			jg_cambio = 1;
 			return;
 		}

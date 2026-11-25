@@ -1,5 +1,5 @@
-Termómetro de Hispa-Pentium 1.0
-===============================
+Termómetro de Hispa-Pentium 1.1.1
+=================================
 
 Mide la temperatura del procesador (Intel y AMD) y la de las zonas térmicas
 de la BIOS (ACPI), hace una prueba de esfuerzo («Calentar», 5, 10 o 15
@@ -15,7 +15,10 @@ LibreOffice), MMDDHHMM.LOG (todo lo que pasa, a prueba de apagones),
 MMDDHHMM.TXT (el resumen de cada prueba) y, con F12, la pantalla en .BMP. Si
 el equipo se apagó solo la vez anterior, lo dice al abrirlo.
 
-Teclas: C calentar; 1, 2 y 3 los minutos; Esc parar; F12 guardar la pantalla.
+Teclas: C calentar; 1, 2 y 3 los minutos; Esc parar; R rendimiento; M la
+memoria RAM; P la lista de las pruebas de este arranque, con su resultado;
+F12 guardar la pantalla. Se pueden hacer varias pruebas seguidas: INFORME.TXT
+las lleva todas, cada una con su parte, y compara las de Calentar.
 
 Lo que no se puede leer, se dice: la gráfica dedicada (sin su controlador),
 un sensor que no se mueve («sin lectura fiable») o uno que da algo imposible

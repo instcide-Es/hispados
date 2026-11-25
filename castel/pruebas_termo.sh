@@ -40,6 +40,11 @@
 #     en INFORME.TXT); y en el anfitrión, nvidia.c con fichas de mentira.
 #  7. Por UEFI (OVMF, q35, -smp 2): el Termómetro, las zonas y la carga.
 #  8. «Rendimiento» (R): las medidas en RENDIMIE.TXT, y que Esc la para.
+#     8b. (1.1.1) Varias pruebas en el mismo arranque: Calentar y luego
+#     Rendimiento (la pantalla, en capturas: la que está en marcha, su
+#     resultado y la lista de todas; INFORME.TXT con cada una en su sección);
+#     y con la batería, Calentar sin enchufar y enchufado, con la tabla que
+#     las compara.
 # 10. (DISCOS) los discos de dentro: IDE, SATA y NVMe en QEMU, solo leer
 #     (pruebas_termo_disco.sh; y en la 0, disco.c con datos simulados).
 # 11. (RAM) «Memoria RAM» (M; termo/ram.c y termoram.cas): en el anfitrión, los
@@ -55,6 +60,7 @@
 
 # termo_qemu IMAGEN NOMBRE SEGUNDOS "CPU" "t:orden del monitor"...
 # (TQ_RED: la red de QEMU; sin red si no se dice. TQ_FIRM: el firmware, OVMF para UEFI)
+# (TQ_DESPUES: con TQ_HASTA, una orden más del monitor cuando ya ha salido)
 # (TQ_HASTA: una función que mira el puerto serie (el archivo, en CP437, como
 # primer argumento) y da 0 cuando ya ha salido lo que se va a comprobar: con
 # ella, SEGUNDOS ya no es cuándo se mata la máquina: después de las órdenes,
@@ -97,6 +103,8 @@ termo_qemu() {
     tope=$((${TQ_TOPE:-$((seg * 2))} + sh))
     while [ $t -lt $tope ] && kill -0 $q 2> /dev/null && ! $TQ_HASTA $Y/$n.sal; do sleep 1; t=$((t + 1)); done
     if $TQ_HASTA $Y/$n.sal; then sleep ${TQ_MARGEN:-3}; else echo "        (${n}: a los $t s, sin lo que se esperaba: $TQ_HASTA)"; fi
+    # (TQ_DESPUES: una orden del monitor, ya visto lo que se esperaba; p. ej. «screendump»)
+    if [ -n "${TQ_DESPUES:-}" ]; then printf '%s\n' "$TQ_DESPUES" | socat - UNIX-CONNECT:$Y/$n.mon > /dev/null 2>&1; sleep 2; fi
   else
     tq_hasta_t $((seg + sh))
   fi
@@ -464,6 +472,8 @@ if mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT 2> /dev/null | grep -q '^MEDID
 else ko "RENDIMIE.TXT: $(mtype -i $Y/termo.img@@1M ::TERMO/RENDIMIE.TXT 2> /dev/null | head -n 6 | tr '\n' ' ')"; fi
 termo_qemu $Y/termo.img t10 75 "$cpum" "46:sendkey ret" "48:sendkey r" "56:sendkey esc"
 mira "«Rendimiento» se para con Esc" "termo: rendimiento: Medida cancelada (Esc)"
+# 8b. (TERMO 1.1.1) varias pruebas en el mismo arranque: la pantalla y el informe
+termo_varias
 # 9. (TERMO) guardar de verdad (los Intel nuevos que no guardaban nada):
 # (a) sin la carpeta TERMO (borrada entera antes de arrancar) y la máquina
 # matada a mitad de la carga: el .LOG y el .CSV quedan, hasta ese momento, y
@@ -480,6 +490,87 @@ termo_terminal
 # 10. (DISCOS) tres discos de dentro (IDE, SATA y NVMe): salud, lectura, sin escribir
 termo_discos
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $Y/ssh/*.ppm $Y/envio/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
+}
+
+# (TERMO 1.1.1) 8b. Varias pruebas en el mismo arranque (Carlos, 25/11/2026,
+# ASUS GL553VD: «al comenzar otra se queda el resultado de la primera en
+# pantalla»; y el INFORME.TXT de las dos de Calentar, mezclado).
+# (a) Calentar (Esc y Esc: el resultado ya) y luego Rendimiento: en pantalla
+# (capturas, con la letra del sistema; la ventana empieza unos puntos más
+# allá: los rectángulos, con holgura), el cuadro de la primera con la lista;
+# mientras mide, «EN MARCHA» y sin el cuadro de antes; al acabar, el
+# resultado de Rendimiento y la lista con las dos (también por el puerto
+# serie); INFORME.TXT con las dos en orden, cada una con su sección, y el
+# RESULTADO con una línea por prueba; el .LOG con sus líneas PRUEBA.
+# (b) Con la batería de mentira: Calentar con la batería, enchufar (CMOS 61h)
+# y Calentar enchufado: cada una con su alimentación, sin frases de la otra,
+# y la tabla que las compara
+tq_dos_hecho() { grep -a 'termo: ' $1 | awk '/termo: prueba 2: acaba/ { d = NR } /informe para el t/ { i = NR } END { exit !(d && i > d) }'; }
+td_cap() { python3 -I $AQUI/nucleo32/mira_captura.py "$@" > $Y/cap.txt 2>&1; }
+termo_varias() {
+  local cpu="-smp 2 -cpu Haswell" I=$Y/varias.txt f L a b
+  [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host -smp 2"
+  cp $Y/termo.img $Y/v.img
+  for f in $(mdir -b -i $Y/v.img@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT|EST)$'); do mdel -i $Y/v.img@@1M "$f" > /dev/null 2>&1; done
+  rm -f $Y/v1.ppm $Y/v2.ppm $Y/v3.ppm
+  TQ_HASTA=tq_dos_hecho TQ_TOPE=420 TQ_DESPUES="screendump $Y/v3.ppm" \
+    termo_qemu $Y/v.img tv1 120 "$cpu" "44:sendkey ret" "46:sendkey c" "62:sendkey esc" "66:sendkey esc" "72:screendump $Y/v1.ppm" "76:sendkey r" "84:screendump $Y/v2.ppm"
+  mira "(1.1.1) dos pruebas seguidas: cada una con su ficha (empieza y acaba) y, al acabar Rendimiento, el cuadro con su resultado y la lista con las dos" \
+    "termo: prueba 1: empieza «Calentar (10 min)»" "termo: prueba 1: acaba «Calentar (10 min)»: .*parada a mano (Esc)" "termo: prueba 2: empieza «Rendimiento»" \
+    "termo: prueba 2: acaba «Rendimiento»: SHA-256" \
+    "termo: pantalla: cuadro «Resultado: Rendimiento (prueba 2, [0-9:]* a [0-9:]*)»; lista: 1\. [0-9:]* Calentar (10 min): .* | >2\. [0-9:]* Rendimiento: SHA-256"
+  if [ -s $Y/v1.ppm ] && td_cap $Y/v1.ppm negrita 40 80 80 2000 "Pruebas de este arranque (1):" negrita 40 80 80 2000 "> 1." negrita 0 80 1000 2000 "Calentar (10 min): BIEN"; then
+    ok "(1.1.1) en pantalla, acabada Calentar: su resultado y la lista de las pruebas (1), la suya marcada"
+  else ko "(1.1.1) la pantalla, acabada Calentar (v1.ppm): $(head -c 300 $Y/cap.txt 2> /dev/null)"; fi
+  if [ -s $Y/v2.ppm ] && td_cap $Y/v2.ppm negrita 10 300 40 2000 "EN MARCHA, prueba 2: Rendimiento:" notexto 40 80 80 1000 "Pruebas de este" notexto 200 80 240 1000 "Calentar (10 min):"; then
+    ok "(1.1.1) en pantalla, con Rendimiento en marcha: «EN MARCHA, prueba 2» y el resultado de Calentar ya no está"
+  else ko "(1.1.1) la pantalla con Rendimiento en marcha (v2.ppm): $(head -c 300 $Y/cap.txt 2> /dev/null)"; fi
+  if [ -s $Y/v3.ppm ] && td_cap $Y/v3.ppm negrita 40 80 80 2000 "Pruebas de este arranque (2):" texto 40 80 80 2000 "  1. " negrita 40 80 80 2000 "> 2." negrita 0 80 1000 2000 "Rendimiento: SHA-256" texto 0 80 1000 2000 "Calentar (10 min): BIEN"; then
+    ok "(1.1.1) en pantalla, acabado Rendimiento: su resultado (no el de Calentar) y la lista con las dos (la de Rendimiento, marcada)"
+  else ko "(1.1.1) la pantalla, acabado Rendimiento (v3.ppm): $(head -c 300 $Y/cap.txt 2> /dev/null)"; fi
+  mtype -i $Y/v.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' > $I
+  a=$(grep -n '^PRUEBA 1 DE ESTE ARRANQUE: Calentar (10 min), de ' $I | head -n 1 | cut -d: -f1)
+  b=$(grep -n '^PRUEBA 2 DE ESTE ARRANQUE: Rendimiento, de ' $I | head -n 1 | cut -d: -f1)
+  if grep -q '^PRUEBAS DE ESTE ARRANQUE' $I && grep -q '^  1\. [0-9:]* a [0-9:]*  Calentar (10 min)$' $I && grep -q '^  2\. [0-9:]* a [0-9:]*  Rendimiento$' $I \
+     && [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] && sed -n "${a},${b}p" $I | grep -q '^FRENADOS DEL PROCESADOR' && sed -n "${a},${b}p" $I | grep -q '^Resultado de esta prueba:' \
+     && sed -n "${b},\$p" $I | grep -q '^MEDIDA;' && grep -q '^1\. [0-9:]* Calentar (10 min): .*parada a mano' $I && grep -q '^2\. [0-9:]* Rendimiento: SHA-256' $I \
+     && ! grep -q '^38s' $I && grep -q '^Núcleo 0 del procesador  \|^Zona ACPI \\_TZ_.TZ01  ' $I; then
+    ok "(1.1.1) INFORME.TXT: las dos, en orden, cada una con su sección (Calentar con sus frenos y su resultado; Rendimiento con RENDIMIE.TXT), y el RESULTADO con una línea por prueba; la tabla de sensores, en columnas"
+  else ko "(1.1.1) INFORME.TXT con las dos pruebas: $(grep -n '^PRUEBA\|^  [0-9]\.\|^[0-9]\. ' $I | head -n 8 | tr '\n' ' ')"; fi
+  L=$(mdir -b -i $Y/v.img@@1M ::TERMO 2> /dev/null | tr -d ' ' | grep '[0-9]\{8\}\.LOG$')
+  if mtype -i $Y/v.img@@1M $L 2> /dev/null | grep -q ' PRUEBA ===== PRUEBA 1 de este arranque: Calentar (10 min), empieza a las ' \
+     && mtype -i $Y/v.img@@1M $L | grep -q ' PRUEBA ===== PRUEBA 2: Rendimiento, acaba a las '; then
+    ok "(1.1.1) el .LOG del arranque: cada prueba empieza y acaba con su línea PRUEBA"
+  else ko "(1.1.1) el .LOG sin las líneas PRUEBA: $(mtype -i $Y/v.img@@1M $L 2> /dev/null | grep ' PRUEBA ' | head -n 3 | tr '\n' ' ')"; fi
+  # (b) con la batería: sin enchufar y luego enchufado
+  local B="o /b 0x70 0x60" E="o /b 0x70 0x61"
+  cp $Y/termo.img $Y/v.img
+  for f in $(mdir -b -i $Y/v.img@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT|EST)$'); do mdel -i $Y/v.img@@1M "$f" > /dev/null 2>&1; done
+  TQ_HASTA=tq_dos_hecho TQ_TOPE=420 TQ_ACPI="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml" \
+    termo_qemu $Y/v.img tv2 150 "$cpu" "2:$B" "2:o /b 0x71 60" "3:$E" "3:o /b 0x71 2" \
+    "44:sendkey ret" "46:sendkey c" "70:sendkey esc" "74:sendkey esc" "78:$E" "78:o /b 0x71 3" "96:sendkey c" "120:sendkey esc" "124:sendkey esc"
+  mira "(1.1.1) con la batería: Calentar con batería y, enchufado después, Calentar enchufado (cada una con su nombre)" \
+    "termo: prueba 1: empieza «Calentar con batería (10 min)»" "termo: prueba 2: empieza «Calentar enchufado (10 min)»" "termo: prueba 2: acaba «Calentar enchufado (10 min)»"
+  mtype -i $Y/v.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' > $I
+  a=$(grep -n '^PRUEBA 1 DE ESTE ARRANQUE: ' $I | head -n 1 | cut -d: -f1)
+  b=$(grep -n '^PRUEBA 2 DE ESTE ARRANQUE: ' $I | head -n 1 | cut -d: -f1)
+  f=
+  [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || f="$f sin las dos secciones;"
+  if [ -z "$f" ]; then
+    sed -n "${a},$((b - 1))p" $I > $Y/varias1.txt
+    sed -n "${b},\$p" $I | sed '/^COMPARACIÓN DE LAS PRUEBAS/,$d' > $Y/varias2.txt
+    grep -q '^Alimentación: con la batería (sin enchufar)' $Y/varias1.txt || f="$f la 1 no dice «con la batería»;"
+    grep -q 'Con el cargador puesto' $Y/varias1.txt && f="$f la 1 (con la batería) habla del cargador;"
+    grep -q '^La batería en esta prueba: del [0-9]* % al [0-9]* %; sin enchufar, en la carga daba hasta 11,0 W' $Y/varias1.txt || f="$f la 1 sin lo que daba la batería;"
+    grep -q '^Alimentación: enchufado a la corriente' $Y/varias2.txt || f="$f la 2 no dice «enchufado»;"
+    grep -q 'daba hasta' $Y/varias2.txt && f="$f la 2 (enchufada) con los vatios de la batería;"
+    grep -q '^COMPARACIÓN DE LAS PRUEBAS DE ESFUERZO DE ESTE ARRANQUE' $I || f="$f sin la COMPARACIÓN;"
+    grep -q '^  1    [0-9:]*  con batería .* 11,0 W' $I || f="$f la fila 1 (con batería, 11,0 W);"
+    grep -q '^  2    [0-9:]*  enchufado ' $I || f="$f la fila 2 (enchufado);"
+    grep -q '^  Enchufado (prueba 2) frente a con la batería (prueba 1): máxima ' $I || f="$f sin la frase que las compara;"
+  fi
+  if [ -z "$f" ]; then ok "(1.1.1) INFORME.TXT: cada Calentar con su alimentación y lo suyo (ni el cargador en la de batería ni la batería en la enchufada) y la tabla que compara enchufado y con batería"
+  else ko "(1.1.1) INFORME.TXT, enchufado y con batería:$f"; grep -n '^PRUEBA\|^Alimentación\|^COMPARACIÓN\|^  [12]    \|^La batería en esta' $I | head -n 10 | sed 's/^/        /'; fi
 }
 
 # (TERMO) 4. «Enviar a Carlos»: sin red y con red (HTTPS de prueba)

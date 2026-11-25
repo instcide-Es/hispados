@@ -3,7 +3,7 @@
  * biblioteca de verdad (-ffreestanding): la memoria (malloc y free, con
  * los trozos libres en una lista por su dirección, que se juntan con los de
  * al lado; crece con la llamada 17), las letras (mem*, str*), los formatos
- * (vsnprintf: %s %c %d %u %x, con l y ll, ancho, «-» y «0»), las cuentas de
+ * (vsnprintf: %s %c %d %u %x, con l y ll, ancho, «-» y «0», y la precisión en %s), las cuentas de
  * 64 bits que gcc pide a libgcc (que aquí no hay para 32 bits) y los
  * argumentos, troceados como en el DOS (con comillas).
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -319,7 +319,7 @@ int vsnprintf(char *s, size_t cabe, const char *f, va_list a)
 
 #define PON(c) do { if (n + 1 < cabe) s[n] = (c); n++; } while (0)
 	for (; *f; f++) {
-		int menos = 0, cero = 0, ancho = 0, largo = 0, k = 0, neg = 0, base = 10;
+		int menos = 0, cero = 0, ancho = 0, largo = 0, k = 0, neg = 0, base = 10, prec = -1;
 		const char *t = NULL;
 		uint64_t v = 0;
 
@@ -342,6 +342,19 @@ int vsnprintf(char *s, size_t cabe, const char *f, va_list a)
 		} else
 			while (*f >= '0' && *f <= '9')
 				ancho = ancho * 10 + (*f++ - '0');
+		/* (TERMO 1.1.1) la precisión, «%.60s» o «%.*s»: en %s, como mucho
+		 * tantos octetos (antes salía «60s» tal cual); en los números, nada */
+		if (*f == '.') {
+			f++;
+			if (*f == '*') {
+				prec = va_arg(a, int);
+				f++;
+			} else {
+				prec = 0;
+				while (*f >= '0' && *f <= '9')
+					prec = prec * 10 + (*f++ - '0');
+			}
+		}
 		while (*f == 'l') {
 			largo++;
 			f++;
@@ -352,6 +365,8 @@ int vsnprintf(char *s, size_t cabe, const char *f, va_list a)
 			if (!t)
 				t = "(nada)";
 			k = (int)strlen(t);
+			if (prec >= 0 && k > prec)
+				k = prec;
 			break;
 		case 'c':
 			num[0] = (char)va_arg(a, int);

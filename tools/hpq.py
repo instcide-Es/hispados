@@ -262,6 +262,8 @@ VERSION_PUNTEROS = VERSION_089
 # eMMC y las SD por SDHCI —la llamada 160, INSTALAR en ellas—). Con
 # Usuario.VERSIÓN_TEXTO («0.8.10»). Suben base, red (rrtl.cas, RED.LOG),
 # wifi (la 7265), paquetes 1.7 (el GRUB.CFG de UEFI) y termo 1.1
+# (TERMO 1.1.1, 25/11/2026: el paquete termo, sin cambiar la base: varias
+# pruebas en el mismo arranque, la pantalla y INFORME.TXT; termo/paquete.sh)
 VERSION_0810 = '0.8.10'
 SISTEMA = [
     ('base', VERSION_0810, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [

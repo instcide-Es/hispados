@@ -10477,6 +10477,53 @@ resultado, «GRÁFICA EN PELIGRO» desde 90 °C y «NO RESPONDE» si deja de
 contestar o hay una tarjeta puesta que no enlaza. Prueba en el anfitrión:
 `termo/pruebas/nvidia_prueba.c` (fichas de mentira del GT80 y del GL553VD).
 
+**Varias pruebas en el mismo arranque (1.1.1, 25/11/2026, rama `termo-pantalla`,
+marca «(TERMO 1.1.1)»).** Carlos, en el ASUS GL553VD de verdad (Calentar 5 min
+enchufado → Rendimiento → RAM rápida → Calentar con la batería, sin apagar):
+«después de finalizar una prueba, al comenzar otra se queda el resultado de la
+primera en pantalla». La causa: el cuadro del resultado se pintaba con
+`fase == F_RESULTADO`, y esa fase solo la cambiaba Calentar; Rendimiento y la
+RAM empezaban y acababan debajo del cuadro de la primera, sin decir nada en
+él. Y el INFORME.TXT de las dos de Calentar salía mezclado: lo contado
+(la batería con el cargador, el voltaje, los frenos por fases, los vatios de
+RAPL, los parones, los SMI, los Machine Check) era de todo el arranque, así que
+decía a la vez «Batería: 83 %, sin enchufar» y «con el cargador puesto, la
+batería no ha bajado (del 92 %)», y la POTENCIA era la media de las dos. El
+arreglo: cada prueba (Calentar enchufado / con batería, Rendimiento, Memoria
+RAM, y los Discos cuando acaban de leerse solos) es una ficha (`struct hecha`:
+la hora, el nombre, su veredicto en una línea y su sección del informe,
+guardada tal cual al acabar en `archivo[]`). Al empezar Calentar se ponen a 0
+las cuentas «durante la prueba» (`reinicia_durante`) y, al acabar, las de por
+fases (`reinicia_despues`, con `po_nueva_prueba` en potencia.c), así que el
+reposo de la siguiente es el de después de esta. En la pantalla: la franja de
+abajo enseña la que está en marcha («CALENTANDO», «ENFRIANDO» o «EN MARCHA,
+prueba N: Rendimiento/Memoria RAM: ...»), y al acabar cualquiera sale su
+resultado con la lista de todas las del arranque (hora, nombre y veredicto en
+una línea; la del cuadro, en negrita y con «>»: nunca solo el color); P la
+vuelve a enseñar. Calentar ya no empieza con Rendimiento en marcha (se
+falseaban las dos). En INFORME.TXT: «PRUEBAS DE ESTE ARRANQUE» (el índice),
+la sección de cada una en orden («PRUEBA N DE ESTE ARRANQUE: ...», con su
+alimentación, la carga usada, sus sensores, frenos, POTENCIA, alimentación,
+parones, la batería en esa prueba y su resultado; la de Rendimiento con su
+RENDIMIE.TXT y la de la RAM con su RAM.TXT de esa vez), «COMPARACIÓN DE LAS
+PRUEBAS DE ESFUERZO» si hay dos o más de Calentar (alimentación, máxima,
+subida, vatios del paquete, MHz, % frenado, vatios de la batería; y la frase
+«enchufado frente a con la batería»), lo del equipo al escribirlo y un
+RESULTADO con una línea por prueba. El .LOG sigue siendo uno por arranque, con
+una línea «PRUEBA» al empezar y al acabar cada una (y RAM.TXT, RENDIMIE.TXT y
+DISCOS.LOG, como antes). De paso: la tabla de sensores salía con «38s» delante
+(`%-38.38s`: la biblioteca de `comprim/base.c` no sabía de precisiones; ahora
+`%.Ns` y `%.*s` sí, y la columna se rellena por letras UTF-8), y lo de
+ARRANQUE.TXT en CP437 («l\xA1nea») se pasa a UTF-8; y `termo/hacer.sh` mira las instrucciones de después del
+Pentium desde `salto` (con más BSS, la cabecera HPU3 salía como un `cmovo`). La carga sigue siendo x87
+(ligera: en el i5-7300HQ, 17 W de un PL1 de 45 W) y el informe lo dice; una
+carga fuerte (SSE2/AVX) pide tocar la carga de los AP del núcleo
+(`termo.cas`) y el guardado del estado SSE: va aparte. Pruebas: la 8b de la
+parte termo (`termo_varias`): Calentar y Rendimiento en el mismo arranque (tres
+capturas leídas con `mira_captura.py`, el puerto serie «termo: pantalla:
+cuadro ...», el INFORME.TXT y el .LOG) y, con la batería de mentira, Calentar
+sin enchufar y enchufado (cada una con lo suyo y la tabla que las compara).
+
 ## 14 quinvicies. El Asistente de compatibilidad (COMPAT.BIN, rama compat)
 
 *22/11/2026, la rama `compat`; aprobado por Carlos el 22/11. Todo lo cambiado

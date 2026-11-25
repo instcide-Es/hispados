@@ -1051,3 +1051,63 @@ int po_veredicto(char *d, int cabe)
 #undef PV
 	return n;
 }
+
+/* (TERMO 1.1.1) acabada una prueba de esfuerzo (su sección del INFORME ya
+ * escrita): lo contado por fases, a 0, para que la siguiente (otra vez
+ * Calentar, enchufado o con la batería) tenga lo suyo y no lo mezcle con lo
+ * de la anterior. Lo del equipo (límites, unidades, qué MSR hay) se queda */
+void po_nueva_prueba(void)
+{
+	int k, i;
+
+	for (k = 0; k < ND; k++) {
+		memset(D[k].uj, 0, sizeof D[k].uj);
+		memset(D[k].us, 0, sizeof D[k].us);
+		memset(D[k].mw_max, 0, sizeof D[k].mw_max);
+	}
+	memset(cuenta, 0, sizeof cuenta);
+	memset(visto_cat, 0, sizeof visto_cat);
+	memset(us_fase, 0, sizeof us_fase);
+	memset(tsc_fase, 0, sizeof tsc_fase);
+	memset(n_fase, 0, sizeof n_fase);
+	memset(perf613_us, 0, sizeof perf613_us);
+	for (i = 0; i < nce; i++)
+		memset(CE[i].suma, 0, sizeof CE[i].suma);
+	ce_cuenta = 0;
+	nring = pring = 0;
+	t_max_carga = NO_T;
+	ca_carga = -1;
+	ca_visto[0] = ca_visto[1] = 0;
+}
+
+/* (TERMO 1.1.1) para la tabla que compara las pruebas: los vatios del
+ * paquete en la carga (media y máximo, mW; -1 sin RAPL) y el tanto por
+ * ciento de la carga frenado (por potencia, por la placa o por temperatura;
+ * -1 si no se sabe) */
+void po_cifras(int *mw_media, int *mw_max, int *pct_frenado)
+{
+	int p = -1;
+
+	*mw_media = *mw_max = -1;
+	if (!empezado || !n_fase[PO_CARGA]) {
+		*pct_frenado = -1;
+		return;
+	}
+	if (rapl_cuenta() && D[D_PAQ].us[PO_CARGA]) {
+		*mw_media = (int)media_mw(D_PAQ, PO_CARGA);
+		*mw_max = (int)D[D_PAQ].mw_max[PO_CARGA];
+	}
+	if (frenos_hay) {
+		int a = pct_clase('w', PO_CARGA, 0), b = pct_clase('p', PO_CARGA, 0), c = pct_clase('t', PO_CARGA, 0);
+
+		p = a > b ? a : b;
+		p = p > c ? p : c;
+	}
+	if (perf613 > 0 && us_fase[PO_CARGA]) {
+		int p613 = (int)(perf613_us[PO_CARGA] * 100 / us_fase[PO_CARGA]);
+
+		if (p613 > p)
+			p = p613;
+	}
+	*pct_frenado = p;
+}

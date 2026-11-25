@@ -46,4 +46,10 @@ int po_veredicto(char *d, int cabe);
 int po_frenado_carga(void);
 /* ¿tiene RAPL (los vatios)? */
 int po_hay_rapl(void);
+/* (TERMO 1.1.1) acabada una prueba de esfuerzo: lo contado, a 0 (la
+ * siguiente, lo suyo) */
+void po_nueva_prueba(void);
+/* (TERMO 1.1.1) para comparar las pruebas: los vatios del paquete en la
+ * carga (media y máximo, mW; -1 sin RAPL) y el % de la carga frenado (-1) */
+void po_cifras(int *mw_media, int *mw_max, int *pct_frenado);
 #endif
