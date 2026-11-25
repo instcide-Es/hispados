@@ -709,7 +709,10 @@ termo_alimentacion() {
   [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host"
   termo_ram_img $R "acpitarde"
   for f in $(mdir -b -i $R@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT|EST)$'); do mdel -i $R@@1M "$f" > /dev/null 2>&1; done
-  TQ_HASTA=tq_informe TQ_TOPE=360 TQ_ACPI="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml" \
+  # (0.8.12) hasta 480 s al informe, como la 8c (420): tras la parada de
+  # seguridad, el enfriamiento y el informe; con el anfitrión ocupado, 360 no
+  # llegaban (el VPS y el PC de Albinyana, 25/11)
+  TQ_HASTA=tq_informe TQ_TOPE=480 TQ_ACPI="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml" \
     termo_qemu $R ta1 200 "$cpu" "2:$B" "2:o /b 0x71 90" "3:$E" "3:o /b 0x71 3" \
     "20:sendkey 1" "20:sendkey c" "52:$E" "52:o /b 0x71 2" "70:$B" "70:o /b 0x71 86" "100:$B" "100:o /b 0x71 82" "140:$C" "140:o /b 0x71 91" "152:$C" "152:o /b 0x71 50"
   mira "(1.2) Calentar espera a la primera lectura de ACPI (y lo dice); la alimentación, con todas las lecturas: desenchufado a mitad, la prueba es «con batería»" \
