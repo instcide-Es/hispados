@@ -65,7 +65,7 @@ $(B)/PARTIR.COM: ordenes/partir.asm | $(B)
 	$(CP437) $< $(B)/gen/partir.asm && cd $(B)/gen && $(NASM) -f bin -o ../PARTIR.COM partir.asm
 
 # las órdenes que solo usan de util.inc lo de la pantalla
-SUELTAS = ETIQUETA ATRIBUTO ARBOL XCOPIAR REVISAR
+SUELTAS = ETIQUETA ATRIBUTO ARBOL XCOPIAR REVISAR INSTALAR
 define SUELTA
 $(B)/$(1).COM: ordenes/$(shell echo $(1) | tr A-Z a-z).asm $(B)/gen/util.inc | $(B)
 	$(CP437) $$< $(B)/gen/$(shell echo $(1) | tr A-Z a-z).asm && cd $(B)/gen && $(NASM) -f bin -o ../$(1).COM $(shell echo $(1) | tr A-Z a-z).asm
@@ -83,6 +83,10 @@ $(B)/DISCORAM.SYS: ordenes/discoram.asm | $(B)
 
 $(B)/MAS.COM: ordenes/mas.asm | $(B)
 	$(CP437) $< $(B)/gen/mas.asm && $(NASM) -f bin -o $@ $(B)/gen/mas.asm
+
+# el menú de las aplicaciones (ordenes/menu.asm)
+$(B)/MENU.COM: ordenes/menu.asm | $(B)
+	$(CP437) $< $(B)/gen/menu.asm && $(NASM) -f bin -o $@ $(B)/gen/menu.asm
 
 $(B)/ORDENAR.COM: ordenes/ordenar.asm | $(B)
 	$(CP437) $< $(B)/gen/ordenar.asm && $(NASM) -f bin -o $@ $(B)/gen/ordenar.asm
@@ -124,7 +128,7 @@ $(B)/SALUDO.SYS: prueba/saludo.asm | $(B)
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
-ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM $(B)/MAS.COM $(B)/ORDENAR.COM $(B)/REVISAR.COM $(B)/ETIQUETA.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/XCOPIAR.COM $(B)/DISCORAM.SYS $(B)/EDITAR.COM $(B)/TECLADO.COM $(B)/BASIC.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
+ARCHIVOS = $(B)/NUCLEO86.SYS $(B)/COMMAND.COM $(B)/PASAR.COM $(B)/FORMATEA.COM $(B)/SISTEMA.COM $(B)/PARTIR.COM $(B)/MAS.COM $(B)/ORDENAR.COM $(B)/REVISAR.COM $(B)/ETIQUETA.COM $(B)/ATRIBUTO.COM $(B)/ARBOL.COM $(B)/XCOPIAR.COM $(B)/DISCORAM.SYS $(B)/EDITAR.COM $(B)/TECLADO.COM $(B)/INSTALAR.COM $(B)/MENU.COM $(B)/BASIC.COM $(B)/HOLA.COM $(B)/ARCH.COM $(B)/EXE.EXE $(B)/LEEME.TXT AUTOEXEC.BAT prueba/LOTE.BAT
 
 # el disquete: se le da formato (mformat rellena la BPB), se le pone nuestro
 # sector de arranque conservando esa BPB, y se copian los archivos
