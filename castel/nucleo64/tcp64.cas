@@ -18,8 +18,13 @@
 ;  [etapa 10] La escala de ventana (RFC 7323: la nuestra, 3; búferes de
 ;  256 KB), y lo que llega desordenado se guarda en su sitio (8 trozos) y se
 ;  dice con SACK (RFC 2018) en los ACK si la otra punta lo sabe; al llegar
-;  lo que faltaba, se junta. (Al mandar, los SACK de la otra punta no se
-;  miran: se repite desde lo primero sin confirmar.)
+;  lo que faltaba, se junta.
+;  [etapa 11] Al mandar, el control de congestión (NewReno: RFC 5681 y
+;  6582; la ventana de empezar, 10 segmentos, RFC 6928) y los SACK de la
+;  otra punta (RFC 2018 y lo de RFC 6675): en la recuperación rápida se
+;  repiten solo los huecos (lo que la otra punta no dice tener), no todo
+;  desde lo primero sin confirmar; y SACK también en los segmentos con
+;  datos (con menos datos: la MSS no cuenta las opciones, RFC 6691).
 ;  Lo de Hispa-Pentium (castel/nucleo32/rtcp.cas) es el modelo.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -51,6 +56,9 @@ módulo Tcp64
     variable pierde_cuenta: nat32
 
     público variable tcp_rst_rx, tcp_rst_tx, tcp_retx, tcp_rápidas, tcp_tirados, tcp_abiertas: nat64
+    ; [etapa 11] los ACK que han traído SACK, los huecos repetidos por ellos y
+    ; las recuperaciones rápidas acabadas (con todo confirmado)
+    público variable tcp_sack_rx, tcp_huecos, tcp_recup_hechas, tcp_cwnd_máx: nat64
 
     ; las comparaciones de números de secuencia (que dan la vuelta)
     función antes(a: nat32, b: nat32): bool
@@ -177,11 +185,10 @@ módulo Tcp64
             lh := 24
             si s.escala_rx <> 0 o f = F_SYN entonces lh := lh + 4 fin
             si s.sack_ok <> 0 o f = F_SYN entonces lh := lh + 4 fin
-        sino si f yb F_ACK <> 0 y n = 0 y s.sack_ok <> 0 y s.ooo_n > 0 entonces
-            ; [etapa 10] los SACK de lo desordenado (como mucho 4 trozos; solo en
-            ; los ACK sin datos: con datos, la trama se pasaría de la MTU)
-            lh := 20 + 4 + 8 * s.ooo_n
-            si s.ooo_n > 4 entonces lh := 20 + 4 + 32 fin
+        sino si f yb F_ACK <> 0 y f yb F_RST = 0 entonces
+            ; [etapa 10] los SACK de lo desordenado (como mucho 4 trozos); [etapa
+            ; 11] también con datos (quien manda deja sitio: carga_máx)
+            lh := 20 + opc_sack(s)
         fin
         pon_be16(u, s.l_puerto)
         pon_be16(u + 2, s.r_puerto)
@@ -292,18 +299,209 @@ módulo Tcp64
         si s.t_retx = 0 entonces s.t_retx := ahora_ns() + s.rto fin
     fin
 
+    ; ---- [etapa 11] los SACK que llegan y la congestión ----
+    ; lo que miden las opciones de SACK de un segmento que sale (0: no van)
+    función opc_sack(s: puntero a Sock): nat32
+        si s.sack_ok = 0 o s.ooo_n = 0 entonces devolver 0 fin
+        si s.ooo_n > 4 entonces devolver 4 + 32 fin
+        devolver 4 + 8 * s.ooo_n
+    fin
+
+    ; los datos que caben en un segmento (la MSS, menos las opciones que lleve)
+    función carga_máx(s: puntero a Sock): nat64
+        devolver nat64(s.mss - opc_sack(s))
+    fin
+
+    función máx(a: nat64, b: nat64): nat64
+        si a > b entonces devolver a fin
+        devolver b
+    fin
+
+    ; la ventana de congestión de empezar (al pasar a ESTABLECIDO: la MSS ya se sabe)
+    función empieza_cwnd(s: puntero a Sock)
+        s.cwnd := 10 * nat64(s.mss)
+        s.ssthresh := nat64(0xFFFFFFFF)
+        s.en_recup := 0
+        s.sb_n := 0
+    fin
+
+    ; fuera los trozos ya confirmados (o mal)
+    función sb_poda(s: puntero a Sock)
+        variable i, j: nat32
+        i := 0
+        mientras i < s.sb_n hacer
+            si antes_o_igual(s.sb_fin[i], s.snd_una) o antes(s.snd_max, s.sb_fin[i]) entonces
+                j := i
+                mientras j + 1 < s.sb_n hacer
+                    s.sb_ini[j] := s.sb_ini[j + 1]
+                    s.sb_fin[j] := s.sb_fin[j + 1]
+                    j := j + 1
+                fin
+                s.sb_n := s.sb_n - 1
+            sino
+                si antes(s.sb_ini[i], s.snd_una) entonces s.sb_ini[i] := s.snd_una fin
+                i := i + 1
+            fin
+        fin
+    fin
+
+    ; apunta [ini, fin) de lo que la otra punta dice tener; cierto si es nuevo
+    función sb_añade(s: puntero a Sock, ini: nat32, fin_: nat32): bool
+        variable i, j: nat32
+        variable nuevo: bool
+        si antes(ini, s.snd_una) entonces ini := s.snd_una fin
+        si antes_o_igual(fin_, ini) o antes(s.snd_max, fin_) entonces devolver falso fin
+        nuevo := cierto
+        i := 0
+        mientras i < s.sb_n hacer
+            si antes_o_igual(s.sb_ini[i], fin_) y antes_o_igual(ini, s.sb_fin[i]) entonces
+                ; (se tocan o se pisan: uno solo, el de los dos)
+                si antes_o_igual(s.sb_ini[i], ini) y antes_o_igual(fin_, s.sb_fin[i]) entonces nuevo := falso fin
+                si antes(s.sb_ini[i], ini) entonces ini := s.sb_ini[i] fin
+                si antes(fin_, s.sb_fin[i]) entonces fin_ := s.sb_fin[i] fin
+                j := i
+                mientras j + 1 < s.sb_n hacer
+                    s.sb_ini[j] := s.sb_ini[j + 1]
+                    s.sb_fin[j] := s.sb_fin[j + 1]
+                    j := j + 1
+                fin
+                s.sb_n := s.sb_n - 1
+                i := 0
+                seguir
+            fin
+            i := i + 1
+        fin
+        si s.sb_n >= MAX_SB entonces
+            ; (sin sitio: se olvida el más bajo, que será el primero en confirmarse)
+            j := 0
+            mientras j + 1 < s.sb_n hacer
+                s.sb_ini[j] := s.sb_ini[j + 1]
+                s.sb_fin[j] := s.sb_fin[j + 1]
+                j := j + 1
+            fin
+            s.sb_n := s.sb_n - 1
+        fin
+        ; (por orden de secuencia)
+        i := s.sb_n
+        mientras i > 0 y antes(ini, s.sb_ini[i - 1]) hacer
+            s.sb_ini[i] := s.sb_ini[i - 1]
+            s.sb_fin[i] := s.sb_fin[i - 1]
+            i := i - 1
+        fin
+        s.sb_ini[i] := ini
+        s.sb_fin[i] := fin_
+        s.sb_n := s.sb_n + 1
+        devolver nuevo
+    fin
+
+    ; los SACK de un segmento que llega (d, con lh de cabecera); cierto si
+    ; dicen algo nuevo
+    función lee_sack(s: puntero a Sock, d: nat64, lh: nat32): bool
+        variable i, op, l, k: nat32
+        variable nuevo, hay: bool
+        nuevo := falso
+        hay := falso
+        si s.sack_ok = 0 entonces devolver falso fin
+        i := 20
+        mientras i < lh hacer
+            op := m8(d + i)
+            si op = 0 entonces romper fin
+            si op = 1 entonces
+                i := i + 1
+                seguir
+            fin
+            si i + 1 >= lh entonces romper fin
+            l := m8(d + i + 1)
+            si l < 2 o i + l > lh entonces romper fin
+            si op = 5 y l >= 10 entonces
+                hay := cierto
+                k := 2
+                mientras k + 8 <= l hacer
+                    si sb_añade(s, be32(d + i + k), be32(d + i + k + 4)) entonces nuevo := cierto fin
+                    k := k + 8
+                fin
+            fin
+            i := i + l
+        fin
+        si hay entonces tcp_sack_rx := tcp_sack_rx + 1 fin
+        devolver nuevo
+    fin
+
+    ; el primer hueco desde «desde_»: lo que no dice tener la otra punta por
+    ; debajo de lo más alto que dice tener (lo que se da por perdido). Sin
+    ; SACK, ninguno. Da su principio y lo que mide (como mucho, un segmento)
+    función hueco(s: puntero a Sock, desde_: nat32, ref ini: nat32, ref largo: nat64): bool
+        variable x, alto, sig: nat32
+        variable i: nat32
+        variable otra: bool
+        si s.sb_n = 0 entonces devolver falso fin
+        alto := s.sb_fin[s.sb_n - 1]
+        x := desde_
+        si antes(x, s.snd_una) entonces x := s.snd_una fin
+        otra := cierto
+        mientras otra hacer
+            otra := falso
+            i := 0
+            mientras i < s.sb_n hacer
+                si antes_o_igual(s.sb_ini[i], x) y antes(x, s.sb_fin[i]) entonces
+                    x := s.sb_fin[i]
+                    otra := cierto
+                fin
+                i := i + 1
+            fin
+        fin
+        si antes_o_igual(alto, x) entonces devolver falso fin
+        sig := alto
+        i := 0
+        mientras i < s.sb_n hacer
+            si antes(x, s.sb_ini[i]) y antes(s.sb_ini[i], sig) entonces sig := s.sb_ini[i] fin
+            i := i + 1
+        fin
+        ini := x
+        largo := mín(nat64(sig - x), carga_máx(s))
+        devolver cierto
+    fin
+
+    ; repite el segmento que empieza en «seq» (largo octetos como mucho; de lo
+    ; que ya ha salido: por debajo de snd_nxt)
+    función repite(s: puntero a Sock, seq: nat32, largo: nat64)
+        variable off, vuelo: nat64
+        off := nat64(seq - s.snd_una)
+        vuelo := en_vuelo(s)
+        si off >= vuelo entonces devolver fin
+        largo := mín(mín(largo, vuelo - off), carga_máx(s))
+        si largo = 0 entonces devolver fin
+        manda(s, F_ACK ob F_PSH, seq, off, nat32(largo))
+        s.retx_total := s.retx_total + 1
+        si antes(s.retx_alto, seq + nat32(largo)) entonces s.retx_alto := seq + nat32(largo) fin
+        pon_retx(s)
+    fin
+
+    ; el siguiente hueco por repetir en la recuperación (por encima de lo ya repetido)
+    función repite_hueco(s: puntero a Sock): bool
+        variable ini: nat32
+        variable largo: nat64
+        si no hueco(s, s.retx_alto, ini, largo) entonces devolver falso fin
+        si antes_o_igual(s.snd_nxt, ini) entonces devolver falso fin
+        repite(s, ini, largo)
+        tcp_huecos := tcp_huecos + 1
+        devolver cierto
+    fin
+
     ; manda lo que haya y quepa en la ventana (y el FIN, si toca)
     público función sale_lo_que_haya(s: puntero a Sock)
         variable vuelo, libre, ventana_, n, k: nat64
         si s.estado <> T_ESTABLECIDO y s.estado <> T_ESPERA_CIERRE y s.estado <> T_FIN_ESPERA1 y s.estado <> T_CERRANDO y s.estado <> T_ÚLTIMO_ACK entonces devolver fin
+        si s.cwnd = 0 entonces empieza_cwnd(s) fin
         k := 0
         mientras k < 64 hacer
             vuelo := en_vuelo(s)
             libre := s.tx_n - vuelo
-            ventana_ := nat64(s.snd_wnd)
+            ; [etapa 11] lo que deje la otra punta y la congestión
+            ventana_ := mín(nat64(s.snd_wnd), s.cwnd)
             si ventana_ > vuelo entonces ventana_ := ventana_ - vuelo sino ventana_ := 0 fin
             si libre = 0 o ventana_ = 0 entonces romper fin
-            n := mín(mín(libre, ventana_), nat64(s.mss))
+            n := mín(mín(libre, ventana_), carga_máx(s))
             ; (sin Nagle con poco: lo pequeño sale ya; con TCP_NODELAY, igual)
             manda(s, F_ACK ob F_PSH, s.snd_nxt, vuelo, nat32(n))
             si s.snd_nxt = s.rtt_seq o s.rtt_t = 0 entonces
@@ -500,8 +698,9 @@ módulo Tcp64
     fin
 
     ; el ACK de lo enviado
-    función confirma(s: puntero a Sock, ack: nat32, wnd: nat32, seq: nat32, hay_datos: bool)
-        variable n, datos: nat64
+    función confirma(s: puntero a Sock, ack: nat32, wnd: nat32, seq: nat32, hay_datos: bool, sack_nuevo: bool)
+        variable n, datos, vuelo: nat64
+        si s.cwnd = 0 entonces empieza_cwnd(s) fin
         si antes(s.snd_una, ack) y antes_o_igual(ack, s.snd_max) entonces
             n := nat64(ack - s.snd_una)
             datos := n
@@ -517,16 +716,57 @@ módulo Tcp64
             fin
             s.retx_n := 0
             s.dupacks := 0
+            si antes(s.retx_alto, s.snd_una) entonces s.retx_alto := s.snd_una fin
+            sb_poda(s)
             si s.snd_una = s.snd_max entonces s.t_retx := 0 sino s.t_retx := ahora_ns() + s.rto fin
+            ; [etapa 11] la congestión
+            si s.en_recup <> 0 entonces
+                si antes_o_igual(s.recover, ack) entonces
+                    ; (todo lo de antes de la pérdida, confirmado: se acaba, RFC 6582)
+                    s.en_recup := 0
+                    s.cwnd := mín(s.ssthresh, en_vuelo(s) + nat64(s.mss))
+                    tcp_recup_hechas := tcp_recup_hechas + 1
+                sino
+                    ; (un ACK parcial: lo siguiente perdido, ya; la ventana, desinflada)
+                    si s.cwnd > n entonces s.cwnd := s.cwnd - n sino s.cwnd := 0 fin
+                    s.cwnd := s.cwnd + nat64(s.mss)
+                    si no repite_hueco(s) y antes_o_igual(s.retx_alto, s.snd_una) entonces repite(s, s.snd_una, nat64(s.mss)) fin
+                fin
+            sino si s.cwnd < s.ssthresh entonces
+                s.cwnd := s.cwnd + mín(n, nat64(s.mss))        ; (el arranque lento)
+            sino
+                s.cwnd := s.cwnd + máx(1, nat64(s.mss) * nat64(s.mss) div s.cwnd)
+            fin
+            si s.cwnd < nat64(s.mss) entonces s.cwnd := nat64(s.mss) fin
+            si s.cwnd > nat64(s.tx_tam) * 2 entonces s.cwnd := nat64(s.tx_tam) * 2 fin
+            si s.cwnd > tcp_cwnd_máx entonces tcp_cwnd_máx := s.cwnd fin
             Sondeo64.avisa()
-        sino si ack = s.snd_una y s.snd_una <> s.snd_max y no hay_datos y wnd = s.snd_wnd entonces
-            ; un ACK repetido: al tercero, se repite lo primero sin esperar
+        sino si ack = s.snd_una y s.snd_una <> s.snd_max y no hay_datos y (wnd = s.snd_wnd o sack_nuevo) entonces
+            ; un ACK repetido (o con SACK de algo nuevo)
             s.dupacks := s.dupacks + 1
-            si s.dupacks = 3 entonces
+            si s.en_recup <> 0 entonces
+                ; (otro segmento ha salido de la red: la ventana se infla, y el hueco siguiente)
+                s.cwnd := s.cwnd + nat64(s.mss)
+                repite_hueco(s)
+            sino si s.dupacks = 3 entonces
                 tcp_rápidas := tcp_rápidas + 1
-                s.snd_nxt := s.snd_una
-                s.marcas := s.marcas yb (nob nat32(M_FIN_ENVIADO))
+                vuelo := en_vuelo(s)
                 s.rtt_t := 0
+                si vuelo = 0 entonces
+                    ; (solo falta el FIN: otra vez)
+                    s.snd_nxt := s.snd_una
+                    s.marcas := s.marcas yb (nob nat32(M_FIN_ENVIADO))
+                sino
+                    ; [etapa 11] la recuperación rápida (NewReno): la mitad, y se
+                    ; repite lo primero sin confirmar; luego, los huecos que diga SACK
+                    s.ssthresh := máx(vuelo div 2, 2 * nat64(s.mss))
+                    s.cwnd := s.ssthresh + 3 * nat64(s.mss)
+                    s.recover := s.snd_max
+                    s.en_recup := 1
+                    s.retx_alto := s.snd_una
+                    repite(s, s.snd_una, nat64(s.mss))
+                    repite_hueco(s)
+                fin
             fin
         fin
         ; la ventana (RFC 793: si el segmento es más nuevo)
@@ -750,7 +990,7 @@ módulo Tcp64
                 devolver
             fin
         fin
-        confirma(s, ack, wnd, seq, lon > 0)
+        confirma(s, ack, wnd, seq, lon > 0, lee_sack(s, d, lh))
         ; lo nuestro, confirmado: ¿se acaba algo?
         si s.marcas yb M_FIN_ENVIADO <> 0 y s.snd_una = s.snd_max entonces
             si s.estado = T_FIN_ESPERA1 entonces
@@ -878,7 +1118,15 @@ módulo Tcp64
             sino si s.estado = T_SYN_RECIBIDO entonces
                 manda(s, F_SYN ob F_ACK, s.iss, 0, 0)
             sino
-                ; (desde lo primero sin confirmar)
+                ; (desde lo primero sin confirmar; [etapa 11] la congestión: un
+                ; segmento, y la mitad de lo que había fuera como umbral; lo de
+                ; SACK, olvidado: RFC 2018 deja que la otra punta lo tire)
+                si s.cwnd = 0 entonces empieza_cwnd(s) fin
+                s.ssthresh := máx(en_vuelo(s) div 2, 2 * nat64(s.mss))
+                s.cwnd := nat64(s.mss)
+                s.en_recup := 0
+                s.sb_n := 0
+                s.dupacks := 0
                 s.snd_nxt := s.snd_una
                 s.marcas := s.marcas yb (nob nat32(M_FIN_ENVIADO))
                 si s.estado = T_FIN_ESPERA1 entonces s.estado := T_ESTABLECIDO fin

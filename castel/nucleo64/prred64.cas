@@ -91,6 +91,11 @@ módulo PrRed64
         fin
     fin
 
+    ; [etapa 11] la congestión y los SACK de la otra punta
+    función escribe_tcp11()
+        escribir("  TCP [etapa 11]: ", tcp_rápidas, " recuperaciones rápidas (NewReno), ", tcp_recup_hechas, " acabadas; ", tcp_sack_rx, " ACK con SACK leídos, ", tcp_huecos, " huecos repetidos por ellos; la ventana de congestión, hasta ", tcp_cwnd_máx div 1024, " KB\n")
+    fin
+
     público función pruebas_red()
         variable k: ent32
         variable t0: nat64
@@ -112,6 +117,7 @@ módulo PrRed64
         escribir("  TCP [etapa 10]: ", tcp_escaladas, " conexiones con escala de ventana, ", tcp_guardados, " trozos desordenados guardados y ", tcp_juntados, " juntados, ", tcp_sack, " ACK con SACK")
         si pierde_cada > 0 entonces escribir(" (red=pierde: uno de cada ", pierde_cada, " con datos, tirado)") fin
         escribir("\n")
+        escribe_tcp11()
         k := busca_archivo("RED.PRB")
         si k < 0 entonces devolver fin
         si n_ifz > 1 entonces
@@ -134,6 +140,7 @@ módulo PrRed64
             escribir("  la hora, puesta ", puesta_veces, " veces; el CMOS, escrito ", cmos_escrito, " veces: va ", desvío_cmos(), " s del reloj")
             si cmos_local entonces escribir(" (en hora local)\n") sino escribir(" (en UTC)\n") fin
         fin
+        escribe_tcp11()
         escribir("  TCP [etapa 10], después de la red: ", tcp_escaladas, " conexiones con escala de ventana, ", tcp_guardados, " trozos desordenados guardados y ", tcp_juntados, " juntados, ", tcp_sack, " ACK con SACK\n")
         escribir("Después de la red: ", socks_vivos, " sockets (", socks_hechos, " hechos), ", vivos, " procesos; IP ", ip_rx, " recibidos y ", ip_tx, " enviados, ", ip_malos, " malos; TCP: ", tcp_abiertas, " conexiones, ", tcp_retx, " repeticiones, ", tcp_rst_tx, " RST; UDP ", udp_rx, " y ", udp_tx, "; ", eventos_vivos + tempos_vivos + textos_vivos, " objetos\n")
         si socks_vivos <> 0 entonces mal("quedan sockets") fin

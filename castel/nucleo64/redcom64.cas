@@ -89,6 +89,7 @@ módulo Redcom64
     público constante T_ESPERA_TIEMPO = 10      ; TIME_WAIT
     público constante COLA_ESCUCHA = 32
     público constante MAX_OOO = 8               ; [etapa 10] los trozos desordenados que se guardan
+    público constante MAX_SB = 8                ; [etapa 11] los trozos de SACK de la otra punta que se apuntan
 
     público tipo Sock = estructura
         refs: nat64                             ; los descriptores que lo tienen
@@ -127,6 +128,15 @@ módulo Redcom64
         ooo_n, sack_ok: nat32
         ooo_ini, ooo_fin: arreglo [MAX_OOO] de nat32
         ooo_guardados: nat64
+        ; [etapa 11] al mandar: la ventana de congestión (NewReno, RFC 5681 y
+        ; 6582: cwnd y ssthresh, en octetos; recover, hasta dónde llega la
+        ; recuperación rápida en marcha) y lo que la otra punta dice tener
+        ; con SACK (los trozos [sb_ini, sb_fin) por encima de snd_una: lo que
+        ; se repite son los huecos de entre ellos, RFC 6675; retx_alto, hasta
+        ; dónde se han repetido ya)
+        cwnd, ssthresh: nat64
+        recover, retx_alto, en_recup, sb_n: nat32
+        sb_ini, sb_fin: arreglo [MAX_SB] de nat32
     fin
 
     público variable socks: arreglo [MAX_SOCK] de nat64
