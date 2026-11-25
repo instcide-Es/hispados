@@ -31,8 +31,8 @@ for f in sys.argv[3:]:
     open(os.path.join(dst, os.path.basename(f)), 'wb').write(d)
 PY
 fi
-ok() { echo "  OK   $1" | tee -a $T/salida.txt; }
-ko() { echo "  FAIL $1" | tee -a $T/salida.txt; fail=1; }
+ok() { [ -n "${SIN_QEMU:-}" ] && return; echo "  OK   $1" | tee -a $T/salida.txt; }
+ko() { [ -n "${SIN_QEMU:-}" ] && return; echo "  FAIL $1" | tee -a $T/salida.txt; fail=1; }
 : > $T/salida.txt
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.25}"; }
 tecla() { local k; for k in "$@"; do mon "sendkey $k" 0.12; done; }
@@ -47,10 +47,11 @@ teclea() {    # como escribe, pero sin el Intro del final
 }
 # la pantalla de texto (80x25, un octeto de letra y otro de color), a texto
 pantalla() {
+  rm -f $T/scr.bin
   mon "pmemsave 0xb8000 4000 \"$T/scr.bin\"" 0.4
   python3 - $T/scr.bin <<'PY' > $T/$1.txt
-import sys
-d = open(sys.argv[1], 'rb').read()
+import os, sys
+d = open(sys.argv[1], 'rb').read() if os.path.exists(sys.argv[1]) else b''
 for f in range(25):
     print(bytes(d[f * 160:(f + 1) * 160:2]).decode('cp437').rstrip())
 PY
@@ -64,7 +65,23 @@ arranca() {   # imagen del disquete, cpu y, si se quiere, imagen del disco duro
     -serial unix:$T/serie,server,nowait ${QMAS:-} \
     -boot a -no-reboot > /dev/null 2>&1 &
   QPID=$!
-  sleep 5
+  qemu_vive
+}
+# espera (hasta 20 s) a que conteste el monitor de QEMU, y luego los 5 s del
+# arranque. Si no contesta, un solo FAIL y lo demás de la parte (hasta el
+# apaga) no cuenta: con el equipo muy cargado, un QEMU que tardaba en
+# arrancar daba decenas de FAIL que parecían del sistema
+qemu_vive() {
+  local i
+  SIN_QEMU=
+  for ((i=0; i<40; i++)); do
+    printf 'info status\n' | socat - UNIX-CONNECT:$T/mon 2> /dev/null | grep -q "VM status" && { sleep 5; return 0; }
+    kill -0 $QPID 2> /dev/null || break
+    sleep 0.5
+  done
+  ko "QEMU no arranca (o su monitor no contesta): lo que queda de esta parte se salta"
+  SIN_QEMU=1
+  return 1
 }
 arranca_duro() {   # solo con el disco duro, sin disquete: imagen y cpu
   rm -f $T/mon
@@ -73,7 +90,7 @@ arranca_duro() {   # solo con el disco duro, sin disquete: imagen y cpu
     -serial unix:$T/serie,server,nowait \
     -boot c -no-reboot > /dev/null 2>&1 &
   QPID=$!
-  sleep 5
+  qemu_vive
 }
 # espera (hasta $3 segundos, 30 si no se dice) a que en la pantalla salga $2
 espera() {
@@ -81,7 +98,7 @@ espera() {
   for ((i=0; i<${3:-30}; i++)); do pantalla $1; grep -qF -- "$2" $T/$1.txt && return 0; sleep 1; done
   return 1
 }
-apaga() { mon quit 0.5; wait $QPID 2>/dev/null; }
+apaga() { mon quit 0.5; wait $QPID 2>/dev/null; SIN_QEMU=; }
 
 # ---- las partes de la prueba: cada una arranca y apaga lo suyo. Con
 # SOLO="duro medidas" ./prueba/prueba.sh se corren solo las que se digan ----
