@@ -1550,6 +1550,12 @@ controles de `controles.cas`).
   franja** a la izquierda, y su palabra: **nada depende solo del color**
   (Carlos es daltónico). Lo que funciona lleva un «+» (la letra del sistema no
   tiene «√»).
+- **Al abrirla** (desde el 25/11, «(RECOGIDO)», lo pidió Carlos: «Mejor todo
+  lo que funcione que esté recogido»): las categorías en las que todo funciona,
+  **recogidas** («[+] Red (1)» y, en Estado, «todo funciona»); las que tienen
+  algo sin controlador, con error o desactivado, **abiertas** («1 NO VA», «3 NO
+  VAN»), con lo que falla a la vista y marcado en palabra. «*» despliega todo
+  y «/» lo recoge (y en Ver: «Desplegar todo», «Recoger todo»).
 - **Las propiedades** (Intro o dos clics): otra ventana (el mismo programa, con
   `/P BUS DIRECCIÓN`), con las pestañas **General** (tipo, fabricante, dónde
   está, el estado en una frase y el detalle: la MAC y el enlace de la tarjeta
@@ -4900,7 +4906,7 @@ número de serie, el UUID, el SKU ni el inventario: de cualquiera); y el
 receptor `tools/informe-disp/` (`informe.php`, `informe-mover.sh`, el bloque de
 nginx e `INSTALAR.txt`; sin instalar: lo pone Carlos). Los paquetes: base
 **0.8.12** (el núcleo) y equipo **0.9.6** (DISPOSIT.BIN). Las pruebas:
-`SOLO=dispositivos` 103/0 (con la 19 bis nueva, `SOLO=informe`).
+`SOLO=dispositivos` 104/0 (con la 19 bis nueva, `SOLO=informe`, y el árbol recogido).
 
 
 **La 0.8.10** (24/11, rama `pentium-0810`: las ramas `termometro` —la de

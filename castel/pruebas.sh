@@ -3948,7 +3948,7 @@ mkfs.fat -C -F 16 -n SATA $Y/sata.img 65536 > /dev/null
 USBS="-device usb-ehci,id=e -device usb-kbd,bus=e.0 -device usb-mouse,bus=e.0 -device usb-tablet,bus=e.0 -drive id=mu,file=$Y/mem.img,format=raw,if=none -device usb-storage,bus=e.0,drive=mu"
 CAPTURAS=$G ESCRIBE=1 SATA=$Y/sata.img SOLO_LECTURA=1 MODULOS=$Y/ACPI.BIN,$Y/DISPOSIT.BIN,$Y/EQUIPO.BIN,$Y/RED.BIN ARRANQUE="escritorio escritura=usb unidad=M acpicada=1" \
   QEMU_MAS="-S $SSDT -nic user,model=e1000 $USBS" $AQUI/nucleo32/probar.sh $Y/SEMILLA.BIN "${PUESTA[@]}" ":monitor cont" ":pausa 7" \
-  ":clicd 63 40" ":pausa 1" ":captura dv1" ":clic 100 70" ":pausa 4" ":captura dv2" ":clic 395 81" ":pausa 3" ":captura dv3" \
+  ":clicd 63 40" ":pausa 1" ":captura dv1" ":clic 100 70" ":pausa 4" ":captura dv2a" ":tecla shift-bracket_right" ":pausa 1" ":captura dv2" ":clic 395 81" ":pausa 3" ":captura dv3" \
   ":tecla down" ":tecla ret" ":pausa 4" ":captura dv4" ":clic 228 140" ":raton 400 450" ":pausa 1" ":captura dv5" ":clic 323 140" ":raton 400 450" ":pausa 1" ":captura dv6" \
   ":tecla esc" ":pausa 1" ":clic 245 81" ":pausa 2" ":captura dv7" \
   ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":tecla down" ":tecla left" ":pausa 1" ":captura dv10" ":clic 742 31" ":pausa 1" \
@@ -3959,7 +3959,10 @@ mira "Mi equipo > Propiedades, Configuración > «Administrador de dispositivos.
   "^escritorio: lanzo .DISPOSIT.BIN (la tarea [0-9]*)$"
 [ "$(grep -c '^escritorio: lanzo .DISPOSIT.BIN' $S)" = 2 ] && ok "(dos veces: desde Mi equipo y desde Configuración)" || ko "DISPOSIT.BIN no se lanza dos veces: $(grep -c '^escritorio: lanzo .DISPOSIT' $S)"
 miracap "el botón secundario en Mi equipo: «Abrir» y «Propiedades»" dv1 texto 60 30 200 100 Abrir texto 60 30 200 100 Propiedades
-miracap "la ventana: el árbol por categorías, con el controlador de cada cosa" dv2 \
+miracap "(RECOGIDO) al abrirla: lo que funciona entero, recogido y dicho en palabra; lo que tiene algo que no va, abierto, con lo que falla a la vista" dv2a \
+  negrita 40 120 400 520 "[+] Pantalla (2)" negrita 40 120 400 520 "[+] Discos (2)" negrita 40 120 400 520 "[+] Red (1)" texto 380 120 620 160 "todo funciona" \
+  negrita 40 120 400 520 "[-] Teclado y ratón" texto 380 120 620 520 "1 NO VA" negrita 40 120 760 520 "! QEMU USB Tablet" texto 300 120 720 520 "SIN CONTROLADOR"
+miracap "con «*», desplegado todo: el árbol por categorías, con el controlador de cada cosa" dv2 \
   negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 120 400 520 "[-] Pantalla (2)" negrita 40 120 500 520 "Intel PRO/1000 MT (82540EM)" \
   texto 400 120 760 520 RED.BIN texto 400 120 760 520 ahci.cas texto 30 60 700 100 "Guardar informe"
 miracap "las categorías se cierran con la flecha izquierda; la tableta USB, «SIN CONTROLADOR» con su «!», fondo naranja y su franja" dv10 \

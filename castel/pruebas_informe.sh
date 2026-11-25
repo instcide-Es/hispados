@@ -216,7 +216,8 @@ PY
   tr -d '\r' < $Y/w.sal > $Y/w.txt
   S=$Y/w.txt
   miracap "Configuración › Dispositivos (el Administrador): «Enviar informe de los dispositivos que fallan», abajo" id1 \
-    negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 480 500 520 "Enviar informe de los dispositivos que fallan"
+    negrita 30 15 400 40 "Administrador de dispositivos" negrita 40 480 500 520 "Enviar informe de los dispositivos que fallan" \
+    negrita 40 120 400 480 "[+] Pantalla (2)" texto 380 120 620 160 "todo funciona" negrita 40 120 400 480 "[-] Teclado y ratón (3)" texto 380 120 620 480 "1 NO VA" negrita 40 120 760 480 "! QEMU USB Tablet"
   miracap "al pulsarlo (Tab, Intro): la vista, en texto, de exactamente lo que se manda, con «Enviar» y «Cancelar»" id2 \
     negrita 40 40 500 70 "Enviar informe de los dispositivos que fallan" texto 40 60 760 120 "exactamente lo que se va a mandar" \
     texto 40 110 760 140 "Hispa-Pentium: informe de los dispositivos que fallan" negrita 40 505 140 540 "Enviar" negrita 120 505 260 540 "Cancelar"

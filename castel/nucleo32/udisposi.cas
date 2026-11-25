@@ -18,6 +18,10 @@
 ;                              lo enseña, pregunta (con /SI, no) y lo manda a
 ;                              hispados.es (tools/informe-disp/informe.php)
 ;
+;  (RECOGIDO) Al abrirla, las categorías en las que todo funciona van recogidas
+;  («[+] Red (1)», y «todo funciona» en Estado) y las que tienen algo que no va
+;  (sin controlador, con error o desactivado), abiertas («1 NO VA»); «*» despliega
+;  todo y «/» lo recoge (también en Ver).
 ;  En la ventana: el árbol (Intro, dos clics o un clic en [+]/[-] abren y
 ;  cierran una categoría; Intro o dos clics en un dispositivo, sus
 ;  propiedades), y «Copiar informe» (al portapapeles) y «Guardar informe»
@@ -2109,8 +2113,24 @@ módulo UDisposi
     ; =========================================================================
     ;  La ventana: el árbol
     ; =========================================================================
+    ; (RECOGIDO) ¿algo de la categoría c no va? (sin controlador, con error o desactivado)
+    función mal_en(c: nat32): nat32
+        variable i, m: nat32
+        m := 0
+        para i desde 0 hasta n - 1 hacer
+            si no oculto[i] y categoría(i) = c y (lista[i].estado = EST_SIN_CONTROLADOR o lista[i].estado = EST_ERROR o lista[i].estado = EST_APAGADO) entonces m := m + 1 fin
+        fin
+        devolver m
+    fin
+
+    ; (RECOGIDO) al abrir: recogido lo que funciona entero; abierto lo que tiene algo que no va
+    función abre_lo_que_falla()
+        variable c: nat32
+        para c desde 0 hasta N_CAT - 1 hacer abierta[c] := mal_en(c) > 0 fin
+    fin
+
     función llena_rejilla()
-        variable c, i, h, antes: nat32
+        variable c, i, h, antes, m: nat32
         variable r: ent32
         variable nom: arreglo [80] de byte
         variable cl: nat32
@@ -2129,7 +2149,17 @@ módulo UDisposi
                 dd[1] := nat32(dirección(t2[0]))
                 dd[2] := h
                 formatear(t, 200, "%s %s (%u)", dd)
+
                 celda(g, r, 0, t)
+                ; (RECOGIDO) y, en palabra, cómo está la categoría (no solo el color)
+                m := mal_en(c)
+                dd[0] := m
+                si m = 0 entonces celda(g, r, 1, "todo funciona")
+                sino si m = 1 entonces celda(g, r, 1, "1 NO VA")
+                sino
+                    formatear(t2, 200, "%u NO VAN", dd)
+                    celda(g, r, 1, t2)
+                fin
                 si abierta[c] entonces
                     para i desde 0 hasta n - 1 hacer
                         si no oculto[i] y categoría(i) = c entonces
@@ -2231,7 +2261,7 @@ módulo UDisposi
         abierto_m := ent32(k)
         según k
             caso 0: abrir_menú_barra(0, "Propiedades|-|Copiar informe|Guardar informe|Enviar informe de los dispositivos que fallan...|-|Cerrar", 0)
-            caso 1: abrir_menú_barra(1, "Actualizar|Abrir todas|Cerrar todas|-|Letra normal|Letra grande", 0)
+            caso 1: abrir_menú_barra(1, "Actualizar|Desplegar todo (*)|Recoger todo (/)|-|Letra normal|Letra grande", 0)
             si no: abrir_menú_barra(2, "Acerca del Administrador de dispositivos", 0)
         fin
     fin
@@ -2311,6 +2341,10 @@ módulo UDisposi
         sino si (c = TECLA_IZQUIERDA o c = TECLA_DERECHA) y id >= ES_CATEGORÍA entonces
             abierta[id - ES_CATEGORÍA] := c = TECLA_DERECHA
             llena_rejilla()
+        sino si c = '*' entonces
+            todas(cierto)                        ; (RECOGIDO) * despliega todo; / lo recoge
+        sino si c = '/' entonces
+            todas(falso)
         sino si c = TECLA_F5 entonces
             actualiza()
         sino si c = 27 entonces
@@ -2361,7 +2395,8 @@ módulo UDisposi
         variable s: Suceso
         variable c: nat32
         si no preparar_medida("Administrador de dispositivos", 720, 500, tamaño_) entonces devolver 2 fin
-        para c desde 0 hasta N_CAT - 1 hacer abierta[c] := cierto fin
+        lee()
+        abre_lo_que_falla()                     ; (RECOGIDO)
         rejilla_nueva(g, MAX + N_CAT + 4)
         rejilla_columna(g, "Dispositivo", 0, falso)
         rejilla_columna(g, "Estado", 16, falso)
