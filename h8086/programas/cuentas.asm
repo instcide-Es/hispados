@@ -56,6 +56,10 @@ F_FECHA     equ 0x50
 inicio:
         cld
         mov sp, pila_fin
+        mov di, acc                 ; las variables, a cero: el DOS no lo hace,
+        mov cx, pila_fin - acc      ; y lo que dejaba otro programa ([lote] con
+        xor al, al                  ; la G de un /G de antes) se tomaba por
+        rep stosb                   ; bueno
         mov bx, (pila_fin - inicio + 0x100 + 15) / 16
         DOS 0x4A                    ; el programa se queda con lo suyo
         mov bx, 0xFFFF              ; y pide lo demás
