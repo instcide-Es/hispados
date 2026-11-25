@@ -4,7 +4,7 @@
 # instalado en C:\HISPADOS\INTERNET, contra el servidor de pruebas del
 # anfitrión (tests/tools/nav_servidor.py: una «biblioteca» de mentira parecida
 # a la de ClicGest, por HTTPS con certificados hechos aquí; su raíz solo se le
-# da al sistema en la prueba: RAIZ.CER junto al programa). Se maneja con el
+# da al sistema en la prueba: RAIZ.CER en AUTORID\, junto al programa). Se maneja con el
 # ratón y el teclado y se miran las capturas y lo que ha recibido el servidor:
 #  - el grupo «Internet» del menú Inicio aparece solo y abre el Navegador;
 #  - la página de entrada por HTTPS (TLS 1.2, certificado comprobado): entrar
@@ -71,7 +71,8 @@ mcopy -o -i $T/f.img $T/CONFIG.SYS ::CONFIG.SYS
 mkdir -p $T/c
 mcopy -s -n -i "$IMG" ::HISPADOS $T/c/
 mkdir -p $T/c/HISPADOS/INTERNET
-cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA.EXE $T/RAIZ.CER $T/c/HISPADOS/INTERNET/
+cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA.EXE $T/c/HISPADOS/INTERNET/
+mkdir -p $T/c/HISPADOS/INTERNET/AUTORID; cp $T/RAIZ.CER $T/c/HISPADOS/INTERNET/AUTORID/
 cp $B/HW32.COM $B/MSVCRT.DLL $T/c/HISPADOS/
 mkdir -p $T/c/HISPADOS/PROGS $T/c/FOTOS
 cp $B/LECTOR.HVP $T/c/HISPADOS/PROGS/

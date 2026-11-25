@@ -989,23 +989,37 @@ dinámica y con implementaciones de 32 bits. Lo nuestro (`hsptls.c`):
   Google, Amazon, Sectigo/USERTrust, GoDaddy, Starfield, Microsoft, Certum,
   SSL.com) van dentro de la DLL (`anclas.h`; se rehace con
   `tools/mkanclas.sh`). Además vale como raíz cualquier certificado `*.CER`
-  (X.509 en DER, de una autoridad) que haya **en la carpeta del programa**:
-  para la intranet de una asociación, y para las pruebas. Sin revocación
-  (ni CRL ni OCSP).
+  (X.509 en DER, de una autoridad; hasta 4) que haya **en la subcarpeta
+  `AUTORID\` de la del programa** (`C:\HISPADOS\INTERNET\AUTORID\`): para
+  la intranet de una asociación, y para las pruebas. Hasta la 0.9.30 valía uno
+  suelto en la carpeta del programa, que es donde HTTPS.EXE guarda lo que
+  baja: `HTTPS https://x/RAIZ.CER` dejaba una autoridad nueva para siempre.
+  Quien tuviera ahí el suyo, que lo pase a `AUTORID\`. Si hay alguno,
+  `TlsInfo` (lo que enseña `HTTPS /V`) lo dice: «con autoridades de más, de
+  AUTORID». Sin revocación (ni CRL ni OCSP).
 - **La memoria de certificados.** La cadena de clicgest.es son dos firmas
   ECDSA P-384, que con aritmética genérica de 32 bits son lo más caro con
   diferencia. La cadena que ya se dio por buena para un servidor (el resumen
   SHA-256 del nombre y de los certificados) se recuerda **una semana**
   (`HSPTLS.CCH`, junto al programa, 16 servidores): mientras tanto no se
   vuelve a comprobar, solo se lee la clave del servidor. Si el servidor
-  cambia de certificado, o pasa la semana, se comprueba otra vez entera.
+  cambia de certificado, pasa la semana o caduca cualquier certificado de la
+  cadena (se apunta el `notAfter` que llega antes), se comprueba otra vez
+  entera; los usos de la clave del servidor son los que dio la comprobación
+  de verdad.
 - **El azar.** No hay generador del sistema. Se junta (SHA-256) lo
   imprevisible que hay: el contador del reloj (PIT, 0,8 µs) y el de ciclos
   (TSC, si lo hay) cada vez que llega algo de la red o se llama a la DLL, la
   hora, las teclas y el ratón (el Navegador se los pasa) y una semilla que
-  se guarda de una vez para otra (`HSPTLS.SEM`). En un equipo recién
-  instalado y sin tocar es poco azar para lo que se pide hoy: es el punto
-  flaco, y está dicho.
+  se guarda de una vez para otra (`HSPTLS.SEM`, junto al programa; si ahí no
+  se puede escribir —un disquete protegido, un CD—, en `C:\HSPTLS.SEM`, y se
+  leen las dos). En un equipo recién instalado y sin tocar es poco azar para
+  lo que se pide hoy: es el punto flaco, y está dicho. Sin TSC (un 486) y sin
+  semilla (la primera vez), `TlsInfo` lo dice: «poco azar: sin TSC ni
+  semilla». (Crear la semilla al instalar, con el tiempo de las teclas, queda
+  para el instalador.)
+- **TlsEscribir** espera lo que haga falta mientras el servidor vaya
+  leyendo; si en 60 s no puede mandar nada, da la conexión por cortada (-1).
 - Las sesiones se reanudan si el servidor guarda su identificador (los
   «tickets» no están).
 - Los tiempos de las multiplicaciones dependen de los datos en un 486 (y
@@ -1060,8 +1074,12 @@ tablas.
 redirecciones, descargas cifradas ECDSA (AES-256-GCM) y RSA
 (ChaCha20-Poly1305), el certificado recordado, guardar en un archivo, los
 certificados que no valen (de otro nombre, sin autoridad conocida, caducado,
-sin la raíz de pruebas), el reloj mal puesto, un 404, un servidor que no
+sin la raíz de pruebas, que va en `AUTORID\`), el reloj mal puesto, un 404, un servidor que no
 existe y que después HSPRED se descarga (los programas soltaron la red).
+`tests/run_tls_tests.sh` (en el anfitrión, con gcc, BearSSL y hsptls.c tal
+cual): la semilla (junto al programa o en `C:\`, «poco azar»), `AUTORID\`,
+`TlsEscribir` con un servidor que no lee y la memoria de certificados con
+una cadena caducada.
 
 ## Memoria
 
