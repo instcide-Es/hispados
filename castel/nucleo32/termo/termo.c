@@ -423,9 +423,9 @@ static void lee_zonas(void)
 	if (sc(SC_ZONAS, (u32)&za, 0, 0) != 1 || za.t.version != TA_VERSION || za.t.lecturas == 0)
 		return;
 	/* (TERMO 1.2, solo las pruebas) «acpitarde» en la línea del cargador:
-	 * lo de ACPI no se mira hasta 10 s después de abrir (como el ASUS
+	 * lo de ACPI no se mira hasta 15 s después de abrir (como el ASUS
 	 * GL553VD, recién arrancado): Calentar tiene que esperar a ello */
-	if (acpi_tarde && (!t_inicio || (int)(jg_tics() - t_inicio) < 10 * (int)jg_hz))
+	if (acpi_tarde && (!t_inicio || (int)(jg_tics() - t_inicio) < 15 * (int)jg_hz))
 		return;
 	if (!hay_zonas) {
 		hay_zonas = 1;

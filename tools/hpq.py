@@ -274,8 +274,15 @@ VERSION_0810 = '0.8.10'
 # entrado; y el diagnóstico del Wi-Fi en WIFI.LOG sin «Registro=SI». Suben
 # base, paquetes 1.8, red (RED.BIN: «/OTRA» al relanzar WIFI.BIN) y wifi
 VERSION_0811 = '0.8.11'
+# (0.8.12, 25/11/2026, rama termo-fuerte, «(TERMO-FUERTE)»: el SSE en el
+# núcleo —CR4.OSFXSR y OSXMMEXCPT; FXSAVE/FXRSTOR al cambiar de tarea, con la
+# de la que sale guardada siempre: nada de un programa en los registros de
+# otro— y la carga fuerte, SSE2, del Termómetro en los demás procesadores; la
+# 224 con EBX = 8). Sube la base; con ella, termo 1.2 (termo/paquete.sh:
+# «base >= 0.8.12»)
+VERSION_0812 = '0.8.12'
 SISTEMA = [
-    ('base', VERSION_0811, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_0812, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'), ('RATON.BIN', r'\HISPA\RATON.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),

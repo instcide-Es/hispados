@@ -4762,6 +4762,34 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
+**La 0.8.12** (25/11, rama `termo-fuerte`, marcas «(TERMO-FUERTE)» en el
+núcleo y «(TERMO 1.2)» en el Termómetro; sobre la 0.8.11). Para ver si una
+fuente o un cargador frenan a un portátil (el MSI GT80 Titan, que se congela
+y «no tiene fuerza» para cargar Windows): con la carga de siempre, x87, el
+ASUS GL553VD de referencia (i5-7300HQ, PL1 45 W) solo llegaba a 17,2 W.
+
+- **El SSE en el núcleo** (`tareas.cas`, `prepara_sse` y `cambia_coma`; la
+  sección del Termómetro, «La carga fuerte»): con FXSAVE (CPUID 1, EDX bit
+  24) se encienden CR4.OSFXSR y, con SSE, CR4.OSXMMEXCPT (CR0.EM a 0, MP a
+  1), y la coma flotante de cada tarea es la de FXSAVE (512 octetos: x87,
+  MMX, XMM0-7 y MXCSR, en `fx_zona`, una por ficha, alineada a 16); sin
+  FXSAVE (Pentium, Pentium MMX), `fnsave`/`frstor` como antes. **Ya no es
+  perezoso**: la de la tarea que sale se guarda siempre al cambiar; la que
+  entra, si ya la ha usado, se pone; si no, se queda una limpia (x87 tras
+  `fninit`, XMM a 0, MXCSR = 1F80h) con CR0.TS, y la excepción 7 se la da la
+  primera vez. Así nunca hay en los registros nada de otro programa (ni
+  leído por ejecución especulativa: LazyFP, CVE-2018-3665), y lo que no usa
+  coma flotante no paga nada. **Nada de AVX** (pide XSAVE, CR4.OSXSAVE,
+  XCR0 y el estado YMM: sección 16).
+- **La carga fuerte del Termómetro** (1.2): SSE2 en la tarea hija y en los
+  demás procesadores (`termo.cas`, `termo_ap_fuerte`), elegible con F
+  («Carga: ligera / fuerte») y con «cargafuerte» en la línea del cargador;
+  la ligera, igual que antes. Y «Enviar a Carlos» que dice cómo ha ido, la
+  alimentación de cada prueba con todas sus lecturas y Calentar que espera
+  a la primera lectura de ACPI.
+
+Los paquetes: base **0.8.12**, termo **1.2** (`base >= 0.8.12`).
+
 **La 0.8.11** (25/11, rama `sin-admin`, empezada: este arreglo). El HP Mini
 de la asociación con la 0.8.10 instalada y un solo usuario, «Biblio2»,
 normal, sin ningún administrador; y su BCM4313 que «sigue sin encontrar
@@ -5465,7 +5493,9 @@ Tres cambios, marcados «(NAVEGADOR)»:
   que el núcleo se siga compilando igual con CASTEL32 y ENSAMB32 (sección 14
   bis). **`X87.BIN`** (`navega/prueba_x87.c`) lo prueba: se lanza a sí mismo
   dos veces y los tres dejan números distintos en la pila del x87 mientras
-  duermen; con el núcleo de antes dice «MAL», con este «bien».
+  duermen; con el núcleo de antes dice «MAL», con este «bien». (Desde la
+  0.8.12, con FXSAVE y el SSE, y guardando siempre al salir de la tarea:
+  «La carga fuerte», en la sección del Termómetro; y `XMM.BIN`.)
 - **Programas de hasta 8 MB** (`MAX_PROGRAMA`, `usuario.cas`; antes 2 MB:
   NAVEGA.BIN mide 2.095.604 octetos).
 
@@ -10670,6 +10700,97 @@ capturas leídas con `mira_captura.py`, el puerto serie «termo: pantalla:
 cuadro ...», el INFORME.TXT y el .LOG) y, con la batería de mentira, Calentar
 sin enchufar y enchufado (cada una con lo suyo y la tabla que las compara).
 
+**La carga fuerte y el SSE del núcleo (1.2, base 0.8.12, 25/11/2026, rama
+`termo-fuerte`, marcas «(TERMO-FUERTE)» y «(TERMO 1.2)»).** Para ver si la
+fuente o el cargador frenan (el MSI GT80 Titan 2QD: i7 Haswell, dos GTX 970M y
+un cargador de 330 W, que se congela y no tiene fuerza para Windows) hay que
+llegar a PL1 y PL2; la ligera (x87: una cadena de `fsqrt`, y en la hija raíz
+y seno) dejó el ASUS GL553VD (i5-7300HQ, PL1 45 W) en 17,2 W.
+
+- *El núcleo* (`tareas.cas`): `prepara_sse` (al arrancar, desde
+  `prepara_tareas`) mira CPUID (con la bandera ID de EFLAGS); con FXSAVE
+  enciende CR4.OSFXSR (bit 9) y, con SSE, OSXMMEXCPT (bit 10), y hace la
+  plantilla limpia (`fninit`, `fxsave`, MXCSR = 1F80h, lo demás a 0).
+  `Tareas.sse` dice lo encendido (1 FXSAVE, 2 SSE, 4 SSE2); la 224 con EBX =
+  8 lo da a los programas (con 100h: un núcleo de antes da 0). Al cambiar de
+  tarea (`cambia_coma`, desde `cambiar`): si la del procesador es de otra, se
+  guarda en su ficha (`fxsave` en `fx_zona`, 512 octetos alineados a 16 por
+  ficha; sin FXSAVE, `fnsave` en `x87`) y, si la que entra la ha usado, se
+  pone la suya (`fxrstor`/`frstor`); si no, la limpia, y CR0.TS para que la
+  excepción 7 (`sin_x87`) se la dé al usarla. Se eligió guardar siempre (no
+  «perezoso», como la 0.8.3): con lo perezoso los registros de un programa
+  se quedan en el procesador mientras corre otro, y eso se puede leer por
+  ejecución especulativa (LazyFP, CVE-2018-3665); lo que cuesta (un `fxsave`
+  y un `fxrstor` de 512 octetos, unos cientos de ciclos) solo lo pagan los
+  cambios en que hay coma flotante de por medio, a 100 Hz. Los procesadores
+  del núcleo no se cambian de procesador (los demás solo hacen la carga del
+  Termómetro o la prueba de la RAM, fuera de las tareas): no hace falta más.
+  Las instrucciones, como `db` (ENSAMB32 y `ensambla.py` siguen dando lo
+  mismo que NASM). Una excepción de SSE sin enmascarar (la 19) acaba el
+  programa como cualquier otra. **AVX, para después**: pide XSAVE/XRSTOR,
+  CR4.OSXSAVE, XCR0 (x87, SSE y AVX) y una zona por tarea del tamaño que diga
+  CPUID 0Dh (más de 832 octetos), y la carga fuerte con `vfmadd` (Haswell en
+  adelante: el doble de vatios que con SSE2).
+- *Los demás procesadores* (`termo.cas`): con ECX bit 1 en la 224 (EBX = 1)
+  el trampolín (+44Ch = 1) hace la fuerte si el procesador tiene FXSAVE y
+  SSE2: enciende la caché (CR0.CD y NW a 0, como cualquier sistema con sus
+  procesadores; tras INIT se quedan como los dejó la BIOS: **la ligera los
+  deja así**, como hasta ahora, y el informe avisa si alguno llegó con la
+  caché apagada), el x87 (EM a 0; MP y NE), CR4.OSFXSR y OSXMMEXCPT, MXCSR,
+  y siete cadenas de `x := x * a + c` (`mulpd` con un operando del bloque de
+  1344 octetos de +A00h, `addpd` con XMM7), dos dobles por registro: las dos
+  unidades de coma flotante ocupadas casi siempre, desde la caché L1. Con a
+  entre 1 - 2^-14 y 1 - 2^-17 y c = 2^-13, x se queda entre 2 y 16: ni
+  desbordes ni subnormales. Una vuelta (40.000 pasadas de 12 trozos) tarda
+  como una de la ligera, así que el latido, el 19Ch y el vigía de 10 s van
+  igual. En la tabla (EBX = 4): el cuarto número, la carga pedida; de cada
+  procesador, en +28, su CR0 al llegar, con el bit 31 si hace la fuerte.
+- *El Termómetro* (`termo.c`): la tecla F y el botón «Carga: ligera (F)» /
+  «Carga: fuerte (F)» (marcado con la fuerte; solo si el núcleo ha encendido
+  el SSE2), «cargafuerte» en la línea del cargador (o `/FUERTE`) para
+  empezar en fuerte; la hija es `TERMO.BIN /CARGA=s /FUERTE` (`fuerte_vuelta`:
+  lo mismo, con un bloque de 16 K, y cada vuelta mira que sus XMM siguen en
+  lo que dan las cuentas: si no, «MAL» por el puerto serie). La prueba se
+  llama «Calentar fuerte (...)»; el .LOG («EMPIEZA ... carga fuerte (SSE2)»),
+  la línea del resultado («; carga fuerte (SSE2)» o «ligera (x87)»), la
+  «Carga usada: FUERTE, SSE2 ...» de su sección de INFORME.TXT y la tabla que
+  compara (avisa si una es ligera y otra fuerte) lo dicen. La parada de
+  seguridad (el límite menos 10 °C, 95 °C sin límite; la misma para las
+  gráficas) no cambia: se mira cada segundo, y la prueba la comprueba con la
+  fuerte.
+- *Más de la 1.2* (el ASUS GL553VD de verdad, con la 1.1.1). **La
+  alimentación** de cada Calentar se decide con todas las lecturas de la
+  carga (cada 2 s: _PSR y, si no lo dice, _BST), no con la primera: lo que
+  ha sido la mayor parte del tiempo; «no se sabe» solo sin ninguna lectura;
+  si ha habido de las dos, cuánto de cada; y la prueba se renombra con lo
+  que ha sido (lo dice el .LOG). **Calentar espera a ACPI**: sin la primera
+  lectura (la batería y las zonas: el ASUS recién arrancado daba «no se
+  sabe» y la zona «sin dato» en el reposo), espera hasta 15 s y lo dice en
+  la franja. **«Enviar a Carlos» (E)**: la tecla, también en la línea de
+  abajo y en la ayuda; un cartel en letras («ENVIANDO A CARLOS...» con
+  «Enviando... (archivo 3 de 9: ...)», «ENVIADO A CARLOS» o «NO ENVIADO»,
+  con el motivo en llano —sin red, el DNS, no se puede conectar, el
+  certificado, la hora, la memoria no reconocida (403), el tope del día
+  (429)— y qué hacer, y que los archivos siguen en X:\TERMO para el FTP)
+  hasta la siguiente tecla; y «Enviado a Carlos: sí/NO, ...» en el .LOG y en
+  INFORME.TXT. Un servidor con el que no se llega a conectar con el primer
+  archivo no se reintenta (antes, cuatro veces con esperas y 30 s cada una:
+  minutos); hispados.es va antes que actualiza.hispados.es (que no tiene
+  HTTPS), también con el ENVIO.INI de las memorias de antes.
+- *Pruebas*: en la parte del Navegador (`XMM.BIN`, `navega/prueba_xmm.c`):
+  tres programas a la vez, cada uno con sus XMM, su MXCSR (cada uno con su
+  redondeo) y su x87, durmiendo entre medias, limpios al empezar, y unas
+  cuentas con `mulpd` que dan lo mismo durmiendo que sin dormir; con
+  `-cpu pentium`, el x87 con `fnsave` y «sin SSE2». En la parte termo: 8c
+  (`termo_fuerte`: «cargafuerte», F, la fuerte en la hija y en los otros 3,
+  la parada de seguridad a 91 °C, el INFORME y lo que corre), 8d
+  (`termo_alimentacion`, con «acpitarde», solo de las pruebas: ACPI sin mirar
+  los primeros 15 s) y en la 4 (`termo_enviar`): sin red, el primer servidor
+  que no contesta, 403 y 429. `TERMO_SOLO="fuerte alimentacion enviar"` hace
+  solo esas.
+- *En QEMU*: no hay RAPL (ni con KVM, en QEMU 8.2): se mide lo que corre.
+  CIFRAS_QEMU
+
 ## 14 quinvicies. El Asistente de compatibilidad (COMPAT.BIN, rama compat)
 
 *22/11/2026, la rama `compat`; aprobado por Carlos el 22/11. Todo lo cambiado
@@ -11988,6 +12109,11 @@ colgado al apagar; y el Wi-Fi simulado que se va y vuelve con otra IP
 (sección 14 tervicies).
 
 ## 16. Por dónde seguir
+
+**AVX** (después de la 0.8.12, que trae el SSE con FXSAVE): XSAVE/XRSTOR con
+CR4.OSXSAVE y XCR0, la zona de cada tarea del tamaño de CPUID 0Dh, y la carga
+fuerte del Termómetro con AVX2/FMA (`vfmadd231pd` en YMM, Haswell en
+adelante), que es la que de verdad llega a PL2 en el MSI GT80 y el ASUS.
 
 Hecho el 21/11 (la 0.8.3, rama `pentium-navegador`): **el Navegador** (sección
 14 ter), con la rueda del ratón, el x87 de cada programa y programas de hasta 8

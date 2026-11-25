@@ -45,6 +45,14 @@
 #     resultado y la lista de todas; INFORME.TXT con cada una en su sección);
 #     y con la batería, Calentar sin enchufar y enchufado, con la tabla que
 #     las compara.
+#     8c. (1.2) la carga fuerte (SSE2): «cargafuerte», la tecla F, la hija y
+#     los otros 3 procesadores con SSE2, la parada de seguridad a 91 °C, el
+#     INFORME («FUERTE») y lo que corre (QEMU no da RAPL).
+#     8d. (1.2) la alimentación con todas las lecturas (desenchufado a mitad:
+#     «con batería», con cuánto de cada) y Calentar que espera a ACPI
+#     («acpitarde»). En la 4, también (1.2): el cartel, el .LOG e INFORME.TXT
+#     («Enviado a Carlos: sí/NO»), el primer servidor que no contesta, 403 y
+#     429. Con TERMO_SOLO="fuerte alimentacion enviar", hecha la memoria, solo esas.
 # 10. (DISCOS) los discos de dentro: IDE, SATA y NVMe en QEMU, solo leer
 #     (pruebas_termo_disco.sh; y en la 0, disco.c con datos simulados).
 # 11. (RAM) «Memoria RAM» (M; termo/ram.c y termoram.cas): en el anfitrión, los
@@ -367,6 +375,11 @@ if mtype -i $Y/termo.img@@1M ::TERMO/ENVIO.INI | grep -q "^testigo=$(sed -n 's/^
    && grep -q "^sha256=$(sed -n 's/^testigo=//p' $Y/para.txt | tr -d '\n' | sha256sum | cut -d' ' -f1)$" $Y/para.txt; then
   ok "la memoria lleva su testigo (ENVIO.INI) y su llave propia (TERMO\\SSH\\ID_ED.SSH y .PUB, SSH.INI); el testigo, su SHA-256 y la llave pública, una vez, aparte"
 else ko "lo de la memoria (ENVIO.INI, SSH.INI, la llave): $(cat $Y/para.txt 2> /dev/null | head -n 2)"; fi
+# (TERMO 1.2) TERMO_SOLO="fuerte enviar alimentacion": hecha la memoria, solo esas (para ir más deprisa)
+if [ -n "${TERMO_SOLO:-}" ]; then
+  for f in $TERMO_SOLO; do termo_$f; done
+  return
+fi
 # 1. la parada de seguridad; el ratón que pasa (sin repintar), lo ocupado, cada 2 s
 termo_qemu $Y/termo.img t1 150 "-cpu Haswell" "38:mouse_move 40 30" "39:mouse_move -20 25" "40:mouse_move 35 -10" "41:mouse_move -40 -30" "42:sendkey f12" \
   "44:sendkey 1" "46:sendkey c" "58:$C" "58:o /b 0x71 91" "70:$C" "70:o /b 0x71 50"
@@ -474,6 +487,10 @@ termo_qemu $Y/termo.img t10 75 "$cpum" "46:sendkey ret" "48:sendkey r" "56:sendk
 mira "«Rendimiento» se para con Esc" "termo: rendimiento: Medida cancelada (Esc)"
 # 8b. (TERMO 1.1.1) varias pruebas en el mismo arranque: la pantalla y el informe
 termo_varias
+# 8c. (TERMO 1.2) la carga fuerte (SSE2) y su parada de seguridad
+termo_fuerte
+# 8d. (TERMO 1.2) la alimentación con todas las lecturas, y Calentar que espera a ACPI
+termo_alimentacion
 # 9. (TERMO) guardar de verdad (los Intel nuevos que no guardaban nada):
 # (a) sin la carpeta TERMO (borrada entera antes de arrancar) y la máquina
 # matada a mitad de la carga: el .LOG y el .CSV quedan, hasta ese momento, y
@@ -598,18 +615,115 @@ termo_enviar() {
   # sin red: lo dice (y cómo conectar el Wi-Fi)
   cp $E/termo.img $E/sin.img
   TQ_RED="-nic none" termo_qemu $E/sin.img e1 60 "$cpu" "45:sendkey e" "50:screendump $E/e1.ppm"
-  mira "«Enviar a Carlos» sin red: lo dice, y cómo conectar el cable o el Wi-Fi" "termo: suceso: Enviar a Carlos: No hay red: enchufe el cable o conecte el Wi-Fi"
-  # con red: por HTTPS
+  mira "«Enviar a Carlos» sin red (la tecla E): «NO ENVIADO: sin red», qué hacer y dónde siguen los archivos; en el .LOG" \
+    "termo: suceso: Enviar a Carlos: NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez; o súbalo al FTP: los archivos siguen en X:.TERMO"
+  if [ -s $E/e1.ppm ] && td_cap $E/e1.ppm texto 40 0 120 2000 "NO ENVIADO: sin red"; then ok "(1.2) sin red, en pantalla: el cartel con «NO ENVIADO: sin red» en letras"
+  else ko "(1.2) el cartel sin red (e1.ppm): $(head -c 300 $Y/cap.txt 2> /dev/null)"; fi
+  if mtype -i $E/sin.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' | grep -q '^Enviado a Carlos: NO, a las [0-9:]*: NO ENVIADO: sin red'; then ok "(1.2) INFORME.TXT: «Enviado a Carlos: NO, ...: NO ENVIADO: sin red»"
+  else ko "(1.2) INFORME.TXT sin «Enviado a Carlos: NO»: $(mtype -i $E/sin.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -a 'Enviado' | head -n 2)"; fi
+  # con red: por HTTPS (el primer servidor, uno que no contesta: se pasa al otro enseguida)
+  local PC
+  PC=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+  mtype -i $E/termo.img@@1M ::TERMO/ENVIO.INI | tr -d '\r' | sed "s|^servidor=.*|servidor=https://10.0.2.2:$PC/termo/subir.php\nservidor=https://10.0.2.2:$PT/termo/subir.php|" | sed 's/$/\r/' > $E/ENVIO.INI
+  mcopy -o -i $E/termo.img@@1M $E/ENVIO.INI ::TERMO/ENVIO.INI
   TQ_RED="-nic user,model=e1000" termo_qemu $E/termo.img e2 130 "$cpu" "50:sendkey e" "120:screendump $E/e2.ppm"
-  mira "«Enviar a Carlos» con red (cable): TERMO.BIN /ENVIAR sube por HTTPS cada archivo y acaba con «Hecho»" \
-    "termo: suceso: Enviar a Carlos: se manda X:.TERMO" "termo: envío: Enviando [0-9]* archivos a 10.0.2.2" "termo: envío: Hecho: [0-9]* archivos enviados a Carlos"
+  mira "«Enviar a Carlos» con red (cable): el primer servidor no contesta y se pasa al otro sin reintentos; TERMO.BIN /ENVIAR sube por HTTPS cada archivo (archivo N de M) y acaba con «ENVIADO»" \
+    "termo: suceso: Enviar a Carlos: se manda X:.TERMO" "termo: envío: Enviando... (archivo 1 de [0-9]*: .*, a 10.0.2.2)" \
+    "termo: envío: resultado: ENVIADO: [0-9]* archivos a 10.0.2.2 (lote [0-9-]*[0-9A-F]*)" "termo: suceso: Enviar a Carlos: ENVIADO: "
+  if [ "$(grep -c "otra vez" $S)" -le 1 ]; then ok "(1.2) el servidor que no contesta no se reintenta: $(grep -c 'termo: envío: Enviando... (archivo 1 de' $S) intentos con el primer archivo"
+  else ko "(1.2) reintentos con el servidor que no contesta: $(grep 'termo: envío: Enviando' $S | head -n 6 | tr '\n' ' ')"; fi
+  if [ -s $E/e2.ppm ] && td_cap $E/e2.ppm texto 40 0 120 2000 "ENVIADO: "; then ok "(1.2) en pantalla: el cartel con «ENVIADO: N archivos a ...»"
+  else ko "(1.2) el cartel enviado (e2.ppm): $(head -c 300 $Y/cap.txt 2> /dev/null)"; fi
+  if mtype -i $E/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' | grep -q '^Enviado a Carlos: sí, a las [0-9:]*: ENVIADO: [0-9]* archivos a 10.0.2.2'; then ok "(1.2) INFORME.TXT: «Enviado a Carlos: sí, ...»"
+  else ko "(1.2) INFORME.TXT sin «Enviado a Carlos: sí»: $(mtype -i $E/termo.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | grep -a 'Enviado' | head -n 2)"; fi
   local D
   D=$(ls -d $E/datos/entrantes/Portatil-gamer/20* 2> /dev/null | head -n 1)
   if [ -n "$D" ] && ls $D | grep -q 'CSV$' && ls $D | grep -q 'LOG$' && [ -s $D/ARRANQUE.TXT ] && ! ls $D | grep -qi 'INI\|EST\|HEC' \
      && grep -q 'conexión TLS: TLSv1.2' $E/tls/tls.txt && grep -q ' Portatil-gamer .*CSV OK' $E/datos/registro/subidas.log; then
     ok "en el servidor de prueba, por TLS 1.2 y con el testigo de la memoria: el .CSV, el .LOG y el ARRANQUE.TXT en entrantes/Portatil-gamer/$(basename $D)/ (ni ENVIO.INI ni lo demás)"
   else ko "lo que llega al servidor de prueba: $(ls $D 2> /dev/null | tr '\n' ' ') $(tail -n 2 $E/tls/tls.txt 2> /dev/null | tr '\n' ' ')"; fi
+  # (1.2) el servidor dice que no: el testigo desconocido (403) y el tope del día (429)
+  cp $E/termo.img $E/t403.img
+  mtype -i $E/t403.img@@1M ::TERMO/ENVIO.INI | tr -d '\r' | sed 's/^testigo=.*/testigo=00000000000000000000000000000000000000000000000000000000000000aa/' | sed 's/$/\r/' > $E/ENVIO403.INI
+  mcopy -o -i $E/t403.img@@1M $E/ENVIO403.INI ::TERMO/ENVIO.INI
+  mdel -i $E/t403.img@@1M ::TERMO/ENVIO.HEC > /dev/null 2>&1
+  TQ_RED="-nic user,model=e1000" termo_qemu $E/t403.img e3 110 "$cpu" "50:sendkey e"
+  mira "(1.2) «Enviar a Carlos» con un testigo que el servidor no conoce (403): «NO ENVIADO: el servidor no reconoce esta memoria», qué hacer y el FTP" \
+    "termo: envío: resultado: NO ENVIADO: el servidor no reconoce esta memoria (.el servidor dice: testigo desconocido o revocado.: el testigo es desconocido o se ha revocado). Avise a Carlos para que lo dé de alta. Si no hay manera, súbalo al FTP: los archivos siguen en X:.TERMO."
+  cp $E/termo.img $E/t429.img
+  mdel -i $E/t429.img@@1M ::TERMO/ENVIO.HEC > /dev/null 2>&1
+  mkdir -p $E/datos/cuotas
+  echo "0 400" > $E/datos/cuotas/$(sed -n 's/^sha256=//p' $E/para.txt | cut -c1-16)-$(date -u +%Y%m%d)
+  TQ_RED="-nic user,model=e1000" termo_qemu $E/t429.img e4 110 "$cpu" "50:sendkey e"
+  mira "(1.2) «Enviar a Carlos» con el tope del día gastado (429): «NO ENVIADO: ... por hoy ya se ha mandado bastante», y no sigue con los demás archivos" \
+    "termo: envío: resultado: NO ENVIADO: el servidor dice que por hoy ya se ha mandado bastante (64 MB o 400 archivos). Pulse E mañana."
+  if [ "$(grep -c 'termo: envío: Enviando... (archivo' $S)" -le 2 ]; then ok "(1.2) con el 429, un solo archivo intentado: $(grep -c 'termo: envío: Enviando... (archivo' $S)"
+  else ko "(1.2) con el 429 sigue intentando: $(grep -c 'termo: envío: Enviando... (archivo' $S) veces"; fi
   kill $PID_PHP $PID_TLS 2> /dev/null; wait $PID_PHP $PID_TLS 2> /dev/null
+}
+
+# (TERMO 1.2) 8c. La carga fuerte (SSE2): con «cargafuerte» en la línea del
+# cargador empieza en fuerte; F la cambia (ligera y otra vez fuerte); con 4
+# procesadores (KVM si lo hay), la tarea hija y los otros 3 hacen la fuerte
+# (los registros XMM de la hija, bien: el núcleo los guarda al cambiar de
+# tarea), y la parada de seguridad salta igual (la zona de ACPI a 91 °C de
+# 100: la misma comprobación que la de las gráficas). QEMU no da RAPL: se
+# mide lo que corre (las vueltas) y el INFORME dice «FUERTE»
+termo_fuerte() {
+  local R=$Y/fuerte.img cpu="-smp 4,cores=4,threads=1 -cpu Haswell" I=$Y/fuerte.txt v n seg mfl
+  [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host -smp 4"
+  termo_ram_img $R "cargafuerte"
+  for f in $(mdir -b -i $R@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT|EST)$'); do mdel -i $R@@1M "$f" > /dev/null 2>&1; done
+  TQ_HASTA=tq_informe TQ_TOPE=300 termo_qemu $R tf1 150 "$cpu" "43:sendkey f" "44:sendkey f" "45:sendkey 1" "46:sendkey c" "106:$C" "106:o /b 0x71 91" "120:$C" "120:o /b 0x71 50"
+  mira "(1.2) la carga fuerte: el núcleo enciende el SSE2; «cargafuerte» la pone por omisión; F la cambia; la hija y los otros 3 procesadores, con SSE2; la parada de seguridad a 91 °C, igual" \
+    "termo: coma flotante del núcleo: FXSAVE, SSE y SSE2; la carga, por omisión: fuerte (SSE2)" "termo: suceso: la carga, ahora: ligera" "termo: suceso: la carga, ahora: fuerte" \
+    "termo: prueba 1: empieza «Calentar fuerte" "termo: carga en marcha (fuerte, SSE2)" "termo: carga fuerte (SSE2): este (la tarea hija) y 3 de los 3 procesadores más" \
+    "termo: suceso: EMPIEZA la prueba de esfuerzo: 300 s, carga fuerte (SSE2) en 4 procesadores" \
+    "termo: fin de la carga a los [0-9]* s (PARADA DE SEGURIDAD); pico 91,0 °C" "termo: carga parada (fuerte: [0-9]* vueltas de [0-9]* multiplicaciones y sumas de dobles; los registros bien)" \
+    "termo: los demás procesadores, al parar: 3, vueltas de carga: [1-9][0-9]* [1-9][0-9]* [1-9]" "termo: prueba 1: acaba «Calentar fuerte.*PARADA DE SEGURIDAD.*; carga fuerte (SSE2)"
+  mtype -i $R@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' > $I
+  if grep -q '^Carga usada: FUERTE, SSE2 .* en este y en 3 de los 3 procesadores más' $I && grep -q '^Motivo de la parada: Zona ACPI' $I && grep -q '^1\. [0-9:]* Calentar fuerte.*carga fuerte (SSE2)' $I; then
+    ok "(1.2) INFORME.TXT: «Carga usada: FUERTE, SSE2» en los 4, el motivo de la parada y la línea del resultado con «carga fuerte (SSE2)»"
+  else ko "(1.2) INFORME.TXT con la fuerte: $(grep -a '^Carga usada\|^Motivo\|^1\. ' $I | head -n 3 | tr '\n' ' ')"; fi
+  # lo que corre (sin RAPL en QEMU): las vueltas de la hija y de los otros 3
+  v=$(sed -n 's/.*carga parada (fuerte: \([0-9]*\) vueltas de \([0-9]*\) .*/\1 \2/p' $S | head -n 1)
+  n=$(sed -n 's/.*los demás procesadores, al parar: 3, vueltas de carga: \([0-9 ]*\)$/\1/p' $S | head -n 1)
+  seg=$(sed -n 's/.*fin de la carga a los \([0-9]*\) s .*/\1/p' $S | head -n 1)
+  if [ -n "$v" ] && [ -n "$n" ] && [ -n "$seg" ] && [ "$seg" -gt 0 ]; then
+    mfl=$(echo "$v $n $seg" | awk '{ h = $1 * $2; a = 0; for (i = 3; i < NF; i++) a += $i; a *= 40000 * 12 * 28; printf "%.0f MFLOPS la hija y %.0f MFLOPS los otros 3 (en %d s)", h / $NF / 1e6, a / $NF / 1e6, $NF }')
+    ok "(1.2) la carga fuerte, en QEMU ($cpu, sin RAPL: no da vatios): $mfl"
+    echo "termo-fuerte: $mfl" >> $Y/fuerte-cifras.txt
+  else ko "(1.2) sin las vueltas de la carga fuerte: «$v» «$n» «$seg»"; fi
+}
+tq_informe() { grep -a -q 'termo: suceso: informe para el técnico' $1; }
+
+# (TERMO 1.2) 8d. La alimentación (el ASUS GL553VD, 25/11/2026: «no se sabe si
+# estaba enchufado» en la primera, porque ACPI aún no había leído la batería;
+# y «enchufado (!)» en otra que fue casi toda sin enchufar). Con «acpitarde»
+# (ACPI, sin mirar los primeros 15 s; C, 4 s después de abrirse: lo primero
+# que se puede pulsar) Calentar espera a su primera lectura y
+# lo dice; enchufado al empezar, se desenchufa a los ~20 s y la batería baja:
+# la prueba es «con batería», con el cambio y cuánto de cada
+termo_alimentacion() {
+  local R=$Y/alim.img cpu="-cpu Haswell" I=$Y/alim.txt B="o /b 0x70 0x60" E="o /b 0x70 0x61"
+  [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host"
+  termo_ram_img $R "acpitarde"
+  for f in $(mdir -b -i $R@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT|EST)$'); do mdel -i $R@@1M "$f" > /dev/null 2>&1; done
+  TQ_HASTA=tq_informe TQ_TOPE=360 TQ_ACPI="-acpitable file=$AQUI/../tests/acpi/bateria-qemu.aml" \
+    termo_qemu $R ta1 200 "$cpu" "2:$B" "2:o /b 0x71 90" "3:$E" "3:o /b 0x71 3" \
+    "20:sendkey 1" "20:sendkey c" "52:$E" "52:o /b 0x71 2" "70:$B" "70:o /b 0x71 86" "100:$B" "100:o /b 0x71 82" "140:$C" "140:o /b 0x71 91" "152:$C" "152:o /b 0x71 50"
+  mira "(1.2) Calentar espera a la primera lectura de ACPI (y lo dice); la alimentación, con todas las lecturas: desenchufado a mitad, la prueba es «con batería»" \
+    "termo: suceso: Calentar: se espera a la primera lectura de ACPI" "termo: suceso: Calentar: ya está la primera lectura de ACPI (a los [0-9]* s de pedirlo): se empieza" \
+    "termo: prueba 1: empieza «Calentar enchufado (5 min)»" "termo: suceso: OJO: durante la prueba de esfuerzo se ha desenchufado el cargador" \
+    "termo: suceso: la prueba 1, «Calentar enchufado (5 min)», ha sido en realidad «Calentar con batería (5 min)» ([0-9]* s enchufado, [0-9]* s con la batería)" \
+    "termo: prueba 1: acaba «Calentar con batería (5 min)»"
+  mtype -i $R@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' > $I
+  if grep -q '^Alimentación: con la batería (sin enchufar); OJO: se ha enchufado o desenchufado durante la prueba: [0-9]* s enchufado y [0-9]* min [0-9]* s con la batería' $I \
+     && grep -q '^PRUEBA 1 DE ESTE ARRANQUE: Calentar con batería (5 min)' $I && ! grep -q 'no se sabe si estaba enchufado' $I; then
+    ok "(1.2) INFORME.TXT: «Alimentación: con la batería», con el cambio y cuánto tiempo de cada; el nombre de la prueba, el de verdad"
+  else ko "(1.2) INFORME.TXT, la alimentación: $(grep -a '^Alimentación\|^PRUEBA 1' $I | head -n 2 | tr '\n' ' ')"; fi
+  if grep -a 'ACPI ._TZ_.TZ01' $I | grep -qv 'sin dato'; then ok "(1.2) la zona de ACPI tiene dato también en el reposo de la prueba (se ha esperado a ACPI)"
+  else ko "(1.2) la zona de ACPI en el informe: $(grep -a 'TZ01' $I | head -n 2)"; fi
 }
 
 # (TERMO) 5. «Terminal»: SSH.BIN contra un sshd propio (puerto alto, solo 127.0.0.1, ForceCommand)

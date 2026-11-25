@@ -297,12 +297,14 @@ static int lee_archivo(const char *ruta, u8 **b, u32 *n)
 	*b = (u8 *)malloc(l + 1);
 	r = *b ? sc(SC_LEER, m, (u32)*b, l) : 0;
 	sc(SC_CERRAR, m, 0, 0);
-	if (!*b || ES_ERROR(r) || r != l) {
+	/* (TERMO 1.2) el .LOG que el Termómetro está escribiendo a la vez puede
+	 * dar menos de lo que medía: se manda lo leído */
+	if (!*b || ES_ERROR(r) || r == 0 || r > l) {
 		free(*b);
 		*b = 0;
 		return 0;
 	}
-	*n = l;
+	*n = r;
 	return 1;
 }
 
@@ -372,7 +374,7 @@ static int manda(const struct url *u, const char *lote, const char *nombre, cons
 		 * iban minutos en reintentos antes de probar hispados.es) */
 		if (c == SIN_CABLE || c == SIN_IP || c == SIN_RED || c == SIN_TARJETA)
 			return 2;
-		return c == TLS_CERTIFICADO || c == TLS_SIN_HORA || c == SIN_TLS || c == NO_RESUELVE || !ningun_bueno ? 3 : 2;
+		return c == TLS_CERTIFICADO || c == TLS_SIN_HORA || c == SIN_TLS || c == NO_RESUELVE || ningun_bueno ? 3 : 2;
 	}
 	r = envia(u, c, (const u8 *)cab_http, (u32)m);
 	if (!r)
@@ -384,7 +386,10 @@ static int manda(const struct url *u, const char *lote, const char *nombre, cons
 	if (r) {
 		fallo_red = r;
 		snprintf(por_que, (size_t)cabe, "%s", texto_red(r));
-		return 2;
+		/* (TERMO 1.2) tampoco se reintenta con el primer archivo si se corta
+		 * antes de la respuesta (TLS.BIN puede dar el fallo del apretón de
+		 * manos al enviar): el otro servidor ya */
+		return ningun_bueno ? 3 : 2;
 	}
 	if (!strncmp(resp, "HTTP/1.", 7))
 		fallo_http = (resp[9] - '0') * 100 + (resp[10] - '0') * 10 + (resp[11] - '0');
@@ -476,7 +481,8 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 	struct url us[2];
 	char lote[24], por_que[300];
 	u32 m, a, me, d, h, mi, s, f, ho, hn;
-	int nn = 0, k, buenos = 0, malos = 0, iguales = 0, i, sv = 0;
+	int nn = 0, k, buenos = 0, malos = 0, iguales = 0, i, sv = 0, no_leidos = 0;
+	char no_leido[16] = "", nl[80] = "";
 	u8 az[4];
 
 	consola = en_consola;
@@ -572,7 +578,8 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 
 		if (!lee_archivo(rutas[k], &b, &n)) {
 			di("%s: no se puede leer (o pasa de 4 MB): no se manda.", nombres[k]);
-			malos++;
+			no_leidos++;	/* (TERMO 1.2) aparte: no es culpa de la red ni del servidor */
+			snprintf(no_leido, sizeof no_leido, "%s", nombres[k]);
 			continue;
 		}
 		if (ya_mandado(nombres[k], n)) {
@@ -588,7 +595,7 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 
 				if (vez % 4)
 					sc(SC_DORMIR, espera[vez % 4] * jg_hz, 0, 0);
-				di("Enviando... (archivo %d de %d: %s, %u octetos, a %s)%s", k + 1, nn, nombres[k], n, us[sv].host, vez ? ", otra vez" : "");
+				di("Enviando... (archivo %d de %d: %s, %u octetos, a %s)%s%s", k + 1, nn, nombres[k], n, us[sv].host, vez ? ", otra vez: antes, " : "", vez ? por_que : "");
 				r = manda(&us[sv], lote, nombres[k], b, n, por_que, sizeof por_que);
 				/* (cuatro veces mal, o con este no hay manera: el otro servidor) */
 				if ((r == 3 || (r == 2 && vez % 4 == 3)) && n_servidores > 1 && probados < 2) {
@@ -623,6 +630,8 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 			}
 		}
 	}
+	if (no_leidos)
+		snprintf(nl, sizeof nl, "; %d no se %s podido leer (%s%s)", no_leidos, no_leidos == 1 ? "ha" : "han", no_leido, no_leidos > 1 ? " y otros" : "");
 	if (malos) {
 		char mot[360];
 
@@ -633,8 +642,10 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 		else
 			di("NO ENVIADO: %s Si no hay manera, súbalo al FTP: los archivos siguen en %s.", mot, carpeta);
 	} else if (buenos)
-		di("ENVIADO: %d archivos a %s (lote %s)%s.", buenos, us[sv].host, lote, iguales ? (snprintf(por_que, sizeof por_que, "; otros %d ya estaban", iguales), por_que) : "");
+		di("ENVIADO: %d archivos a %s (lote %s)%s%s.", buenos, us[sv].host, lote, iguales ? (snprintf(por_que, sizeof por_que, "; otros %d ya estaban", iguales), por_que) : "", nl);
+	else if (iguales)
+		di("ENVIADO: no había nada nuevo (los %d archivos ya estaban en el servidor)%s.", iguales, nl);
 	else
-		di("ENVIADO: no había nada nuevo (los %d archivos ya estaban en el servidor).", iguales);
+		di("NO ENVIADO: no se ha podido leer ningún archivo de %s%s. Súbalos al FTP: siguen en %s.", carpeta, nl, carpeta);
 	return malos ? 3 : 0;
 }

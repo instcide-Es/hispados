@@ -4942,7 +4942,8 @@ fi   # (SONIDO) el sonido
 # pestaña), la dirección (F6) por HTTP, el portapapeles del sistema (Ctrl+L,
 # Ctrl+C y Ctrl+V en un campo), una descarga a C:\DESCARGA con su nombre en
 # 8+3 (igual octeto a octeto), las galletas que se guardan al cerrar; y el
-# x87 de cada programa (X87.BIN, a la vez con su copia). Las posiciones, las de
+# x87 de cada programa (X87.BIN, a la vez con su copia); (TERMO-FUERTE) el SSE
+# de cada programa (XMM.BIN) y, con -cpu pentium, el x87 sin FXSAVE. Las posiciones, las de
 # la ventana en una pantalla de 800 x 600 (la página empieza en (20, 108)).
 if parte08 navegador; then
 echo "== Hispa-Pentium: el Navegador (NetSurf con QuickJS, NAVEGA.BIN) =="
@@ -5080,6 +5081,21 @@ if [ -n "$HS" ] && $AQUI/nucleo32/disco.sh $Q/d.img 32 red tls navegador > $Q/di
   S=$Q/x.txt
   mira "el x87 de cada programa: X87.BIN y sus dos copias, a la vez, cada una con su coma flotante (el núcleo la guarda y la repone)" \
     "^x87: bien (dos programas a la vez, cada uno con su x87)$"
+  # (TERMO-FUERTE, 0.8.12) el SSE de cada programa (FXSAVE/FXRSTOR al cambiar
+  # de tarea): XMM.BIN y sus dos copias, a la vez, cada una con sus XMM, su
+  # MXCSR y su x87; limpio al empezar; y sin FXSAVE (-cpu pentium), el x87
+  # con fnsave como antes y XMM.BIN dice que no hay SSE2
+  DISCO=$Q/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "xmm" ":pausa 8" "x87" ":pausa 6" > $Q/xm.sal 2>&1
+  tr -d '\r' < $Q/xm.sal > $Q/xm.txt
+  S=$Q/xm.txt
+  mira "(TERMO-FUERTE) el SSE de cada programa: XMM.BIN y sus dos copias, a la vez, cada una con sus XMM, su MXCSR y su x87 (FXSAVE al salir de cada tarea), limpios al empezar; y el x87 sigue bien" \
+    "^xmm: bien (tres programas a la vez, cada uno con sus XMM, su MXCSR y su x87)$" "^x87: bien (dos programas a la vez, cada uno con su x87)$"
+  if grep -q '^xmm: MAL' $S; then ko "(TERMO-FUERTE) XMM.BIN: $(grep '^xmm: MAL' $S | head -n 2 | tr '\n' ' ')"; fi
+  DISCO=$Q/d.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-cpu pentium" $AQUI/nucleo32/probar.sh "" "x87" ":pausa 6" "xmm" ":pausa 3" > $Q/xp.sal 2>&1
+  tr -d '\r' < $Q/xp.sal > $Q/xp.txt
+  S=$Q/xp.txt
+  mira "(TERMO-FUERTE) con un Pentium (sin FXSAVE ni SSE): el x87 de cada programa, con fnsave como antes; XMM.BIN dice que no hay SSE2" \
+    "^x87: bien (dos programas a la vez, cada uno con su x87)$" "^xmm: sin SSE2"
 else ko "no se puede poner en marcha el sitio de prueba o hacer el disco: $(tail -n 1 $Q/srv.txt) $(tail -n 3 $Q/disco.txt)"; fi
 kill $NPID 2> /dev/null; wait $NPID 2> /dev/null
 else
