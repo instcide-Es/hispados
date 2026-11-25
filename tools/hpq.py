@@ -291,6 +291,12 @@ VERSION_0811 = '0.8.11'
 # rmovil.cas en RED.BIN), con la prioridad cable > móvil > Wi-Fi. Suben base
 # (el núcleo), red (RED.BIN, IPCONFIG) y wifi (REDWIFI dice «por el móvil»).
 # La red de la 0.8.12 con una base de antes sigue yendo, sin el móvil.
+# (RTL8723BS, 0.8.12, rama wifi-sdio) el Wi-Fi por SDIO de las tabletas Bay
+# Trail (el Acer One 10): la Realtek RTL8723BS en WIFI.BIN (wifi 0.8.12) y
+# ACPI.BIN (en la base) que aprende la SDIO en \SDIO.TXT; el núcleo pone en
+# marcha RED.BIN con el escritorio también en esas tabletas, e INSTALAR lleva
+# \SDIO.TXT a la raíz. (La 0.8.12 junta termo-fuerte, informe-disp, usb-movil,
+# bluetooth y wifi-sdio: docs/PENTIUM.md, «La 0.8.12».)
 # (BLUETOOTH, 25/11/2026, rama bluetooth) el Bluetooth: en el núcleo, el
 # transporte por USB (usbbt.cas: las llamadas 240 a 248), los teclados y
 # ratones Bluetooth en usbhid.cas, el sello y los secretos de BT.BIN y el

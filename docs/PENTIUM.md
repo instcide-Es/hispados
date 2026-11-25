@@ -4860,7 +4860,44 @@ alarma del Reloj (suena), «Poner en hora» (pregunta el modo
 administrador), «ÁÉÍÓÚ €» en el Bloc, y `COPY` a `C:\HISPA`: acceso
 denegado.
 
-**La 0.8.12** (25/11, rama `termo-fuerte`, marcas «(TERMO-FUERTE)» en el
+**La 0.8.12** (25/11, rama `pentium-0812`: las ramas `termo-fuerte`,
+`informe-disp`, `usb-movil`, `bluetooth` y `wifi-sdio`, por ese orden, todas
+sobre la 0.8.11). Lo que se tocó al juntar:
+
+- **Una sola versión**: `VERSION_0812` en `hpq.py` (base, red y wifi) y
+  `Usuario.VERSIÓN_TEXTO` («0.8.12»); `VERSION_BT`, la que pide el paquete
+  `bluetoot` 0.1, es la misma (la rama la dejaba en la 0.8.11, que no tiene
+  las llamadas del Bluetooth).
+- **Las partes**: 19 bis (`informe`), 55 (`movil`), **56** (`bt`) y **57**
+  (`rtl`): las tres ramas numeraban la suya 55. La sección del Bluetooth es
+  la **14 tricies** (la rama la llamaba 14 undequadragies; el móvil es la 14
+  undetricies).
+- **Las llamadas**: 101 (el móvil: dentro de 90..101, la red), 224 con EBX =
+  8 (la carga fuerte), 226, 8 (la ficha del SMBIOS, de cualquiera), 240 a
+  248 (el Bluetooth); las 159, 160, 220-225 y 238, como estaban. Ninguna se
+  pisa; `wifi-sdio` no añade ninguna (la SDIO va por la 160 y lo que ya
+  daba la red al Wi-Fi).
+- **`semilla.cas` y `usbcal.cas`**: el móvil (`Usbmovil`) y el Bluetooth
+  (`Usbbt`), los dos, al enumerar y al desenchufar.
+- **El Wi-Fi por SDIO arranca con el escritorio** (`wifi_por_sdio`, en
+  `semilla.cas`): el escritorio solo ponía en marcha RED.BIN si había una
+  tarjeta de red en el PCI (la clase 02), y el Wi-Fi de las tabletas no lo
+  es; ahora también con la controladora SDIO de Bay Trail o Cherry Trail
+  (8086:0F15, 8086:2295) en el PCI o, con su puente (8086:0F00, 8086:2280),
+  con `\SDIO.TXT` o sin ninguna controladora SD en el PCI (el «modo ACPI»
+  del Acer One 10). Es la misma regla de `busca_tarjeta` en `rwifi.cas`.
+- **INSTALAR lleva `\SDIO.TXT` a la raíz** de lo instalado, como
+  `\SDHCI.TXT` (WIFI.BIN y el núcleo lo buscan en la raíz del sistema o en
+  la X:; en `\HISPA` no lo veían).
+- **`usb.sh`** con `PRUEBA_SDHCI=1` y `PRUEBA_WIFI_SDIO=1` a la vez (la
+  memoria de instalar del Acer One 10): el eMMC y la SD son las entradas 1 a
+  4 y el Wi-Fi, la 5 a la 7 (las dos se numeraban desde la 1).
+
+Los paquetes: base **0.8.12**, red **0.8.12**, wifi **0.8.12**, termo **1.2**,
+equipo **0.9.6**, el nuevo **bluetoot 0.1** (`base >= 0.8.12`); lo demás, tal
+cual lo publicado.
+
+**La carga fuerte** (rama `termo-fuerte`, marcas «(TERMO-FUERTE)» en el
 núcleo y «(TERMO 1.2)» en el Termómetro; sobre la 0.8.11). Para ver si una
 fuente o un cargador frenan a un portátil (el MSI GT80 Titan, que se congela
 y «no tiene fuerza» para cargar Windows): con la carga de siempre, x87, el
@@ -4886,7 +4923,29 @@ ASUS GL553VD de referencia (i5-7300HQ, PL1 45 W) solo llegaba a 17,2 W.
   alimentación de cada prueba con todas sus lecturas y Calentar que espera
   a la primera lectura de ACPI.
 
-Los paquetes: base **0.8.12**, termo **1.2** (`base >= 0.8.12`).
+Los paquetes (de esta rama): base **0.8.12**, termo **1.2** (`base >= 0.8.12`).
+
+**El informe de los dispositivos** (rama `informe-disp`, sobre la 0.8.11). «Enviar informe
+de los dispositivos que fallan» en Configuración › Dispositivos (sección
+«Enviar informe de los dispositivos que fallan», en la del Administrador de
+dispositivos): el botón, la vista de lo que se manda, «Enviar»/«Cancelar»,
+«ENVIADO (número de informe ...)» o «NO ENVIADO: ...» y la copia en los
+Documentos; la llamada **226, 8** (la ficha del equipo del SMBIOS, sin el
+número de serie, el UUID, el SKU ni el inventario: de cualquiera); y el
+receptor `tools/informe-disp/` (`informe.php`, `informe-mover.sh`, el bloque de
+nginx e `INSTALAR.txt`; sin instalar: lo pone Carlos). Los paquetes: base
+**0.8.12** (el núcleo) y equipo **0.9.6** (DISPOSIT.BIN). Las pruebas:
+`SOLO=dispositivos` 104/0 (con la 19 bis nueva, `SOLO=informe`, y el árbol recogido).
+
+**El móvil por USB** (rama `usb-movil`; sección 14 undetricies): el
+«Anclaje de USB» de Android, RNDIS y CDC-NCM (`usbmovil.cas`, la llamada 101,
+y `rmovil.cas` en RED.BIN), con la prioridad cable > móvil > Wi-Fi. **El
+Bluetooth** (rama `bluetooth`; sección 14 tricies): `BT.BIN`, la pila (HCI,
+SSP, L2CAP, SDP, HID), los teclados y ratones, el icono del Panel de control
+con un adaptador; las llamadas 240 a 248. **El Wi-Fi por SDIO** (rama
+`wifi-sdio`; en la sección del Wi-Fi, «La Realtek RTL8723BS por SDIO»): SDIO sobre la SDHCI y la
+Realtek RTL8723BS del Acer One 10, sacada de Linux; ACPI.BIN aprende la SDIO
+y cómo se enciende el chip en `\SDIO.TXT`.
 
 **La 0.8.11** (25/11, rama `sin-admin`, empezada: este arreglo). El HP Mini
 de la asociación con la 0.8.10 instalada y un solo usuario, «Biblio2»,
@@ -4926,19 +4985,6 @@ Los paquetes: base **0.8.11**, paquetes **1.8**, red **0.8.11** (RED.BIN, el
 escritorio), `wifi` 107/0 (con «4 quater»), `paquetes` 108/0, `programas`
 92/0 y `compat` 89/0 (estas tres, por lo que lanza ACTUALIZ /BANDEJA y el
 PAQUETES nuevo).
-
-**La 0.8.12** (25/11, rama `informe-disp`, sobre la 0.8.11). «Enviar informe
-de los dispositivos que fallan» en Configuración › Dispositivos (sección
-«Enviar informe de los dispositivos que fallan», en la del Administrador de
-dispositivos): el botón, la vista de lo que se manda, «Enviar»/«Cancelar»,
-«ENVIADO (número de informe ...)» o «NO ENVIADO: ...» y la copia en los
-Documentos; la llamada **226, 8** (la ficha del equipo del SMBIOS, sin el
-número de serie, el UUID, el SKU ni el inventario: de cualquiera); y el
-receptor `tools/informe-disp/` (`informe.php`, `informe-mover.sh`, el bloque de
-nginx e `INSTALAR.txt`; sin instalar: lo pone Carlos). Los paquetes: base
-**0.8.12** (el núcleo) y equipo **0.9.6** (DISPOSIT.BIN). Las pruebas:
-`SOLO=dispositivos` 104/0 (con la 19 bis nueva, `SOLO=informe`, y el árbol recogido).
-
 
 **La 0.8.10** (24/11, rama `pentium-0810`: las ramas `termometro` —la de
 después de la 0.8.9: la batería que se relee, SMBIOS 3, MSDM fuera, las zonas
