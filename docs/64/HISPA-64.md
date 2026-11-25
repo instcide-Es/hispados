@@ -3012,3 +3012,36 @@ etapa 11:
   Con el núcleo de la 10, el primero da el doble fallo de siempre.
 - Lo de las etapas 0 a 10, igual (la unidad en memoria lleva 40 archivos;
   uname 0.11.0).
+
+### Lo que queda para la 11 b (y más adelante)
+
+- **De la 11 del plan**: imprimir (IPP Everywhere: mDNS para descubrir,
+  mandar PDF), suspender (S3 o S0ix), la batería, el brillo y HWP/P-states:
+  piden **ACPICA** (los métodos de AML: `_BST`, `_BCM`, `_PTS`...), que es
+  lo siguiente de fondo; con ella, también los enlaces `_CRS` hechos por un
+  método (los LNKA del modo PIC) para la INTx.
+- **El sonido**: la mezcla de varios programas a la vez (hoy, uno con
+  /dev/dsp; EBUSY para el segundo) y el volumen (en la mezcla, como en
+  Hispa-Pentium), los auriculares (mirar si hay algo enchufado y callar los
+  altavoces), los Cirrus de los Mac y SONIDO.INI de Hispa-Pentium; la
+  entrada (el micrófono); probarlo en el taller (el Realtek del ASUS, el del
+  Toshiba). Con KVM, la grabación de QEMU (`-audiodev wav`) pierde a veces
+  hasta 130 ms del final de un trozo antes de cambiar la frecuencia (el
+  flujo se para y se vuelve a poner): sin KVM, no; por mirar si es lo que
+  guarda la tarjeta de QEMU con su temporizador (`use-timer`) o algo
+  nuestro.
+- **La expropiación al salir de una interrupción en el núcleo**: hoy, la
+  que despierta a uno que pasa por delante mientras corre un hilo del
+  núcleo le da el procesador en el tic siguiente (como mucho 10 ms); el
+  aviso del otro procesador y la vuelta al anillo 3, ya en el acto.
+- **El tiempo de procesador**, de 10 en 10 ms (el tic); más fino, con el
+  TSC al cambiar de hilo. Y el de un fallo de página del programa cuenta
+  como suyo (Linux lo cuenta del núcleo).
+- **CUBIC** (si hiciera falta para enlaces largos y rápidos) y SACK al
+  repetir tras vencer el plazo (hoy se olvida lo de SACK y se repite todo
+  con un segmento de ventana).
+- **De la 10 b**, sin empezar (el plan los pone allí): el navegador
+  (Ladybird o WPE WebKit), ICU, curl, **IPv6** y la libstdc++ compilada
+  para musl.
+- Lo de la sección 15 que sigue: las I219 en el taller, el cliente SSH, la
+  Wi-Fi en paralelo.
