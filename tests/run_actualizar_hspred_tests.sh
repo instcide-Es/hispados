@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 B=build
 NIC=${NIC:-ne2k_pci}
-for f in HSPRED CONFRED ACTUALIZAR; do
+for f in HSPRED CONFRED ACTUALIZAR ACTPRUEB; do
   [ -f $B/$f.COM ] || { echo "falta $B/$f.COM (make)"; exit 1; }
 done
 [ -f "$IMG" ] || { echo "falta la imagen $IMG (make)"; exit 1; }
@@ -29,6 +29,9 @@ T=$(mktemp -d)
 PORT=${PORT:-8080}
 mkdir -p $T/www
 printf '[0.9.31]\ncpu=386\n' > $T/www/aldia.txt
+# [FIRMA] (0.9.31) la lista, firmada con la clave de prueba, y en el disquete
+# el ACTUALIZAR que la lleva (build/ACTPRUEB.COM)
+python3 tools/firma_versiones.py firma $T/www/aldia.txt --clave tests/firma/clave_prueba.key > /dev/null || exit 1
 python3 -m http.server --bind 127.0.0.1 --directory $T/www $PORT > $T/http.log 2>&1 &
 HTTP_PID=$!
 sleep 1
@@ -46,6 +49,7 @@ corre() {
     netargs=(-net none)     # sin tarjeta: QEMU, si no, añade una e1000 por omisión
   fi
   cp "$IMG" $T/$n.img
+  mcopy -o -i $T/$n.img $B/ACTPRUEB.COM ::HISPADOS/ACTUALIZ.COM
   { sleep 6
     for c in "$@"; do printf '%s\r' "${c#*|}"; sleep "${c%%|*}"; done
   } | timeout $tmo qemu-system-i386 -display none -serial stdio -monitor none -parallel none \
