@@ -30,7 +30,7 @@
 #define ROJO 0xB42318
 
 static struct bt_estado e;
-static int hay_servicio;
+static int hay_servicio, ocupado;
 
 /* ---- hablar con el servicio ---- */
 static u32 pide(u32 op, u32 a, const u8 *dir)
@@ -59,9 +59,12 @@ static int lee(void)
 	p.op = BO_ESTADO;
 	n = sc(SC_BT_PEDIR, (u32)&p, (u32)&e, sizeof e);
 	hay_servicio = !ES_ERROR(n) && n == sizeof e;
+	ocupado = n == 0xFFFFFFF6u;
 	if (!hay_servicio) {
 		memset(&e, 0, sizeof e);
 		e.estado = BTE_NADA;
+		if (ocupado)
+			formatear(e.aviso, sizeof e.aviso, "Poniendo en marcha el adaptador (con el firmware de Intel, hasta dos minutos)...");
 	}
 	return hay_servicio;
 }
@@ -74,7 +77,7 @@ static const char *estado_texto(void)
 	case BTE_SIN_ADAPTADOR: return "Sin adaptador Bluetooth";
 	case BTE_FALLO: return "No se ha podido poner en marcha";
 	}
-	return "El servicio Bluetooth no está en marcha";
+	return ocupado ? "Ocupado: poniendo en marcha el adaptador" : "El servicio Bluetooth no está en marcha";
 }
 
 static const char *que_es(struct bt_fila *f)
@@ -253,7 +256,8 @@ int cliente(const char *a)
 		return 0;
 	}
 	if (!lee()) {
-		h_escribe("Bluetooth: el servicio no está en marcha (¿hay un adaptador Bluetooth?).\n");
+		h_escribe(ocupado ? "Bluetooth: ocupado, poniendo en marcha el adaptador (con el firmware de Intel, hasta dos minutos).\n"
+			  : "Bluetooth: el servicio no está en marcha (¿hay un adaptador Bluetooth?).\n");
 		return 1;
 	}
 	if (h_empieza(a, "/BUSCAR")) {

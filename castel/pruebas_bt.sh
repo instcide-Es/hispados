@@ -25,15 +25,20 @@ if make -s -C $R build/bt_prueba build/usbredir_bt > $X/make.txt 2>&1; then
   if $R/build/bt_prueba $X/fw > $X/anf.txt 2>&1 && grep -q ", 0 fallos" $X/anf.txt; then ok "en el anfitrión, la pila contra el modelo: $(tail -1 $X/anf.txt)"
   else ko "build/bt_prueba falla:"; grep "MAL\|FALLO" $X/anf.txt | head -8 | sed 's/^/        /'; tail -1 $X/anf.txt | sed 's/^/        /'; fi
 else ko "no se hacen build/bt_prueba y build/usbredir_bt: $(tail -2 $X/make.txt)"; return; fi
-# ---- 2. en QEMU ----
+# ---- 2. en QEMU (el núcleo, una vez; con BT_NUCLEO=archivo, ese) ----
+local K=${BT_NUCLEO:-}
+if [ -z "$K" ]; then
+  if ! { python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $X/s.asm > /dev/null && nasm -f bin $X/s.asm -o $X/SEMILLA.BIN; }; then ko "no se hace el núcleo"; return; fi
+  K=$X/SEMILLA.BIN
+fi
 if ! $AQUI/nucleo32/disco.sh $X/d.img 16 bt > $X/disco.txt 2>&1; then ko "no se hace el disco con BT.BIN: $(tail -2 $X/disco.txt)"; return; fi
 PU=$((47000 + RANDOM % 2000))
 QM="-device qemu-xhci,id=x -chardev socket,id=bt,host=127.0.0.1,port=$PU -device usb-redir,chardev=bt,bus=x.0"
 # (a) emparejar el teclado y el ratón; el teclado teclea «hola» e Intro
 $R/build/usbredir_bt $PU --estado $X/estado --teclea 'hola\n' 2> $X/redir1.txt &
 sleep 0.5
-QEMU_MAS="$QM" MEMORIA=64 ESCRIBE=1 DISCO=$X/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "bt" ":pausa 3" "bt /buscar" \
-  "bt /emparejar DE:AD:BA:BE:10:01" ":pausa 12" "bt /emparejar DE:AD:BA:BE:11:02" ":pausa 6" "bt" ":pausa 2" "type bt.log" ":pausa 2" "type bt.ini" ":pausa 1" > $X/q1.sal 2>&1
+QEMU_MAS="$QM" MEMORIA=64 ESCRIBE=1 DISCO=$X/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K "bt" ":pausa 3" "bt /buscar" \
+  "bt /emparejar DE:AD:BA:BE:10:01" ":pausa 12" "bt /emparejar DE:AD:BA:BE:11:02" ":pausa 8" "bt" ":pausa 2" "type bt.log" ":pausa 2" "type bt.ini" ":pausa 1" > $X/q1.sal 2>&1
 wait
 S=$X/q1.sal
 mira "QEMU, usb-redir: el núcleo ve el adaptador Bluetooth (E0/01/01) y BT.BIN lo pone en marcha (reset, versión, dirección)" \
@@ -50,21 +55,40 @@ mira "el ratón: Just Works, su descriptor por SDP y el protocolo de informes (h
 mira "BT: los dos, emparejados y conectados" "Teclado de prueba (teclado), DE:AD:BA:BE:10:01: emparejado, conectado" "Ratón de prueba (ratón), DE:AD:BA:BE:11:02: emparejado, conectado"
 if grep -q "Escriba [0-9]\{6\}" $S && ! sed -n '/type bt.log/,$p' $S | grep -q "$(grep -o 'Escriba [0-9]\{6\}' $S | head -1 | cut -c9-)"; then ok "BT.LOG: ni el código de emparejar ni las direcciones enteras"
 else ko "BT.LOG lleva el código de emparejar"; fi
-if grep -q "^Aparato=0110BEBAADDE," $S && grep -q "^; Teclado de prueba (teclado)" $S; then ok "BT.INI: el teclado y el ratón, con su nombre a la vista y la clave cifrada"
+MTOOLS_SKIP_CHECK=1 mcopy -n -i $X/d.img ::BT.INI $X/BT.INI > /dev/null 2>&1
+if grep -q "^Aparato=0110BEBAADDE," $X/BT.INI && grep -q "^Aparato=0211BEBAADDE," $X/BT.INI && grep -q "^; Teclado de prueba (teclado)" $X/BT.INI && grep -q "^Encendido=SI" $X/BT.INI; then
+  ok "BT.INI: el teclado y el ratón, con su nombre a la vista y la clave cifrada"
 else ko "BT.INI no tiene los emparejados"; fi
+mira "BT.INI es un secreto de BT.BIN: ORDENES no lo puede leer" "^permisos: acceso denegado a .bt.ini para leer (ORDENES.BIN)"
 if grep -q "modelo: FALLO" $X/redir1.txt; then ko "el modelo ha visto cosas mal hechas: $(grep -m3 'modelo: FALLO' $X/redir1.txt | tr '\n' ' ')"
 else ok "el adaptador de mentira no ha visto nada mal hecho ($(tail -1 $X/redir1.txt | sed 's/^usbredir_bt: //'))"; fi
 # (b) arrancar otra vez: el teclado se despierta y se conecta solo, y teclea
 $R/build/usbredir_bt $PU --estado $X/estado --teclea 'hola\n' 2> $X/redir2.txt &
 sleep 0.5
-QEMU_MAS="$QM" MEMORIA=64 ESCRIBE=1 DISCO=$X/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "bt" ":pausa 14" "bt" ":pausa 1" > $X/q2.sal 2>&1
+QEMU_MAS="$QM" MEMORIA=64 ESCRIBE=1 DISCO=$X/d.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K "bt" ":pausa 14" "bt" ":pausa 1" > $X/q2.sal 2>&1
 wait
 S=$X/q2.sal
-mira "al arrancar otra vez: BT.INI leído, el teclado se conecta solo (con la clave guardada) y teclea" \
-  "^bt: BT.INI: 2 emparejados; encendido" "^bt: xx:xx:xx:xx:10:01 quiere conectarse: se acepta" "^bt: Cifrado con xx:xx:xx:xx:10:01" "^hola desde el anillo 3"
-mira "y el ratón, llamado al arrancar" "^bt: Reconectando con xx:xx:xx:xx:11:02" "Ratón de prueba (ratón), DE:AD:BA:BE:11:02: emparejado, conectado"
+mira "al arrancar otra vez: BT.INI leído, los emparejados se reconectan solos (con la clave guardada, sin SDP) y el teclado teclea" \
+  "^bt: BT.INI: 2 emparejados; encendido" "^bt: Reconectando con xx:xx:xx:xx:10:01" "^bt: Cifrado con xx:xx:xx:xx:10:01" \
+  "^bt: HID listo: xx:xx:xx:xx:10:01 (Teclado de prueba), con el protocolo de arranque" "^hola desde el anillo 3"
+mira "y el ratón" "^bt: Reconectando con xx:xx:xx:xx:11:02" "Ratón de prueba (ratón), DE:AD:BA:BE:11:02: emparejado, conectado"
+if grep -q "modelo: FALLO" $X/redir2.txt; then ko "el modelo ha visto cosas mal hechas: $(grep -m3 'modelo: FALLO' $X/redir2.txt | tr '\n' ' ')"; else ok "al reconectar, el modelo no ha visto nada mal hecho"; fi
+# (d) el escritorio: con un adaptador, el icono «Bluetooth» del Panel de
+# control; su ventana: buscar, elegir el teclado, «Emparejar» (el código en
+# grande) y emparejado
+$AQUI/nucleo32/disco.sh $X/g.img 16 bt > /dev/null 2>&1
+rm -f $X/estado_g
+$R/build/usbredir_bt $PU --estado $X/estado_g --teclea 'hola' 2> $X/redir4.txt &
+sleep 0.5
+QEMU_MAS="$QM" CAPTURAS=$X MEMORIA=64 ESCRIBE=1 DISCO=$X/g.img ARRANQUE=escritorio MODULOS= $AQUI/nucleo32/probar.sh $K ":pausa 9" ":clicd 400 300" ":pausa 1" ":clic 410 309" ":pausa 2" \
+  ":captura bt1" ":clic 590 370" ":pausa 4" ":clic 328 139" ":pausa 14" ":captura bt2" ":clic 300 185" ":pausa 1" ":clic 174 497" ":pausa 2" ":captura bt3" ":pausa 10" ":captura bt4" > $X/q4.sal 2>&1
+wait
+S=$X/q4.sal
+mira "el escritorio: con un adaptador, Configuración tiene «Bluetooth», que abre su ventana (BT /VENTANA)" "^escritorio: Panel de control > Bluetooth$" "^escritorio: lanzo .BT.BIN"
+mira "la ventana: «Buscar aparatos», el teclado elegido, «Emparejar»: el código (tecleado por «la persona»), emparejado y conectado" \
+  "^bt: Buscando aparatos" "^bt: Emparejar con xx:xx:xx:xx:10:01 (Teclado de prueba)" "^bt: SSP: el código, a teclear en xx:xx:xx:xx:10:01" "^bt: HID listo: xx:xx:xx:xx:10:01"
 # (c) el Intel 0AAA en su cargador, con un firmware de mentira (lo hace bt_prueba en $X/fw: se rehace)
-if $R/build/bt_prueba $X/fw > /dev/null 2>&1; :; then
+if :; then
   python3 -I - $X/fw <<'EOF'
 import sys, os
 d = sys.argv[1]
@@ -84,7 +108,7 @@ cp $X/d.img $X/i.img
 MTOOLS_SKIP_CHECK=1 mmd -i $X/i.img ::FIRMWARE 2> /dev/null; MTOOLS_SKIP_CHECK=1 mcopy -o -i $X/i.img $X/fw/FIRMWARE/ibt-17-16-1.sfi ::FIRMWARE/
 $R/build/usbredir_bt $PU --clase intel-cargador --fw $X/fw 2> $X/redir3.txt &
 sleep 0.5
-QEMU_MAS="$QM" MEMORIA=64 DISCO=$X/i.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh "" "bt" ":pausa 25" "bt" ":pausa 1" > $X/q3.sal 2>&1
+QEMU_MAS="$QM" MEMORIA=64 DISCO=$X/i.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K "bt" ":pausa 45" "bt" ":pausa 1" > $X/q3.sal 2>&1
 wait
 S=$X/q3.sal
 mira "Intel 8087:0AAA en su cargador: su firmware (ibt-17-16-1.sfi, de \\FIRMWARE) por el extremo a granel, arranca y luego el reset de siempre" \
