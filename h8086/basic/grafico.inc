@@ -1050,7 +1050,8 @@ d_salta_esp:
         jmp d_salta_esp
 .x:
         ret
-; AX por la escala (S: en cuartos; 0 = 4)
+; AX por la escala (S: en cuartos; 0 = 4). Si no cabe en 16 bits,
+; «Desbordamiento» (con IDIV, un S255U600 daba INT 0: el equipo colgado)
 d_escala:
         push dx
         push cx
@@ -1059,11 +1060,24 @@ d_escala:
         jnz .e
         mov cx, 4
 .e:
-        imul cx
-        mov cx, 4
-        idiv cx
+        imul cx                     ; DX:AX, entre 4 (hacia el cero, como
+        test dx, dx                 ; hacía IDIV)
+        jns .p
+        add ax, 3
+        adc dx, 0
+.p:
+        sar dx, 1
+        rcr ax, 1
+        sar dx, 1
+        rcr ax, 1
+        mov cx, dx                  ; ¿lo alto es solo el signo de AX?
+        cwd
+        cmp cx, dx
+        jne .desb
         pop cx
         pop dx
         ret
+.desb:
+        jmp err_desb
 d_dirs  db 'U', 0, -1, 'D', 0, 1, 'L', -1, 0, 'R', 1, 0
         db 'E', 1, -1, 'F', 1, 1, 'G', -1, 1, 'H', -1, -1, 0

@@ -181,3 +181,20 @@ tecla n; sleep 1
 apaga
 if cmp -s <(mtype -i $T/a.img ::GRANDE.TXT) $T/GRANDE.TXT; then ok "n.º 9: GRANDE.TXT sigue entero"; else ko "n.º 9: GRANDE.TXT ha cambiado"; fi
 }
+
+# ---- n.º 10: BASIC, DRAW con una escala y una distancia grandes ----
+p_auditoria_basic() {
+echo "== Hispa-8086: auditoría 1, Hispa-BASIC (DRAW grande) =="
+cp $IMG/hispa8086-360.img $T/a.img
+printf '10 SCREEN 1\r\n20 DRAW "S8U100M+10,-10"\r\n30 ON ERROR GOTO 100\r\n40 DRAW "S255U600"\r\n50 PRINT "NO DEBE SALIR"\r\n60 END\r\n100 SCREEN 0: PRINT "ERROR"; ERR; "EN"; ERL\r\n110 END\r\n' > $T/DIBUJO.BAS
+mcopy -o -i $T/a.img $T/DIBUJO.BAS ::
+arranca $T/a.img 486
+escribe "limpiar"; escribe "basic dibujo.bas"; sleep 5
+pantalla g1
+esta g1 "ERROR 6 EN 40" "n.º 10: DRAW «S255U600» da «Desbordamiento» (no cuelga el equipo): "
+noesta g1 "NO DEBE SALIR" ""
+escribe "system"; sleep 1; escribe "eco sigue vivo"; sleep 1
+pantalla g2
+esta g2 "sigue vivo" "n.º 10: y el sistema sigue: "
+apaga
+}
