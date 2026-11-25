@@ -348,8 +348,11 @@ termo_anfitrion
 termo_disco_anfitrion   # (DISCOS) disco.c con datos simulados
 if [ "$(id -u)" != 0 ] || ! command -v qemu-system-x86_64 > /dev/null; then echo "  (sin ser root o sin qemu-system-x86_64: sin el Termómetro en QEMU)"; return; fi
 python3 -I $AQUI/../tests/acpi/termo-qemu.py $Y/termo.aml
-if TERMO=1 USB_MB=32 TERMO_PARA=$Y/para.txt bash $AQUI/nucleo32/usb.sh $Y/termo.img > $Y/usb.txt 2>&1 && mtype -i $Y/termo.img@@1M ::boot/grub/grub.cfg | grep -q "escritorio .*termo"; then
-  ok "usb.sh con TERMO=1: la memoria de 32 MB con TERMO.BIN y el menú que arranca el escritorio con «termo»"
+# (de 64 MB, como las de verdad: con 32 quedaban 6 MB libres, y la pantalla
+# de F12 y la de INFORME.BMP (6 MB cada una, a trozos; se mata la máquina a
+# medias) la llenaban: luego, ni INFORME.TXT ni la prueba de escritura)
+if TERMO=1 USB_MB=64 TERMO_PARA=$Y/para.txt bash $AQUI/nucleo32/usb.sh $Y/termo.img > $Y/usb.txt 2>&1 && mtype -i $Y/termo.img@@1M ::boot/grub/grub.cfg | grep -q "escritorio .*termo"; then
+  ok "usb.sh con TERMO=1: la memoria de 64 MB con TERMO.BIN y el menú que arranca el escritorio con «termo»"
 else ko "usb.sh con TERMO=1: $(tail -n 2 $Y/usb.txt)"; return; fi
 if mtype -i $Y/termo.img@@1M ::TERMO/ENVIO.INI | grep -q "^testigo=$(sed -n 's/^testigo=//p' $Y/para.txt)" && mtype -i $Y/termo.img@@1M ::TERMO/SSH.INI | grep -q '^equipo=' \
    && [ "$(mdir -b -i $Y/termo.img@@1M ::TERMO/SSH 2> /dev/null | grep -c 'ID_ED')" = 2 ] && grep -q '^llave=ssh-ed25519 ' $Y/para.txt \
