@@ -3053,3 +3053,204 @@ etapa 11:
   para musl.
 - Lo de la sección 15 que sigue: las I219 en el taller, el cliente SSH, la
   Wi-Fi en paralelo.
+
+## 18. La etapa 11 b, hecha (25/11/2026): el tic estable, ACPICA, la batería, el brillo y HWP
+
+### Las decisiones
+
+- **Primero, el tic** (los mal de la 11, «sin HPET, 43 tics en 1 s (mínimo
+  50)», «UEFI -cpu max, 31 tics en 1 s», «el interactivo, de media 32 ms»).
+  No eran del reloj de QEMU, sino nuestros: **el temporizador del APIC se
+  calibraba mal**. `mide()` ponía la cuenta y leía después la hora, y lo que
+  pasara entre las dos (el TCG traduciendo el código la primera vez, o el
+  anfitrión cargado sin darle su hilo al procesador) se contaba como del
+  temporizador: salía cada 13,9 ms en vez de 10 (72 tics en 1 s en un
+  arranque cualquiera, y menos con el servidor más cargado). Por eso nunca
+  salían tics «de más», solo de menos. Ahora la cuenta del APIC, el TSC y
+  la hora se leen **juntas** (la hora antes y después de la cuenta, la vez
+  que menos hay entre las dos) y sobre 20 ms: 625.000 cuentas cada 10 ms
+  (las de QEMU, exactas) con y sin carga. Igual la frecuencia del TSC.
+- **Lo que sí es del anfitrión, contado** (no los límites subidos a ciegas):
+  si el procesador está parado desde fuera (el anfitrión que no le da su
+  hilo; en un equipo de verdad, el SMM), los tics que vencen mientras se
+  juntan en uno (el APIC no guarda más de uno pendiente). El tic lo ve con
+  el TSC: el temporizador va a su paso, así que desde el último tic que
+  llegó a su hora («el ancla») tenían que haber llegado redondeo((ahora −
+  ancla) / 10 ms), y los que faltan se han perdido; uno que llega tarde pero
+  llega no cuenta (la primera versión contaba cada hueco de más de tic y
+  medio, y un tic tarde seguido de uno a su hora salía perdido: 95 + 12 una
+  vez). Va en el bloque del procesador (`perdidos`, `huecos`). La etapa 2 dice ahora «Tic: N tics en 1
+  s (...), M que no han llegado (H huecos); entre dos cambios del segundo del
+  CMOS: ...; el temporizador, cada 10,00 ms (contra el TSC)», y la batería
+  pide: **el periodo contra el TSC de 9,80 a 10,20 ms** (lo programado de
+  verdad: la relación tic/TSC, que no depende de la carga), los que llegan
+  más los que no, **de 95 a 106** en 1 s (de 90 a 110 entre dos segundos
+  del CMOS), y que lleguen al menos 30 (90 con KVM). El interactivo de la
+  etapa 3 dice también lo que se pasa **sin esos tics** (lo que no es del
+  planificador), y eso es lo que se mide (25 ms como mucho).
+- **Con KVM, lo principal**: la vuelta de KVM con 4 procesadores pide ahora
+  también el tic (90 o más) y la etapa 3 entera (el interactivo incluido).
+- **MSENALES con KVM** («getrusage: el tiempo del programa (más de 80 ms)»,
+  una vez): con KVM leer el HPET (`clock_gettime`) es salir a QEMU, y mucho
+  del rato de ITIMER_PROF es del núcleo. Ahora se pide lo que de verdad se
+  sabe: 50 ms del programa como poco (ITIMER_VIRTUAL) y, con lo del núcleo
+  por él, 140 (50 + los 90 de ITIMER_PROF) menos lo que se va en contar de
+  10 en 10 ms (110).
+- **ACPICA, en el núcleo** (no como servicio del anillo 3, como ACPI.BIN de
+  Hispa-Pentium). Lo piden cosas del núcleo y en el arranque: las rutas de
+  las INTx antes de las tarjetas, apagar después de vaciar los discos y,
+  luego, suspender; un servicio llegaría tarde y necesitaría llamadas nuevas
+  para los puertos, la memoria física y la configuración PCI. Es lo que hace
+  Linux. **El mismo ACPICA** (R2025_04_04, `acpi/acpica/`, bajo la GPL-2.0
+  de su licencia triple) y **el mismo núcleo de C** de Hispa-DOS y
+  Hispa-Pentium (`acpi/nucleo/`: la memoria, el registro, el controlador
+  embebido, la batería y el cable), compilados para 64 bits (`-mcmodel=kernel
+  -mno-red-zone -mgeneral-regs-only`) con lo de `acpi/hispa64/`: la entrada
+  y la cabecera, la «máquina» (los puertos directos; la memoria física por
+  el mapa directo o `mapea_disp`; la configuración PCI por Pci64; dormir y
+  la hora, del núcleo) y las llamadas. Sale **ACPICA64.BIN** (161 KB), un
+  binario plano enlazado para 0xFFFFFFFFC0000000, que va en la unidad en
+  memoria: `acpica64.cas` lo copia ahí (el código de solo leer, los datos
+  sin ejecutar), le da 4 MB de montón y lo llama siempre con su mutex (un
+  hilo dentro cada vez: `ACPI_SINGLE_THREADED`), en la pila del hilo que
+  llama; las funciones del núcleo, por `castel0`..`castel5` (los argumentos
+  por la pila, como Castel). Sin el archivo, o si ACPICA no arranca, se
+  sigue como antes (lo de las tablas, a ojo; «sinacpica» lo quita).
+  Los cambios en `acpi/nucleo/` no cambian Hispa-DOS ni Hispa-Pentium (el
+  simulador da lo mismo, octeto a octeto, con el Toshiba): los números de
+  las direcciones (`ufis`, `uptr`), `achispa.h` con la rama de 64 bits,
+  `bateria_arranca` y `bateria_lectura` por separado, y un gancho para los
+  demás avisos (`nucleo_aviso`).
+- **Lo que hace con ella**:
+  - **el arranque**: las tablas, el espacio de nombres, los `_INI`, el
+    controlador embebido (su `_REG`), `\_PIC(1)` (el modo APIC), a `_OSI`
+    que sí a todos los Windows (como Linux);
+  - **la batería y el cable**: `_STA`, `_BIF`/`_BIX` (con los ciclos),
+    `_BST` y `_PSR`, con los Notify del equipo; el hilo «acpi» mira los
+    avisos del controlador embebido (`_Qxx`) cada 250 ms y lee la batería
+    cada 10 s o en cuanto el equipo avisa;
+  - **el botón de encendido** que avisa con Notify (PNP0C0C, el de muchos
+    portátiles, por el controlador embebido): como el «fijo» de la FADT,
+    que sigue por la SCI;
+  - **apagar de verdad**: `AcpiEnterSleepStatePrep(5)` (`\_S5` evaluado,
+    `_PTS(5)`, `_SST`) y `AcpiEnterSleepState(5)`; si sigue encendido, lo de
+    antes (`\_S5` buscado a ojo);
+  - **el `_CRS` de los enlaces de los `_PRT`** que la 10 dejó a medias: las
+    tablas que Aml64 no resuelve (los LNKA-LNKD, cuyo `_CRS` es un método
+    que lee lo programado en el puente) las resuelve ACPICA
+    (`AcpiGetIrqRoutingTable` y `AcpiGetCurrentResources`), con las marcas
+    del `_CRS` (en «pc», por nivel y **activa en alto**), y Prt64 las usa
+    como las demás;
+  - **el brillo** (lo de la 11 b que «si da tiempo»): el primer dispositivo
+    con `_BCM`; `_BCL` da los niveles y se pone el más cercano al pedido;
+    `_BQC` lo lee.
+- **HWP** (si da tiempo): si el procesador lo tiene (Intel desde Skylake),
+  IA32_PM_ENABLE y, en cada procesador, IA32_HWP_REQUEST del más bajo al más
+  alto, sin «deseado» y con la preferencia (EPP) a medias, como Linux: él
+  elige la frecuencia y la baja en reposo. Sin HWP lo dice (los P-states de
+  `_PSS`, para más adelante). En QEMU no hay HWP (ni con KVM en el EPYC del
+  servidor): solo se ha probado que lo dice.
+- **Las dos cosas que vio el coordinador en las capturas**: el reloj de la
+  barra del escritorio marcaba la hora UTC (`gmtime_r`): ahora
+  `localtime_r`, y las fechas de la oficina (`so_ahora`) también; el fondo
+  dice la versión de uname en vez de «etapa 8».
+- **El sonido** (la mezcla y el volumen) no ha cabido: sigue en lo que queda.
+
+### Qué hace
+
+Hispa-64 0.11.1.
+
+| Archivo | Qué |
+|---|---|
+| `apic64.cas`, `reloj64.cas`, `porcpu64.cas` | la cuenta del APIC, el TSC y la hora leídos juntos; los tics que no llegan (`perdidos`, `huecos`); `periodo_tic_us` (contra el TSC) |
+| `hispa64.cas`, `prsmp64.cas` | la etapa 2 con los que no llegan y el periodo; el interactivo sin ellos; ACPICA antes de las tarjetas; `apaga_todo`; HWP |
+| `acpica64.cas` | ACPICA en el núcleo (nuevo): cargarlo, el hilo «acpi», las rutas, apagar, el brillo, `prueba=acpica` |
+| `prt64.cas`, `aml64.cas` | los `_PRT` que no resuelve Aml64, por ACPICA (`ruta_disp`) |
+| `acpi64.cas` | la RSDP leída, para ACPICA |
+| `acpi/hispa64/` | ACPICA64.BIN (nuevo): `entrada.asm`, `maquina.c`, `servicio.c`, `hispa64.h`, `hispa64.ld`, `hacer.sh` |
+| `acpi/nucleo/` | lo de 64 bits (sin cambiar Hispa-DOS ni Hispa-Pentium) |
+| `tests/acpi/brillo-qemu.asl`, `haz_brillo.py` | el brillo de mentira (sin iasl: el AML, a mano) |
+| `programas/ventanas/ventanas.c`, `nucleo32/oficina/comun/so_hispa64.c` | la hora local; la versión en el fondo |
+| `programas/musl/msenales.c` | getrusage con lo del núcleo |
+
+Lo que dice al arrancar (QEMU «pc», con la batería y el brillo de mentira):
+
+```
+Tic: 101 tics en 1 s (medido con el HPET), 0 que no han llegado (0 huecos); entre dos cambios del segundo del CMOS: 100 tics y 0 que no han llegado; el temporizador, cada 10,00 ms (contra el TSC)
+ACPICA: ACPICA64.BIN, 161 KB (160 KB de código), en 0xFFFFFFFFC0000000 con 220 KB
+Batería 1: \_SB_.HBAT
+Adaptador de corriente: \_SB_.HACA
+ACPICA: en marcha (55 KB de su montón; 0 avisos o errores de ACPICA); \_S5 (0, 0); el brillo, \_SB_.HLCD (50 %)
+Energía: sin HWP (el procesador no deja que elija él la frecuencia): la que deja el firmware; en reposo, hlt o mwait
+Prueba de ACPICA: la batería al 73 % y con el cable (CMOS 60h y 61h): 1 puesta(s), al 73 %, 3650 de 5000 mAh (de fábrica 7350), con el cable, cargando, 312 ciclos
+  y al 41 % sin el cable: 1 puesta(s), al 41 %, 2050 de 5000 mAh (de fábrica 7350), sin el cable, 312 ciclos
+  y quitada: 0 baterías puestas
+Prueba de ACPICA: el brillo, \_SB_.HLCD, 10 niveles: a 30 % (_BCM) y leído (_BQC): 30; pedido el 77 %: 80 (el nivel de _BCL más cercano)
+INTx: las rutas de ACPI (_PRT): 1 tablas resueltas (1 por ACPICA, con 128 entradas por enlaces de _CRS hecho por un método), 128 entradas
+```
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **131 pruebas** (eran 124). **Dos vueltas
+seguidas, 131 bien y 0 mal cada una**, con el servidor cargado (otras
+sesiones con QEMU y, a la vez, `SOLO=castel64`: carga de 3 a 5 en 4
+procesadores), y `SOLO=castel64` dos vueltas seguidas a la vez, **80 bien y 0
+mal** cada una (CASTEL64 y ENSAMB64 sacan el núcleo igual, octeto a octeto,
+con la batería de Hispa-64 dentro). En las dos vueltas, 91 medidas del tic
+cada una: de 91 a 101 tics que llegan en 1 s, con 8 y 27 que no llegaron
+(en 5 y 8 arranques; 56 y 74 huecos de un tic tarde, que no cuentan), y el
+temporizador siempre de 9,99 a 10,00 ms contra el TSC. La 11 dio 31 y 43
+tics. Antes de esas dos vueltas, dos con mal de las propias pruebas
+(«  MAL» casaba con «MALO»; la INTx de «pc» de la etapa 10 ya no es la de
+antes con ACPICA) y una con el recuento de los huecos de antes (95 + 12). Lo
+nuevo:
+
+- **El tic**: en cada arranque, el periodo contra el TSC (de 9,80 a 10,20
+  ms), los que llegan más los que no (de 95 a 106; entre dos segundos del
+  CMOS, de 90 a 110) y que lleguen 30 o más; con KVM, 90 o más, y la etapa
+  3 entera (el interactivo, de 2 a 3 ms de media). El interactivo de cada
+  arranque, sin los tics perdidos (25 ms como mucho).
+- **ACPICA** en «pc» y en q35 con la batería de mentira
+  (`tests/acpi/bateria-qemu.aml`, la de las pruebas de Hispa-DOS: sus
+  métodos leen la CMOS, que cambia la prueba) y el brillo de mentira
+  (`brillo-qemu.aml`): 73 % cargando con el cable, 41 % sin él, quitada; los
+  ciclos de `_BIX`; el brillo a 30 y el pedido al 77 %, al 80 de `_BCL`; 0
+  errores de ACPICA. ACPICA arranca también en todos los demás arranques
+  (sin batería: «sin baterías»).
+- **Apagar por ACPICA** (`prueba=acpiapagar`): `_PTS(5)`, AE_OK, y QEMU
+  acaba con 0; y con `sinacpica`, lo de antes.
+- **Los enlaces de «pc»**: el `_PRT` con los LNKA-LNKD (su `_CRS`, un
+  método), resuelto por ACPICA: 128 entradas; la e1000 por la GSI 10 u 11
+  de su enlace, sin mirar cada 10 ms; los discos sin MSI ni MSI-X (los dos
+  NVMe y la AHCI) por su INTx (por nivel, activa en alto: unas 100
+  interrupciones del NVMe y 4.400 de la AHCI, ninguna GSI tapada), ARCHIVOS, fsck.fat y
+  miraexfat.py, bien; y con `sinacpica`, mirando la cola, como antes.
+- **El reloj de la barra**: con el CMOS en hora local, la hora de Madrid
+  (19:47 cuando en UTC eran las 18:46) y «versión 0.11.1» en el fondo.
+- **Hispa-DOS y Hispa-Pentium sin cambios**: HSPACPI.BIN y el simulador se
+  compilan; el simulador con las tablas del Toshiba da lo mismo, línea a
+  línea, que antes de tocar `acpi/nucleo/`.
+- Lo de las etapas 0 a 11, igual (la unidad en memoria lleva 41 archivos,
+  con ACPICA64.BIN; uname 0.11.1).
+
+### Lo que queda (y más adelante)
+
+- **Suspender** (S3 con `_PTS(3)`, el vector de despertar de la FACS y
+  volver a poner todo: APIC, IOAPIC, las tarjetas; o S0ix): con ACPICA ya
+  se puede empezar, pero pide guardar y restaurar cada controlador.
+- **Los P-states sin HWP** (`_PSS`, `_PCT`, `_PPC` por procesador, con un
+  «gobernador» que baje en reposo) y los C-states de `_CST` (hoy, hlt o
+  mwait C1); el AMD CPPC.
+- **Los GPE y la SCI por ACPICA** (hoy, los avisos del controlador embebido
+  se miran cada 250 ms y la SCI solo atiende el botón fijo): el EC por su
+  GPE, las tapas de los portátiles (PNP0C0D), los Notify de los
+  dispositivos que se enchufan.
+- **Los enlaces sin IRQ puesta** (su `_PRS` y `_SRS`, programarlos): hoy
+  se cuentan como «sin resolver» y se mira la cola.
+- **Imprimir** (IPP Everywhere: mDNS para descubrir, mandar PDF).
+- **El sonido**: la mezcla de varios programas y el volumen, los
+  auriculares, los Cirrus de los Mac, el micrófono (lo de la sección 17).
+- Probar ACPICA en el taller: la batería y el EC del Toshiba y el HP Mini
+  (las mismas tablas que ya pasan por el simulador de Hispa-DOS), el brillo
+  y el botón de los portátiles.
+- De la 10 b y la 11, lo que sigue allí.
