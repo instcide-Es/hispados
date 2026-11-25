@@ -2365,7 +2365,13 @@ repartir: los programas no se enteran.
 (no gastan sitio en VENTANAS.COM): `hvl_cad` y `hvl_num` (componer textos),
 `hvl_lee_num`, `hvl_opcion` (buscar `/X` en los parámetros), `hvl_ruta` (la
 ruta del módulo con otra extensión: el archivo de datos), `hvl_leer` y
-`hvl_escribir` (un archivo entero), `hvl_clave` (buscar `Clave=` en un
+`hvl_escribir` (un archivo entero; [0.9.31] sin vaciar el de antes: se
+escribe en un temporal, la misma ruta con `.$$$`, y solo si cabe entero el
+de antes pasa a `.BAK`, el temporal toma su nombre y la `.BAK` se borra;
+`ventanas/guardar.inc`, que también usan el Bloc de notas y CENTRO.INI, y
+`gua_crear`/`gua_cerrar` para quien escribe a trozos, como Cuentas; si falta
+CENTRO.INI, Hispa Ventanas lee CENTRO.BAK), `hvl_reemplazar` (en «Guardar
+como», «Ya hay un archivo con ese nombre… ¿Quiere reemplazarlo?»), `hvl_clave` (buscar `Clave=` en un
 texto) y `hvl_clases`.
 
 ### Cómo se hace un programa
