@@ -129,9 +129,13 @@ p_v86_flechas() {
 echo "== Hispa-8086: las teclas de cursor en el emulador v86 (opcional) =="
 local pw=${PLAYWRIGHT:-/opt/herramientas/node_modules/playwright-core} cr=${CHROME:-/usr/bin/google-chrome}
 local v86=${V86:-/www/hispados-web/v86} pag=${V86_PAGINA:-/root/FTP/HispaDOS/web/index.html}
-if ! command -v node > /dev/null || [ ! -d "$pw" ] || [ ! -x "$cr" ] || [ ! -f "$v86/libv86.js" ] || [ ! -f "$pag" ]; then
-  echo "  (no hay node, playwright-core, Chrome o v86 en esta máquina: esta parte se salta)"; return
-fi
+local falta=""
+command -v node > /dev/null || falta="$falta node"
+[ -d "$pw" ] || falta="$falta $pw (PLAYWRIGHT=)"
+[ -x "$cr" ] || falta="$falta $cr (CHROME=)"
+[ -f "$v86/libv86.js" ] || falta="$falta $v86/libv86.js (V86=)"
+[ -f "$pag" ] || falta="$falta $pag (V86_PAGINA=)"
+if [ -n "$falta" ]; then echo "  (se salta: falta$falta)"; return; fi
 mkdir -p $T/webf/v86
 cp "$pag" $T/webf/index.html; cp $v86/libv86.js $v86/v86.wasm $v86/seabios.bin $v86/vgabios.bin $T/webf/v86/
 cp ${V86_IMG:-$IMG/hispa8086-1440.img} $T/webf/v86/hispa8086.img

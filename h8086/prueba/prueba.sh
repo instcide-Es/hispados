@@ -67,15 +67,17 @@ arranca() {   # imagen del disquete, cpu y, si se quiere, imagen del disco duro
   QPID=$!
   qemu_vive
 }
-# espera (hasta 20 s) a que conteste el monitor de QEMU, y luego los 5 s del
-# arranque. Si no contesta, un solo FAIL y lo demás de la parte (hasta el
-# apaga) no cuenta: con el equipo muy cargado, un QEMU que tardaba en
-# arrancar daba decenas de FAIL que parecían del sistema
+# espera (hasta 20 s) a que conteste el monitor de QEMU, y luego al arranque:
+# a que salga el indicador («:\>», hasta 30 s; antes eran 5 s fijos, cortos
+# con el equipo cargado). Si el monitor no contesta, un solo FAIL y lo demás
+# de la parte (hasta el apaga) no cuenta: un QEMU que tardaba en arrancar
+# daba decenas de FAIL que parecían del sistema
 qemu_vive() {
   local i
   SIN_QEMU=
   for ((i=0; i<40; i++)); do
-    printf 'info status\n' | socat - UNIX-CONNECT:$T/mon 2> /dev/null | grep -q "VM status" && { sleep 5; return 0; }
+    printf 'info status\n' | socat - UNIX-CONNECT:$T/mon 2> /dev/null | grep -q "VM status" && {
+      sleep 3; espera _arranque ':\>' 27 && sleep 1; return 0; }
     kill -0 $QPID 2> /dev/null || break
     sleep 0.5
   done

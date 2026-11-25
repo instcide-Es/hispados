@@ -29,13 +29,22 @@ rm -f $T/mon
 qemu-system-i386 -display none -monitor unix:$T/mon,server,nowait -cpu ${CPU:-486} -m 4 \
   -drive file=$T/a.img,format=raw,if=floppy,index=0 -boot a -no-reboot > /dev/null 2>&1 &
 QPID=$!
-sleep 3
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.3}"; }
+# (que conteste el monitor de QEMU: hasta 20 s; si no, se dice una vez y se
+# acaba, en vez de 240 lecturas fallidas de la pantalla)
+for ((i=0; i<40; i++)); do
+  printf 'info status\n' | socat - UNIX-CONNECT:$T/mon 2> /dev/null | grep -q "VM status" && break
+  kill -0 $QPID 2> /dev/null || i=40
+  sleep 0.5
+done
+if [ $i -ge 40 ]; then echo "  FAIL QEMU no arranca (o su monitor no contesta): la prueba de BASIC se salta"; kill $QPID 2> /dev/null; rm -rf $T; exit 1; fi
+sleep 2
 for ((i=0; i<${ESPERA:-240}; i++)); do
+  rm -f $T/scr.bin
   mon "pmemsave 0xb8000 4000 \"$T/scr.bin\"" 0.3
   python3 -c "
-import sys
-d=open('$T/scr.bin','rb').read()
+import os
+d=open('$T/scr.bin','rb').read() if os.path.exists('$T/scr.bin') else b''
 print('\n'.join(bytes(d[f*160:(f+1)*160:2]).decode('cp437').rstrip() for f in range(25)))" > $T/scr.txt
   grep -q "FIN-PRUEBA" $T/scr.txt && break
   sleep 1
@@ -43,6 +52,7 @@ done
 mon quit 0.5; wait $QPID 2>/dev/null
 grep -q "FIN-PRUEBA" $T/scr.txt || { echo "NO ACABÓ; la pantalla:"; cat $T/scr.txt; }
 fallos=0
+[ -x "$PCB" ] || echo "  (no hay PC-BASIC en $PCB: se compara con los .gw y .esperado guardados; PCBASIC=ruta lo indica)"
 for f in "$@"; do
   n=$(basename "$f" .bas | tr a-z A-Z)
   mcopy -o -i $T/a.img ::$n.SAL $T/$n.SAL 2>/dev/null || { echo "  FAIL $n: no hay salida"; fallos=1; continue; }

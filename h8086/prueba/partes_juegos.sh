@@ -75,9 +75,13 @@ tecla spc; sleep 1.5
 cga g2; mira_cga g2
 esta g2 "pelota 158,180" "la pelota, pegada a la pala, en medio: "
 tecla spc; sleep 0.6
-cga g3; mira_cga g3; sleep 0.4
-cga g4; mira_cga g4
-local p3=$(grep -o "pelota [0-9]*,[0-9]*" $T/g3.txt) p4=$(grep -o "pelota [0-9]*,[0-9]*" $T/g4.txt)
+cga g3; mira_cga g3
+local p3=$(grep -o "pelota [0-9]*,[0-9]*" $T/g3.txt) p4 i
+for ((i=0; i<10; i++)); do    # (con el equipo cargado, dos fotos seguidas
+  sleep 0.4; cga g4; mira_cga g4  # pueden pillar la pelota quieta: hasta 10)
+  p4=$(grep -o "pelota [0-9]*,[0-9]*" $T/g4.txt)
+  [ -n "$p4" ] && [ "$p3" != "$p4" ] && break
+done
 if [ -n "$p3" ] && [ -n "$p4" ] && [ "$p3" != "$p4" ]; then ok "con Espacio, la pelota sale y se mueve ($p3 y $p4)"; else ko "la pelota no se mueve: «$p3» «$p4»"; fi
 sleep 2; tecla esc; sleep 1; tecla spc; sleep 1; tecla esc; sleep 2
 escribe "limpiar"; escribe "mostrar derribo.rec"; escribe "dir derribo.rec"
