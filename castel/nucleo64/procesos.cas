@@ -2368,10 +2368,7 @@ módulo Procesos
     ; [etapa 10 b] llena el apartado fd: el objeto antes que la clase (lo ve
     ; otro hilo en cuanto cambia la clase)
     público función llena_fd(p: puntero a Proceso, fd: ent32, clase: nat32, obj: nat64)
-        p.fd_obj[nat32(fd)] := obj
-        ensamblador
-            sfence
-        fin
+        p.fd_obj[nat32(fd)] := obj               ; (en x86, dos escrituras no se adelantan una a otra)
         p.fd_clase[nat32(fd)] := clase
     fin
 

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cstdarg>
 #include <unistd.h>
 #include <string>
 #include <vector>
@@ -50,6 +51,30 @@ static std::string u8(const UnicodeString &s)
 }
 
 static UnicodeString U(const char *s) { return UnicodeString::fromUTF8(s); }
+
+// una línea de resultados: lo que no sean ASCII y las letras de aquí que
+// la consola de Hispa-64 pasa tal cual a la página 437 (á é í ó ú ñ ü ç « »
+// ¿ ¡ ª º), como \u{XXXX}: así sale lo mismo por el puerto serie que en
+// Linux (pruebas.sh compara las dos)
+static void linea(const char *f, ...)
+{
+	static const char32_t bien[] = U"áéíóúñÑüÜçÇ«»¿¡ªº";
+	char b[2048];
+	va_list a;
+	va_start(a, f);
+	vsnprintf(b, sizeof b, f, a);
+	va_end(a);
+	UnicodeString t = UnicodeString::fromUTF8(b);
+	std::string r;
+	for (int32_t i = 0; i < t.length(); i = t.moveIndex32(i, 1)) {
+		UChar32 c = t.char32At(i);
+		bool vale = c < 0x80;
+		for (int k = 0; !vale && bien[k]; k++) vale = (UChar32)bien[k] == c;
+		if (vale) { UnicodeString x(c); x.toUTF8String(r); }
+		else { char e[16]; snprintf(e, sizeof e, "\\u{%04X}", (unsigned)c); r += e; }
+	}
+	fputs(r.c_str(), stdout);
+}
 
 int main(int argc, char **argv)
 {
@@ -119,7 +144,7 @@ int main(int argc, char **argv)
 			return r;
 		};
 		std::string a = U_SUCCESS(e) ? ordena(es.get()) : "", b = U_SUCCESS(e) ? ordena(tr2.get()) : "";
-		printf("  a la española: %s\n  a la tradicional: %s\n", a.c_str(), b.c_str());
+		linea("  a la española: %s\n  a la tradicional: %s\n", a.c_str(), b.c_str());
 		MIRA(a == "Ávila avión chico cosa llama luz nube nuez Nuño ñu zapato", "ordenar a la española (la ñ después de la n)");
 		MIRA(b == "Ávila avión cosa chico luz llama nube nuez Nuño ñu zapato", "ordenar a la tradicional (ch y ll aparte)");
 		UErrorCode x = U_ZERO_ERROR;
@@ -136,7 +161,7 @@ int main(int argc, char **argv)
 		ch->setText(t);
 		int n = 0;
 		for (int32_t p = ch->next(); p != icu::BreakIterator::DONE; p = ch->next()) n++;
-		printf("  letras: %d grafemas en %d unidades de UTF-16 (una bandera, una familia con ZWJ, e + tilde y ñ)\n", n, t.length());
+		linea("  letras: %d grafemas en %d unidades de UTF-16 (una bandera, una familia con ZWJ, e + tilde y ñ)\n", n, t.length());
 		MIRA(U_SUCCESS(x) && n == 4 && t.length() == 15, "letras: una bandera, una familia (ZWJ), e + tilde y ñ: 4 grafemas");
 		std::unique_ptr<icu::BreakIterator> pa(icu::BreakIterator::createWordInstance(icu::Locale("es"), x));
 		UnicodeString f = U("¿Qué tal? El navegador de Hispa-64 corta 3,5 palabras.");
@@ -145,7 +170,7 @@ int main(int argc, char **argv)
 		int32_t i0 = pa->first();
 		for (int32_t p = pa->next(); p != icu::BreakIterator::DONE; i0 = p, p = pa->next())
 			if (pa->getRuleStatus() != UBRK_WORD_NONE) pal += (pal.empty() ? "" : "|") + u8(UnicodeString(f, i0, p - i0));
-		printf("  palabras: %s\n", pal.c_str());
+		linea("  palabras: %s\n", pal.c_str());
 		MIRA(pal == "Qué|tal|El|navegador|de|Hispa|64|corta|3,5|palabras", "palabras");
 		std::unique_ptr<icu::BreakIterator> li(icu::BreakIterator::createLineInstance(icu::Locale("es"), x));
 		UnicodeString l = U("Un texto largo, con «comillas» y guiones-de-unión, que se parte (bien).");
@@ -154,7 +179,7 @@ int main(int argc, char **argv)
 		i0 = li->first();
 		for (int32_t p = li->next(); p != icu::BreakIterator::DONE; i0 = p, p = li->next())
 			tr += (tr.empty() ? "" : "/") + u8(UnicodeString(l, i0, p - i0));
-		printf("  líneas: %s\n", tr.c_str());
+		linea("  líneas: %s\n", tr.c_str());
 		MIRA(tr == "Un /texto /largo, /con /«comillas» /y /guiones-/de-/unión, /que /se /parte /(bien).", "dónde se puede cortar la línea (UAX 14)");
 	}
 
@@ -174,7 +199,7 @@ int main(int argc, char **argv)
 		std::unique_ptr<icu::NumberFormat> en(icu::NumberFormat::createInstance(icu::Locale("en_US"), x));
 		UnicodeString se;
 		en->format(1234567.891, se);
-		printf("  números: %s; %s (NumberFormat), %s y %s (NumberFormatter); %s; %s; en inglés, %s\n", u8(s).c_str(), u8(s4).c_str(), u8(s5).c_str(), u8(s6).c_str(), u8(m).c_str(), u8(m2).c_str(), u8(se).c_str());
+		linea("  números: %s; %s (NumberFormat), %s y %s (NumberFormatter); %s; %s; en inglés, %s\n", u8(s).c_str(), u8(s4).c_str(), u8(s5).c_str(), u8(s6).c_str(), u8(m).c_str(), u8(m2).c_str(), u8(se).c_str());
 		MIRA(U_SUCCESS(x) && u8(s) == "1.234.567,891" && u8(s4) == "1.234" && u8(s5) == "1234" && u8(s6) == "12.345" && u8(m) == "98.765,50\xC2\xA0€" && u8(m2) == "1.234,50\xC2\xA0€" && u8(se) == "1,234,567.891",
 		     "números a la española (con NumberFormatter, 1234 sin el punto de los miles: dos cifras como mínimo, lo de CLDR), euros y en inglés");
 		icu::Formattable fo;
@@ -201,7 +226,7 @@ int main(int argc, char **argv)
 		std::unique_ptr<icu::DateFormat> fg(icu::DateFormat::createDateInstance(icu::DateFormat::kLong, icu::Locale("gl_ES")));
 		fg->setTimeZone(*z);
 		fg->format(ver, s3);
-		printf("  la fecha: %s; en catalán, %s; en gallego, %s\n", u8(s).c_str(), u8(s2).c_str(), u8(s3).c_str());
+		linea("  la fecha: %s; en catalán, %s; en gallego, %s\n", u8(s).c_str(), u8(s2).c_str(), u8(s3).c_str());
 		MIRA(u8(s).find("miércoles, 25 de noviembre de 2026") == 0 && u8(s).find("20:30") != std::string::npos, "la fecha en español (la hora de Madrid)");
 		MIRA(u8(s2) == "15 de juliol del 2026" && u8(s3) == "15 de xullo de 2026", "la fecha en catalán («del 2026») y en gallego");
 		std::unique_ptr<icu::Calendar> ca(icu::Calendar::createInstance(*z, icu::Locale("es_ES"), x));
@@ -236,7 +261,7 @@ int main(int argc, char **argv)
 		UIDNAInfo i1 = UIDNA_INFO_INITIALIZER, i2 = UIDNA_INFO_INITIALIZER;
 		uidna_nameToASCII_UTF8(id, "ñandú.Español.es", -1, a, sizeof a, &i1, &x);
 		uidna_nameToUnicodeUTF8(id, a, -1, u, sizeof u, &i2, &x);
-		printf("  IDNA: ñandú.Español.es -> %s -> %s\n", a, u);
+		linea("  IDNA: ñandú.Español.es -> %s -> %s\n", a, u);
 		MIRA(U_SUCCESS(x) && i1.errors == 0 && !strcmp(a, "xn--and-6ma2c.xn--espaol-zwa.es") && !strcmp(u, "ñandú.español.es"), "IDNA: a ASCII (punycode) y de vuelta");
 		uidna_close(id);
 	}
@@ -263,7 +288,7 @@ int main(int argc, char **argv)
 		UnicodeString nom, nom2;
 		icu::Locale("ca").getDisplayName(icu::Locale("es"), nom);
 		icu::Locale("eu").getDisplayName(icu::Locale("es"), nom2);
-		printf("  los idiomas: %s, %s\n", u8(nom).c_str(), u8(nom2).c_str());
+		linea("  los idiomas: %s, %s\n", u8(nom).c_str(), u8(nom2).c_str());
 		MIRA(u8(nom) == "catalán" && u8(nom2) == "euskera", "el nombre de los idiomas en español");
 	}
 	return acaba("MICU");
