@@ -126,6 +126,11 @@ módulo PrRed64
         t0 := ahora_ns()
         mientras (socks_vivos > 0 o vivos > 0) y ahora_ns() - t0 < 8000000000 hacer duerme_ms(20) fin
         escribe_red()
+        ; [etapa 10] si la ha puesto NTP, también en el CMOS
+        si puesta_veces > 0 entonces
+            escribir("  la hora, puesta ", puesta_veces, " veces; el CMOS, escrito ", cmos_escrito, " veces: va ", desvío_cmos(), " s del reloj")
+            si cmos_local entonces escribir(" (en hora local)\n") sino escribir(" (en UTC)\n") fin
+        fin
         escribir("Después de la red: ", socks_vivos, " sockets (", socks_hechos, " hechos), ", vivos, " procesos; IP ", ip_rx, " recibidos y ", ip_tx, " enviados, ", ip_malos, " malos; TCP: ", tcp_abiertas, " conexiones, ", tcp_retx, " repeticiones, ", tcp_rst_tx, " RST; UDP ", udp_rx, " y ", udp_tx, "; ", eventos_vivos + tempos_vivos + textos_vivos, " objetos\n")
         si socks_vivos <> 0 entonces mal("quedan sockets") fin
         si eventos_vivos + tempos_vivos + textos_vivos <> 0 entonces mal("quedan eventfd, timerfd o textos") fin

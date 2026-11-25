@@ -14,6 +14,11 @@
 ;     con las reglas «M» (mes, semana —5 es la última— y día, a una hora): el
 ;     núcleo la usa para el CMOS, y los programas la reciben en la variable
 ;     TZ (musl hace lo demás: localtime, strftime, tm_zone...).
+;   - [etapa 10] Cuando la ponen (NTP), también se escribe en el CMOS, en la
+;     hora que lleve (la local o UTC, «cmos=utc»), como Windows y Linux;
+;     «cmos=quieto», no se toca. Y /etc/localtime (TZif de la versión 2:
+;     sin cambios apuntados, la zona de POSIX al final) para los programas
+;     que no miran TZ.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Hora64
@@ -24,6 +29,8 @@ módulo Hora64
     público variable zona_nombre: arreglo [40] de byte
     público variable cmos_local: bool
     público variable puesta_veces: nat64        ; cuántas veces la han puesto (clock_settime)
+    público variable cmos_quieto: bool          ; [etapa 10] «cmos=quieto»: no se escribe en el CMOS
+    público variable cmos_escrito: nat64        ; cuántas veces se ha escrito
     variable desfase: ent64                     ; real (ns desde 1970, UTC) = ahora_ns() + desfase
     ; la zona, ya leída
     variable std_este, dst_este: ent64          ; segundos al este de UTC (Madrid: 3600 y 7200)
@@ -260,6 +267,107 @@ módulo Hora64
     público función pon_real_ns(ns: nat64)
         desfase := ent64(ns) - ent64(ahora_ns())
         puesta_veces := puesta_veces + 1
+        a_cmos()
+    fin
+
+    ; [etapa 10] la hora de ahora, al CMOS (redondeada al segundo más cercano)
+    público función a_cmos()
+        variable u: ent64
+        variable d, me, a, h, mi, s: nat32
+        si cmos_quieto o no hay_cmos() entonces devolver fin
+        u := ent64((real_ns() + 500000000) div 1000000000)
+        si cmos_local entonces
+            local_de(u, d, me, a, h, mi, s)
+        sino
+            fecha_de(u div 86400, d, me, a)
+            h := nat32((u mod 86400) div 3600)
+            mi := nat32((u mod 3600) div 60)
+            s := nat32(u mod 60)
+        fin
+        pon_fecha(d, me, a, h, mi, s)
+        cmos_escrito := cmos_escrito + 1
+    fin
+
+    ; [etapa 10] ¿cuánto va el CMOS por delante del reloj (segundos)?
+    público función desvío_cmos(): ent64
+        variable c: ent64
+        c := ent64(segundos_unix())
+        si cmos_local entonces
+            c := c - std_este
+            si de_verano(c - (dst_este - std_este)) entonces c := c - (dst_este - std_este) fin
+        fin
+        devolver c - ent64(real_s())
+    fin
+
+    ; [etapa 10] /etc/localtime: TZif de la versión 2 (RFC 8536) en d (caben
+    ; 200 octetos); da cuántos. Un solo cambio (en 1901) y un solo tipo (el
+    ; de invierno): lo que vale es la zona de POSIX del final.
+    público función tzif(d: nat64): nat32
+        variable n, k, i, nl: nat32
+        variable p: puntero a byte
+        p := puntero(d)
+        n := 0
+        k := 0
+        mientras k < 2 hacer
+            ; la cabecera: «TZif», la versión, 15 de reserva y los seis números
+            p[n] := 'T'
+            p[n + 1] := 'Z'
+            p[n + 2] := 'i'
+            p[n + 3] := 'f'
+            p[n + 4] := '2'
+            i := 5
+            mientras i < 44 hacer
+                p[n + i] := 0
+                i := i + 1
+            fin
+            p[n + 35] := 1                         ; timecnt
+            p[n + 39] := 1                         ; typecnt
+            nl := 0
+            mientras std_nombre[nl] <> 0 hacer nl := nl + 1 fin
+            p[n + 43] := byte(nl + 1)              ; charcnt
+            n := n + 44
+            ; un cambio, en 1901 (-2^31): lo de después lo dice la zona de
+            ; POSIX del final (musl la usa pasado el último cambio)
+            si k = 1 entonces
+                i := 0
+                mientras i < 4 hacer
+                    p[n + i] := 0xFF
+                    i := i + 1
+                fin
+                n := n + 4
+            fin
+            p[n] := 0x80
+            p[n + 1] := 0
+            p[n + 2] := 0
+            p[n + 3] := 0
+            p[n + 4] := 0                          ; (su tipo, el 0)
+            n := n + 5
+            ; el tipo: utoff (con su signo, big endian), isdst y el índice del nombre
+            p[n] := byte((nat64(std_este) >> 24) yb 0xFF)
+            p[n + 1] := byte((nat64(std_este) >> 16) yb 0xFF)
+            p[n + 2] := byte((nat64(std_este) >> 8) yb 0xFF)
+            p[n + 3] := byte(nat64(std_este) yb 0xFF)
+            p[n + 4] := 0
+            p[n + 5] := 0
+            n := n + 6
+            i := 0
+            mientras i <= nl hacer
+                p[n] := std_nombre[i]
+                n := n + 1
+                i := i + 1
+            fin
+            k := k + 1
+        fin
+        p[n] := 10
+        n := n + 1
+        i := 0
+        mientras zona_tz[i] <> 0 y i < 63 hacer
+            p[n] := zona_tz[i]
+            n := n + 1
+            i := i + 1
+        fin
+        p[n] := 10
+        devolver n + 1
     fin
 
     ; de un instante del reloj real a ahora_ns (para los plazos absolutos)
@@ -283,7 +391,7 @@ módulo Hora64
     fin
 
     ; al arrancar: la zona (el valor de «zona=», o vacío) y el CMOS
-    público función prepara_hora(nombre: puntero a byte, cmos_utc: bool)
+    público función prepara_hora(nombre: puntero a byte, cmos_utc: bool, quieto: bool)
         variable t: puntero a byte
         variable c: ent64
         si nombre[0] = 0 entonces copia(dirección(zona_nombre[0]), "Europa/Madrid", 40) sino copia(dirección(zona_nombre[0]), nombre, 40) fin
@@ -295,6 +403,7 @@ módulo Hora64
             lee_zona(dirección(zona_tz[0]))
         fin
         cmos_local := no cmos_utc
+        cmos_quieto := quieto
         c := 0
         si hay_cmos() entonces c := ent64(segundos_unix()) fin
         si cmos_local entonces

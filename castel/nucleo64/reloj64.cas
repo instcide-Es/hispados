@@ -192,6 +192,54 @@ módulo Reloj64
         año := c * 100 + a
     fin
 
+    ; [etapa 10] escribe en el CMOS (como lo tenga: BCD o binario, 12 o 24
+    ; horas; el siglo, si la FADT dice dónde): con SET (el bit 7 del registro
+    ; B) puesto mientras tanto, para que no avance a medias
+    función pon_cmos(r: nat32, v: nat32)
+        sale8(0x70, r)
+        sale8(0x71, v)
+    fin
+
+    función a_bcd(v: nat32): nat32
+        devolver ((v div 10) << 4) ob (v mod 10)
+    fin
+
+    público función pon_fecha(d: nat32, me: nat32, año: nat32, h: nat32, mi: nat32, s: nat32)
+        variable b, hh, c, a: nat32
+        variable pm: bool
+        si no hay_cmos() entonces devolver fin
+        b := cmos(0x0B)
+        pon_cmos(0x0B, b ob 0x80)
+        hh := h
+        pm := falso
+        si b yb 2 = 0 entonces
+            ; (de 12 horas: 12 AM es 12, y el bit 7, PM)
+            pm := h >= 12
+            hh := h mod 12
+            si hh = 0 entonces hh := 12 fin
+        fin
+        c := año div 100
+        a := año mod 100
+        si b yb 4 = 0 entonces
+            s := a_bcd(s)
+            mi := a_bcd(mi)
+            hh := a_bcd(hh)
+            d := a_bcd(d)
+            me := a_bcd(me)
+            a := a_bcd(a)
+            c := a_bcd(c)
+        fin
+        si pm entonces hh := hh ob 0x80 fin
+        pon_cmos(0, s)
+        pon_cmos(2, mi)
+        pon_cmos(4, hh)
+        pon_cmos(7, d)
+        pon_cmos(8, me)
+        pon_cmos(9, a)
+        si siglo <> 0 entonces pon_cmos(siglo, c) fin
+        pon_cmos(0x0B, b yb 0x7F)
+    fin
+
     ; la fecha y la hora: «23/11/2026 18:30:05»
     público función escribe_hora()
         variable s, mi, h, d, me, a: nat32

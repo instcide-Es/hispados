@@ -11,7 +11,10 @@
  * EADDRINUSE y SO_REUSEADDR; UDP (sendto/recvfrom, MSG_DONTWAIT, connect y
  * send); epoll; sendmsg/recvmsg con dos trozos; las opciones (TCP_NODELAY,
  * SO_RCVBUF, SO_SNDBUF, SO_KEEPALIVE, SO_TYPE); getaddrinfo; eventfd;
- * timerfd; /dev/urandom, /dev/random y getrandom. */
+ * timerfd; /dev/urandom, /dev/random y getrandom; [etapa 10] /etc/localtime
+ * (TZif con la zona de TZ al final: localtime sin TZ da lo mismo que con TZ). */
+#include <time.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -542,6 +545,38 @@ static void pruebas_azar(void)
 	close(fr);
 }
 
+/* [etapa 10] /etc/localtime: musl la lee si no hay TZ */
+static void pruebas_localtime(void)
+{
+	char b[512], tz[80], zv[72], z1[16], z2[16];
+	const char *e = getenv("TZ");
+	int f = open("/etc/localtime", O_RDONLY), n, i, igual = 1;
+	time_t t;
+	struct tm a, c;
+	MIRA(f >= 0, "abrir /etc/localtime");
+	n = f >= 0 ? (int)read(f, b, sizeof b - 1) : 0;
+	if (f >= 0) close(f);
+	b[n > 0 ? n : 0] = 0;
+	snprintf(tz, sizeof tz, "\n%s\n", e ? e : "");
+	snprintf(zv, sizeof zv, "%s", e ? e : "");
+	MIRA(n > 60 && !memcmp(b, "TZif2", 5) && e && n > (int)strlen(tz) && !memcmp(b + n - strlen(tz), tz, strlen(tz)), "/etc/localtime: TZif 2, con la zona de TZ al final");
+	/* el 15/1 y el 1/7 de 2026 a las 12:00 UTC, con TZ y sin ella */
+	for (i = 0; i < 2 && e; i++) {
+		t = i ? 1782907200 : 1768478400;
+		localtime_r(&t, &a);
+		strftime(z1, sizeof z1, "%H:%M %Z", &a);
+		unsetenv("TZ");
+		tzset();
+		localtime_r(&t, &c);
+		strftime(z2, sizeof z2, "%H:%M %Z", &c);
+		setenv("TZ", zv, 1);
+		tzset();
+		if (strcmp(z1, z2) || a.tm_gmtoff != c.tm_gmtoff) igual = 0;
+		if (i) printf("  /etc/localtime: el 1/7/2026 a las 12:00 UTC son las %s (con TZ, %s)\n", z2, z1);
+	}
+	MIRA(e && igual, "localtime sin TZ (de /etc/localtime) da lo mismo que con TZ, en invierno y en verano");
+}
+
 static void parado(int s)
 {
 	static const char m[] = "  MAL: MRED lleva 120 s parado en una llamada (SIGALRM)\nMRED: mal (parado)\n";
@@ -568,6 +603,7 @@ int main(void)
 	pruebas_eventfd();
 	pruebas_timerfd();
 	pruebas_azar();
+	pruebas_localtime();
 	printf("  en %s ms\n", coma(ms_ahora() - t0, 0));
 	return acaba("MRED");
 }

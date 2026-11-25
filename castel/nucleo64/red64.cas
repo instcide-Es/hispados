@@ -17,12 +17,13 @@
 ;  (los DNS de DHCP), /etc/hosts (localhost, el equipo y los de «hosts=» de
 ;  la línea del núcleo), /etc/hostname, /etc/services (los puertos de
 ;  siempre: getaddrinfo los mira), /proc/net/route y /proc/net/dev (con la
-;  forma de Linux: los leen ifconfig y los demás).
+;  forma de Linux: los leen ifconfig y los demás); y [etapa 10]
+;  /etc/localtime (la zona en TZif, de Hora64).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Red64
 
-    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64, Procesos, Sondeo64, Chacha64, Objet64, Redcom64, Ip64, Tcp64
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hora64, Hilos64, Sinc64, Procesos, Sondeo64, Chacha64, Objet64, Redcom64, Ip64, Tcp64
 
     constante EPERM = -1
     constante EINTR = -4
@@ -1436,7 +1437,7 @@ módulo Red64
 
     ; ¿es una de las rutas de texto de la red?
     público función es_texto_red(t: puntero a byte): bool
-        devolver igual(t, "/etc/resolv.conf") o igual(t, "/etc/hosts") o igual(t, "/etc/hostname") o igual(t, "/etc/services") o igual(t, "/proc/net/route") o igual(t, "/proc/net/dev") o igual(t, "/etc/protocols")
+        devolver igual(t, "/etc/resolv.conf") o igual(t, "/etc/hosts") o igual(t, "/etc/hostname") o igual(t, "/etc/services") o igual(t, "/proc/net/route") o igual(t, "/proc/net/dev") o igual(t, "/etc/protocols") o igual(t, "/etc/localtime")
     fin
 
     ; hace el texto de la ruta t: el objeto (Objet64.nuevo_texto), o 0
@@ -1489,6 +1490,9 @@ módulo Red64
             fin
         sino si igual(t, "/etc/hostname") entonces
             pon(e, "hispa-64\n")
+        sino si igual(t, "/etc/localtime") entonces
+            ; [etapa 10] la zona, en TZif (Hora64), para los que no miran TZ
+            e.n := nat64(tzif(e.d))
         sino si igual(t, "/etc/services") entonces
             pon(e, "ftp\t\t21/tcp\nssh\t\t22/tcp\ntelnet\t\t23/tcp\nsmtp\t\t25/tcp\ndomain\t\t53/tcp\ndomain\t\t53/udp\nbootps\t\t67/udp\nbootpc\t\t68/udp\nhttp\t\t80/tcp\npop3\t\t110/tcp\nntp\t\t123/udp\nimap\t\t143/tcp\nhttps\t\t443/tcp\nsubmission\t587/tcp\nimaps\t\t993/tcp\npop3s\t\t995/tcp\nipp\t\t631/tcp\n")
         sino si igual(t, "/etc/protocols") entonces

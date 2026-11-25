@@ -647,7 +647,7 @@ módulo Hispa64
         variable v: arreglo [210] de byte
         prepara_azar()
         valor_de("zona=", dirección(v[0]))
-        prepara_hora(dirección(v[0]), tiene("cmos=utc"))
+        prepara_hora(dirección(v[0]), tiene("cmos=utc"), tiene("cmos=quieto"))
     fin
 
     función etapa9()

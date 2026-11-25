@@ -748,6 +748,13 @@ módulo Sistema
                 dc := p.fd_clase[nat32(fd)]
                 dob := p.fd_obj[nat32(fd)]
                 ext := R_DISP
+            sino si p.fd_clase[nat32(fd)] = F_TEXTO entonces
+                ; [etapa 10] un texto hecho al abrirlo (/etc/localtime: musl lo mapea): una copia, de solo leer
+                si desp yb 4095 <> 0 entonces devolver EINVAL fin
+                si compartida y prot yb 2 <> 0 entonces devolver EACCES fin
+                dc := F_TEXTO
+                dob := p.fd_obj[nat32(fd)]
+                ext := R_ARCHIVO
             sino si p.fd_clase[nat32(fd)] <> F_ARCHIVO entonces devolver ENODEV fin
             si dc = 0 entonces
                 ab := abierto(p, nat64(fd))
@@ -798,7 +805,14 @@ módulo Sistema
             devolver ENOMEM
         fin
         si marcas_ yb 0x50 = 0 entonces p.mmap_próx := a + l fin
-        si dc <> 0 entonces
+        si dc = F_TEXTO entonces
+            r := llena_de_texto(p, a, l, dob, desp, nat32(prot))
+            si r < 0 entonces
+                quita_de(p, a, a + l)
+                abre_mem(p)
+                devolver r
+            fin
+        sino si dc <> 0 entonces
             r := mapea_dispo(p, dc, dob, a, l, desp, nat32(prot))
             si r < 0 entonces
                 quita_de(p, a, a + l)
@@ -846,6 +860,32 @@ módulo Sistema
             v := v + 4096
         fin
         ; (sin ningún permiso: las páginas se quedan, sin la marca de usuario)
+        si prot = 0 entonces remarca_rango(e, a, a + l, 0, cierto) fin
+        devolver 0
+    fin
+
+    ; [etapa 10] lo mismo con un texto (Objet64.Texto)
+    función llena_de_texto(p: puntero a Proceso, a: nat64, l: nat64, d: nat64, desp: nat64, prot: nat32): ent64
+        variable tx: puntero a Texto
+        variable v, pos, f, n: nat64
+        variable e: puntero a Espacio
+        e := puntero(p.espacio)
+        tx := puntero(d)
+        v := a
+        mientras v < a + l y desp + (v - a) < tx.n hacer
+            pos := desp + (v - a)
+            f := pide()
+            si f = 0 entonces devolver ENOMEM fin
+            ceros_mem(virt(f), 4096)
+            n := tx.n - pos
+            si n > 4096 entonces n := 4096 fin
+            copia_mem(virt(f), tx.datos + pos, n)
+            si no mapea_u(e, v, f, marcas_de_prot(prot)) entonces
+                devuelve(f)
+                devolver ENOMEM
+            fin
+            v := v + 4096
+        fin
         si prot = 0 entonces remarca_rango(e, a, a + l, 0, cierto) fin
         devolver 0
     fin

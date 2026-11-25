@@ -257,7 +257,7 @@ e7_bien() {   # SALIDA N [avx]
     && [ "$(grep -c "^MMAPA: todo bien (16 pruebas)$" <<< "$v")" = 2 ] \
     && grep -q "^LUA: todo bien (16 pruebas); hoy es " <<< "$v" \
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
-    && grep -q "^MRED: todo bien (123 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
     && grep -q "^Después de musl: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas, 0 tuberías; " <<< "$v" \
     && grep -q "^  la memoria: la de antes; el montón: [0-9]* bloques (los de antes); las pilas: [0-9]* (las de antes)$" <<< "$d" \
@@ -1278,6 +1278,7 @@ red9_bien() {   # SALIDA [dns]
     && grep -q "certificado no válido: es de otro nombre" <<< "$v" \
     && { [ "${2:-}" != dns ] || { grep -q "^PING anfitrion.prueba (10.0.2.2): 56 octetos de datos" <<< "$v" && grep -q "^PING 10.0.2.2: 1 enviados, 1 recibidos" <<< "$v" && grep -q "^Programa «=2 DESCARGA\|^Programa «DESCARGA http://noexiste.zz/»: acaba con el código 2, como debe" <<< "$v" && [ "$(grep -c "^DESCARGA: 1048576 octetos en .*; sha256 = $SHA9$" <<< "$v")" -ge 4 ]; }; } \
     && grep -q "^NTP: 10.0.2.2:$PN9 dice .*; el reloj iba 36[0-9][0-9][0-9][0-9][0-9] ms atrasado .*; puesto en hora$" <<< "$v" \
+    && grep -qE "^  la hora, puesta [0-9]+ veces; el CMOS, escrito [0-9]+ veces: va (-1|0|1) s del reloj \(en (hora local|UTC)\)$" <<< "$v" \
     && grep -q "^ECO: 1000000 octetos de ida y vuelta, iguales" <<< "$v" && grep -q "^ECO: servidor: 1 conexiones, 102400 octetos devueltos$" <<< "$v" \
     && [ -f "$s.eco" ] \
     && ! grep -q "^Programa .*: acaba con el código [0-9]*$" <<< "$v" \
