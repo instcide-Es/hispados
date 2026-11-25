@@ -878,11 +878,18 @@ HTTP/1.1 200 OK
 Guardado en PAGINA.HTM (8764 octetos).
 ```
 
-`HTTPS [/V] [/N] dirección [archivo]`: baja por HTTP o HTTPS, sigue hasta 5
+`HTTPS [/V] [/N] [/I] dirección [archivo]`: baja por HTTP o HTTPS, sigue hasta 5
 redirecciones y guarda el archivo (sin nombre: el de la ruta en 8.3, o
 `INDEX.HTM`). `/N`: no guarda, dice los octetos y su suma. `/V`: las
-cabeceras, el cifrado y lo que ha costado el apretón de manos. Sale con 0 si
-todo va bien (4: la conexión segura falla; 8: el servidor no da un 200).
+cabeceras, el cifrado y lo que ha costado el apretón de manos. Una
+redirección de `https://` a `http://` **no se sigue** (lo de después ya no
+iría cifrado ni comprobado: cualquiera en medio podría cambiarlo); con `/I`
+se sigue igualmente. Una redirección que no cabe (más de 1000 letras, o una
+dirección que no cabe en la petición) tampoco. Las relativas («/ruta»,
+«ruta», «//servidor/ruta») van contra la dirección de ahora. Sale con 0 si
+todo va bien (4: la conexión segura falla; 8: el servidor no da un 200; 10:
+una redirección demasiado larga; 11: de https a http sin `/I`). Prueba:
+`tests/run_https_tests.sh` (en el anfitrión, con una red de mentira).
 (COMMAND.COM lanza los `.EXE` de Hispa32 con HW32 él solo: basta `HTTPS ...`
 si HW32.COM está junto a COMMAND.COM o en el PATH.)
 
