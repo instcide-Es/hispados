@@ -204,20 +204,22 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     "^sdhci: la de $basei, dada en la línea del cargador$" "^disco [0-9]: tarjeta SD QEMU! (SDSC), 512 MB, FAT32 (SD)\.$" "equipo.bin es un archivo de [0-9]* octetos"
   if ! grep -q "^arranque: no se ve ningún disco" $S; then ok "y no dice que no ve ningún disco"; else ko "dice que no ve el disco"; fi
   # (UEFI) el arranque por UEFI de lo instalado (las tabletas Bay Trail no tienen otro)
+  # (0.8.12) con \SDHCI.TXT en el medio, las entradas llevan « sdhci=...» (las
+  # dos maneras: multiboot y multiboot2; desde la 0.8.10, y aquí no se miraba)
   if [ -f $K/BOOTIA32.EFI ]; then
     rm -f $X/cfg.txt; mcopy -n -i $X/vol.img ::HISPA/GRUB.CFG $X/cfg.txt > /dev/null 2>&1
     if mdir -i $X/vol.img ::EFI/BOOT 2> /dev/null | grep -q "^BOOTIA32 *EFI" && cmp -s <(mcopy -n -i $X/vol.img ::EFI/BOOT/BOOTIA32.EFI - 2> /dev/null) $K/BOOTIA32.EFI \
-      && grep -q "^    multiboot2 /HISPA/NUCLEO.BIN escritorio escritura$" $X/cfg.txt && grep -q "^    multiboot /HISPA/NUCLEO.BIN escritorio escritura$" $X/cfg.txt \
+      && grep -q "^    multiboot2 /HISPA/NUCLEO.BIN escritorio escritura sdhci=$basei$" $X/cfg.txt && grep -q "^    multiboot /HISPA/NUCLEO.BIN escritorio escritura sdhci=$basei$" $X/cfg.txt \
       && grep -q "^    module2 /HISPA/ORDENES.BIN ORDENES.BIN$" $X/cfg.txt && grep -q "^set modo=800x600x32,800x600,auto$" $X/cfg.txt && grep -q "(arranca por la BIOS y por UEFI" $X/s2.txt; then
       ok "INSTALAR con los GRUB EFI: \\EFI\\BOOT\\BOOTIA32.EFI (y BOOTX64.EFI) en la tarjeta, y GRUB.CFG con las entradas de las dos maneras (multiboot y multiboot2)"
-    else ko "INSTALAR no deja bien el arranque por UEFI:"; mdir -i $X/vol.img ::EFI/BOOT 2>&1 | sed 's/^/        /' | head -5; sed 's/^/        /' $X/cfg.txt | head -12; fi
+    else ko "INSTALAR no deja bien el arranque por UEFI:"; mdir -i $X/vol.img ::EFI/BOOT 2>&1 | sed 's/^/        /' | head -9; grep -n "multiboot\|module" $X/cfg.txt | sed 's/^/        /' | head -12; fi
     if [ -f /usr/share/OVMF/OVMF32_CODE_4M.fd ]; then
       cp /usr/share/OVMF/OVMF32_VARS_4M.fd $X/vars32.fd; cp $I $X/inst2.img
       V=$X maquina_uefi qemu-system-i386 inst32 "-machine q35 -m 512 -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF32_CODE_4M.fd -drive if=pflash,format=raw,file=$X/vars32.fd -device qemu-xhci,id=x -drive if=none,id=u,file=$X/inst2.img,format=raw -device usb-storage,bus=x.0,drive=u" \
         ":espera 90 ^escritorio: en marcha" ":pausa 2"
       S=$X/inst32.txt
       mira "lo instalado en la tarjeta arranca por UEFI de 32 bits (OVMF ia32, como el Acer One 10): su GRUB EFI, \\HISPA\\GRUB.CFG, multiboot2 y el escritorio" \
-        "^arranque: por UEFI (32 bits, GOP .*la línea del cargador: escritorio escritura$" "^escritorio: en marcha"
+        "^arranque: por UEFI (32 bits, GOP .*la línea del cargador: escritorio escritura sdhci=$basei$" "^escritorio: en marcha"
     fi
   fi
 else
