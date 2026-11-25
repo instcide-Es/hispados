@@ -77,6 +77,7 @@ módulo Permisos
     público constante SELLO_ARGON2 = 23         ; (USUARIOS) el que resume las contraseñas (ARGON2.BIN)
     público constante SELLO_USUARIOS = 24       ; (USUARIOS) Configuración › Usuarios (USUARIOS.BIN)
     público constante SELLO_CORREO = 25         ; (CORREO) Correo: sus cuentas y sus mensajes (\HISPA\CORREO, secreto)
+    público constante SELLO_BT = 26             ; (BLUETOOTH) el servicio Bluetooth (BT.BIN): BT.INI y BT.LLV
     ; (hasta 31)
 
     ; un bit por sello, para las listas de quién escribe
@@ -104,6 +105,7 @@ módulo Permisos
     constante B_ARGON2 = 0x800000               ; (USUARIOS)
     constante B_USUARIOS = 0x1000000
     constante B_CORREO = 0x2000000              ; (CORREO)
+    constante B_BT = 0x4000000                  ; (BLUETOOTH)
     ; (USUARIOS) los renglones que solo valen si quien lanza el programa es
     ; administrador (o el sistema): la configuración de SSH y de los túneles
     constante SOLO_ADMIN = 0xD00                ; B_SSHD, B_WG y B_TAILSCAL
@@ -211,6 +213,7 @@ módulo Permisos
         regla("USUARIOS.NUE", NADIE, cierto)
         regla("AZAR.SEM", NADIE, cierto)                   ; la semilla del pozo del azar (pozo.cas)
         programa("CORREO.BIN", SELLO_CORREO, falso)        ; (CORREO)
+        programa("BT.BIN", SELLO_BT, cierto)                ; (BLUETOOTH) el servicio Bluetooth
         ; ---- el arranque ----
         regla_admin("GRUB.CFG", B_ASISTE, falso)           ; (y el escritorio, que es el núcleo: la medida de la pantalla)
         regla_admin("GRUBENV", B_ACTUALIZ, falso)          ; (lo pone PAQUETES; ACTUALIZ da el núcleo nuevo por bueno)
@@ -242,6 +245,9 @@ módulo Permisos
         regla("WIFI.INI", B_WIFI, cierto)                  ; las redes recordadas y sus claves
         regla("WIFI.LLV", B_WIFI, cierto)                  ; la llave que las cifra
         regla("WIFI.LOG", B_WIFI, falso)
+        regla("BT.INI", B_BT, cierto)                      ; (BLUETOOTH) los emparejados y sus claves
+        regla("BT.LLV", B_BT, cierto)                      ; la llave que las cifra
+        regla("BT.LOG", B_BT, falso)
         regla("SONIDO.INI", B_SONIDO, falso)               ; (pentium-sonido) el volumen y los sonidos del sistema
         regla("ESCUDO\\", B_ESCUDO, falso)                 ; sus opciones, el cortafuegos (CORTAFUE.INI), el registro y las firmas
         regla("CUARENTE\\", B_ESCUDO, cierto)              ; la cuarentena: lo apartado solo lo vuelve a sacar Escudo
@@ -326,6 +332,7 @@ módulo Permisos
         regla("ARGON2.BIN", NADIE, falso)                  ; (USUARIOS)
         regla("USUARIOS.BIN", NADIE, falso)
         regla("CORREO.BIN", NADIE, falso)                  ; (CORREO)
+        regla("BT.BIN", NADIE, falso)                      ; (BLUETOOTH)
         regla("HISPA\\", NADIE, falso)                     ; (en la raíz: que no se haga una \HISPA donde no la hay)
     fin
 

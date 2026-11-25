@@ -541,6 +541,15 @@ $(B)/iwl_analiza: tests/wifi/iwl_analiza.c wifi/nucleo/iwl_fw.c wifi/nucleo/iwl_
 	gcc -std=gnu11 -O2 -Wall -fno-builtin -Iwifi/nucleo -o $@ tests/wifi/iwl_analiza.c wifi/nucleo/iwl_fw.c
 $(B)/iwl_modelo: tests/wifi/iwl_modelo.c wifi/nucleo/radio_iwl.c wifi/nucleo/iwl_fw.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c wifi/nucleo/iwl.h wifi/nucleo/iwl_fw.h wifi/nucleo/nucleo.h | $(B)
 	gcc -std=gnu11 -O2 -Wall -Wno-unused -fno-builtin -DIWL_ANFITRION -Iwifi/nucleo -o $@ tests/wifi/iwl_modelo.c wifi/nucleo/radio_iwl.c wifi/nucleo/iwl_fw.c wifi/nucleo/w80211.c wifi/nucleo/wpa.c
+# (BLUETOOTH) la pila de BT.BIN (castel/nucleo32/bt/) contra el modelo de
+# adaptador y aparatos (tests/bt/modelo.c), en el anfitrión; y el adaptador
+# USB de mentira para QEMU, por usb-redir (tests/bt/usbredir_bt.c):
+# castel/pruebas_bt.sh, la parte 55 de castel/pruebas.sh (SOLO=bt)
+BT_PILA = castel/nucleo32/bt/hci.c castel/nucleo32/bt/l2cap.c castel/nucleo32/bt/intel.c castel/nucleo32/bt/claves.c
+$(B)/bt_prueba: tests/bt/prueba.c tests/bt/modelo.c tests/bt/modelo.h $(BT_PILA) castel/nucleo32/bt/bt.h | $(B)
+	gcc -std=gnu11 -O2 -Wall -Wno-unused -Icastel/nucleo32/bt -Itests/bt -Iterceros/monocypher -o $@ tests/bt/prueba.c tests/bt/modelo.c $(BT_PILA) terceros/monocypher/monocypher.c
+$(B)/usbredir_bt: tests/bt/usbredir_bt.c tests/bt/modelo.c tests/bt/modelo.h | $(B)
+	gcc -std=gnu11 -O2 -Wall -Wno-unused -Itests/bt -o $@ tests/bt/usbredir_bt.c tests/bt/modelo.c
 # ACPI de Hispa-486 (docs/ACPI.md): la batería de los portátiles que no tienen
 # APM. HSPACPI.COM (residente: contesta INT 15h AX=530Ah como una BIOS con
 # APM) y su núcleo de 32 bits HSPACPI.BIN: ACPICA de Intel (acpi/acpica/, sin

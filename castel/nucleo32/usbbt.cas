@@ -1,0 +1,462 @@
+; =============================================================================
+;  usbbt.cas - (BLUETOOTH) los adaptadores Bluetooth USB en el núcleo de
+;  Hispa-Pentium: solo el transporte (HCI por USB, la clase E0/01/01 de la
+;  norma Bluetooth: las órdenes por el extremo 0, con la petición de clase
+;  0x20; los sucesos por el extremo de interrupción de entrada; los datos
+;  ACL por los dos a granel) y lo que el servicio Bluetooth (BT.BIN, en C,
+;  nucleo32/bt/) necesita del núcleo. Todo lo demás (el HCI, emparejar,
+;  L2CAP, SDP, HID) es de BT.BIN, en el anillo 3, como la red y el sonido:
+;  un fallo suyo acaba con él, no con el sistema.
+;
+;  Las llamadas (240 a 248; la 246 es de cualquiera, las demás solo de
+;  BT.BIN, por su sello: el de la carpeta del sistema):
+;    240  apuntarse como el servicio Bluetooth                 -> 0
+;    241  lo que se sabe del adaptador EBX (un Bt_info a ECX)  -> cuántos hay
+;    242  mandar: EBX la clase (1 una orden por el extremo 0; 2 datos ACL
+;         por el de granel; 3 una orden por el de granel: los Intel en su
+;         cargador), ECX los octetos, EDX cuántos (hasta 1024) -> los que han ido
+;    243  recibir: lo siguiente que ha llegado (un trozo tal cual lo da el
+;         USB, de 64 octetos como mucho: lo junta BT.BIN), a EBX (caben
+;         ECX); si no hay nada, se espera hasta EDX tics (con el bit 31,
+;         sin dormir: cediendo el procesador, para las miles de órdenes del
+;         firmware de Intel)            -> n | de << 16 (de: 1 interrupción, 2 granel); 0
+;    244  los teclados y los ratones: EBX la orden (1 alta, 2 un informe,
+;         3 baja) | la ranura (0 a 3) << 8 | la clase (1 teclado, 2 ratón)
+;         << 16; ECX y EDX, el descriptor (alta de un ratón con el
+;         protocolo de informes) o el informe: a usbhid.cas, como los USB
+;    245  cómo está (EBX: BTE_..., ECX: un texto de hasta 80): para el
+;         Administrador de dispositivos
+;    246  (cualquiera) pedir al servicio: EBX el pedido (struct bt_pedido:
+;         su segunda palabra, el largo, hasta 256; la primera la pone el
+;         núcleo: 1 si quien pide es administrador), ECX adónde la
+;         respuesta, EDX cuánto cabe (hasta 2048). Si no hay servicio y sí
+;         adaptador, usuario.cas lo pone en marcha. Espera hasta 10 s
+;                                                    -> los octetos de la respuesta
+;    247  (el servicio) el pedido siguiente, a EBX (264 octetos), esperando
+;         hasta ECX tics                             -> su largo (0: ninguno)
+;    248  (el servicio) contestar: EBX los octetos, ECX cuántos
+;
+;  Si el servicio se acaba, se sueltan sus teclados y ratones (lo pulsado,
+;  soltado) y los que esperaban, sin respuesta.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Usbbt
+
+    importar Usb, Usbbase, Tareas, Registro, Mem32, Marcos, Paginas, Permisos, Usbhid, Cuentas, Textos32, Multiboot
+
+    público constante MAX_BT = 2
+    público constante BTE_NADA = 0
+    público constante BTE_SIN_ADAPTADOR = 1
+    público constante BTE_APAGADO = 2
+    público constante BTE_ENCENDIDO = 3
+    público constante BTE_FALLO = 4
+    constante NO_VALE = 0xFFFFFFF9
+    constante EN_USO = 0xFFFFFFF6
+    constante NO_HAY = 0xFFFFFFFF
+    constante TROZO = 64
+    constante COLA = 16384
+    constante MAX_PEDIDO = 256
+    constante MAX_RESPUESTA = 2048
+
+    tipo Adaptador = estructura
+        usado: bool
+        aparato, interfaz: nat32
+        e_int, e_ent, e_sal: nat32              ; sus extremos (los índices en el Aparato)
+        t_int, t_ent: nat32                     ; sus tuberías (de usb.cas)
+        fallos: nat32
+    fin
+
+    ; lo que da la 241 (la struct bt_info de bt.h)
+    tipo Bt_info = estructura
+        fabricante, producto, versión, aparato: nat16
+        cambios: nat32
+        velocidad, hc, interfaz, resto: byte
+    fin
+
+    variable ads: arreglo [MAX_BT] de Adaptador
+    público variable n_adaptadores: nat32
+    público variable cambios_bt: nat32          ; sube al enchufarse o irse uno
+    público variable sin_bt: bool               ; «sinbt» en la línea del cargador
+    público variable no_está: bool              ; no hay BT.BIN: no se vuelve a intentar
+    público variable lanzado_en: nat32          ; el tic en que se puso en marcha BT.BIN (para no ponerlo dos veces)
+    público variable estado_bt: nat32           ; lo que dice el servicio (la 245)
+    público variable texto_bt: arreglo [84] de byte
+    variable página: nat32                      ; para lo que sale por el granel (física)
+    ; lo que ha llegado: trozos [de][n bajo][n alto][los octetos]
+    variable cola: arreglo [COLA] de byte
+    variable c_ini, c_fin: nat32
+    público variable perdidos: nat32            ; los trozos que no han cabido
+    ; el servicio
+    público variable servicio_bt: puntero a Tarea
+    variable servicio_id: nat32
+    ; lo que piden los programas (de uno en uno)
+    variable cerrojo_buzón: Cerrojo
+    variable buzón: arreglo [MAX_PEDIDO + 8] de byte
+    variable buzón_n, buzón_estado: nat32       ; 0 libre, 1 pedido, 2 lo tiene el servicio, 3 contestado, 4 sin servicio
+    variable respuesta: arreglo [MAX_RESPUESTA] de byte
+    variable respuesta_n: nat32
+
+    ; -------------------------------------------------------------------------
+    público función hay_servicio_bt(): bool
+        devolver servicio_bt <> nulo y servicio_bt.id = servicio_id y servicio_bt.estado <> ACABADA y servicio_bt.estado <> Tareas.LIBRE
+    fin
+
+    función es_servicio(): bool
+        devolver hay_servicio_bt() y servicio_bt = actual
+    fin
+
+    ; ¿hay que poner en marcha BT.BIN? (el escritorio lo mira cada segundo)
+    público función quiere_bt(): bool
+        si lanzado_en <> 0 y tics - lanzado_en < 1000 y no hay_servicio_bt() entonces devolver falso fin   ; (se está poniendo en marcha)
+        devolver n_adaptadores > 0 y no sin_bt y no no_está y no hay_servicio_bt()
+    fin
+
+    ; ¿puede el programa leer (o escribir) ahí? (como en red.cas)
+    función puede(inicio: nat32, n: nat32, para_escribir: bool): bool
+        variable p: nat32
+        si n > 0 y inicio >= PILA_INICIO y inicio < PILA_FINAL y inicio + n > inicio y inicio + n <= PILA_FINAL entonces
+            p := inicio yb 0xFFFFF000
+            mientras p < inicio + n hacer
+                si banderas_de(actual.cr3, p) = 0 y no atender_pila(actual.cr3, p, actual.esp_usuario) entonces devolver falso fin
+                p := p + PÁGINA
+            fin
+        fin
+        devolver usuario_puede(actual.cr3, inicio, n, para_escribir)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Buscar los adaptadores entre lo que ha enumerado usb.cas
+    ; -------------------------------------------------------------------------
+    ; el aparato a, ¿es un adaptador Bluetooth? (una interfaz E0/01/01 con
+    ; un extremo de interrupción de entrada y dos a granel)
+    función mira(a: nat32): bool
+        variable k, i, n, e_int, e_ent, e_sal: nat32
+        variable d: arreglo [4] de nat32
+        para k desde 1 hasta aparatos[a].n_interfaces hacer
+            si aparatos[a].interfaces[k - 1].clase = 0xE0 y aparatos[a].interfaces[k - 1].subclase = 1 y aparatos[a].interfaces[k - 1].protocolo = 1 entonces
+                e_int := NINGUNO
+                e_ent := NINGUNO
+                e_sal := NINGUNO
+                para i desde 1 hasta aparatos[a].n_extremos hacer
+                    si aparatos[a].extremos[i - 1].interfaz = k - 1 entonces
+                        si aparatos[a].extremos[i - 1].clase = 3 y aparatos[a].extremos[i - 1].número yb 0x80 <> 0 y e_int = NINGUNO entonces e_int := i - 1 fin
+                        si aparatos[a].extremos[i - 1].clase = 2 y aparatos[a].extremos[i - 1].número yb 0x80 <> 0 y e_ent = NINGUNO entonces e_ent := i - 1 fin
+                        si aparatos[a].extremos[i - 1].clase = 2 y aparatos[a].extremos[i - 1].número yb 0x80 = 0 y e_sal = NINGUNO entonces e_sal := i - 1 fin
+                    fin
+                fin
+                d[0] := a
+                d[1] := aparatos[a].fabricante
+                d[2] := aparatos[a].producto
+                si e_int = NINGUNO o e_ent = NINGUNO o e_sal = NINGUNO entonces
+                    apunta("bt: el aparato %u (%04X:%04X) es Bluetooth pero le faltan extremos: no se usa\n", d)
+                    devolver falso
+                fin
+                n := 0
+                mientras n < MAX_BT y ads[n].usado hacer n := n + 1 fin
+                si n >= MAX_BT entonces devolver falso fin
+                si página = 0 entonces página := reservar_marco() fin
+                si página = 0 entonces devolver falso fin
+                llenar(puntero(nat32(dirección(ads[n]))), tamaño(Adaptador), 0)
+                ads[n].aparato := a
+                ads[n].interfaz := aparatos[a].interfaces[k - 1].número
+                ads[n].e_int := e_int
+                ads[n].e_ent := e_ent
+                ads[n].e_sal := e_sal
+                ads[n].t_int := tubo_abre(a, e_int)
+                ads[n].t_ent := tubo_abre(a, e_ent)
+                si ads[n].t_int = NINGUNO o ads[n].t_ent = NINGUNO entonces
+                    apunta("bt: el aparato %u (%04X:%04X): no se le pueden abrir las tuberías\n", d)
+                    devolver falso
+                fin
+                tubo_pide(ads[n].t_int, TROZO)
+                tubo_pide(ads[n].t_ent, TROZO)
+                ads[n].usado := cierto
+                n_adaptadores := n_adaptadores + 1
+                cambios_bt := cambios_bt + 1
+                c_ini := 0
+                c_fin := 0
+                apunta("bt: el aparato %u (%04X:%04X) es un adaptador Bluetooth: lo lleva BT.BIN\n", d)
+                devolver cierto
+            fin
+        fin
+        devolver falso
+    fin
+
+    público función prepara(): nat32
+        variable a: nat32
+        sin_bt := buscar(línea_del_cargador(), "sinbt") <> nulo
+        para a desde 0 hasta MAX_APARATOS - 1 hacer
+            si aparatos[a].usado entonces mira(a) fin
+        fin
+        devolver n_adaptadores
+    fin
+
+    ; (usbcal.cas) se acaba de enchufar el aparato a
+    público función nuevo(a: nat32): bool
+        devolver mira(a)
+    fin
+
+    ; (usbcal.cas) se ha ido el aparato a
+    público función se_va(a: nat32)
+        variable i: nat32
+        para i desde 0 hasta MAX_BT - 1 hacer
+            si ads[i].usado y ads[i].aparato = a entonces
+                ads[i].usado := falso
+                n_adaptadores := n_adaptadores - 1
+                cambios_bt := cambios_bt + 1
+                apunta1("bt: el adaptador Bluetooth (aparato %u) se ha desenchufado\n", a)
+                Usbhid.bt_bajas()
+            fin
+        fin
+    fin
+
+    ; (dispositivos) ¿es el aparato USB a un adaptador Bluetooth de los que se llevan?
+    público función lleva(a: nat32): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_BT - 1 hacer
+            si ads[i].usado y ads[i].aparato = a entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que llega
+    ; -------------------------------------------------------------------------
+    función cabe(n: nat32): bool
+        variable usado: nat32
+        usado := (c_fin + COLA - c_ini) mod COLA
+        devolver usado + n + 3 < COLA - 1
+    fin
+
+    función mete(de: nat32, p: puntero a byte, n: nat32)
+        variable i: nat32
+        si n = 0 entonces devolver fin
+        si no cabe(n) entonces
+            perdidos := perdidos + 1
+            devolver
+        fin
+        cola[c_fin] := de
+        c_fin := (c_fin + 1) mod COLA
+        cola[c_fin] := n
+        c_fin := (c_fin + 1) mod COLA
+        cola[c_fin] := n >> 8
+        c_fin := (c_fin + 1) mod COLA
+        para i desde 0 hasta n - 1 hacer
+            cola[c_fin] := p[i]
+            c_fin := (c_fin + 1) mod COLA
+        fin
+    fin
+
+    ; mira las dos tuberías del primer adaptador
+    función sondea()
+        variable r: ent32
+        si no ads[0].usado entonces devolver fin
+        r := tubo_mira(ads[0].t_int, TROZO)
+        si r <> T_ESPERA entonces
+            si r > 0 entonces mete(1, tubo_datos(ads[0].t_int), nat32(r)) sino ads[0].fallos := ads[0].fallos + 1 fin
+            tubo_pide(ads[0].t_int, TROZO)
+        fin
+        r := tubo_mira(ads[0].t_ent, TROZO)
+        si r <> T_ESPERA entonces
+            si r > 0 entonces mete(2, tubo_datos(ads[0].t_ent), nat32(r)) sino ads[0].fallos := ads[0].fallos + 1 fin
+            tubo_pide(ads[0].t_ent, TROZO)
+        fin
+    fin
+
+    función recibir(a: nat32, b: nat32, c: nat32): nat32
+        variable p: puntero a byte
+        variable de, n, i, tope: nat32
+        si no puede(a, b, cierto) entonces devolver NO_VALE fin
+        sondea()
+        si c_ini = c_fin y c yb 0xFFFF <> 0 entonces
+            tope := tics + (c yb 0xFFFF)
+            mientras c_ini = c_fin y tics < tope y ads[0].usado y no actual.matar hacer
+                si c yb 0x80000000 <> 0 entonces ceder() sino dormir(1) fin
+                sondea()
+            fin
+        fin
+        si c_ini = c_fin entonces
+            si no ads[0].usado entonces devolver NO_HAY fin
+            devolver 0
+        fin
+        de := cola[c_ini]
+        n := cola[(c_ini + 1) mod COLA] ob (nat32(cola[(c_ini + 2) mod COLA]) << 8)
+        c_ini := (c_ini + 3) mod COLA
+        p := puntero(a)
+        para i desde 0 hasta n - 1 hacer
+            si i < b entonces p[i] := cola[c_ini] fin
+            c_ini := (c_ini + 1) mod COLA
+        fin
+        si n > b entonces n := b fin
+        devolver n ob (de << 16)
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Lo que sale
+    ; -------------------------------------------------------------------------
+    función enviar(clase: nat32, b: nat32, n: nat32): nat32
+        variable r: ent32
+        si n = 0 o n > 1024 entonces devolver NO_VALE fin
+        si no puede(b, n, falso) entonces devolver NO_VALE fin
+        si no ads[0].usado entonces devolver NO_HAY fin
+        si clase = 1 entonces
+            ; HCI: la petición de clase al aparato (bRequestType 0x20), como btusb
+            r := control(ads[0].aparato, 0x20, 0, 0, 0, puntero(b), n)
+        sino si clase = 2 o clase = 3 entonces
+            copiar_memoria(puntero(página), puntero(b), n)
+            r := granel(ads[0].aparato, ads[0].e_sal, página, n, 100)
+        sino
+            devolver NO_VALE
+        fin
+        si r < 0 entonces
+            ads[0].fallos := ads[0].fallos + 1
+            si r = T_PARADA y clase <> 1 entonces quita_parada(ads[0].aparato, ads[0].e_sal) fin
+            devolver NO_VALE
+        fin
+        devolver n
+    fin
+
+    función info(i: nat32, b: nat32): nat32
+        variable f: puntero a Bt_info
+        variable k, j: nat32
+        si no puede(b, tamaño(Bt_info), cierto) entonces devolver NO_VALE fin
+        f := puntero(b)
+        llenar(puntero(b), tamaño(Bt_info), 0)
+        k := 0
+        para j desde 0 hasta MAX_BT - 1 hacer
+            si ads[j].usado entonces
+                si k = i entonces
+                    f.fabricante := aparatos[ads[j].aparato].fabricante
+                    f.producto := aparatos[ads[j].aparato].producto
+                    f.aparato := ads[j].aparato
+                    f.cambios := cambios_bt
+                    f.velocidad := aparatos[ads[j].aparato].velocidad
+                    f.hc := aparatos[ads[j].aparato].hc_clase
+                    f.interfaz := ads[j].interfaz
+                fin
+                k := k + 1
+            fin
+        fin
+        devolver n_adaptadores
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  Los programas piden; el servicio contesta
+    ; -------------------------------------------------------------------------
+    función pedir(a: nat32, b: nat32, c: nat32): nat32
+        variable p: puntero a nat32
+        variable largo, k, r: nat32
+        si es_servicio() entonces devolver NO_VALE fin
+        si no puede(a, 16, falso) entonces devolver NO_VALE fin
+        p := puntero(a)
+        largo := p[1]
+        si largo < 16 o largo > MAX_PEDIDO entonces devolver NO_VALE fin
+        si no puede(a, largo, falso) entonces devolver NO_VALE fin
+        si c > MAX_RESPUESTA entonces c := MAX_RESPUESTA fin
+        si c > 0 y no puede(b, c, cierto) entonces devolver NO_VALE fin
+        si no hay_servicio_bt() entonces devolver NO_HAY fin
+        tomar(cerrojo_buzón)
+        copiar_memoria(dirección(buzón[0]), puntero(a), largo)
+        p := puntero(nat32(dirección(buzón[0])))
+        p[0] := 0
+        si persona_admin(actual) entonces p[0] := 1 fin       ; (lo pone el núcleo, no el programa)
+        buzón_n := largo
+        buzón_estado := 1
+        k := 0
+        mientras buzón_estado <> 3 y buzón_estado <> 4 y k < 1000 y hay_servicio_bt() y no actual.matar hacer
+            dormir(1)
+            k := k + 1
+        fin
+        r := NO_HAY
+        si buzón_estado = 1 entonces r := EN_USO fin      ; (el servicio no lo ha cogido: está ocupado, poniendo en marcha el adaptador)
+        si buzón_estado = 3 entonces
+            r := respuesta_n
+            si r > c entonces r := c fin
+            si r > 0 entonces copiar_memoria(puntero(b), dirección(respuesta[0]), r) fin
+            r := respuesta_n
+        fin
+        buzón_estado := 0
+        soltar(cerrojo_buzón)
+        devolver r
+    fin
+
+    función siguiente(a: nat32, espera: nat32): nat32
+        variable k: nat32
+        si no puede(a, MAX_PEDIDO + 8, cierto) entonces devolver NO_VALE fin
+        k := 0
+        mientras buzón_estado <> 1 y k < espera hacer
+            dormir(1)
+            k := k + 1
+        fin
+        si buzón_estado <> 1 entonces devolver 0 fin
+        copiar_memoria(puntero(a), dirección(buzón[0]), buzón_n)
+        buzón_estado := 2
+        devolver buzón_n
+    fin
+
+    función contestar(a: nat32, n: nat32): nat32
+        si buzón_estado <> 2 entonces devolver NO_VALE fin
+        si n > MAX_RESPUESTA entonces n := MAX_RESPUESTA fin
+        si n > 0 y no puede(a, n, falso) entonces devolver NO_VALE fin
+        si n > 0 entonces copiar_memoria(dirección(respuesta[0]), puntero(a), n) fin
+        respuesta_n := n
+        buzón_estado := 3
+        devolver 0
+    fin
+
+    función apuntarse(): nat32
+        si hay_servicio_bt() entonces
+            si servicio_bt = actual entonces devolver 0 fin
+            devolver EN_USO
+        fin
+        si no actual.servicio o actual.sello <> SELLO_BT entonces devolver NO_VALE fin   ; (PROTEGE) por su sello, no por su nombre
+        servicio_bt := actual
+        servicio_id := actual.id
+        estado_bt := BTE_SIN_ADAPTADOR
+        texto_bt[0] := 0
+        c_ini := 0
+        c_fin := 0
+        no_está := falso
+        devolver 0
+    fin
+
+    ; (usuario.cas, en recoge_lo_suyo)
+    público función acabó_bt(t: puntero a Tarea)
+        si hay_servicio_bt() y servicio_bt = t entonces
+            servicio_bt := nulo
+            estado_bt := BTE_NADA
+            texto_bt[0] := 0
+            Usbhid.bt_bajas()
+            si buzón_estado = 1 o buzón_estado = 2 entonces buzón_estado := 4 fin
+        fin
+    fin
+
+    público función atender_bt(n: nat32, a: nat32, b: nat32, c: nat32): nat32
+        si sin_bt entonces devolver NO_HAY fin
+        si n = 246 entonces devolver pedir(a, b, c) fin
+        si n = 240 entonces devolver apuntarse() fin
+        si no actual.servicio o no es_servicio() entonces devolver NO_VALE fin      ; (PROTEGE)
+        según nat16(n)
+            caso 241: devolver info(a, b)
+            caso 242: devolver enviar(a, b, c)
+            caso 243: devolver recibir(a, b, c)
+            caso 244:
+                si c > 512 o (c > 0 y no puede(b, c, falso)) entonces devolver NO_VALE fin
+                según nat16(a yb 0xFF)
+                    caso 1: Usbhid.bt_alta((a >> 8) yb 3, (a >> 16) yb 0xFF = 1, puntero(b), c)
+                    caso 2: Usbhid.bt_informe((a >> 8) yb 3, puntero(b), c)
+                    caso 3: Usbhid.bt_baja((a >> 8) yb 3)
+                fin
+                devolver 0
+            caso 245:
+                estado_bt := a
+                texto_bt[0] := 0
+                si b <> 0 y puede(b, 80, falso) entonces copiar_hasta(dirección(texto_bt[0]), puntero(b), 80) fin
+                devolver 0
+            caso 247: devolver siguiente(a, b)
+            caso 248: devolver contestar(a, b)
+        fin
+        devolver NO_VALE
+    fin
+
+fin Usbbt.

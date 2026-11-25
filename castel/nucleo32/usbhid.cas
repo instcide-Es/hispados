@@ -43,6 +43,7 @@ módulo Usbhid
         cambiada: bool                          ; (teclado de Apple europeo) dos teclas van cambiadas
         interfaz: nat32                         ; (0.8.10) su número (para las luces)
         luces: nat32                            ; (0.8.10) las puestas con SET_REPORT (FFh: aún ninguna)
+        bt: nat32                               ; (BLUETOOTH) 0: USB; si no, la ranura de BT.BIN + 1 (sin tubería: los informes llegan por la 244)
         dis: Diseño                             ; (ratón) dónde va cada cosa en el informe (hiddesc.cas)
     fin
 
@@ -298,7 +299,7 @@ módulo Usbhid
         variable r: ent32
         mientras cierto hacer
             para i desde 0 hasta MAX_HID - 1 hacer
-                si hids[i].usado entonces
+                si hids[i].usado y hids[i].bt = 0 entonces
                     r := tubo_mira(hids[i].tubo, hids[i].largo)
                     si r <> T_ESPERA entonces
                         si r > 0 entonces
@@ -318,7 +319,7 @@ módulo Usbhid
             fin
             ; (0.8.10) las luces, si han cambiado (Bloq Num, Bloq Mayús)
             para i desde 0 hasta MAX_HID - 1 hacer
-                si hids[i].usado y hids[i].teclado y hids[i].luces <> 0xFF y hids[i].luces <> luces_usb() entonces
+                si hids[i].usado y hids[i].bt = 0 y hids[i].teclado y hids[i].luces <> 0xFF y hids[i].luces <> luces_usb() entonces
                     pon_luces(hids[i])
                     si luces_dichas < 16 entonces
                         luces_dichas := luces_dichas + 1
@@ -407,7 +408,17 @@ módulo Usbhid
     público función se_va(a: nat32)
         variable i, k, b: nat32
         para i desde 0 hasta MAX_HID - 1 hacer
-            si hids[i].usado y hids[i].aparato = a entonces
+            si hids[i].usado y hids[i].bt = 0 y hids[i].aparato = a entonces
+                suelta(i)
+            fin
+        fin
+    fin
+
+    ; deja de atender el número i (un teclado o un ratón que se ha ido): lo
+    ; que tuviera pulsado se suelta
+    función suelta(i: nat32)
+        variable k, b: nat32
+        si hids[i].usado entonces
                 hids[i].usado := falso
                 n_hids := n_hids - 1
                 dormir(2)                       ; (por si la tarea estaba con él)
@@ -424,8 +435,108 @@ módulo Usbhid
                     ratón_de_fuera(0, 0, 0)
                     ratones := ratones - 1
                 fin
+        fin
+    fin
+
+    ; -------------------------------------------------------------------------
+    ;  (BLUETOOTH) Los teclados y los ratones Bluetooth (BT.BIN, la llamada
+    ;  244 de usbbt.cas): lo mismo que los USB, sin tubería; los informes los
+    ;  da el servicio. La ranura r (0 a 3) es la de BT.BIN.
+    ; -------------------------------------------------------------------------
+    función de_bt(r: nat32): nat32
+        variable i: nat32
+        para i desde 0 hasta MAX_HID - 1 hacer
+            si hids[i].usado y hids[i].bt = r + 1 entonces devolver i fin
+        fin
+        devolver NINGUNO
+    fin
+
+    ; un teclado (con el protocolo de arranque) o un ratón: con descriptor
+    ; (n > 0), el protocolo de informes y lo que diga hiddesc.cas; sin él, el
+    ; de arranque (botones, X e Y; la rueda, si la manda)
+    público función bt_alta(r: nat32, teclado: bool, desc: puntero a byte, n: nat32)
+        variable i: nat32
+        variable d: arreglo [4] de nat32
+        si de_bt(r) <> NINGUNO entonces bt_baja(r) fin
+        i := 0
+        mientras i < MAX_HID y hids[i].usado hacer i := i + 1 fin
+        si i >= MAX_HID entonces devolver fin
+        llenar(puntero(nat32(dirección(hids[i]))), tamaño(Hid), 0)
+        hids[i].bt := r + 1
+        hids[i].aparato := 0x100 + r
+        hids[i].tubo := NINGUNO
+        hids[i].teclado := teclado
+        hids[i].luces := 0xFF
+        si teclado entonces
+            teclados := teclados + 1
+        sino
+            hids[i].dis.ratón := cierto
+            hids[i].dis.n_botones := 3
+            hids[i].dis.botones_bit := 0
+            hids[i].dis.x_bit := 8
+            hids[i].dis.y_bit := 16
+            hids[i].dis.eje_bits := 8
+            si n > 0 entonces
+                si n > 512 entonces n := 512 fin
+                copiar_memoria(dirección(descriptor[0]), desc, n)
+                descriptor_largo := n
+                si no mira_descriptor(hids[i]) entonces
+                    apunta1("bt: el descriptor del ratón Bluetooth (ranura %u) no dice dónde van X e Y: no se usa\n", r)
+                    devolver
+                fin
+            fin
+            ratones := ratones + 1
+            hay_ratón_usb := cierto
+        fin
+        hids[i].usado := cierto
+        n_hids := n_hids + 1
+        d[0] := nat32("ratón")
+        si teclado entonces d[0] := nat32("teclado") fin
+        d[1] := r
+        d[2] := nat32("arranque")
+        si n > 0 entonces d[2] := nat32("informes (su descriptor)") fin
+        apunta("bt: un %s Bluetooth (ranura %u), con el protocolo de %s\n", d)
+        pon_en_marcha()
+    fin
+
+    público función bt_informe(r: nat32, p: puntero a byte, n: nat32)
+        variable i: nat32
+        i := de_bt(r)
+        si i = NINGUNO entonces devolver fin
+        informes := informes + 1
+        si hids[i].teclado entonces
+            si n >= 8 entonces informe_teclado(hids[i], p) fin
+        sino
+            si n > 64 entonces n := 64 fin
+            guarda_último(p, n)
+            informe_ratón(hids[i], p, n)
+        fin
+    fin
+
+    público función bt_baja(r: nat32)
+        variable i: nat32
+        i := de_bt(r)
+        si i <> NINGUNO entonces suelta(i) fin
+    fin
+
+    ; (el servicio se ha acabado, o el adaptador se ha ido) todos los Bluetooth
+    público función bt_bajas()
+        variable i: nat32
+        para i desde 0 hasta MAX_HID - 1 hacer
+            si hids[i].usado y hids[i].bt <> 0 entonces suelta(i) fin
+        fin
+    fin
+
+    ; (dispositivos) los Bluetooth que hay: los bits 0 a 3, teclados; 4 a 7, ratones
+    público función bt_hay(): nat32
+        variable i, r: nat32
+        r := 0
+        para i desde 0 hasta MAX_HID - 1 hacer
+            si hids[i].usado y hids[i].bt <> 0 entonces
+                si hids[i].teclado entonces r := r + 1 sino r := r + 0x10 fin
             fin
         fin
+        devolver r
     fin
 
     ; lo que da el descriptor de informe del último ratón sin protocolo de

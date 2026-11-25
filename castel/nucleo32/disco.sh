@@ -29,6 +29,7 @@
 # microcódigo de las Broadcom (BCM43XX.FW, BCM43XXH.FW y su licencia,
 # BCM43XX.TXT); con «wifisim», además un RED.INI con «WifiSimulada=SI» (la
 # radio de mentira: las pruebas).
+# (BLUETOOTH) Con «bt», también el servicio Bluetooth (BT.BIN, nucleo32/bt/hacer.sh).
 # (PANEL) Con «panel», también el Panel de control (PANEL.BIN) y la hora por
 # Internet (HORARED.BIN), que el escritorio pone en marcha al arrancar.
 # La imagen se le da a QEMU como disco IDE: DISCO=IMAGEN nucleo32/probar.sh ...
@@ -46,8 +47,9 @@ ESCUDO=
 SSH=
 WIFI=
 PANEL=
+BT=
 for o in "${@:3}"; do
-  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; ssh) SSH=ssh ;; escudo) ESCUDO=escudo ;; wifi) WIFI=wifi ;; wifisim) WIFI=wifisim ;; panel) PANEL=panel ;; esac
+  case $o in oficina) OFICINA=oficina ;; red) RED=red ;; tls) TLS=tls ;; navegador) NAVEGADOR=navegador ;; ssh) SSH=ssh ;; escudo) ESCUDO=escudo ;; wifi) WIFI=wifi ;; wifisim) WIFI=wifisim ;; panel) PANEL=panel ;; bt) BT=bt ;; esac
 done
 T=$(mktemp -d)
 trap 'rm -rf $T' EXIT
@@ -120,6 +122,11 @@ if [ "$RED" = red ]; then
       mcopy -i $V $T/RED.INI ::
     fi
   fi
+fi
+# (BLUETOOTH) el servicio Bluetooth
+if [ "$BT" = bt ]; then
+  bash $AQUI/bt/hacer.sh $T/BT.BIN
+  mcopy -i $V $T/BT.BIN ::
 fi
 # (PANEL) el Panel de control y la hora por Internet
 if [ "$PANEL" = panel ]; then

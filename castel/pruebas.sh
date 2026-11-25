@@ -289,6 +289,9 @@
 #      toque, arrastrar, el borde derecho, dos dedos, la palma, al escribir, descolocados);
 #      el ratón PS/2 de QEMU sigue igual (y RATON /TOUCHPAD lo graba); con «tp_simulado»,
 #      RATON /INYECTA baja y sube el Bloc y hace clic; Panel de control > Ratón > Touchpad.
+#  55. (BLUETOOTH, SOLO=bt) El Bluetooth (pruebas_bt.sh): la pila de BT.BIN contra su
+#      modelo en el anfitrión, y en QEMU un adaptador USB de mentira por usb-redir:
+#      buscar, emparejar el teclado y el ratón, lo tecleado, reconectar, el Intel 0AAA.
 #  52. (I2CHID, SOLO=i2chid) Los touchpads HID sobre I2C (pruebas_i2chid.sh): hiddesc.cas
 #      con descriptores de touchpads de verdad (HIDPRUEB con corre32); lo de ACPI.BIN con
 #      acpi_sim (la SSDT de prueba y las tablas del ASUS GL553VD); en QEMU, sin controladora
@@ -443,6 +446,7 @@
 #   SOLO=sdhci ./pruebas.sh       la primera y la 53 (SDHCI: las tarjetas SD y el eMMC; pruebas_sdhci.sh)
 #   SOLO=movil ./pruebas.sh       la primera y la 55 (MÓVIL: el móvil por USB, el anclaje de USB de Android; pruebas_movil.sh)
 #   SOLO=punteros ./pruebas.sh    la primera y la 51 (PUNTEROS: los punteros del ratón; pruebas_punteros.sh)
+#   SOLO=bt ./pruebas.sh          la primera y la 56 (BLUETOOTH: pruebas_bt.sh)
 #   SOLO=i2chid ./pruebas.sh      la primera y la 52 (I2CHID: los touchpads HID sobre I2C; pruebas_i2chid.sh)
 #   SOLO=16 ./pruebas.sh          de la primera a la séptima (sin arrancar el núcleo de Hispa-Pentium)
 #   SOLO=castel32 ./pruebas.sh    la primera y la decimoquinta (CASTEL32: corre32, Hispa-Pentium y HW32)
@@ -515,6 +519,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_punteros.sh        # (PUNTEROS) la parte 51, como parte_punteros
 . $AQUI/pruebas_i2chid.sh          # (I2CHID) la parte 52, como parte_i2chid
 . $AQUI/pruebas_movil.sh           # (MÓVIL) la parte 55, como parte_movil
+. $AQUI/pruebas_bt.sh              # (BLUETOOTH) la parte 56, como parte_bt
 . $AQUI/pruebas64.sh               # [CASTEL64] la parte 23 (CASTEL64), como la función parte23
 
 # ---------------------------------------------------------------- 1. errores
@@ -537,7 +542,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil|bt) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -2467,9 +2472,9 @@ for hc in xhci ehci; do
   # lo instalado, apuntado para PAQUETES: los registros de los paquetes del sistema, en \HISPA\PAQUETES
   rm -rf $Z/pqi $Z/pqu; mkdir $Z/pqi $Z/pqu
   mcopy -n -i $Z/vol.img '::HISPA/PAQUETES/*' $Z/pqi/ > /dev/null 2>&1; mcopy -n -i $G/usb.img@@1M '::INSTALA/PAQUETES/*' $Z/pqu/ > /dev/null 2>&1
-  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "ACCESORI.PQI BASE.PQI BLOC.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI PINTURA.PQI RED.PQI SONIDO.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIFI.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
+  if [ "$(ls $Z/pqi | tr '\n' ' ')" = "ACCESORI.PQI BASE.PQI BLOC.PQI BLUETOOT.PQI CONSOLA.PQI EJEMPLOS.PQI EQUIPO.PQI HVPRUN.PQI OFICINA.PQI PAQUETES.PQI PINTURA.PQI RED.PQI SONIDO.PQI SSH.PQI TAILSCAL.PQI TLS.PQI WIFI.PQI WIN32.PQI " ] && diff -r $Z/pqi $Z/pqu > /dev/null \
     && mcopy -n -i $Z/vol.img ::HISPA/PAQUETES.BIN $Z/f.bin > /dev/null 2>&1; then
-    ok "$que: INSTALAR apunta lo que instala: los registros de los 17 paquetes del sistema (OFICINA2: con pintura), en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
+    ok "$que: INSTALAR apunta lo que instala: los registros de los 18 paquetes del sistema (OFICINA2: con pintura; BLUETOOTH: con bluetoot), en C:\\HISPA\\PAQUETES (y PAQUETES.BIN en \\HISPA)"
   else ko "$que: lo instalado no queda apuntado en C:\\HISPA\\PAQUETES:"; ls $Z/pqi | sed 's/^/        /' | head -10; fi
   # SOLO el disco: el primer arranque
   desde_disco $Z/d$hc.img $Z/a$hc.sal
@@ -2549,9 +2554,9 @@ for hc in xhci ehci; do
     if grep -q "Hispa-Pentium $VERSION_BASE: un núcleo de 32 bits escrito en Castel" $Z/b1$hc.txt && grep -q "^|C:\\\\>dir \\\\hispa\\\\hispa.ini" $Z/b1$hc.txt && grep -q "^|.hispa.hispa.ini es un archivo de [0-9]* octetos" $Z/b1$hc.txt; then
       ok "la entrada de modo texto del disco: el intérprete de órdenes (de C:\\HISPA), en C:, con el teclado guardado en HISPA.INI (el de EE. UU.: su tecla «\\» da la barra)"
     else ko "la entrada de modo texto del disco no arranca el intérprete:"; sed 's/^/        /' $Z/b1$hc.txt | grep -v '^ *|$' | tail -n 8; fi
-    if grep -q "^|  win32     1\.[0-9]     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|17 paquetes\.$" $Z/b2$hc.txt \
-      && grep -q "^|Los archivos de los 17 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
-      ok "PAQUETES en el sistema recién instalado: LISTA dice los 17 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 17, base ya no cabe en la pantalla; (OFICINA2) con pintura) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
+    if grep -q "^|  win32     1\.[0-9]     Programas de Windows de 32 bits" $Z/b2$hc.txt && grep -q "^|  tailscal  0\.8\.[0-9]   Tailscale y WireGuard" $Z/b2$hc.txt && grep -q "^|18 paquetes\.$" $Z/b2$hc.txt \
+      && grep -q "^|Los archivos de los 18 paquetes instalados están como se instalaron\.$" $Z/b2$hc.txt; then
+      ok "PAQUETES en el sistema recién instalado: LISTA dice los 18 paquetes del sistema (..., ssh, tailscal, sonido, tls, wifi y win32: con 17, base ya no cabe en la pantalla; (OFICINA2) con pintura; (BLUETOOTH) con bluetoot) y COMPRUEBA, que sus archivos son los instalados (SHA-256)"
     else ko "PAQUETES en el sistema recién instalado no ve bien lo instalado:"; sed 's/^/        /' $Z/b2$hc.txt | grep -v '^ *|$' | tail -n 12; fi
     # la oficina, en el disco instalado: el grupo «Oficina» del menú Inicio
     # (Facturas, con C:\\HISPA\\HVPRUN.BIN) y Mi equipo abriendo Cuentas de C:\\OFICINA
@@ -6144,6 +6149,8 @@ if parte08 punteros; then parte_punteros; else echo "  (SOLO=${SOLO08:-$SOLO}: s
 if parte08 i2chid; then parte_i2chid; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los touchpads HID sobre I2C)"; fi
 # ------------------------- 55. (MÓVIL) el móvil por USB (pruebas_movil.sh)
 if parte08 movil; then parte_movil; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el móvil por USB)"; fi
+# ------------------------- 56. (BLUETOOTH) el Bluetooth (pruebas_bt.sh)
+if parte08 bt; then parte_bt; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Bluetooth)"; fi
 [ -n "${CAPTURAS_A:-}" ] && { mkdir -p "$CAPTURAS_A"; cp $G/*.ppm "$CAPTURAS_A"/ 2> /dev/null; }
 
 # ------------------------------------- 35. (BLOC) el Bloc de notas 1.0

@@ -1,0 +1,42 @@
+BT.BIN: el Bluetooth de Hispa-Pentium (el paquete «bluetoot» 0.1)
+
+Lo que hace
+-----------
+BT.BIN es el servicio Bluetooth: lleva los adaptadores Bluetooth USB (los
+de dentro de los portátiles, como el Intel de la Wi-Fi 7265, y los de
+enchufar), busca aparatos, empareja (con el código que se escribe en el
+teclado, con «Just Works» los ratones, o comparando un número) y hace
+funcionar los teclados y los ratones Bluetooth como si fueran USB. Los
+emparejados se recuerdan (BT.INI) y se vuelven a conectar al arrancar.
+
+  - En el escritorio: Configuración > Bluetooth (el icono sale cuando hay
+    un adaptador): encender y apagar, «Buscar aparatos», «Emparejar»,
+    «Conectar» y «Olvidar».
+  - En la Consola: BT (cómo está), BT /BUSCAR, BT /EMPAREJAR n,
+    BT /OLVIDAR n, BT /ENCENDER, BT /APAGAR (BT /? para la ayuda).
+  - Lo que pasa queda en BT.LOG (en \HISPA, o en la raíz de la memoria
+    USB), sin claves ni códigos y con las direcciones recortadas.
+
+Los adaptadores de Intel
+------------------------
+Los de la 7265 (8087:0A2A) funcionan sin nada. Los más nuevos (8087:0AAA,
+8087:0026...) necesitan su firmware, el de Intel (ibt-*.sfi y ibt-*.ddc,
+de linux-firmware: se puede repartir sin cambios, con su licencia, pero
+no es software libre, así que no va con Hispa-Pentium). Se pone en una
+carpeta FIRMWARE de la memoria USB o en \HISPA\FIRMWARE; si falta, BT.LOG
+dice cuál y de dónde bajarlo.
+
+Lo que no hace todavía
+----------------------
+Emparejar los aparatos de Bluetooth de bajo consumo (BLE): se ven en la
+lista, pero emparejarlos llega en la etapa 2 b. Tampoco el sonido por
+Bluetooth (auriculares, altavoces).
+
+Las licencias
+-------------
+BT.BIN: Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o
+posterior (el texto entero, detrás). De BlueZ y de Linux (btusb, btintel;
+GPL-2.0 o posterior) se han tomado los hechos: los números de las órdenes,
+el orden de los pasos y los nombres de los firmwares. Lleva Monocypher
+(terceros/monocypher, de Loup Vaillant: CC0 o BSD de 2 cláusulas) para
+cifrar las claves de BT.INI.

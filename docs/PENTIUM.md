@@ -485,6 +485,7 @@ lenguaje, y lo demás lo da el módulo **Llamadas** (`llamadas.cas`).
 | 80 | **colocar la ventana** EBX (suya) con su esquina en (ECX, EDX) de la pantalla; con ECX = 0xFFFFFFFF, en el centro (encima de la barra de tareas). La usa HVPRUN (sección 10, «La oficina de Hispa-386») | — | 0 |
 | 90-98 | **la red**: pedir al servicio de red (90) y lo del propio servicio (91 a 96, 98); cómo está (97). Las cuenta la sección 14 | `redes.cas` | |
 
+| 240-248 | (BLUETOOTH) **el Bluetooth**: la 246, de cualquiera, pedir al servicio Bluetooth (`BT.BIN`; si no está y hay adaptador, se pone en marcha); las demás, solo `BT.BIN` por su sello: el transporte por USB, los teclados y ratones y su estado. Las cuenta la sección 14 tricies | — (en C: `bt/bt.h`) | |
 | 190-199 | (SONIDO) **el sonido**: abrir un canal (190), darle muestras (191), el canal (192), el volumen y lo de todos (193), tocar un .WAV (194); y lo del servicio de sonido (195 a 199). Las cuenta la sección 14 decies | `abrir_canal`, `dar_muestras`, `orden_canal`, `tocar_wav`, `volumen_general`, `sonar` | |
 | 180-182 | [WIN32] **los programas de Windows** (`WIN32.BIN`, sección 14 ter): poner y quitar páginas en cualquier sitio de la zona del programa (180), las teclas pulsadas ahora y desde la última vez (181: EBX el búfer, ECX lo que cabe —desde la 0.8.7—: 32 octetos, solo las pulsadas ahora; 64 o más, también las de desde la última vez; 0, los 64 de antes —WIN32 1.1, juegos 1.0 y Pluma 2.0 lo dan así, con un búfer de 64—; menos de 32, `NO_VALE`. Antes escribía siempre 64: un búfer de 32 en la pila se pisaba), y las ventanas: hacerlas sin marco o a pantalla completa, colocarlas, traerlas delante, dónde están, el ratón; (JUEGOS) llevar la flecha, lo movido de verdad y esconderla (182) | — | |
 | 183-185 | (JUEGOS) **lo que pide un juego** (sección 14 quater ter): los hilos de un proceso de Windows, su TEB, el despachador de SEH, ceder y quitar las primeras 64 K (183); esperar mientras en una dirección haya un valor (184) y despertar a los que esperan (185). (El CD de sonido de los juegos es la 134, la del Reproductor, con la letra 0: el primer lector; la 186 queda libre) | `crear_hilo`, `acaba_hilos`, `a_su_despachador` | |
@@ -6025,6 +6026,8 @@ primer renglón que casa. **PAQUETES e INSTALAR escriben en toda la zona**
 | `TLS.INI`, `RAICES\` | nadie | |
 | `RED.INI` | RED | |
 | `WIFI.INI`, `WIFI.LLV` | WIFI (rama `pentium-wifi`) | sí |
+| `BT.INI`, `BT.LLV` | BT (rama `bluetooth`) | sí |
+| `BT.LOG` | BT | |
 | `WIFI.LOG` | WIFI | |
 | `SONIDO.INI` | SONIDO (rama `pentium-sonido`) | |
 | `ESCUDO\` | ESCUDO (rama `pentium-escudo`) | |
@@ -11875,6 +11878,259 @@ seguro), el RNDIS de Android (INITIALIZE con su MaxTransferSize, varias tramas
 juntas), la alta velocidad (480 Mbit/s: EHCI con la cola asíncrona, o xHCI) y
 el DHCP del móvil (192.168.42.x). Y NCM en un móvil de verdad. La memoria de
 prueba: `Pruebas/Pendientes/Movil-USB/Anclaje-Android/`.
+## 14 tricies. El Bluetooth (BT.BIN, rama `bluetooth`, «(BLUETOOTH)»)
+
+*25/11/2026, la rama `bluetooth` (sobre `worktree-v0.1-nucleo`, la 0.8.11
+en pruebas). Carlos: «vamos de sencillo para arriba». Etapa 1 (la base: el
+HCI por USB, emparejar) y etapa 2 (los teclados y los ratones). Lo cambiado
+fuera de lo nuevo lleva la marca `(BLUETOOTH)`.*
+
+| | |
+|---|---|
+| ![La ventana del Bluetooth tras buscar](pentium/bt-buscar.png) | ![Emparejando un teclado: el código en grande](pentium/bt-codigo.png) |
+
+### Cómo se usa
+
+- Con un **adaptador Bluetooth USB** (los de dentro de los portátiles, que
+  van por USB aunque estén soldados —el Intel `8087:0A2A` de la 7265 del
+  ASUS GL553VD, el `8087:0AAA` del Monovate, el `8087:0026` del ThinkPad
+  E14—, y los de enchufar: CSR, Realtek, Broadcom, `13D3:...`), el
+  escritorio pone en marcha **`BT.BIN`** solo (también si se enchufa luego)
+  y en **Configuración** sale un icono más, **«Bluetooth»** (sin adaptador
+  no sale: el Panel de control queda como siempre). Su ventana: arriba,
+  cómo está **en texto** («Encendido: Intel 8087:0A2A», «Apagado», «Sin
+  adaptador», «No se ha podido poner en marcha», «Ocupado: poniendo en
+  marcha el adaptador»), **Encender/Apagar**, **Buscar aparatos** (10 s,
+  Bluetooth clásico y BLE a la vez), la lista (los emparejados primero;
+  cada uno con su nombre, lo que es —teclado, ratón, teléfono...— y
+  «emparejado, conectado», «sin emparejar; visto ahora (-55 dBm)»...; el
+  elegido, con un borde y una flecha, no solo de otro color),
+  **Emparejar**, **Conectar**, **Olvidar** y **Cerrar**. Con el teclado:
+  las flechas, Intro, Supr, B y Esc.
+- **Emparejar**: el aparato, en su modo de emparejar. Un **teclado**: sale
+  el código **en grande**, «Escriba este código en el teclado y pulse
+  Intro», con «Tecleadas: 3 de 6» (y las cifras ya tecleadas, en verde y
+  subrayadas); un **ratón**: nada (Just Works); un teléfono: «¿Sale este
+  mismo número en el otro aparato?» con **Sí** y **No**; un teclado de
+  antes de Bluetooth 2.1: el PIN a teclear en él. Luego, «BIEN:
+  emparejado» o «NO se ha podido emparejar» y por qué («no se ha aceptado
+  el código», «no contesta (¿está en modo de emparejar?)»...). **Emparejar
+  y olvidar, solo un administrador** (lo dice el núcleo al pasar el
+  pedido, no el programa; sin usuarios, todos).
+- Los emparejados **se reconectan solos al arrancar** (se les llama uno a
+  uno; y si se despiertan ellos —una tecla—, se les deja entrar) y van
+  como los USB: lo tecleado, a la consola (el teclado español, las
+  repeticiones...), y el ratón, al puntero (con la rueda).
+- En la Consola, **`BT`** (cómo está y la lista), `BT /BUSCAR`, `BT
+  /EMPAREJAR n` (el número de la lista o la dirección), `BT /CONECTAR n`,
+  `BT /OLVIDAR n`, `BT /ENCENDER`, `BT /APAGAR`, `BT /VENTANA`, `BT /?`.
+- El **Administrador de dispositivos** dice que el adaptador lo lleva
+  `BT.BIN`, con lo que dice el servicio: «Bluetooth: encendido; 2
+  emparejados, 1 conectados (teclados: 1, ratones: 0)».
+
+### Cómo está hecho
+
+```
+  BT /VENTANA, BT (ventana.c)        el teclado y el ratón (consola, puntero)
+        │ 246 (el pedido; el núcleo         ▲  usbhid.cas: lo mismo que los USB
+        ▼  dice si es administrador)        │  (hiddesc.cas para los descriptores)
+  el núcleo: usbbt.cas ──────────────────────┤ 244 (alta, informe, baja)
+        │ 247/248 (el buzón)   ▲ 241-243     │
+        ▼                      │ (el USB)    │
+  BT.BIN (anillo 3, C): servicio.c  BT.LOG, BT.INI/BT.LLV, el bucle
+     hci.c    arrancar, buscar, conectar, SSP y el PIN, las claves
+     l2cap.c  L2CAP (modo básico), el cliente SDP, HID (PSM 0x11 y 0x13)
+     intel.c  los Intel: la versión, el parche (ROM), el firmware (cargador)
+     claves.c BT.INI (las claves, con XChaCha20-Poly1305 de Monocypher)
+        │ 242: órdenes por el extremo 0 (petición de clase 0x20), ACL por
+        ▼ el de granel; 243: lo que llega por el de interrupción y el de entrada
+  el adaptador (la clase USB E0/01/01)
+```
+
+**En el núcleo solo está el transporte** (`usbbt.cas`, unas 450 líneas),
+como con la red y el sonido: un fallo de la pila acaba con `BT.BIN`, no con
+el sistema. Busca entre lo enumerado (y lo que se enchufa: `usbcal.cas`)
+las interfaces **E0/01/01** con un extremo de interrupción de entrada y dos
+a granel; abre tuberías para los dos de entrada (`tubo_abre`: en el xHCI
+valen para los de granel; con EHCI y UHCI van por la lista periódica: sin
+probar con un adaptador) y guarda lo que llega, en trozos de 64 octetos
+tal cual, en una cola de 16 K; los junta `BT.BIN` (por el largo de cada
+suceso y de cada paquete ACL, como `btusb_recv_intr`/`_bulk`). Las
+llamadas:
+
+| EAX | Quién | Qué | Devuelve |
+|---|---|---|---|
+| 240 | `BT.BIN` | apuntarse (por su sello, `SELLO_BT`: el de la carpeta del sistema) | 0, `EN_USO`, `NO_VALE` |
+| 241 | `BT.BIN` | el adaptador EBX: un `Bt_info` a ECX (VID, PID, el aparato, `cambios`) | cuántos hay |
+| 242 | `BT.BIN` | mandar: EBX 1 una orden (extremo 0), 2 ACL (granel), 3 una orden por el granel (los Intel en su cargador); ECX, EDX los octetos (hasta 1024) | los mandados |
+| 243 | `BT.BIN` | recibir lo siguiente, a EBX (caben ECX); si no hay, esperar EDX tics (con el bit 31, cediendo el procesador en vez de dormir) | n \| de << 16 (1 interrupción, 2 granel); 0; `NO_HAY` sin adaptador |
+| 244 | `BT.BIN` | los teclados y ratones: EBX = op (1 alta, 2 informe, 3 baja) \| ranura << 8 \| clase << 16 (1 teclado, 2 ratón); ECX, EDX el descriptor o el informe | 0 |
+| 245 | `BT.BIN` | cómo está (EBX: 0 nada, 1 sin adaptador, 2 apagado, 3 encendido, 4 fallo) y un texto (ECX, hasta 80): el Administrador de dispositivos | 0 |
+| 246 | cualquiera | pedir al servicio: EBX un `bt_pedido` (hasta 256), ECX y EDX la respuesta (hasta 2048). De uno en uno, hasta 10 s | los octetos; `NO_HAY`; `EN_USO` (ocupado: poniendo en marcha el adaptador) |
+| 247 | `BT.BIN` | el pedido siguiente (con la primera palabra puesta por el núcleo: 1 si quien pide es administrador) | su largo, o 0 |
+| 248 | `BT.BIN` | contestarlo | 0 |
+
+`usbhid.cas` lleva los teclados y ratones Bluetooth en su misma tabla (la
+ficha con `bt`, sin tubería): el teclado con el protocolo de arranque (los
+8 octetos de siempre: `informe_teclado`), el ratón con el de arranque o con
+su descriptor (`hiddesc.cas`, como los ratones USB y los touchpads I2C); al
+irse (o acabarse `BT.BIN`, o desenchufarse el adaptador) se sueltan las
+teclas y los botones. `permisos.cas`: `SELLO_BT` (26), `BT.BIN` servicio;
+`BT.INI` y `BT.LLV`, secretos que solo escribe y lee él; `BT.LOG`, suyo.
+`usuario.cas` lo pone en marcha (`mira_bt` cada segundo desde el
+escritorio; `lanza_bt` cuando alguien pide algo con la 246) y no dos veces
+seguidas; con **`sinbt`** en la línea del cargador, nada.
+
+**La pila** (en C; de BlueZ y Linux, los hechos, cada uno con su función de
+Linux 6.6; el código, nuestro):
+
+- **Arrancar** (`bt_arranca`, el orden de `hci_init1..4_sync`): lo del
+  fabricante (abajo), `HCI_Reset`, la versión, la dirección, lo que sabe
+  (LMP features: SSP, EIR, la señal, BLE), los búferes ACL, la máscara de
+  sucesos (la de `hci_setup_event_mask`), SSP encendido, la búsqueda con
+  EIR, la clase (un portátil), el nombre (el del equipo), 5,12 s para
+  conectar, la política (cambiar de papel y «sniff») y lo de BLE. Encender
+  es dejar que se conecten (Write_Scan_Enable 2: no se deja ver).
+- **Buscar**: Inquiry (GIAC, 10,24 s) y el escaneo BLE activo a la vez; los
+  nombres, del EIR o preguntados luego (Remote_Name_Request, de uno en
+  uno); de lo BLE, el nombre, la apariencia y si anuncia HID (0x1812).
+- **Emparejar** (el orden de BlueZ): Create_Connection,
+  Authentication_Requested; sin clave, IO Capability «pantalla y Sí/No» con
+  MITM si se puede: el teclado (solo teclado) da **Passkey Entry** (User
+  Passkey Notification: el código en grande; las Keypress Notification, las
+  tecleadas), el ratón (nada) **Just Works** (se acepta solo), un teléfono
+  la **comparación numérica** (Sí/No); los de antes de 2.1, el **PIN** (un
+  teclado, al azar y tecleado en él; lo demás, «0000»). La clave (Link Key
+  Notification) se guarda; luego se cifra (Set_Connection_Encryption).
+- **L2CAP** (modo básico, MTU 672): las señales (conectar, configurar,
+  desconectar, eco, información), los canales que pedimos y los que pide el
+  aparato (si aún no hay cifrado: «pendiente», y «sí» al cifrar, como
+  BlueZ). **SDP**: ServiceSearchAttributeRequest del servicio HID (0x1124)
+  con sus continuaciones: el descriptor (0x0206) y si tiene el protocolo de
+  arranque (0x020E). **HID**: el canal de control (0x11) y el de
+  interrupción (0x13); SET_PROTOCOL: el de arranque (teclados, y ratones
+  que lo tienen) o el de informes con su descriptor; los informes (0xA1)
+  al núcleo. Olvidar manda VIRTUAL_CABLE_UNPLUG.
+- **Reconectar**: al arrancar, los emparejados HID de uno en uno (si no
+  contestan, a los 5 s el siguiente); y el que llega solo (Connection
+  Request de uno emparejado) se acepta, con su clave (Link Key Request).
+  Uno que no está emparejado, no.
+- **Los Intel** (`intel.c`, `btintel_setup_combined` en lo mínimo): la
+  versión (0xFC05, la forma de antes, que vale hasta la familia 0x14). Los
+  de **ROM** (familias 0x07 y 0x08: **el 8087:0A2A del ASUS**) funcionan sin
+  nada; si está su parche (`ibt-hw-37.8.10-fw-1.10.3.11.e.bseq` y así), se
+  pone en el modo de fabricante (0xFC11) orden a orden, comprobando cada
+  respuesta, y si algo no cuadra se sale sin él. Los de **cargador** (0x0B,
+  0x0C, 0x11 **JfP —el 0AAA—**, 0x12, 0x13 **HrP —el 0026—**, 0x14): si ya
+  tienen su firmware puesto (0x23), nada; si no, los parámetros de
+  arranque (0xFC0D), su firmware **`ibt-<familia>-<rev>-<rev>.sfi`** (en el
+  0AAA, `ibt-17-16-1.sfi`; en el 0026, `ibt-19-0-4.sfi` o el que diga), la
+  cabecera RSA (128 + 256 + 256), lo demás en trozos múltiplos de 4 (la
+  0xFC09, **por el extremo a granel** mientras está en el cargador, y sus
+  sucesos llegan también por ahí), el suceso del resultado, 0xFC01 con la
+  dirección de arranque (de su orden 0xFC0E) y el aviso de que ha
+  arrancado; luego su `.ddc` (0xFC8B) si está. Los firmwares de Intel **no
+  van con el sistema** (no son libres): se buscan en `\HISPA\FIRMWARE`,
+  `\FIRMWARE` de la unidad del sistema y `\FIRMWARE` de cada unidad, y si
+  falta, `BT.LOG` dice cuál, dónde ha mirado y de dónde bajarlo. Los AX200
+  y siguientes (la versión en TLV: 0029, 0032, 0033...) aún no.
+- **`BT.INI`** (`claves.c`): `Encendido=SI|NO`, `Registro=TODO` (las órdenes
+  y los sucesos, sin su contenido, a `BT.LOG`), y por aparato una línea
+  `Aparato=` (la dirección, la clase, lo de HID, el nombre y la clave **cifrada
+  y firmada** con XChaCha20-Poly1305 —llave sacada de `BT.LLV`, la dirección
+  como dato asociado—: una clave cambiada o de otro equipo no se usa) y
+  `Descriptor=`, con un comentario delante con el nombre a la vista. Como
+  `WIFI.INI`: protege de quien vea solo `BT.INI`, no de quien tenga el disco.
+- **`BT.LOG`** (en `\HISPA` o la raíz de la memoria): nuevo en cada
+  arranque, escrito y cerrado en cada línea el primer minuto; **sin claves
+  ni códigos** y con las direcciones recortadas a sus dos últimos octetos
+  (`xx:xx:xx:xx:3F:21`); si no arranca, un «DIAGNOSTICO».
+
+### El paquete «bluetoot»
+
+Del sistema (`tools/hpq.py`; 8 letras, como `tailscal` y `accesori`) 0.1:
+`BT.BIN` (unos 85 K; 1,5 MB de variables para el firmware de Intel) y
+`BT.TXT` (lo que es y las licencias, con la GPL-2.0 entera). Pide la base
+con las llamadas 240 a 248 (`VERSION_BT`: hoy la 0.8.11; al juntar la rama,
+la que salga con ella). En la memoria USB y el CD, como módulo, y al
+instalar, a `\HISPA`.
+
+### Probarlo
+
+QEMU **ya no tiene `-device usb-bt-dongle`** (lo quitó en la 5.0 con todo
+su Bluetooth: el de aquí es la 8.2), así que:
+
+- **`build/bt_prueba`** (`tests/bt/prueba.c`): la pila contra
+  **`tests/bt/modelo.c`**, un controlador HCI de mentira con cinco aparatos
+  (un teclado SSP de solo teclado, un ratón Just Works sin protocolo de
+  arranque, un teléfono de comparación numérica, un teclado antiguo de PIN y
+  un ratón BLE): buscar, los nombres, emparejar cada uno (y mal: el código
+  equivocado, el «No», uno que no contesta), SDP en dos trozos, HID, lo
+  tecleado y lo movido, `BT.INI` (y uno cambiado a mano, y con otra
+  `BT.LLV`), apagar y arrancar otra vez (el teclado que se conecta solo
+  antes de cifrar, el ratón al que se llama), olvidar; el 0A2A sin parche y
+  con uno; el 0AAA sin firmware y con uno de mentira (llega entero, por el
+  granel, con la clase de cada trozo, y arranca con la dirección de su
+  0xFC0E). 57 comprobaciones. El modelo cuenta lo que el anfitrión hace mal.
+- **`build/usbredir_bt PUERTO`** (`tests/bt/usbredir_bt.c`): el mismo modelo
+  **enchufado a QEMU como aparato USB** por `usb-redir` (el protocolo de
+  usbredir), con «una persona» que teclea el código de emparejar, luego
+  «hola» e Intro, y mueve el ratón:
+
+```
+make build/usbredir_bt
+build/usbredir_bt 47123 --estado /tmp/claves --teclea 'hola\n' &
+castel/nucleo32/disco.sh /tmp/d.img 16 bt
+QEMU_MAS="-device qemu-xhci,id=x -chardev socket,id=bt,host=127.0.0.1,port=47123 -device usb-redir,chardev=bt,bus=x.0" \
+  MEMORIA=64 ESCRIBE=1 DISCO=/tmp/d.img ARRANQUE=ordenes castel/nucleo32/probar.sh "" "bt /buscar" \
+  "bt /emparejar DE:AD:BA:BE:10:01" ":pausa 12" "bt"
+```
+
+  (`--clase intel-cargador --fw CARPETA`: el 0AAA en su cargador.)
+- `castel/pruebas.sh`, parte 56 (**`SOLO=bt`**, `pruebas_bt.sh`): lo de
+  arriba en el anfitrión, y en QEMU: el núcleo ve el adaptador y `BT.BIN` lo
+  pone en marcha; `BT /BUSCAR` (el teclado por EIR, el ratón con su nombre
+  preguntado, el BLE); emparejar el teclado (el código, no escrito en el
+  registro) y **lo que teclea llega a ORDENES, que lanza HOLA.BIN**; el ratón
+  con su descriptor (`hiddesc.cas`); `BT.INI` (secreto: ORDENES no lo lee);
+  al arrancar otra vez, los dos se reconectan y el teclado teclea; el
+  escritorio (el icono de Configuración, la ventana, buscar, emparejar con
+  el código en grande); y el 0AAA con su firmware de mentira desde
+  `C:\FIRMWARE`.
+
+Las pruebas, el 25/11 en el VPS: `bt` 18/0 (la del Intel, comprobada en la
+misma salida tras quitar el «^»: la línea va detrás del «C:\>»),
+`caliente` 79/0, `dispositivos` 85/0, `protege` 76/0, `paquetes` 108/0 (con
+18 paquetes del sistema), `panel` 108/0 (con el VPS muy cargado, sus tres de
+la hora por Internet fallan: el arranque tarda más de lo que da su margen; con
+la carga normal, bien).
+
+**Lo que solo se verá en el ASUS** (la memoria
+`Pruebas/Pendientes/ASUS-GL553V/Bluetooth/`): el 0A2A de verdad (su
+versión, si contesta por el extremo 0 y el de interrupción, el reset), un
+teclado y un ratón de verdad (sus capacidades al emparejar, su SDP, el
+protocolo de arranque). Sin probar: el 0AAA y el 0026 con su firmware de
+verdad (en QEMU, cargar uno de mentira de 33 K tarda unos 20 s: el de
+verdad, de unos 600 K, irá más rápido en el USB de verdad, pero hay que
+medirlo), los adaptadores por EHCI y UHCI, Realtek (sin su firmware
+`rtl_bt`, con el de su ROM) y los clones de CSR.
+
+### Lo que falta
+
+- **Etapa 2 b: los ratones y teclados BLE** (HID sobre GATT): ya se ven al
+  buscar; falta conectar por LE (LE_Create_Connection), SMP (el
+  emparejamiento de LE: con «LE Secure Connections» la clave P-256 y el
+  DHKey los hace el adaptador —LE_Read_Local_P-256_Public_Key,
+  LE_Generate_DHKey— y el AES, LE_Encrypt, así que en el anfitrión basta
+  con AES-CMAC hecho sobre LE_Encrypt), cifrar (LE_Start_Encryption, con la
+  LTK guardada en BT.INI), ATT/GATT (buscar el servicio 0x1812, el «Report
+  Map» 0x2A4B —el mismo descriptor de siempre, a hiddesc.cas—, los
+  «Report» 0x2A4D con sus CCCD y el «Protocol Mode» 0x2A4E) y las
+  notificaciones al núcleo por la misma 244.
+- Los Intel de la versión en TLV (AX200, AX210/211...) y los Realtek con su
+  firmware; el sonido (A2DP), los mandos; las luces del teclado por
+  Bluetooth (SET_REPORT por el canal de control).
+- Un icono en la bandeja.
 
 ## 15. Las pruebas
 

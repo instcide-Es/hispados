@@ -38,7 +38,7 @@ módulo Semilla
 
     modelo núcleo
 
-    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Sdacpi, Usb, Usbhid, I2c, I2chid, Usbalm, Usbmovil, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
+    importar Cpu, Multiboot, Marcos, Paginas, Monton, Tareas, Consola, Discos, Fat, Unidades, Sdacpi, Usb, Usbhid, Usbbt, I2c, I2chid, Usbalm, Usbmovil, Usbcal, Cdcal, Cdrom, Registro, Usuario, Termo, Ajustes, Escritorio, Textos32, Mem32, Formato, Red, Pci, Energia, Sonido, Cuentas, Entrada, Win32, Textouefi, Relojhpet, Video     ; (UEFI) Textouefi, Relojhpet, Video
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
@@ -690,6 +690,7 @@ módulo Semilla
                 Usb.enseña()
                 Usbhid.prepara()
                 enseña_descriptor()
+                Usbbt.prepara()                 ; (BLUETOOTH) los adaptadores (los lleva BT.BIN)
                 si Usbalm.prepara() <> 0 entonces busca_usb() fin
                 Usbmovil.prepara()                     ; (MÓVIL) el anclaje de USB de un móvil
                 ; («1 ratón», «2 ratones»: en singular o en plural)
