@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | 8–12 sem. | 15 meses |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). El navegador, en la 10 b | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | 4–6 sem. | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -429,7 +429,16 @@ RTL8139C+. Ver la sección 15.
 - **QEMU**: `-nic user,model=e1000e`, `rtl8139`, `usb-net`. **Taller**: cable en el
   ASUS (Realtek), el ThinkPad, el adaptador USB.
 
-### Etapa 10 — el navegador moderno
+### Etapa 10 — el navegador moderno (la base, hecha: sección 16)
+
+Lo hecho el 25/11 (sección 16): primero lo que dejó la 9 (la red por USB
+CDC-ECM, setitimer y alarm, la hora de NTP al CMOS y /etc/localtime, las
+INTx por el `_PRT`) y, de la 10, lo de abajo de todo: **C++** (la libstdc++
+del sistema con musl, con un puente: `cxx.sh`), **FreeType y HarfBuzz**
+(compilados con musl, la misma letra que en Linux), **TCP de hoy** (escala
+de ventana, lo desordenado guardado, SACK) y los límites de un proceso (512
+hilos, 256 descriptores). Queda (la «10 b», sección 16): ICU, curl, IPv6, la
+libstdc++ compilada para musl y el navegador mismo.
 
 - C++ completo (libc++ y libunwind, o libstdc++), FreeType, HarfBuzz, ICU, curl,
   y Ladybird (o WPE WebKit) con su ventana sobre el compositor.
@@ -2594,3 +2603,193 @@ e1000: DHCP, MRED, «todo en orden» y el escritorio.
 - `/etc/localtime` (TZif) para los programas que no miran TZ, y escribir la
   hora de NTP en el CMOS (con `cmos=` sabiendo cuál es).
 - setitimer (38) y alarm, que MRED usa para su vigilante (hoy -ENOSYS).
+
+---
+
+## 16. La etapa 10, hecha la base (25/11/2026): lo que dejó la 9, C++, la letra y TCP de hoy
+
+### Las decisiones
+
+- **Primero lo que dejó la 9** (sección 15, «Lo que queda»), que es de la
+  base y lo pide el navegador:
+  - **La red por USB, CDC-ECM** (`usbred64.cas`): `Usb64.enumera` mira, si
+    la primera configuración no es de una clase que se atienda (la de
+    Realtek de la RTL8153, la RNDIS de `usb-net` de QEMU), si otra es de CDC
+    Ethernet (clase 2, subclase 6), y se queda con esa; de la interfaz de
+    datos (0x0A) lee la **variante 1** (la 0 no tiene extremos) y del
+    descriptor de Ethernet, el texto de la MAC (iMACAddress). La clase:
+    SET_INTERFACE, el filtro (SET_ETHERNET_PACKET_FILTER), **recibir con un
+    pedido a granel siempre en marcha, sin el mutex del aparato** (como los
+    informes de HID: pedir y mirar; al acabar, el xHCI señala también el
+    suceso del hilo «red», `Ext.otro_aviso`: sin mirar cada 10 ms), mandar a
+    granel con un octeto de más si la trama mide un múltiplo del paquete
+    (como usbnet de Linux), y los avisos de enlace. Enchufar y desenchufar
+    en marcha (el vigía USB se lo pasa a la red; el aparato desenchufado se
+    queda marcado, como las memorias). NCM (la subclase 0x0D) no: la RTL8153
+    y los adaptadores de casa traen ECM.
+  - **setitimer, getitimer y alarm** (ITIMER_REAL): cada proceso lleva su
+    vencimiento y su intervalo; el hilo del núcleo «alarmas» duerme hasta el
+    primero (o hasta que lo cambien) y manda SIGALRM. ITIMER_VIRTUAL y
+    ITIMER_PROF (tiempo de procesador) dan EINVAL. fork no la hereda.
+  - **La hora de NTP, al CMOS** (clock_settime y settimeofday), en la hora
+    que lleve (la local por omisión, como Windows; UTC con `cmos=utc`);
+    `cmos=quieto`: no se toca. Y **/etc/localtime**: TZif de la versión 2,
+    hecho al abrirlo, con un solo cambio (en 1901) y la zona de POSIX al
+    final (musl la usa pasado el último cambio); musl lo mapea con `mmap`,
+    así que los textos hechos al abrirlos se pueden mapear (una copia).
+  - **Las INTx por el `_PRT`** (`aml64.cas`, `prt64.cas`): Aml64, en el
+    mismo recorrido de las tablas (sin interpretar el AML), apunta los Name
+    con paquetes de rutas, los `_PRT` (un Name, o un Method que nombra
+    paquetes o los lleva dentro: «If (PICM) Return (AR00)…» de Intel y el
+    `_PRT` con los paquetes escritos del HP Mini), los `_BBN` y los `_CRS`
+    fijos; se queda con el paquete que se resuelve entero (las GSI
+    escritas, o los enlaces de `_CRS` fijo: los GSIA-GSIH de QEMU q35); los
+    enlaces de `_CRS` hecho por un método (los LNKA del modo PIC) no se
+    resuelven y entonces va la línea de siempre (y mirando cada 10 ms).
+    Prt64 sabe el bus de cada dueño (el `_BBN` del puente raíz, el bus
+    secundario del puente de su `_ADR`) y, si un bus no tiene `_PRT`, sube
+    girando la patilla. La e1000, la Realtek y virtio-net piden la GSI así
+    (`pon_intx`); con MSI o con la GSI del `_PRT`, el hilo «red» espera de 50
+    en 50 ms (los plazos de TCP, ARP y DHCP), no de 10 en 10. La que tenga
+    otro vector no se pisa.
+- **C++ con musl, con la libstdc++ del sistema** (`programas/cxx/`): no hay
+  aquí fuentes de GCC para compilar una libstdc++ para musl, pero la del
+  sistema (GCC 13, `libstdc++.a`, hecha para glibc) casi vale: `cxx.sh` es
+  el «compilador cruzado» de C++ (como `musl-gcc` para C): las cabeceras de
+  musl y las de la libstdc++, `puente.h` delante de todo y, al enlazar
+  (estático), `libpuente.a` (`puente.c`) con lo que esa libstdc++ espera de
+  glibc y musl no tiene: `__GLIBC_PREREQ` (como la 2.34: todo pthread en la
+  biblioteca de C, sin los débiles; pero sin las `*f128`), el `locale_t`
+  de glibc (la libstdc++ mira dentro: `__ctype_b`, `tolower`, `toupper`;
+  `newlocale` y `duplocale`, envueltas con `--wrap`, dan un bloque con los
+  6 punteros de musl delante y las tablas de musl —las mismas que las de
+  glibc— donde las busca glibc), `strerror_r` de GNU (envuelta), los
+  destructores de `thread_local` (`__cxa_thread_atexit_impl`), las esperas
+  con reloj de la 2.30 (`pthread_cond_clockwait`…), las `_chk` de
+  `_FORTIFY_SOURCE` (comprobando), las de LFS y `arc4random`. Es un puente
+  (honesto: depende de la libstdc++ del sistema); lo de fondo es compilar
+  GCC para `x86_64-linux-musl` (la 10 b).
+- **La letra: FreeType y HarfBuzz** (en `terceros/`, sin cambiar nada:
+  FreeType 2.13.3 con la GPL versión 2 de las dos que da; HarfBuzz 10.1.0,
+  Old MIT), compilados en `build/` la primera vez (FreeType con musl,
+  módulo a módulo; HarfBuzz de una vez, `harfbuzz.cc`, con `cxx.sh`, con
+  FreeType y los hilos de pthread). Y DejaVu Sans entera (la original, para
+  GSUB, GPOS y kern: las de Hispa-Pentium están recortadas).
+- **TCP de hoy** (`tcp64.cas`, lo que el navegador pide para bajar deprisa
+  por Internet): la **escala de ventana** (RFC 7323: la nuestra, 3) con
+  búferes de **256 KB**; **lo desordenado se guarda** en su sitio del búfer
+  de recibir (detrás de lo que va en orden: 8 trozos) y se junta al llegar
+  lo que faltaba; **SACK** (RFC 2018) en los ACK sin datos (con datos, la
+  trama se pasaría de la MTU) si la otra punta lo ofrece. Al mandar, los
+  SACK de la otra punta no se miran (se repite desde lo primero sin
+  confirmar). `red=pierde` tira uno de cada 23 segmentos con datos que
+  llegan, para probarlo. La red de usuario de QEMU (slirp) no sabe de escala
+  ni de SACK: eso se prueba de Hispa-64 a Hispa-64 (MRED, por 127.0.0.1).
+- **Los límites de un proceso**: 512 hilos (eran 64: el navegador, a
+  cientos), 256 descriptores (eran 32; `select`, hasta el 63: lo demás con
+  `poll`) y 1024 regiones de memoria (eran 256).
+
+### Qué hace
+
+Hispa-64 0.10.0. Los módulos y programas nuevos y lo que cambia:
+
+| Archivo | Qué |
+|---|---|
+| `usbred64.cas` | la red por USB, CDC-ECM (arriba) |
+| `prt64.cas` | las INTx por el `_PRT`: el bus de cada dueño, girar la patilla, `pon_intx`, quién tiene cada GSI |
+| `aml64.cas` | los `_PRT`, `_BBN` y `_CRS` fijos, en el mismo recorrido (`busca_prt`) |
+| `usb64.cas` | elegir la configuración de CDC-ECM, la variante 1 de los datos, la MAC; `texto_de` |
+| `xhci64.cas` | `Ext.otro_aviso`: otro suceso que señalar al acabar una transferencia |
+| `ip64.cas` | las tarjetas por USB (T_USB); el hilo «red», de 50 en 50 ms si nadie tiene que mirar |
+| `tcp64.cas`, `redcom64.cas` | la escala de ventana, lo desordenado, SACK, `red=pierde` |
+| `hora64.cas`, `reloj64.cas` | escribir en el CMOS (BCD o binario, 12 o 24 horas, el siglo); /etc/localtime (`tzif`) |
+| `procesos.cas`, `sistema.cas` | setitimer, getitimer, alarm (el hilo «alarmas»); los límites; `mmap` de los textos |
+| `intel64.cas`, `rtl64.cas`, `virtio64.cas` | la INTx con `pon_intx` |
+| `prt/miraprt.cas` | MIRAPRT (modelo linux64): los `_PRT` de unas tablas de verdad, como los ve el núcleo; `prt/esperado.txt`, lo que da con las del ASUS, el Toshiba y el HP Mini |
+| `programas/cxx/` | `cxx.sh`, `puente.h`, `puente.c`; MCXX (C++17) y MTEXTO (HarfBuzz y FreeType); `hazcxx.sh` |
+
+Lo que dice al arrancar (QEMU, q35, la e1000 y un `usb-net`):
+
+```
+INTx: las rutas de ACPI (_PRT): 1 tablas resueltas, 128 entradas
+Red: 00:02.0 8086:100E Intel 82540EM (PRO/1000 MT Desktop, e1000), MAC 52:54:00:12:34:56, INTx por la GSI 22 (del _PRT)
+Red: USB 1-5 0525:A4A2 «RNDIS/QEMU USB Network Device», CDC-ECM (la configuración 1 de 2), MAC 40:54:00:12:34:56, a granel por los extremos 0x82 y 0x02 (de 64 octetos), con las interrupciones del xHCI
+MCXX: todo bien (35 pruebas)
+  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex
+MTEXTO: HarfBuzz 10.1.0 sobre FreeType, con /DEJAVU.TTF
+  formas: 33 glifos para 42 letras; «fino», 3 glifos (sin la ligadura, 4); «AV», 2671 y 2802 (1/64 de punto, con y sin kerning)
+  dibujado: 33 glifos en 640x64, 557 de avance; tinta 945961, 2504 puntos grises; suma FNV-1a 0xC23E97E8
+  TCP [etapa 10]: 14 conexiones con escala de ventana, 637 trozos desordenados guardados y 25 juntados, 946 ACK con SACK (red=pierde: uno de cada 23 con datos, tirado)
+  la hora, puesta 1 veces; el CMOS, escrito 1 veces: va 0 s del reloj (en hora local)
+```
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **CIFRAS_PRUEBAS**. Lo de la etapa 10:
+
+- **MSENALES** (38 pruebas: eran 26): alarm (al segundo, lo que quedaba,
+  quitarla), setitimer con intervalo (cinco SIGALRM), getitimer, ITIMER_VIRTUAL
+  (EINVAL) y que el hijo de fork no la hereda. **MRED** (126: eran 123):
+  /etc/localtime es TZif 2 con la zona de TZ al final, y `localtime` sin TZ
+  da lo mismo que con ella (en invierno y en verano).
+- **MCXX** (35 pruebas, en cada arranque con musl): lo global y
+  `thread_local` con su destructor, las excepciones (entre funciones, por
+  su base, `exception_ptr`, `out_of_range`, `bad_alloc`, `throw;`), RTTI y
+  `dynamic_cast`, los contenedores y algoritmos, `optional` y `variant`,
+  `string_view`, los flujos (`ifstream` de /SALUDO.TXT), `regex`, **200
+  `std::thread` a la vez**, `condition_variable::wait_for`, `async`,
+  `promise`, `timed_mutex`, `shared_ptr` y `weak_ptr`, 20.000 `new`.
+- **MTEXTO**: la ligadura «fi» (GSUB), el kerning de «AV» (GPOS) y el texto
+  dibujado con suavizado; **la suma del lienzo, la misma que da el mismo
+  programa en Linux** (pruebas.sh lo corre en el anfitrión y compara).
+- **La red por USB**: con `usb-net` detrás del xHCI de QEMU, como las demás
+  tarjetas (DHCP, PING, IFCONFIG, DESCARGA por HTTP y HTTPS con su sha256,
+  NTP, ECO de ida y vuelta y de servidor), y que elige la configuración de
+  ECM (la 2.ª: la 1.ª es RNDIS) con la variante 1 y la MAC; y **enchufada y
+  desenchufada en marcha** (device_add y device_del por el monitor): DHCP
+  le da la IP, y al quitarla, sin enlace.
+- **El `_PRT`**: MIRAPRT (en Linux) con las tablas de verdad del ASUS
+  GL553VD (24 tablas: AR00 de 44 entradas y las de sus puentes), el Toshiba
+  NB250 (6) y el HP Mini 5103 (6, con los paquetes dentro del método), igual
+  que `prt/esperado.txt`; en QEMU q35, la e1000 por la GSI del `_PRT` (los
+  GSIA-GSIH), con sus interrupciones y sin mirar cada 10 ms; con «pc» (los
+  LNKA), la línea y mirando.
+- **La hora**: después de NTP, el CMOS va con el reloj (0 s, en hora local
+  y en UTC).
+- **TCP**: con la e1000e y `red=pierde` (slirp manda; Hispa-64 guarda lo
+  desordenado y lo junta: las descargas, con su sha256); y de Hispa-64 a
+  Hispa-64 (MRED por 127.0.0.1 con `red=pierde`): la escala de ventana por
+  las dos puntas, lo desordenado, los ACK con SACK, y los 256 KB de ida y
+  vuelta, iguales.
+- Lo de las etapas 0 a 9, igual (la unidad en memoria lleva 39 archivos;
+  uname 0.10.0, «etapa 10 (C++ y la red de hoy)»).
+
+`SOLO=castel64`: **CIFRAS_CASTEL64**.
+
+Las imágenes de la carpeta del taller
+(`Pruebas/Pendientes/VirtualBox/Hispa-64-etapa-10/`): el disco (`.vdi` y
+`.img`) y el CD, con LEEME.TXT: qué probar en VirtualBox (la red como
+viene, ahora por la GSI del `_PRT`: sin mirar cada 10 ms; MCXX y MTEXTO en
+el arranque; NTP y el CMOS).
+
+### Lo que queda para la 10 b y la 11
+
+- **El navegador mismo** (Ladybird o WPE WebKit) con su ventana sobre el
+  compositor; antes, **ICU** (Unicode, el corte de líneas) y **curl** (con
+  BearSSL), y **IPv6** (ND, SLAAC, AF_INET6).
+- **La libstdc++ compilada para musl** (las fuentes de GCC: un
+  `x86_64-linux-musl-g++` de verdad), para quitar el puente de `cxx.sh`; y
+  los programas de C++ dinámicos (libstdc++.so).
+- TCP: mirar los SACK de la otra punta al repetir (hoy, desde lo primero
+  sin confirmar); SACK también en los segmentos con datos; el control de
+  congestión (hoy no hay ventana de congestión: se manda lo que deje la otra
+  punta).
+- La red por USB: NCM (la subclase 0x0D), y la RTL8153 con su configuración
+  propia (r8152) si un día hace falta; probarla en el taller con el
+  adaptador de Carlos (la de la etapa 9 mataba el teclado del MacBook).
+- `_PRT`: las INTx de los demás drivers (xHCI, AHCI y NVMe sin MSI) con
+  `pon_intx`; los enlaces de `_CRS` hecho por un método, con ACPICA (11).
+- ITIMER_VIRTUAL e ITIMER_PROF (contar el tiempo de procesador de cada
+  hilo); `select` de más de 64 descriptores.
+- Lo de la sección 15 que sigue: las I219 en el taller (ULP y K1), el
+  cliente SSH, la Wi-Fi en paralelo.
