@@ -150,12 +150,37 @@ módulo Prt64
         si v = 0 o (conf(i, 0x3C) >> 8) yb 0xFF = 0 entonces devolver 0 fin
         si gsi_pci(i, g, m) y pide_gsi(g, v, m) entonces devolver 4 fin
         l := conf(i, 0x3C) yb 0xFF
-        ; (por nivel y activa en alto, como QEMU dice de sus enlaces de PCI)
-        si l > 0 y l < 24 y dirige(l, v, 1 ob (3 << 2), falso) entonces
+        ; (por nivel y activa en alto, como QEMU dice de sus enlaces de PCI;
+        ; [etapa 11] con pide_gsi también: la de otro vector no se pisa —antes
+        ; se pisaba, y las interrupciones del otro iban a parar aquí—)
+        si l > 0 y l < 24 y pide_gsi(l, v, 1 ob (3 << 2)) entonces
             g := l
             devolver 3
         fin
         devolver 0
+    fin
+
+    ; [etapa 11] (xHCI, AHCI, NVMe sin MSI) la INTx del aparato i al vector
+    ; v, solo si el _PRT dice su GSI y nadie más la tiene; si no, falso (y se
+    ; mira la cola, como antes: una línea que no se sabe si es la buena, por
+    ; nivel, podría no apagarse nunca)
+    público función intx_prt(i: nat32, v: nat32, ref g: nat32): bool
+        variable m: nat32
+        si v = 0 o (conf(i, 0x3C) >> 8) yb 0xFF = 0 entonces devolver falso fin
+        devolver gsi_pci(i, g, m) y pide_gsi(g, v, m)
+    fin
+
+    ; [etapa 11] la de un aparato que da interrupciones sin tener nada (una
+    ; GSI compartida con uno que no se atiende, o mal dicha): tras muchas
+    ; seguidas, se tapa la GSI (y su driver mira la cola); cierto si la ha tapado
+    público constante VACÍAS_MÁX = 20000
+    público variable intx_tapadas: nat32
+    público función intx_vacía(g: nat32, ref vacías: nat32): bool
+        vacías := vacías + 1
+        si vacías < VACÍAS_MÁX entonces devolver falso fin
+        tapa(g)
+        intx_tapadas := intx_tapadas + 1
+        devolver cierto
     fin
 
     ; «, INTx por la GSI 16 (del _PRT)» y lo demás

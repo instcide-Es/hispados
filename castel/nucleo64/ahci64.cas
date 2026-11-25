@@ -28,7 +28,7 @@
 ; =============================================================================
 módulo Ahci64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64, Prt64
 
     público constante MAX_SATA = 8
     constante MAX_CTL = 2
@@ -72,6 +72,7 @@ módulo Ahci64
     ; ---- las controladoras ----
     variable c_regs: arreglo [MAX_CTL] de nat64
     variable c_aparato, c_modo, c_cap, c_ver: arreglo [MAX_CTL] de nat32
+    variable c_gsi, c_vacías: arreglo [MAX_CTL] de nat32     ; [etapa 11] con CON_INTX
     variable c_s64: arreglo [MAX_CTL] de bool
     público variable sa_n_ctl: nat32
     variable vector: nat32
@@ -192,6 +193,14 @@ módulo Ahci64
         c := 0
         mientras c < sa_n_ctl hacer
             is_ := lee(c, IS)
+            ; [etapa 11] con la INTx: si no tenía nada, ¿se la tapa?
+            si c_modo[c] = CON_INTX entonces
+                si is_ <> 0 entonces
+                    c_vacías[c] := 0
+                sino si intx_vacía(c_gsi[c], c_vacías[c]) entonces
+                    c_modo[c] := NINGUNA
+                fin
+            fin
             si is_ <> 0 entonces
                 d := 0
                 mientras d < sa_n_discos hacer
@@ -430,6 +439,9 @@ módulo Ahci64
         si no sin_msi y vector <> 0 entonces
             si pon_msi(i, vector) entonces c_modo[c] := CON_MSI fin
         fin
+        ; [etapa 11] sin MSI, la patilla, si el _PRT dice su GSI (por nivel:
+        ; la interrupción borra IS y los P_IS, y se apaga)
+        si c_modo[c] = NINGUNA y vector <> 0 y intx_prt(i, vector, c_gsi[c]) entonces c_modo[c] := CON_INTX fin
         pon(c, IS, 0xFFFFFFFF)
         pi := lee(c, PI)
         p := 0
@@ -460,7 +472,7 @@ módulo Ahci64
                     escribir(", AHCI ", c_ver[sa_n_ctl - 1] >> 16, ".", (c_ver[sa_n_ctl - 1] >> 8) yb 0xFF, ", ", (c_cap[sa_n_ctl - 1] yb 31) + 1, " puertos")
                     si c_s64[sa_n_ctl - 1] entonces escribir(", direcciones de 64 bits") sino escribir(", direcciones de 32 bits (con memoria de paso)") fin
                     escribir("; ")
-                    escribe_modo(c_modo[sa_n_ctl - 1])
+                    si c_modo[sa_n_ctl - 1] = CON_INTX entonces escribe_intx(4, c_gsi[sa_n_ctl - 1]) sino escribe_modo(c_modo[sa_n_ctl - 1]) fin
                     escribir("; ", sa_n_discos - antes)
                     si sa_n_discos - antes = 1 entonces escribir(" disco\n") sino escribir(" discos\n") fin
                 sino

@@ -637,6 +637,18 @@ if [ $c = 85 ] && [ "$(serie $S | grep -c '; sin interrupciones (se mira la cola
    && sata_bien "$T/w5/sata.img"; then
   ok "etapa 5 sin MSI ni MSI-X («pc», 2 procesadores, la AHCI aparte): las tres controladoras mirando la cola, y todo igual (fsck.fat y miraexfat.py, bien)"
 else ko "etapa 5 sin interrupciones no sale (código $c): $(e5_dice $S) $(fsck_dice) $(exfat_dice)"; fi
+# 3 b. [etapa 11] sin MSI ni MSI-X en q35: la INTx de cada una por la GSI del _PRT
+# (los GSIA-GSIH), con sus interrupciones (por nivel: se apagan), y el xHCI igual
+copia_discos
+# shellcheck disable=SC2086
+mb1 "apagar escribir sinmsix sinmsi sinmusl" "$T/e5x.txt" 256 -machine q35 -smp 2 $NVME5 $CRUDO5 $SATA5 -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0; c=$?
+S=$T/e5x.txt
+if [ $c = 85 ] && [ "$(serie $S | grep -cE '^  BAR 0 en .*; INTx por la GSI [0-9]* \(del _PRT\);|^SATA \(AHCI\): .*; INTx por la GSI [0-9]* \(del _PRT\); 1 disco$|^  versión .*; INTx por la GSI [0-9]* \(del _PRT\)$')" = 4 ] \
+   && hay $S "^ARCHIVOS: 7 discos de prueba (7 escritos); todo bien" && e5_bien $S \
+   && entre $S "^Interrupciones de los discos: NVMe " 1 999999 && entre $S ", AHCI " 1 9999999 && hay $S "; GSI tapadas por no apagarse: 0$" \
+   && hay $S "«QEMU USB Keyboard»" && sata_bien "$T/w5/sata.img"; then
+  ok "etapa 11, sin MSI ni MSI-X en q35: NVMe (2), AHCI y xHCI por la INTx de su GSI del _PRT; «$(serie $S | grep '^Interrupciones de los discos' | cut -d: -f2- | sed 's/^ //')»; ARCHIVOS, fsck.fat y miraexfat.py, bien"
+else ko "etapa 11, la INTx de los discos y el xHCI no sale (código $c): $(serie $S | grep -E 'INTx por|^Interrupciones|^ARCHIVOS|MAL|parado' | cut -c1-120 | paste -sd '|') $(fsck_dice) $(exfat_dice)"; fi
 # 4. sin «escribir»: nada cambia en los discos (ni un octeto)
 copia_discos
 antes=$(cat "$T"/w5/nvme.img "$T"/w5/sata.img "$T"/w5/crudo.img | md5sum)

@@ -16,6 +16,7 @@ módulo Msi64
     público constante NINGUNA = 0
     público constante CON_MSI = 1
     público constante CON_MSIX = 2
+    público constante CON_INTX = 3              ; [etapa 11] la patilla de PCI, por la GSI del _PRT (Prt64.intx_prt)
 
     variable próximo: nat32
 
@@ -91,6 +92,7 @@ módulo Msi64
     público función escribe_modo(m: nat32)
         si m = CON_MSIX entonces escribir("MSI-X")
         sino si m = CON_MSI entonces escribir("MSI")
+        sino si m = CON_INTX entonces escribir("INTx (del _PRT)")
         sino escribir("sin interrupciones (se mira la cola)") fin
     fin
 

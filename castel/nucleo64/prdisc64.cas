@@ -16,7 +16,7 @@
 ; =============================================================================
 módulo PrDisc64
 
-    importar Cifras64, Es64, Fisica64, Monton64, PorCpu64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64, Discos64, Nodos64, Vfs64, Unidad64, Procesos
+    importar Cifras64, Es64, Fisica64, Monton64, PorCpu64, Reloj64, Hilos64, Sinc64, Nvme64, Ahci64, Prt64, Discos64, Nodos64, Vfs64, Unidad64, Procesos
 
     constante TROZO = 64                        ; páginas de la memoria de prueba (256 KB)
 
@@ -251,6 +251,8 @@ módulo PrDisc64
         si línea_dir <> nulo entonces
             si línea_dir[0] <> 0 entonces corre(línea_dir, 0) fin
         fin
+        ; [etapa 11] cómo han llegado las respuestas (con la INTx, también)
+        escribir("Interrupciones de los discos: NVMe ", nv_interrupciones, " (", nv_sin_aviso, " esperas sin aviso), AHCI ", sa_interrupciones, " (", sa_sin_aviso, " sin aviso); GSI tapadas por no apagarse: ", intx_tapadas, "\n")
         si abiertos = 0 y n_nodos = nodos_antes y en_uso = montón_antes entonces
             escribir("Después de los archivos: 0 abiertos, ", n_nodos, " nodos (los de antes: las raíces), el montón como antes\n")
         sino

@@ -26,7 +26,7 @@
 ; =============================================================================
 módulo Nvme64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64, Prt64
 
     público constante MAX_CTL = 4
     público constante MAX_NS = 8               ; los discos (espacios de nombres), de todas
@@ -37,7 +37,8 @@ módulo Nvme64
     ; ---- una controladora ----
     tipo Ctl = estructura
         aparato: nat32              ; su número en Pci64
-        modo: nat32                 ; NINGUNA, CON_MSI, CON_MSIX
+        modo: nat32                 ; NINGUNA, CON_MSI, CON_MSIX, CON_INTX
+        gsi, vacías: nat32          ; [etapa 11] con CON_INTX: la GSI, y las interrupciones seguidas sin nada
         regs: nat64                 ; dónde se ven sus registros
         timbre: nat64               ; la distancia entre timbres (4 << DSTRD)
         colas: nat32                ; las de E/S
@@ -125,16 +126,32 @@ módulo Nvme64
     interrupción función int_nvme()
         variable c, q: nat32
         variable x: puntero a Ctl
+        variable hay: bool
         nv_interrupciones := nv_interrupciones + 1
         c := 0
         mientras c < nv_n_ctl hacer
             x := ctl(c)
+            ; [etapa 11] con la INTx (por nivel: sigue puesta mientras haya
+            ; respuestas sin recoger), tapada (INTMS) hasta que quien espera
+            ; las recoja y la destape (INTMC, en manda)
+            si x.modo = CON_INTX entonces p32(x, 0x0C, 1) fin
+            hay := falso
             q := 0
             mientras q <= x.colas hacer
                 si x.cq[q] <> 0 entonces
-                    si (m32(virt(x.cq[q]) + nat64(x.cq_cabeza[q]) * 16 + 12) >> 16) yb 1 = x.cq_fase[q] entonces señala(dirección(x.suceso[q])) fin
+                    si (m32(virt(x.cq[q]) + nat64(x.cq_cabeza[q]) * 16 + 12) >> 16) yb 1 = x.cq_fase[q] entonces
+                        señala(dirección(x.suceso[q]))
+                        hay := cierto
+                    fin
                 fin
                 q := q + 1
+            fin
+            si x.modo = CON_INTX entonces
+                si hay entonces
+                    x.vacías := 0
+                sino si intx_vacía(x.gsi, x.vacías) entonces
+                    x.modo := NINGUNA
+                fin
             fin
             c := c + 1
         fin
@@ -192,6 +209,8 @@ módulo Nvme64
             si vueltas < 400 o no va entonces
                 pausa()
             sino si x.modo <> NINGUNA y tic_va entonces
+                ; [etapa 11] con la INTx, destapada antes de dormir (la tapó la interrupción)
+                si x.modo = CON_INTX entonces p32(x, 0x10, 1) fin
                 si no espera_plazo(dirección(x.suceso[q]), 20000000) entonces nv_sin_aviso := nv_sin_aviso + 1 fin
                 rearma(dirección(x.suceso[q]))
             sino
@@ -342,6 +361,11 @@ módulo Nvme64
         p64(x, 0x30, x.cq[0])
         ; las interrupciones, antes de nada (la cola 0 también las usa)
         x.modo := pon_mensajes(i, vector, sin_msix)
+        ; [etapa 11] sin mensajes, la patilla, si el _PRT dice su GSI
+        si x.modo = NINGUNA y intx_prt(i, vector, x.gsi) entonces
+            x.modo := CON_INTX
+            p32(x, 0x10, 0xFFFFFFFF)
+        fin
         si x.modo = NINGUNA entonces habilita(i, cierto) fin
         p32(x, 0x14, (4 << 20) ob (6 << 16) ob 1)
         si no espera_listo(x, 1, 500 * ((cap >> 24) yb 0xFF) + 1000) entonces devolver falso fin
@@ -432,7 +456,7 @@ módulo Nvme64
                     hex(bar_mem(i, 0))
                     si bar_mem(i, 0) >= nat64(1) << 32 entonces escribir(" (por encima de 4 GB)") fin
                     escribir("; ", ctl(nv_n_ctl - 1).colas, " colas de E/S (una por procesador) de ", ENTRADAS, " órdenes; ")
-                    escribe_modo(ctl(nv_n_ctl - 1).modo)
+                    si ctl(nv_n_ctl - 1).modo = CON_INTX entonces escribe_intx(4, ctl(nv_n_ctl - 1).gsi) sino escribe_modo(ctl(nv_n_ctl - 1).modo) fin
                     escribir("; hasta ", ctl(nv_n_ctl - 1).máx_pág * 4, " KB por orden")
                     si ctl(nv_n_ctl - 1).vwc <> 0 entonces escribir("; con caché de escritura") fin
                     escribir("\n")

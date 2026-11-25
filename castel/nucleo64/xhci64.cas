@@ -31,7 +31,7 @@
 ; =============================================================================
 módulo Xhci64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Apic64, Hilos64, Sinc64, Pci64, Msi64, Prt64
 
     público constante MAX_XHCI = 4
     público constante MAX_PUERTOS = 32
@@ -116,7 +116,8 @@ módulo Xhci64
 
     tipo Ctl = estructura
         aparato: nat32              ; su número en Pci64
-        modo: nat32                 ; NINGUNA, CON_MSI, CON_MSIX
+        modo: nat32                 ; NINGUNA, CON_MSI, CON_MSIX, CON_INTX
+        gsi, vacías: nat32          ; [etapa 11] con CON_INTX: la GSI, y las interrupciones seguidas sin nada
         ac64: bool
         hay: bool
         cap, reg, rt, timbres: nat64
@@ -362,15 +363,25 @@ módulo Xhci64
     interrupción función int_xhci()
         variable c: nat32
         variable x: puntero a Ctl
+        variable tenía: bool
         xh_interrupciones := xh_interrupciones + 1
         c := 0
         mientras c < xh_n hacer
             x := ctl(c)
             si x.hay y x.modo <> NINGUNA entonces
-                ; IMAN.IP (se borra con 1; IE sigue), USBSTS.EINT
-                si m32(x.rt + 0x20) yb 1 <> 0 entonces pon_m32(x.rt + 0x20, 3) fin
+                ; IMAN.IP (se borra con 1; IE sigue), USBSTS.EINT ([etapa 11]
+                ; con la INTx, por nivel: borrados, la patilla se apaga)
+                tenía := m32(x.rt + 0x20) yb 1 <> 0
+                si tenía entonces pon_m32(x.rt + 0x20, 3) fin
                 pon(x, USBSTS, 8)
                 recoge(x)
+                si x.modo = CON_INTX entonces
+                    si tenía entonces
+                        x.vacías := 0
+                    sino si intx_vacía(x.gsi, x.vacías) entonces
+                        x.modo := NINGUNA
+                    fin
+                fin
             fin
             c := c + 1
         fin
@@ -590,7 +601,9 @@ módulo Xhci64
             si no sin_msix y pon_msix(i, vector) entonces x.modo := CON_MSIX
             sino si no sin_msi y pon_msi(i, vector) entonces x.modo := CON_MSI fin
         fin
-        habilita(i, x.modo <> NINGUNA)
+        ; [etapa 11] sin mensajes, la patilla, si el _PRT dice su GSI
+        si x.modo = NINGUNA y intx_prt(i, vector, x.gsi) entonces x.modo := CON_INTX fin
+        habilita(i, x.modo = CON_MSI o x.modo = CON_MSIX)       ; (con la INTx, la patilla encendida)
         pon_m32(x.rt + 0x20 + 4, 160)                   ; IMOD: 40 µs entre interrupciones
         si x.modo <> NINGUNA entonces
             pon_m32(x.rt + 0x20, 3)                     ; IMAN: IE (y IP borrado)
@@ -640,7 +653,7 @@ módulo Xhci64
                     escribir("), ", x.ranuras, " ranuras, contextos de ", x.contexto, " octetos")
                     si x.ac64 entonces escribir(", direcciones de 64 bits") sino escribir(", direcciones de 32 bits") fin
                     escribir("; ")
-                    escribe_modo(x.modo)
+                    si x.modo = CON_INTX entonces escribe_intx(4, x.gsi) sino escribe_modo(x.modo) fin
                     escribir("\n")
                 sino
                     escribir(": no se puede usar (", xh_motivo, ")\n")
