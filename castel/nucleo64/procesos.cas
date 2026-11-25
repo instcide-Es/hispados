@@ -1370,6 +1370,13 @@ módulo Procesos
         h := actual()
         si h.usuario = 0 o h.proceso = 0 entonces devolver fin
         si l64(m + 128) yb 3 <> 3 entonces devolver fin
+        ; [etapa 11] si la interrupción ha despertado a uno que pasa por
+        ; delante (y no lo ha hecho ya el tic), le toca antes de volver al programa
+        si hay_que_expropiar() entonces
+            enciende()
+            expropia_aquí(cierto)
+            apaga()
+        fin
         p := puntero(h.proceso)
         si no hay_señal(p, h) entonces devolver fin
         enciende()
@@ -2863,10 +2870,9 @@ módulo Procesos
         al_fallo_usuario := nat64(dirección(al_fallo_))
         al_cambiar := nat64(dirección(al_cambiar_))
         al_volver := nat64(dirección(al_volver_))
-        ; (NORMAL, no INTERACTIVO: con un procesador, uno INTERACTIVO despertado
-        ; desde la llamada de un programa le quita el procesador y el programa no
-        ; vuelve: un fallo del planificador que queda para la etapa 11, sección 16)
-        al_hilo := crea(nat64(dirección(hilo_alarmas)), 0, "alarmas", NORMAL, CUALQUIERA)
+        ; ([etapa 11] INTERACTIVO: en la 10 iba NORMAL por un fallo del
+        ; planificador, el de despierta_todos, arreglado: sección 17)
+        al_hilo := crea(nat64(dirección(hilo_alarmas)), 0, "alarmas", INTERACTIVO, CUALQUIERA)
     fin
 
 fin Procesos.

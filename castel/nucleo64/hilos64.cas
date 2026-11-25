@@ -456,8 +456,40 @@ módulo Hilos64
         suelta_sin(dirección(cola_cerrojo[t]))
         avisa(t, h)
         restaura(b)
-        m := yo()
-        si encendidas() y m.expropiar <> 0 y m.hilo <> m.ociosa entonces
+        expropia_aquí(falso)
+    fin
+
+    ; [etapa 11] los puntos de expropiar: si se ha despertado a uno que pasa
+    ; por delante del que corre (c.expropiar), se le da el procesador aquí, y
+    ; no en medio de lo que se estuviera haciendo. Con las interrupciones
+    ; quitadas (un cerrojo tomado), nunca: lo hará el primer punto de después
+    ; (o el tic). El hilo de un programa, dentro del núcleo (en una llamada al
+    ; sistema), no se expropia al despertar a otro: lo hace al volver
+    ; (al_volver: el final de la llamada, o la vuelta de una interrupción al
+    ; anillo 3), con la llamada acabada, como Linux (need_resched). Antes, el
+    ; que despertaba cambiaba en el acto, en medio de despierta_todos: con un
+    ; procesador, el despertado se ponía otra vez a esperar en la misma cola
+    ; antes de que acabase el bucle, que lo despertaba otra vez, y así sin
+    ; fin (el programa no volvía de alarm: sección 17).
+    ; (sin interrupciones) ¿hay uno despertado que pasa por delante del que corre?
+    público función hay_que_expropiar(): bool
+        variable c: puntero a Cpu
+        c := yo()
+        devolver c.expropiar <> 0 y c.hilo <> c.ociosa
+    fin
+
+    público función expropia_aquí(al_volver: bool)
+        variable b: nat64
+        variable c: puntero a Cpu
+        variable h: puntero a Hilo
+        variable toca: bool
+        si no encendidas() o no va entonces devolver fin
+        b := sin_ints()
+        c := yo()
+        h := hilo(c.hilo)
+        toca := c.expropiar <> 0 y c.hilo <> c.ociosa y (al_volver o h.usuario = 0)
+        restaura(b)
+        si toca entonces
             expropiaciones := expropiaciones + 1
             planifica()
         fin
@@ -751,7 +783,12 @@ módulo Hilos64
         si h.en_espera = nat64(e) entonces quita_de(e, h) fin
     fin
 
-    ; despierta al primero que espera en e; falso si no había ninguno
+    ; despierta al primero que espera en e; falso si no había ninguno.
+    ; [etapa 11] Con el cerrojo de e aún tomado (como Sondeo64.avisa): el
+    ; despertado no puede irse —ni acabar y soltarse— entre sacarlo y
+    ; despertarlo (para salir de su espera necesita el cerrojo); y, con las
+    ; interrupciones quitadas, nadie cambia de hilo en medio: se expropia
+    ; después, en expropia_aquí
     público función despierta_uno(e: puntero a Espera): bool
         variable b: nat64
         variable h: puntero a Hilo
@@ -760,18 +797,34 @@ módulo Hilos64
         si e.primero <> 0 entonces
             h := hilo(e.primero)
             quita_de(e, h)
+            despierta(h)
         fin
         suelta(dirección(e.cerrojo), b)
         si h = nulo entonces devolver falso fin
-        despierta(h)
+        expropia_aquí(falso)
         devolver cierto
     fin
 
-    ; despierta a todos los que esperan en e; cuántos
+    ; despierta a todos los que esperan en e; cuántos. [etapa 11] Los que
+    ; esperan ahora, de una vez, con el cerrojo tomado: uno despertado que se
+    ; pone otra vez a esperar en e (un hilo que espera un suceso en bucle)
+    ; espera al cerrojo y queda para la próxima; antes era «mientras haya
+    ; alguien, despierta al primero», y eso no acababa nunca si el despertado
+    ; corría y volvía a la cola antes de la vuelta siguiente
     público función despierta_todos(e: puntero a Espera): nat32
+        variable b: nat64
         variable n: nat32
+        variable h: puntero a Hilo
         n := 0
-        mientras despierta_uno(e) hacer n := n + 1 fin
+        b := toma(dirección(e.cerrojo))
+        mientras e.primero <> 0 hacer
+            h := hilo(e.primero)
+            quita_de(e, h)
+            despierta(h)
+            n := n + 1
+        fin
+        suelta(dirección(e.cerrojo), b)
+        si n > 0 entonces expropia_aquí(falso) fin
         devolver n
     fin
 

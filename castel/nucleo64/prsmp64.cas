@@ -289,6 +289,57 @@ módulo PrSmp64
         si suma_b = nat64(4 * COSAS) * (4 * COSAS + 1) div 2 entonces escribir(" (exacta)\n") sino mal("la suma de los semáforos no sale") fin
     fin
 
+    ; ---- [etapa 11] despertar a uno que vuelve a esperar en el acto ----
+    ; Un hilo INTERACTIVO que espera un suceso en bucle (como «alarmas») y uno
+    ; NORMAL que lo señala 1000 veces, los dos en el mismo procesador: cada
+    ; señala despierta al interactivo, que pasa por delante, vuelve a esperar
+    ; y deja seguir al otro. Hasta la etapa 10, despierta_todos («mientras
+    ; haya alguien, despierta al primero») le volvía a despertar sin fin: con
+    ; un procesador, el sistema se quedaba ahí.
+    variable suceso_b: Suceso
+    variable vueltas_b, para_b: nat64
+
+    función vigía_b(arg: nat64)
+        mientras cierto hacer
+            rearma(dirección(suceso_b))
+            si para_b <> 0 entonces devolver fin
+            vueltas_b := vueltas_b + 1
+            espera(dirección(suceso_b))
+        fin
+    fin
+
+    función señalador_b(arg: nat64)
+        variable i: nat32
+        i := 0
+        mientras i < 1000 hacer
+            señala(dirección(suceso_b))
+            i := i + 1
+        fin
+        para_b := 1
+        señala(dirección(suceso_b))
+    fin
+
+    función prueba_bucle()
+        variable k: nat32
+        variable e0, t0: nat64
+        variable v, s: puntero a Hilo
+        k := último()
+        vueltas_b := 0
+        para_b := 0
+        rearma(dirección(suceso_b))
+        e0 := expropiaciones
+        v := crea(nat64(dirección(vigía_b)), 0, "vigía", INTERACTIVO, k)
+        duerme_ms(20)
+        t0 := ahora_ns()
+        s := crea(nat64(dirección(señalador_b)), 0, "señalador", NORMAL, k)
+        une(s)
+        une(v)
+        t0 := ahora_ns() - t0
+        escribir("Despertar en bucle: uno interactivo que espera un suceso en bucle, señalado 1000 veces por uno normal en el procesador ", k, ": despierta ", vueltas_b - 1, " veces y pasa por delante (", expropiaciones - e0, " expropiaciones), en ", t0 div 1000000, " ms\n")
+        si vueltas_b <> 1001 entonces mal("el que espera en bucle no despierta una vez por señal") fin
+        si expropiaciones - e0 < 1000 entonces mal("el interactivo despertado no pasa por delante") fin
+    fin
+
     ; ---- las prioridades ----
     variable para_ya: nat64
     variable hecho_p: arreglo [4] de nat64
@@ -461,6 +512,7 @@ módulo PrSmp64
         prueba_sumas(N_SUMADORES, 10000)
         prueba_dormir()
         prueba_esperas()
+        prueba_bucle()
         prueba_prioridades()
         prueba_tlb()
     fin

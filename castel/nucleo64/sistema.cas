@@ -1876,6 +1876,9 @@ módulo Sistema
         ; (las marcas_ que puede devolver sysret: las de las cuentas, con IF)
         p64(m + 136, (l64(m + 136) yb 0xCD5) ob 0x202)
         si l64(m + 120) >= TOPE entonces sal(0, SIGSEGV) fin
+        ; [etapa 11] si durante la llamada se ha despertado a uno que pasa por
+        ; delante, ahora le toca (con la llamada acabada: Hilos64.expropia_aquí)
+        expropia_aquí(cierto)
         ; [etapa 7] las señales (Ctrl+C, kill...), que el proceso acabe, y
         ; repetir lo interrumpido
         antes_de_volver(m, cierto, n)
