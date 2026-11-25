@@ -2789,6 +2789,14 @@ el arranque; NTP y el CMOS).
   adaptador de Carlos (la de la etapa 9 mataba el teclado del MacBook).
 - `_PRT`: las INTx de los demás drivers (xHCI, AHCI y NVMe sin MSI) con
   `pon_intx`; los enlaces de `_CRS` hecho por un método, con ACPICA (11).
+- **Un fallo del planificador** que salió al hacer las alarmas: con **un
+  solo procesador**, un hilo del núcleo INTERACTIVO despertado (`señala`)
+  desde la llamada al sistema de un programa le quita el procesador y el
+  programa **no vuelve** de la llamada (se reproduce con alarm(0) si el
+  hilo «alarmas» es INTERACTIVO: por eso es NORMAL). El hilo «red» es
+  INTERACTIVO y no lo hace (sus avisos llegan con otro camino); hay que
+  encontrar la causa de fondo en Hilos64 (la expropiación al volver de
+  `syscall`).
 - ITIMER_VIRTUAL e ITIMER_PROF (contar el tiempo de procesador de cada
   hilo); `select` de más de 64 descriptores.
 - Lo de la sección 15 que sigue: las I219 en el taller (ULP y K1), el

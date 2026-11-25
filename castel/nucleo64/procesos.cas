@@ -2863,7 +2863,10 @@ módulo Procesos
         al_fallo_usuario := nat64(dirección(al_fallo_))
         al_cambiar := nat64(dirección(al_cambiar_))
         al_volver := nat64(dirección(al_volver_))
-        al_hilo := crea(nat64(dirección(hilo_alarmas)), 0, "alarmas", INTERACTIVO, CUALQUIERA)
+        ; (NORMAL, no INTERACTIVO: con un procesador, uno INTERACTIVO despertado
+        ; desde la llamada de un programa le quita el procesador y el programa no
+        ; vuelve: un fallo del planificador que queda para la etapa 11, sección 16)
+        al_hilo := crea(nat64(dirección(hilo_alarmas)), 0, "alarmas", NORMAL, CUALQUIERA)
     fin
 
 fin Procesos.
