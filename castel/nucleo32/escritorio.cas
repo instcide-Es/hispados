@@ -3236,7 +3236,9 @@ módulo Escritorio
         ; salir) o la pantalla de entrada
         si hay_cuentas y sesión = 0 entonces
             k := 0
-            si no tras_salir entonces k := el_que_entra_solo() fin
+            ; (0.8.11, SIN-ADMIN) sin ningún administrador nadie entra solo:
+            ; la pantalla de entrada ofrece crear uno (entrada.cas)
+            si no tras_salir y no sin_administrador() entonces k := el_que_entra_solo() fin
             si k <> 0 entonces
                 abre_sesión(k)
                 lo_del_usuario()

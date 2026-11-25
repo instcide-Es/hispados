@@ -303,6 +303,12 @@ módulo Llamadas
         devolver llamada(200, 3, 0, 0) = 1
     fin
 
+    ; (0.8.11, solo PAQUETES) un usuario normal va a poner al día lo
+    ; instalado con el catálogo firmado: 0, o un error (un núcleo de antes)
+    público función actualización_firmada(): nat32
+        devolver llamada(200, 6, 0, 0)
+    fin
+
     ; su carpeta («\USUARIOS\CARLOS»), a destino: su largo (0 si no tiene)
     público función mi_carpeta(destino: puntero a byte, cabe: nat32): nat32
         devolver llamada(200, 4, nat32(destino), cabe)

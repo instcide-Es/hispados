@@ -32,6 +32,14 @@
 ;  servicios). Solo el administrador instala programas, cambia la hora o
 ;  pide el modo administrador (con su contraseña).
 ;
+;  SIEMPRE UN ADMINISTRADOR (0.8.11, SIN-ADMIN). Configuración › Usuarios no
+;  quita ni hace normal al último administrador con el que se pueda entrar
+;  (queda_admin_sin); y si aun así no hay ninguno (el HP Mini de la
+;  asociación: solo «Biblio2», normal), sin_administrador() lo dice y la
+;  pantalla de entrada (entrada.cas, en la pantalla de verdad) ofrece crear
+;  uno o hacerlo a uno con contraseña (usuario.cas, recupera_admin_*).
+;  Antes de la 0.8.11, el primero pasaba a ser administrador sin más.
+;
 ;  Sin sistema instalado (la memoria USB de arranque, el CD) no hay
 ;  usuarios: todo es como antes.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
@@ -109,6 +117,44 @@ módulo Cuentas
             si cuentas[i].usada y cuentas[i].admin entonces n := n + 1 fin
         fin
         devolver n
+    fin
+
+    ; (0.8.11, SIN-ADMIN) un administrador con el que se puede entrar: sin
+    ; contraseña o con un resumen que se entiende (uno con «mala» no vale)
+    función admin_que_vale(c: puntero a Cuenta): bool
+        variable kib, pas: nat32
+        variable sal: arreglo [16] de byte
+        variable r: arreglo [32] de byte
+        si no c.usada o no c.admin entonces devolver falso fin
+        si c.clave[0] = 0 entonces devolver cierto fin
+        devolver lee_resumen(dirección(c.clave[0]), kib, pas, sal, r)
+    fin
+
+    público función administradores_que_valen(): nat32
+        variable i, n: nat32
+        n := 0
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si admin_que_vale(dirección(cuentas[i])) entonces n := n + 1 fin
+        fin
+        devolver n
+    fin
+
+    ; (0.8.11, SIN-ADMIN) ¿un sistema con usuarios en el que no hay ningún
+    ; administrador con el que se pueda entrar? (el HP Mini de la asociación:
+    ; solo «Biblio2», normal). Entonces nadie podría cambiar \HISPA ni dar de
+    ; alta a nadie: la pantalla de entrada ofrece arreglarlo
+    público función sin_administrador(): bool
+        devolver hay_cuentas y no implícitas y n_cuentas() > 0 y administradores_que_valen() = 0
+    fin
+
+    ; ¿queda algún administrador (con el que se pueda entrar) si el usuario id
+    ; deja de serlo (o se quita)? (Configuración › Usuarios: el último, no)
+    público función queda_admin_sin(id: nat32): bool
+        variable i: nat32
+        para i desde 0 hasta MAX_CUENTAS - 1 hacer
+            si cuentas[i].id <> id y admin_que_vale(dirección(cuentas[i])) entonces devolver cierto fin
+        fin
+        devolver falso
     fin
 
     ; ¿es administrador el usuario uid? (0, el sistema, sí; sin usuarios, todos)
@@ -313,13 +359,15 @@ módulo Cuentas
         si lee_archivo("\\HISPA\\USUARIOS.TXT") o lee_archivo("\\HISPA\\USUARIOS.NUE") entonces
             si n_cuentas() > 0 entonces
                 hay_cuentas := cierto
-                ; (que haya siempre un administrador: si no, el primero)
-                si administradores() = 0 entonces
-                    para i desde 0 hasta MAX_CUENTAS - 1 hacer
-                        si cuentas[i].usada y administradores() = 0 entonces cuentas[i].admin := cierto fin
-                    fin
+                ; (0.8.11, SIN-ADMIN) antes, sin ningún administrador, el
+                ; primero pasaba a serlo sin que nadie lo decidiera (y sin
+                ; guardarlo). Ahora no: la pantalla de entrada (la de verdad,
+                ; nunca SSH) ofrece crear uno o hacerlo a uno con contraseña
+                ; (Usuario.recupera_admin_*), y queda en USUARIOS.LOG
+                imprimir2("cuentas: %u usuarios (USUARIOS.TXT); administradores: %u\n", n_cuentas(), administradores_que_valen())
+                si sin_administrador() entonces
+                    escribir("cuentas: este equipo no tiene ningún administrador con el que se pueda entrar: la pantalla de entrada ofrece crear uno\n")
                 fin
-                imprimir1("cuentas: %u usuarios (USUARIOS.TXT)\n", n_cuentas())
                 devolver
             fin
         fin
