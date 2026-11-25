@@ -21,7 +21,7 @@ NOMBRE=${NOMBRE:-castelpc}
 J=14
 if [ "${1:-}" = "-j" ]; then J=$2; shift 2; fi
 PARTES=${*:-16 06 07 castel32 caliente paquetes red acpi tls cd pantalla navegador dispositivos 32}
-DEST=${DEST:-carlos@100.126.100.79}
+DEST=${DEST:-carlos@100.112.44.3}
 SSH="ssh -p ${PORT:-2222} -i ${KEY:-/root/.ssh/id_ed25519_pc_albinyana} -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 $DEST"
 $SSH true 2>/dev/null || { echo "No llego al PC. ¿Está Ubuntu (WSL) abierto?"; exit 2; }
 RAIZ=${RAIZ:-/mnt/castelpc}
