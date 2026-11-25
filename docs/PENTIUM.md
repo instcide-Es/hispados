@@ -10789,7 +10789,11 @@ y seno) dejó el ASUS GL553VD (i5-7300HQ, PL1 45 W) en 17,2 W.
   que no contesta, 403 y 429. `TERMO_SOLO="fuerte alimentacion enviar"` hace
   solo esas.
 - *En QEMU*: no hay RAPL (ni con KVM, en QEMU 8.2): se mide lo que corre.
-  CIFRAS_QEMU
+  En el VPS (AMD EPYC-Milan, KVM, `-cpu host -smp 4`, con otras pruebas a
+  la vez): la fuerte da unos 2,9-3,4 GFLOPS en la hija (que comparte su
+  procesador con el Termómetro) y 10,6-11,8 GFLOPS entre los otros 3; la
+  parada de seguridad salta igual a los 63-69 s. Los vatios, en el ASUS y en
+  el MSI de verdad (POTENCIA, RAPL).
 
 ## 14 quinvicies. El Asistente de compatibilidad (COMPAT.BIN, rama compat)
 
