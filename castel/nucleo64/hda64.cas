@@ -41,6 +41,7 @@ módulo Hda64
     público variable hda_hz, hda_canales: nat32 ; los del programa (los canales: 1 o 2; la tarjeta, siempre 2)
     público variable hda_octetos, hda_sin_datos, hda_vueltas: nat64     ; lo escrito en el anillo, las veces que se ha quedado sin datos, las del hilo
     público variable hda_pines_n: nat32
+    público variable hda_lpib_atrás: nat64      ; las veces que LPIB ha ido hacia atrás (y no se ha hecho caso)
     público variable hda_pin, hda_dac: arreglo [MAX_PINES] de nat32
     público variable hda_clase: arreglo [MAX_PINES] de nat32            ; 0 línea, 1 altavoz, 2 auriculares, 3 sin decir
     público variable hda_por_corb: bool
@@ -601,6 +602,14 @@ módulo Hda64
         si r8(sd + 3) yb 0x1C <> 0 entonces w8(sd + 3, 0x1C) fin
         p := nat64(r32(sd + 4)) mod ANILLO
         n := (p + ANILLO - pos_ant) mod ANILLO
+        ; (más de medio anillo de una vez —170 ms, y se mira cada 10—: es que
+        ; LPIB ha ido un poco hacia atrás —con KVM, la de QEMU, a veces—, no
+        ; que haya sonado tanto; se deja para la próxima. Antes se daba por
+        ; tocado casi todo el anillo y se perdía lo escrito)
+        si n > ANILLO div 2 entonces
+            hda_lpib_atrás := hda_lpib_atrás + 1
+            devolver
+        fin
         pos_ant := p
         ; (lo tocado: [leído, leído + n), a cero, por trozos de página)
         x := leído
