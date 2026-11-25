@@ -347,12 +347,37 @@ read_file:
 .r:
         ret
 
-; DX = ruta, SI = datos, CX = octetos -> CF si falla
+; DX = ruta, SI = datos, CX = octetos -> CF si falla. [0.9.31] Sin vaciar el
+; de antes: todo se escribe primero en un temporal (la misma ruta con .$$$);
+; solo si ha cabido entero, el de antes se borra y el temporal toma su
+; nombre. Si el disco se llena o falla la escritura, el de antes queda como
+; estaba (y de él ya hay copia: CONFIG.SIN, AUTOEXEC.SIN, SYSTEM.SIN)
 write_file:
         push cx
         push si
-        mov ax, 0x4301              ; sin solo lectura
-        xor cx, cx
+        mov [wf_ruta], dx
+        mov si, dx                  ; el temporal: la extensión, .$$$
+        mov di, path_t
+        call strcpy
+        mov bx, di
+.b:
+        dec bx
+        cmp bx, path_t
+        jb .sinp
+        mov al, [bx]
+        cmp al, '.'
+        je .pt
+        cmp al, '\'
+        je .sinp
+        cmp al, ':'
+        jne .b
+.sinp:
+        mov bx, di                  ; (sin extensión: se le pone)
+        mov byte [bx], '.'
+.pt:
+        mov dword [bx+1], '$$$'     ; (y el 0)
+        mov dx, path_t
+        mov ah, 0x41                ; uno de otra vez, fuera
         int 0x21
         mov ah, 0x3C
         xor cx, cx
@@ -368,12 +393,31 @@ write_file:
         jne .e
         mov ah, 0x3E
         int 0x21
+        jc .borra
+        mov dx, [wf_ruta]           ; entero: el de antes fuera (sin solo
+        mov ax, 0x4301              ; lectura) y el temporal, a su nombre
+        xor cx, cx
+        int 0x21
+        mov ah, 0x41
+        int 0x21
+        push ds
+        pop es
+        mov dx, path_t
+        mov di, [wf_ruta]
+        mov ah, 0x56
+        int 0x21
         ret
 .e:
         stc
 .c:
         pushf
         mov ah, 0x3E
+        int 0x21
+        popf
+.borra:
+        pushf                       ; el temporal a medias, fuera
+        mov dx, path_t
+        mov ah, 0x41
         int 0x21
         popf
 .r:
@@ -398,6 +442,13 @@ apply:
 .m:
         call puts
         call crlf
+        cmp byte [o_lleno], 0       ; [0.9.31] no ha cabido entero: ni se
+        je .cabe                    ; escribe (se perdería el final)
+        mov si, msg_lleno
+        call puts
+        stc
+        ret
+.cabe:
         mov byte [changed], 1
         cmp word [a_end], bufA
         je .nob
@@ -758,6 +809,7 @@ starts_i:
 ; -----------------------------------------------------------------------------
 o_init:
         mov word [o_ptr], obuf
+        mov byte [o_lleno], 0
         ret
 ; SI, CX -> out
 emit:
@@ -770,6 +822,7 @@ emit:
         cmp cx, ax
         jbe .c
         mov cx, ax
+        mov byte [o_lleno], 1       ; [0.9.31] no cabe: se dice, no se recorta
 .c:
         rep movsb
         mov [o_ptr], di
@@ -1408,6 +1461,18 @@ vshare_off:
 .e:
         cmp byte [mod], 0
         je .r
+        cmp byte [o_lleno], 0       ; [0.9.31] no cabe entero: no se toca
+        jne .lleno
+        mov si, path_w              ; [0.9.31] el de antes, a SYSTEM.SIN (como
+        mov di, path_x              ; CONFIG.SIN y AUTOEXEC.SIN)
+        call strcpy
+        mov dword [di-3], 'SIN'
+        mov dx, path_x
+        mov si, bufA
+        mov cx, [a_end]
+        sub cx, bufA
+        call write_file
+        jc .r
         mov byte [ini_mod], 1
         mov dx, path_w
         mov si, obuf
@@ -1419,6 +1484,11 @@ vshare_off:
         mov si, msg_vshare
         call puts
 .r:
+        ret
+.lleno:
+        call titulo
+        mov si, msg_lleno
+        call puts
         ret
 
 %include "util.inc"
@@ -1477,7 +1547,9 @@ msg_noleo   db "No se puede leer ", 0
 msg_puesto  db "Puesto al día: ", 0
 msg_copia   db " (el anterior queda como ", 0
 msg_par     db ")", 0
-msg_vshare  db "SYSTEM.INI: desactivada la línea device=vshare.386.", 13, 10, 0
+msg_vshare  db "SYSTEM.INI: desactivada la línea device=vshare.386.", 13, 10
+            db "  (el anterior queda como SYSTEM.SIN)", 13, 10, 0
+msg_lleno   db "No se cambia: el archivo nuevo sería demasiado grande.", 13, 10, 0
 msg_nada    db "No hay cambios de Windows pendientes.", 13, 10, 0
 msg_hecho   db "Hecho. Los cambios valen desde el próximo arranque.", 13, 10, 0
 msg_reinicia db "Hecho. Hispa-DOS se reinicia para usarlos (en el menú, «Windows»)...", 13, 10, 0
@@ -1527,6 +1599,9 @@ path_w      resb 96
 path_a      resb 16
 path_b      resb 16
 path_x      resb 96
+path_t      resb 100                ; [0.9.31] el temporal de write_file
+wf_ruta     resw 1
+o_lleno     resb 1                  ; [0.9.31] emit no ha podido poner algo
 u_numbuf    resb 16
 u_lbuf      resb 84
 bufA        resb BMAX
