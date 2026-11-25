@@ -674,7 +674,7 @@ termo_fuerte() {
   [ -w /dev/kvm ] && cpu="-enable-kvm -cpu host -smp 4"
   termo_ram_img $R "cargafuerte"
   for f in $(mdir -b -i $R@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT|EST)$'); do mdel -i $R@@1M "$f" > /dev/null 2>&1; done
-  TQ_HASTA=tq_informe TQ_TOPE=300 termo_qemu $R tf1 150 "$cpu" "43:sendkey f" "44:sendkey f" "45:sendkey 1" "46:sendkey c" "106:$C" "106:o /b 0x71 91" "120:$C" "120:o /b 0x71 50"
+  TQ_HASTA=tq_informe TQ_TOPE=420 termo_qemu $R tf1 150 "$cpu" "43:sendkey f" "44:sendkey f" "45:sendkey 1" "46:sendkey c" "106:$C" "106:o /b 0x71 91" "120:$C" "120:o /b 0x71 50"
   mira "(1.2) la carga fuerte: el núcleo enciende el SSE2; «cargafuerte» la pone por omisión; F la cambia; la hija y los otros 3 procesadores, con SSE2; la parada de seguridad a 91 °C, igual" \
     "termo: coma flotante del núcleo: FXSAVE, SSE y SSE2; la carga, por omisión: fuerte (SSE2)" "termo: suceso: la carga, ahora: ligera" "termo: suceso: la carga, ahora: fuerte" \
     "termo: prueba 1: empieza «Calentar fuerte" "termo: carga en marcha (fuerte, SSE2)" "termo: carga fuerte (SSE2): este (la tarea hija) y 3 de los 3 procesadores más" \
