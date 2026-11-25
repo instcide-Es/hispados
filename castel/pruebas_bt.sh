@@ -112,7 +112,8 @@ QEMU_MAS="$QM" MEMORIA=64 DISCO=$X/i.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo3
 wait
 S=$X/q3.sal
 mira "Intel 8087:0AAA en su cargador: su firmware (ibt-17-16-1.sfi, de \\FIRMWARE) por el extremo a granel, arranca y luego el reset de siempre" \
-  "^bt: Intel 0AAA: plataforma 37, familia 11 JfP" "^bt: Firmware ibt-17-16-1.sfi: [0-9]* octetos" "^bt: Intel: el firmware se ha cargado" \
-  "^bt: Intel: ha arrancado su firmware" "^bt: Versión: Bluetooth 4.2" "^Bluetooth: Encendido (Intel 8087:0AAA (Wireless 9460/9560)"
+  "bt: Intel 0AAA: plataforma 37, familia 11 JfP" "bt: Firmware ibt-17-16-1.sfi: [0-9]* octetos" "bt: Intel: el firmware se ha cargado" \
+  "bt: Intel: ha arrancado su firmware" "bt: Versión: Bluetooth 4.2" "Bluetooth: Encendido (Intel 8087:0AAA (Wireless 9460/9560)"
+mira "mientras carga el firmware, BT dice que está ocupado (no que no hay servicio)" "^Bluetooth: ocupado, poniendo en marcha el adaptador"
 if grep -q "modelo: FALLO" $X/redir3.txt; then ko "Intel: el modelo ha visto cosas mal hechas: $(grep -m3 'modelo: FALLO' $X/redir3.txt | tr '\n' ' ')"; else ok "Intel: el modelo no ha visto nada mal hecho"; fi
 }
