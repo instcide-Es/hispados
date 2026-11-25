@@ -31,6 +31,14 @@
 ;      I2C6-7: 10.0-10.1), y sus SSCN y FMCN si son paquetes fijos.
 ;  Cuando llegue ACPICA (etapa 11), lo mismo saldrá evaluando de verdad
 ;  (_STA, _INI, _CRS, _DSM): la Ficha es la que se rellenará entonces.
+;  [etapa 10] Y, en el mismo recorrido, las tablas de rutas de las INTx de
+;  PCI (_PRT): de cada dispositivo con _PRT (un Name con el paquete, o un
+;  Method que devuelve uno de los Name con paquetes de rutas que nombra: el
+;  «If (PICM) Return (AR00) Else Return (PR00)» de siempre), el paquete que
+;  se resuelve entero: las entradas con la GSI escrita (las del modo APIC)
+;  o con un enlace (PNP0C0F) de _CRS fijo (los GSIA-GSIH de QEMU q35, con su
+;  Interrupt); los enlaces de _CRS hecho por un método (los LNKA del modo
+;  PIC, que se programan) no se resuelven: con ellos, la línea de siempre.
 ;  No usa nada del núcleo (también se prueba en Linux, modelo linux64).
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -94,6 +102,29 @@ módulo Aml64
     constante SEG_SSCN = 0x4E435353
     constante SEG_FMCN = 0x4E434D46
     constante SEG_OSI = 0x49534F5F
+    constante SEG_PRT = 0x5452505F             ; «_PRT»
+    constante SEG_BBN = 0x4E42425F             ; «_BBN»
+
+    ; ---- [etapa 10] las rutas de las INTx (_PRT) ----
+    público constante MAX_PRT = 1024
+    público constante MAX_DUEÑOS = 64
+    constante MAX_RT = 128
+    ; los Name con un paquete de rutas (en cualquier sitio)
+    variable rt_seg, rt_tb, rt_p: arreglo [MAX_RT] de nat32
+    variable n_rt: nat32
+    ; lo de cada dispositivo: su _PRT (clase 0: no tiene; 1 un Name, en ini; 2 un Method, [ini, fin)), su _BBN y su _CRS fijo
+    variable d_prt_clase, d_prt_tb, d_prt_ini, d_prt_fin: arreglo [MAX_DISP] de nat32
+    variable d_bbn, d_crs_tb, d_crs_ini, d_crs_fin: arreglo [MAX_DISP] de nat32
+    ; lo que sale: las entradas (el dueño es el índice en pd_disp; la ranura
+    ; y la patilla de PCI, 0 INTA; la GSI y sus marcas, como las de la MADT:
+    ; 1 o 3 la polaridad, alta o baja; 4 o 12, por flanco o por nivel)
+    público variable prt_n: nat32
+    público variable prt_dueño, prt_ranura, prt_patilla, prt_gsi, prt_marcas: arreglo [MAX_PRT] de nat32
+    público variable pd_n: nat32
+    público variable pd_disp, pd_seg, pd_total, pd_directas, pd_enlaces, pd_candidatos: arreglo [MAX_DUEÑOS] de nat32
+    público variable prt_sin_resolver: nat32    ; los dispositivos con _PRT que no se han podido resolver
+    público variable ps_disp: arreglo [MAX_DUEÑOS] de nat32     ; (cuáles)
+    variable analizado: bool
 
     ; las tablas (DSDT y SSDT): dónde y cuánto
     variable tb_p: arreglo [MAX_TABLAS] de nat64
@@ -603,8 +634,26 @@ módulo Aml64
                 n_guid := n_guid + 1
             fin
         fin
+        ; [etapa 10] (fase 1) los paquetes de rutas, en cualquier sitio
+        si fase = 1 y n_rt < MAX_RT y es_de_rutas(p) entonces
+            rt_seg[n_rt] := seg
+            rt_tb[n_rt] := bt
+            rt_p[n_rt] := p
+            n_rt := n_rt + 1
+        fin
         si actual = NO_HAY entonces devolver fin
         si fase = 1 entonces
+            si seg = SEG_PRT y o8(p) = 0x12 entonces
+                d_prt_clase[actual] := 1
+                d_prt_tb[actual] := bt
+                d_prt_ini[actual] := p
+            sino si seg = SEG_BBN entonces
+                si número(p, v) <> FALLO entonces d_bbn[actual] := v fin
+            sino si seg = SEG_CRS y d_crs_ini[actual] = 0 y búfer(p, ini, fin_) entonces
+                d_crs_tb[actual] := bt
+                d_crs_ini[actual] := ini
+                d_crs_fin[actual] := fin_
+            fin
             si seg = SEG_HID y d_hid[actual][0] = 0 entonces
                 si identificador(p, dirección(t[0])) entonces
                     copia(dirección(d_hid[actual][0]), dirección(t[0]), 12)
@@ -661,6 +710,12 @@ módulo Aml64
         si fase = 0 entonces
             apunta_método(seg, args)
             devolver
+        fin
+        si fase = 1 y seg = SEG_PRT y actual <> NO_HAY y d_prt_clase[actual] = 0 entonces
+            d_prt_clase[actual] := 2
+            d_prt_tb[actual] := bt
+            d_prt_ini[actual] := ini
+            d_prt_fin[actual] := fin_
         fin
         si fase = 1 y seg = SEG_STA y actual <> NO_HAY entonces
             ; un _STA que solo devuelve un número
@@ -768,6 +823,9 @@ módulo Aml64
                                 d_fin[actual] := e
                                 d_adr[actual] := NO_HAY
                                 d_sta[actual] := NO_HAY
+                                d_prt_clase[actual] := 0
+                                d_bbn[actual] := NO_HAY
+                                d_crs_ini[actual] := 0
                             fin
                             recorre(q, e)
                             repón_ruta(dirección(copia_cam[0]), h)
@@ -1162,7 +1220,25 @@ módulo Aml64
     ; busca los dispositivos HID sobre I2C en las tablas añadidas: da cuántos (en «fichas»)
     público función busca_pnp0c50(): nat32
         variable i: nat32
+        analiza_tablas()
+        n_fichas := 0
+        i := 0
+        mientras i < n_disp y n_fichas < MAX_FICHAS hacer
+            si d_es[i] entonces
+                haz_ficha(i, fichas[n_fichas])
+                n_fichas := n_fichas + 1
+            fin
+            i := i + 1
+        fin
+        devolver n_fichas
+    fin
+
+    ; el recorrido de las tablas añadidas (una vez): los métodos y los dispositivos
+    público función analiza_tablas()
+        variable i: nat32
         variable gu: puntero a byte
+        si analizado entonces devolver fin
+        analizado := cierto
         gu := "\xF7\xF6\xDF\x3C\x67\x42\x55\x45\xAD\x05\xB3\x0A\x3D\x89\x38\xDE"
         i := 0
         mientras i < 16 hacer
@@ -1183,18 +1259,263 @@ módulo Aml64
         fin
         fase := 0
         recorre_todo()
+        n_rt := 0
         fase := 1
         sin_entender := 0
         recorre_todo()
+    fin
+
+    ; ¿se han añadido ya tablas?
+    público función con_tablas(): bool
+        devolver n_tb > 0
+    fin
+
+    ; ---- [etapa 10] las rutas de las INTx ----
+    ; ¿es p un paquete de rutas? (un Package cuyo primero es un Package de 4
+    ; con la dirección «0xRRRRFFFF», la patilla y la fuente)
+    función es_de_rutas(p: nat32): bool
+        variable q, e, v: nat32
+        si o8(p) <> 0x12 entonces devolver falso fin
+        e := p + 1 + pkglen(p + 1)
+        q := p + 1 + pk_tam
+        si o8(q) = 0 entonces devolver falso fin
+        q := q + 1
+        si o8(q) <> 0x12 entonces devolver falso fin
+        e := q + 1 + pkglen(q + 1)
+        q := q + 1 + pk_tam
+        si o8(q) <> 4 entonces devolver falso fin
+        q := número(q + 1, v)
+        si q = FALLO o v yb 0xFFFF <> 0xFFFF entonces devolver falso fin
+        q := número(q, v)
+        devolver q <> FALLO y v <= 3 y q < e
+    fin
+
+    función pon_tabla(t: nat32)
+        b := puntero(tb_p[t])
+        bl := tb_n[t]
+        bt := t
+    fin
+
+    ; el dispositivo cuyo nombre acaba en «seg» y tiene un _CRS fijo, o NO_HAY
+    función enlace_de(seg: nat32): nat32
+        variable i: nat32
         i := 0
-        mientras i < n_disp y n_fichas < MAX_FICHAS hacer
-            si d_es[i] entonces
-                haz_ficha(i, fichas[n_fichas])
-                n_fichas := n_fichas + 1
+        mientras i < n_disp hacer
+            si d_hondo[i] > 0 y d_cam[i][d_hondo[i] - 1] = seg y d_crs_ini[i] <> 0 entonces devolver i fin
+            i := i + 1
+        fin
+        devolver NO_HAY
+    fin
+
+    ; la GSI del _CRS fijo de un enlace (su Interrupt, 0x89) y sus marcas; falso si no la tiene
+    función gsi_de_enlace(j: nat32, ref g: nat32, ref marcas: nat32): bool
+        variable p, c, l, f, ant: nat32
+        ant := bt
+        pon_tabla(d_crs_tb[j])
+        p := d_crs_ini[j]
+        mientras p < d_crs_fin[j] hacer
+            c := o8(p)
+            si c yb 0x80 = 0 entonces
+                si (c >> 3) yb 0x0F = 0x0F entonces romper fin
+                p := p + 1 + (c yb 7)
+                seguir
+            fin
+            l := o16(p + 1)
+            si c = 0x89 y l >= 6 y o8(p + 4) >= 1 entonces
+                f := o8(p + 3)
+                g := o32(p + 5)
+                marcas := 1
+                si f yb 4 <> 0 entonces marcas := 3 fin
+                si f yb 2 <> 0 entonces marcas := marcas ob 4 sino marcas := marcas ob 12 fin
+                pon_tabla(ant)
+                devolver cierto
+            fin
+            p := p + 3 + l
+        fin
+        pon_tabla(ant)
+        devolver falso
+    fin
+
+    ; mira el paquete de rutas de la tabla t en p: cuántas entradas, cuántas
+    ; se resuelven (con la GSI escrita y con enlaces); con «dueño» <> NO_HAY,
+    ; las apunta
+    función mira_rutas(t: nat32, p: nat32, dueño_: nat32, ref total: nat32, ref directas: nat32, ref enlaces: nat32)
+        variable q, e, n, i, qe, adr, pin, g, m, fuente, j: nat32
+        pon_tabla(t)
+        total := 0
+        directas := 0
+        enlaces := 0
+        si o8(p) <> 0x12 entonces devolver fin
+        e := p + 1 + pkglen(p + 1)
+        q := p + 1 + pk_tam
+        n := o8(q)
+        q := q + 1
+        i := 0
+        mientras i < n y q < e hacer
+            si o8(q) <> 0x12 entonces devolver fin
+            qe := q + 1 + pkglen(q + 1)
+            q := q + 1 + pk_tam
+            si o8(q) <> 4 entonces devolver fin
+            q := número(q + 1, adr)
+            si q = FALLO entonces devolver fin
+            q := número(q, pin)
+            si q = FALLO entonces devolver fin
+            total := total + 1
+            g := NO_HAY
+            m := 0
+            si número(q, fuente) <> FALLO entonces
+                ; la GSI escrita: por nivel y activa en bajo (lo de PCI)
+                q := número(q, fuente)
+                si número(q, g) = FALLO entonces g := NO_HAY sino directas := directas + 1 fin
+                m := 3 ob 12
+            sino si empieza_nombre(o8(q)) y nombre(q) <> FALLO entonces
+                j := enlace_de(último())
+                si j <> NO_HAY y gsi_de_enlace(j, g, m) entonces enlaces := enlaces + 1 sino g := NO_HAY fin
+                pon_tabla(t)
+            fin
+            si g <> NO_HAY y dueño_ <> NO_HAY y prt_n < MAX_PRT entonces
+                prt_dueño[prt_n] := dueño_
+                prt_ranura[prt_n] := adr >> 16
+                prt_patilla[prt_n] := pin
+                prt_gsi[prt_n] := g
+                prt_marcas[prt_n] := m
+                prt_n := prt_n + 1
+            fin
+            q := qe
+            i := i + 1
+        fin
+    fin
+
+    ; las rutas de todos los dispositivos con _PRT: da cuántos dueños (pd_n)
+    público función busca_prt(): nat32
+        variable i, k, mejor, mejor_p, mt, md, me, t, d, en, cand, p, q: nat32
+        analiza_tablas()
+        prt_n := 0
+        pd_n := 0
+        prt_sin_resolver := 0
+        i := 0
+        mientras i < n_disp y pd_n < MAX_DUEÑOS hacer
+            si d_prt_clase[i] = 1 entonces
+                mira_rutas(d_prt_tb[i], d_prt_ini[i], NO_HAY, t, d, en)
+                si t > 0 y d + en = t entonces
+                    pd_disp[pd_n] := i
+                    pd_seg[pd_n] := SEG_PRT
+                    pd_total[pd_n] := t
+                    pd_directas[pd_n] := d
+                    pd_enlaces[pd_n] := en
+                    pd_candidatos[pd_n] := 1
+                    mira_rutas(d_prt_tb[i], d_prt_ini[i], pd_n, t, d, en)
+                    pd_n := pd_n + 1
+                sino
+                    si prt_sin_resolver < MAX_DUEÑOS entonces ps_disp[prt_sin_resolver] := i fin
+                    prt_sin_resolver := prt_sin_resolver + 1
+                fin
+            sino si d_prt_clase[i] = 2 entonces
+                ; los paquetes que nombra el método: el que se resuelva entero
+                ; (si hay dos, el de más GSI escritas)
+                mejor := NO_HAY
+                mt := 0
+                md := 0
+                me := 0
+                cand := 0
+                k := 0
+                mientras k < n_rt hacer
+                    pon_tabla(d_prt_tb[i])
+                    si tiene_seg(d_prt_ini[i], d_prt_fin[i], rt_seg[k]) entonces
+                        cand := cand + 1
+                        mira_rutas(rt_tb[k], rt_p[k], NO_HAY, t, d, en)
+                        si t > 0 y d + en = t y (mejor = NO_HAY o d > md) entonces
+                            mejor := k
+                            mt := t
+                            md := d
+                            me := en
+                        fin
+                    fin
+                    k := k + 1
+                fin
+                ; y los paquetes escritos dentro del método («If (GPIC) Return (Package...)»)
+                mejor_p := NO_HAY
+                pon_tabla(d_prt_tb[i])
+                p := d_prt_ini[i]
+                mientras p < d_prt_fin[i] hacer
+                    si o8(p) = 0x12 y es_de_rutas(p) entonces
+                        cand := cand + 1
+                        q := p + 1 + pkglen(p + 1)
+                        mira_rutas(d_prt_tb[i], p, NO_HAY, t, d, en)
+                        pon_tabla(d_prt_tb[i])
+                        si t > 0 y d + en = t y (mejor = NO_HAY y mejor_p = NO_HAY o d > md) entonces
+                            mejor := NO_HAY
+                            mejor_p := p
+                            mt := t
+                            md := d
+                            me := en
+                        fin
+                        si q > p entonces p := q sino p := p + 1 fin
+                    sino
+                        p := p + 1
+                    fin
+                fin
+                si mejor <> NO_HAY o mejor_p <> NO_HAY entonces
+                    pd_disp[pd_n] := i
+                    pd_total[pd_n] := mt
+                    pd_directas[pd_n] := md
+                    pd_enlaces[pd_n] := me
+                    pd_candidatos[pd_n] := cand
+                    si mejor <> NO_HAY entonces
+                        pd_seg[pd_n] := rt_seg[mejor]
+                        mira_rutas(rt_tb[mejor], rt_p[mejor], pd_n, t, d, en)
+                    sino
+                        pd_seg[pd_n] := SEG_PRT
+                        mira_rutas(d_prt_tb[i], mejor_p, pd_n, t, d, en)
+                    fin
+                    pd_n := pd_n + 1
+                sino
+                    si prt_sin_resolver < MAX_DUEÑOS entonces ps_disp[prt_sin_resolver] := i fin
+                    prt_sin_resolver := prt_sin_resolver + 1
+                fin
             fin
             i := i + 1
         fin
-        devolver n_fichas
+        devolver pd_n
+    fin
+
+    ; lo de un dispositivo, para saber su bus: ¿es un puente raíz (PNP0A03 o
+    ; PNP0A08)?, su _BBN (NO_HAY: no tiene), su _ADR y su padre (NO_HAY: no hay)
+    público función disp_raíz(i: nat32): bool
+        devolver igual_texto(dirección(d_hid[i][0]), "PNP0A03") o igual_texto(dirección(d_hid[i][0]), "PNP0A08") o igual_texto(dirección(d_cid[i][0]), "PNP0A03") o igual_texto(dirección(d_cid[i][0]), "PNP0A08")
+    fin
+
+    público función disp_bbn(i: nat32): nat32
+        devolver d_bbn[i]
+    fin
+
+    público función disp_adr(i: nat32): nat32
+        devolver d_adr[i]
+    fin
+
+    público función disp_tabla(i: nat32): nat32
+        devolver d_tabla[i]
+    fin
+
+    público función disp_padre(i: nat32): nat32
+        si d_hondo[i] = 0 entonces devolver NO_HAY fin
+        devolver busca_disp(d_hondo[i] - 1, dirección(d_cam[i][0]))
+    fin
+
+    ; la ruta de un dispositivo, escrita («\_SB.PCI0.RP01»)
+    público función escribe_disp(i: nat32)
+        variable k: nat32
+        escribir("\\")
+        k := 0
+        mientras k < d_hondo[i] hacer
+            si k > 0 entonces escribir(".") fin
+            escribe_seg(d_cam[i][k])
+            k := k + 1
+        fin
+    fin
+
+    público función escribe_trozo(s_: nat32)
+        escribe_seg(s_)
     fin
 
     ; ---- decirlo ----

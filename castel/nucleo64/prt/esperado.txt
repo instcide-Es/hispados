@@ -1,0 +1,42 @@
+== asus-gl553vd
+MIRAPRT: 24 tablas resueltas, 0 sin resolver, 136 entradas; 224 dispositivos
+  \_SB_.PCI0: AR00, 44 (44 GSI, 0 enlaces), raíz, _ADR 0.0: 1.A=16 1.B=17 1.C=18 1.D=19 2.A=16 4.A=16 5.A=16 8.A=16 31.A=16 31.B=17 31.C=18 31.D=19 30.A=20 30.B=21 30.C=22 30.D=23 29.A=16 29.B=17 29.C=18 29.D=19 28.A=16 28.B=17 28.C=18 28.D=19 27.A=16 27.B=17 27.C=18 27.D=19 25.A=32 25.B=33 25.C=34 22.A=16 22.B=17 22.C=18 22.D=19 21.A=16 21.B=17 21.C=18 21.D=19 20.A=16 20.D=19 20.B=17 20.C=18 19.A=20
+  \_SB_.PCI0.PEG0: AR01, 4 (4 GSI, 0 enlaces), _ADR 1.0: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.PEG1: AR02, 4 (4 GSI, 0 enlaces), _ADR 1.1: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.PEG2: AR03, 4 (4 GSI, 0 enlaces), _ADR 1.2: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.RP09: AR0C, 4 (4 GSI, 0 enlaces), _ADR 29.0: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.RP10: AR0D, 4 (4 GSI, 0 enlaces), _ADR 29.1: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.RP11: AR0E, 4 (4 GSI, 0 enlaces), _ADR 29.2: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.RP12: AR0F, 4 (4 GSI, 0 enlaces), _ADR 29.3: 0.A=19 0.B=16 0.C=17 0.D=18
+  \_SB_.PCI0.RP13: AR10, 4 (4 GSI, 0 enlaces), _ADR 29.4: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.RP01: AR04, 4 (4 GSI, 0 enlaces), _ADR 28.2: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.RP02: AR05, 4 (4 GSI, 0 enlaces), _ADR 28.1: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.RP03: AR06, 4 (4 GSI, 0 enlaces), _ADR 28.0: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.RP04: AR07, 4 (4 GSI, 0 enlaces), _ADR 28.3: 0.A=19 0.B=16 0.C=17 0.D=18
+  \_SB_.PCI0.RP05: AR08, 4 (4 GSI, 0 enlaces), _ADR 28.4: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.RP06: AR09, 4 (4 GSI, 0 enlaces), _ADR 28.5: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.RP07: AR0A, 4 (4 GSI, 0 enlaces), _ADR 28.6: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.RP08: AR0B, 4 (4 GSI, 0 enlaces), _ADR 28.7: 0.A=19 0.B=16 0.C=17 0.D=18
+  \_SB_.PCI0.RP17: AR14, 4 (4 GSI, 0 enlaces), _ADR 27.0: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.RP18: AR15, 4 (4 GSI, 0 enlaces), _ADR 27.1: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.RP19: AR16, 4 (4 GSI, 0 enlaces), _ADR 27.2: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.RP20: AR17, 4 (4 GSI, 0 enlaces), _ADR 27.3: 0.A=19 0.B=16 0.C=17 0.D=18
+  \_SB_.PCI0.RP14: AR11, 4 (4 GSI, 0 enlaces), _ADR 29.5: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.RP15: AR12, 4 (4 GSI, 0 enlaces), _ADR 29.6: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.RP16: AR13, 4 (4 GSI, 0 enlaces), _ADR 29.7: 0.A=19 0.B=16 0.C=17 0.D=18
+== toshiba-nb250
+MIRAPRT: 6 tablas resueltas, 0 sin resolver, 32 entradas; 66 dispositivos
+  \_SB_.PCI0: AR00, 11 (11 GSI, 0 enlaces), raíz, _ADR 0.0: 31.B=19 29.A=23 29.B=19 29.C=18 29.D=16 27.A=22 28.A=16 28.B=17 28.C=18 28.D=19 2.A=16
+  \_SB_.PCI0.EXP1: AR04, 4 (4 GSI, 0 enlaces), _ADR 28.0: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.EXP2: AR05, 4 (4 GSI, 0 enlaces), _ADR 28.1: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.EXP3: AR06, 4 (4 GSI, 0 enlaces), _ADR 28.2: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.EXP4: AR07, 4 (4 GSI, 0 enlaces), _ADR 28.3: 0.A=19 0.B=16 0.C=17 0.D=18
+  \_SB_.PCI0.PCIB: AR01, 5 (5 GSI, 0 enlaces), _ADR 30.0: 0.A=21 0.B=22 0.C=23 0.D=20 8.A=20
+== hp-mini-5103
+MIRAPRT: 6 tablas resueltas, 0 sin resolver, 34 entradas; 109 dispositivos
+  \_SB_.PCI0: _PRT, 14 (14 GSI, 0 enlaces), raíz: 2.A=16 27.A=19 28.A=16 28.B=17 28.C=18 28.D=19 29.A=20 29.B=22 29.C=18 29.D=19 31.A=22 31.B=17 31.C=18 31.D=19
+  \_SB_.PCI0.PEGP: _PRT, 4 (4 GSI, 0 enlaces), _ADR 1.0: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.RP01: _PRT, 4 (4 GSI, 0 enlaces), _ADR 28.0: 0.A=16 0.B=17 0.C=18 0.D=19
+  \_SB_.PCI0.RP02: _PRT, 4 (4 GSI, 0 enlaces), _ADR 28.1: 0.A=17 0.B=18 0.C=19 0.D=16
+  \_SB_.PCI0.RP03: _PRT, 4 (4 GSI, 0 enlaces), _ADR 28.2: 0.A=18 0.B=19 0.C=16 0.D=17
+  \_SB_.PCI0.RP04: _PRT, 4 (4 GSI, 0 enlaces), _ADR 28.3: 0.A=19 0.B=16 0.C=17 0.D=18

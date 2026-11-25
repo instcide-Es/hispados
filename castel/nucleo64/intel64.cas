@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo Intel64
 
-    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64, Prt64
 
     público constante MAX_INTEL = 2
     constante N_RX = 64
@@ -325,16 +325,8 @@ módulo Intel64
             t.modo := 1
         sino
             habilita(i, falso)
-            v := conf(i, 0x3C)
-            línea := v yb 0xFF
-            pin := (v >> 8) yb 0xFF
-            si vector <> 0 y pin <> 0 y línea > 0 y línea < 24 entonces
-                ; (por nivel y activa en alto, como QEMU dice de sus enlaces de PCI)
-                si dirige(línea, vector, 1 ob (3 << 2), falso) entonces
-                    t.modo := 3
-                    t.gsi := línea
-                fin
-            fin
+            ; [etapa 10] la patilla: por el _PRT (Prt64), o por la línea
+            t.modo := pon_intx(i, vector, t.gsi)
         fin
         ; RXT0, RXO, RXDMT0, LSC, TXDW
         w(t, IMS, 0x80 ob 0x40 ob 0x10 ob 0x04 ob 0x01)
@@ -455,13 +447,7 @@ módulo Intel64
                         escribir(", MAC ")
                         escribe_mac(nat64(dirección(tj(in_n - 1).mac[0])))
                         escribir(", ")
-                        si tj(in_n - 1).modo = 1 entonces
-                            escribir("MSI")
-                        sino si tj(in_n - 1).modo = 3 entonces
-                            escribir("INTx por la GSI ", tj(in_n - 1).gsi, " (y mirando cada 10 ms)")
-                        sino
-                            escribir("sin interrupciones (mirando cada 10 ms)")
-                        fin
+                        escribe_intx(tj(in_n - 1).modo, tj(in_n - 1).gsi)
                         escribir("\n")
                     sino
                         escribir(": no se pone en marcha: ", in_motivo, "\n")

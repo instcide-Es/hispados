@@ -1025,12 +1025,27 @@ módulo Ip64
         si algo entonces Sondeo64.avisa() fin
     fin
 
+    ; [etapa 10] ¿hay que mirar cada 10 ms? (alguna tarjeta sin interrupciones
+    ; que se sepa que llegan: sin MSI ni la GSI del _PRT)
+    público función mirando(): bool
+        variable i: nat32
+        i := 1
+        mientras i < n_ifz hacer
+            si ifz(i).modo_int = 0 o ifz(i).modo_int = 3 entonces devolver cierto fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
     función hilo_de_red(nada: nat64)
+        variable plazo: nat64
         mientras cierto hacer
             rearma(dirección(red_suceso))
             vuelta()
             vueltas := vueltas + 1
-            espera_plazo(dirección(red_suceso), 10000000)
+            ; (con interrupciones, los plazos de TCP, ARP y DHCP van de 50 en 50 ms)
+            si mirando() entonces plazo := 10000000 sino plazo := 50000000 fin
+            espera_plazo(dirección(red_suceso), plazo)
         fin
     fin
 

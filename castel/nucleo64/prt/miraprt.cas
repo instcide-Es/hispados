@@ -1,0 +1,87 @@
+; miraprt.cas - Hispa-64, etapa 10 (docs/64/HISPA-64.md, sección 16): las
+; rutas de las INTx (_PRT) de las tablas de ACPI de un equipo, leídas por
+; Aml64 como en el núcleo, en un programa de «modelo linux64» (corre en
+; Linux y en Hispa-64): MIRAPRT DSDT [SSDT...]. Dice, de cada dueño de un
+; _PRT, el paquete elegido y sus entradas (la ranura, la patilla y la GSI).
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo MiraPrt
+
+    modelo linux64
+
+    importar Linux, Archivos, Argumentos, Aml64
+
+    constante CABE = 1048576
+    variable datos: puntero a byte              ; (del brk: CABE octetos)
+    variable usado: nat32
+
+    función carga(ruta: puntero a byte): bool
+        variable m: ent16
+        variable n, ini: nat32
+        m := abrir(ruta, Archivos.LEER)
+        si m = MAL entonces devolver falso fin
+        ini := usado
+        mientras usado + 32768 <= CABE hacer
+            n := leer(m, dirección(datos[usado]), 32768)
+            si n = 0 entonces romper fin
+            usado := usado + n
+        fin
+        cerrar(m)
+        si usado - ini > 36 entonces añade_tabla(nat64(dirección(datos[ini])), usado - ini) fin
+        ; (cada tabla, alineada a 8)
+        usado := (usado + 7) yb nob nat32(7)
+        devolver cierto
+    fin
+
+    función principal(): byte
+        variable a: arreglo [256] de byte
+        variable k, j, n: nat32
+        variable ini: nat64
+        ini := nat64(sistema(12, 0, 0, 0))
+        si nat64(sistema(12, ini + CABE, 0, 0)) < ini + CABE entonces
+            escribir("MIRAPRT: sin memoria\n")
+            devolver 1
+        fin
+        datos := puntero(ini)
+        n := 1
+        mientras argumento(nat16(n), dirección(a[0]), 256) hacer
+            si no carga(dirección(a[0])) entonces escribir("MIRAPRT: no se lee ", dirección(a[0]), "\n") fin
+            n := n + 1
+        fin
+        busca_prt()
+        escribir("MIRAPRT: ", pd_n, " tablas resueltas, ", prt_sin_resolver, " sin resolver, ", prt_n, " entradas; ", n_disp, " dispositivos")
+        si sin_entender > 0 entonces escribir(", ", sin_entender, " trozos sin entender") fin
+        escribir("\n")
+        k := 0
+        mientras k < pd_n hacer
+            escribir("  ")
+            escribe_disp(pd_disp[k])
+            escribir(": ")
+            escribe_trozo(pd_seg[k])
+            escribir(", ", pd_total[k], " (", pd_directas[k], " GSI, ", pd_enlaces[k], " enlaces)")
+            si disp_raíz(pd_disp[k]) entonces escribir(", raíz") fin
+            si disp_adr(pd_disp[k]) <> NO_HAY entonces escribir(", _ADR ", disp_adr(pd_disp[k]) >> 16, ".", disp_adr(pd_disp[k]) yb 0xFFFF) fin
+            escribir(":")
+            j := 0
+            mientras j < prt_n hacer
+                si prt_dueño[j] = k entonces
+                    escribir(" ", prt_ranura[j], ".")
+                    escribir_car(nat32('A') + prt_patilla[j])
+                    escribir("=", prt_gsi[j])
+                    si prt_marcas[j] <> 15 entonces escribir("/", prt_marcas[j]) fin
+                fin
+                j := j + 1
+            fin
+            escribir("\n")
+            k := k + 1
+        fin
+        k := 0
+        mientras k < prt_sin_resolver y k < MAX_DUEÑOS hacer
+            escribir("  ")
+            escribe_disp(ps_disp[k])
+            escribir(": sin resolver\n")
+            k := k + 1
+        fin
+        devolver 0
+    fin
+
+fin MiraPrt.

@@ -22,7 +22,7 @@
 ; =============================================================================
 módulo Rtl64
 
-    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64, Prt64
 
     constante G_VIEJA = 0
     constante G_EVL = 1
@@ -431,13 +431,7 @@ módulo Rtl64
             modo := 1
         sino
             habilita(i, falso)
-            v := conf(i, 0x3C)
-            si vector <> 0 y (v >> 8) yb 0xFF <> 0 y v yb 0xFF > 0 y v yb 0xFF < 24 entonces
-                si dirige(v yb 0xFF, vector, 1 ob (3 << 2), falso) entonces
-                    modo := 3
-                    gsi := v yb 0xFF
-                fin
-            fin
+            modo := pon_intx(i, vector, gsi)            ; [etapa 10] por el _PRT, o por la línea
         fin
         w16(R_ISR, 0xFFFF)
         w16(R_IMR, 0x0073)                         ; ROK, RER, RDU, LinkChg, FOVW
@@ -555,13 +549,8 @@ módulo Rtl64
                     escribir("), MAC ")
                     escribe_mac(nat64(dirección(mac[0])))
                     si base <> 0 entonces escribir(", registros en la memoria") sino escribir(", registros por los puertos") fin
-                    si modo = 1 entonces
-                        escribir(", MSI")
-                    sino si modo = 3 entonces
-                        escribir(", INTx por la GSI ", gsi, " (y mirando cada 10 ms)")
-                    sino
-                        escribir(", sin interrupciones (mirando cada 10 ms)")
-                    fin
+                    escribir(", ")
+                    escribe_intx(modo, gsi)
                     si grupo = G_G entonces escribir("; de las 8168G en adelante: sin EEE, ALDPS ni L2/L3; el FIFO compartido por LINK_LIST_RDY") fin
                     escribir("\n")
                 sino

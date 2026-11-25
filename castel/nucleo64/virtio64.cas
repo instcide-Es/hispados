@@ -13,7 +13,7 @@
 ; =============================================================================
 módulo Virtio64
 
-    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64
+    importar Cifras64, Es64, Fisica64, Pagina64, Monton64, Reloj64, Apic64, Excep64, Hilos64, Pci64, Msi64, Redcom64, Prt64
 
     constante V_FEAT = 0x00
     constante V_GFEAT = 0x04
@@ -185,14 +185,7 @@ módulo Virtio64
         fin
         q_sig_tx := 0
         ; la interrupción: la patilla
-        modo := 0
-        v := conf(i, 0x3C)
-        si vector <> 0 y (v >> 8) yb 0xFF <> 0 y v yb 0xFF > 0 y v yb 0xFF < 24 entonces
-            si dirige(v yb 0xFF, vector, 1 ob (3 << 2), falso) entonces
-                modo := 3
-                gsi := v yb 0xFF
-            fin
-        fin
+        modo := pon_intx(i, vector, gsi)                ; [etapa 10] por el _PRT, o por la línea
         sale8(io + V_STATUS, 7)                     ; DRIVER_OK
         sale16(io + V_QNOTIFY, 0)
         devolver cierto
@@ -281,7 +274,8 @@ módulo Virtio64
                     escribir(", MAC ")
                     escribe_mac(nat64(dirección(mac[0])))
                     escribir(", colas de ", q_n[0], " y ", q_n[1])
-                    si modo = 3 entonces escribir(", INTx por la GSI ", gsi, " (y mirando cada 10 ms)") sino escribir(", sin interrupciones (mirando cada 10 ms)") fin
+                    escribir(", ")
+                    escribe_intx(modo, gsi)
                     escribir("\n")
                 sino
                     escribir(": no se pone en marcha: ", vi_motivo, "\n")

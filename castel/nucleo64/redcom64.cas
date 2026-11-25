@@ -44,7 +44,7 @@ módulo Redcom64
         dhcp_concesión: nat64                   ; segundos
         dhcp_dada, dhcp_próximo: nat64          ; (ns de ahora_ns)
         dhcp_veces: nat64                       ; cuántas veces se ha tenido IP
-        modo_int: nat32                         ; 0 mirando, 1 MSI, 2 MSI-X, 3 INTx
+        modo_int: nat32                         ; 0 mirando, 1 MSI, 2 MSI-X, 3 INTx por la línea (y mirando), 4 INTx del _PRT
         pci: nat32
         interrupciones: nat64
         rx_paq, tx_paq, rx_oct, tx_oct, rx_err, tx_err, rx_tirados: nat64

@@ -74,9 +74,9 @@ módulo Hispa64
     importar I2chid64
     importar PrMusl64
     importar Disp64
-    importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Intel64, Rtl64, Virtio64, Ip64, Tcp64, Red64, PrRed64
+    importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.9.0"
+    constante VERSIÓN = "0.10.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
@@ -659,6 +659,7 @@ módulo Hispa64
         fin
         valor_de("ip=", dirección(v[0]))
         valor_de("hosts=", dirección(h[0]))
+        escribe_prt(tiene("prueba=prt"))        ; [etapa 10] las rutas de las INTx (_PRT), antes de las tarjetas
         prepara_red(dirección(v[0]), tiene("sindhcp"), tiene("realtek=ensayo"))
         prepara_sockets(dirección(h[0]))
         Tcp64.traza := tiene("red=traza")
@@ -1395,7 +1396,7 @@ módulo Hispa64
         si no tiene("sinpruebas") y no tiene("sinred") y tic_va entonces pruebas_red() fin
         si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 + fallos9 > 0 entonces
             pon_color(12, 0)
-            escribir("Hispa-64 etapa 9: con fallos (los «MAL» de arriba).\n")
+            escribir("Hispa-64 etapa 10: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             si apagar_al_fallar entonces
                 al_apagar()
@@ -1403,7 +1404,7 @@ módulo Hispa64
             fin
         sino
             pon_color(10, 0)
-            escribir("Hispa-64 etapa 9: todo en orden.\n")
+            escribir("Hispa-64 etapa 10: todo en orden.\n")
             pon_color(7, 0)
         fin
         al_apagar()

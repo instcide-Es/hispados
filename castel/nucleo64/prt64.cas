@@ -1,0 +1,220 @@
+; =============================================================================
+;  prt64.cas - Hispa-64, etapa 10: las INTx de PCI por las rutas de ACPI
+;  (docs/64/HISPA-64.md, sección 16). Una tarjeta sin MSI avisa por su
+;  patilla (INTA a INTD), y por qué GSI del IOAPIC llega lo dice el _PRT del
+;  puente raíz (o del puente PCIe que tenga delante), no la «línea» que deja
+;  el firmware en la configuración (la de la PIC de 8259, de los tiempos de
+;  ISA): en QEMU las dos llegan, pero VirtualBox y los equipos de verdad
+;  llevan las INTx a las GSI 16 a 23 (o más), y por la línea no llega nada.
+;  Aml64 lee los _PRT (sin interpretar el AML: los paquetes de rutas que se
+;  resuelven enteros); aquí se sabe el bus de cada dueño (el _BBN del
+;  puente raíz; el bus secundario del puente de su _ADR, leído en la
+;  configuración) y se busca la ranura y la patilla de cada aparato; si su
+;  bus no tiene _PRT, se sube por los puentes girando la patilla («swizzle»:
+;  (patilla + ranura) mod 4), como dice la norma de los puentes de PCI.
+;  Y quién tiene cada GSI (pide_gsi): una GSI con dos dueños no se pisa (el
+;  segundo sigue mirando).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Prt64
+
+    importar Cifras64, Es64, Acpi64, Apic64, Pci64, Aml64
+
+    constante MAX_GSI = 256
+    constante NADA = 0xFFFFFFFF
+
+    variable hecho: bool
+    variable pd_bus: arreglo [MAX_DUEÑOS] de nat32
+    variable gsi_vector: arreglo [MAX_GSI] de nat32
+    público variable prt_dueños_con_bus: nat32
+    público variable prt_buscadas, prt_halladas, prt_giradas: nat32
+
+    ; el bus de un dispositivo de ACPI (el de un puente raíz, o el secundario
+    ; del puente de su _ADR); NADA si no se sabe
+    función bus_de_disp(i: nat32, hondo: nat32): nat32
+        variable pb, adr, d, f, v: nat32
+        si hondo > 8 entonces devolver NADA fin
+        si disp_raíz(i) entonces
+            si disp_bbn(i) = NO_HAY entonces devolver 0 fin
+            devolver disp_bbn(i) yb 0xFF
+        fin
+        adr := disp_adr(i)
+        si adr = NO_HAY o disp_padre(i) = NO_HAY entonces devolver NADA fin
+        pb := bus_de_disp(disp_padre(i), hondo + 1)
+        si pb = NADA entonces devolver NADA fin
+        d := (adr >> 16) yb 31
+        f := adr yb 7
+        v := lee32(pb, d, f, 0)
+        si v yb 0xFFFF = 0xFFFF o v = 0 entonces devolver NADA fin
+        si (lee32(pb, d, f, 0x0C) >> 16) yb 0x7F <> 1 entonces devolver NADA fin
+        devolver (lee32(pb, d, f, 0x18) >> 8) yb 0xFF
+    fin
+
+    ; al arrancar (lo pide la red, la primera): las tablas, los _PRT y sus buses
+    público función prepara_prt()
+        variable i, k: nat32
+        si hecho entonces devolver fin
+        hecho := cierto
+        si no con_tablas() entonces
+            i := 0
+            mientras i < n_tablas hacer
+                si t_firma[i] = 0x54445344 o t_firma[i] = 0x54445353 entonces añade_tabla(t_virt[i], t_largo[i]) fin
+                i := i + 1
+            fin
+        fin
+        busca_prt()
+        prt_dueños_con_bus := 0
+        k := 0
+        mientras k < pd_n hacer
+            pd_bus[k] := bus_de_disp(pd_disp[k], 0)
+            si pd_bus[k] <> NADA entonces prt_dueños_con_bus := prt_dueños_con_bus + 1 fin
+            k := k + 1
+        fin
+    fin
+
+    ; el dueño del _PRT del bus b (el primero), o NADA
+    función dueño_de_bus(b: nat32): nat32
+        variable k: nat32
+        k := 0
+        mientras k < pd_n hacer
+            si pd_bus[k] = b entonces devolver k fin
+            k := k + 1
+        fin
+        devolver NADA
+    fin
+
+    ; el puente de PCI que tiene detrás el bus b, o NADA
+    función puente_de(b: nat32): nat32
+        variable i: nat32
+        i := 0
+        mientras i < pci_n hacer
+            si clase_de(i) >> 8 = 0x0604 y (conf(i, 0x18) >> 8) yb 0xFF = b entonces devolver i fin
+            i := i + 1
+        fin
+        devolver NADA
+    fin
+
+    ; la GSI (y sus marcas, las de la MADT) de la INTx del aparato i de Pci64; falso si no se sabe
+    público función gsi_pci(i: nat32, ref g: nat32, ref marcas: nat32): bool
+        variable b, d, pin, k, j, n, p: nat32
+        prepara_prt()
+        prt_buscadas := prt_buscadas + 1
+        pin := (conf(i, 0x3C) >> 8) yb 0xFF
+        si pin < 1 o pin > 4 entonces devolver falso fin
+        pin := pin - 1
+        b := bus_de(i)
+        d := disp_de(i)
+        n := 0
+        mientras n < 8 hacer
+            k := dueño_de_bus(b)
+            si k <> NADA entonces
+                j := 0
+                mientras j < prt_n hacer
+                    si prt_dueño[j] = k y prt_ranura[j] = d y prt_patilla[j] = pin entonces
+                        g := prt_gsi[j]
+                        marcas := prt_marcas[j]
+                        prt_halladas := prt_halladas + 1
+                        si n > 0 entonces prt_giradas := prt_giradas + 1 fin
+                        devolver cierto
+                    fin
+                    j := j + 1
+                fin
+                devolver falso
+            fin
+            ; sin _PRT para este bus: al puente de delante, con la patilla girada
+            p := puente_de(b)
+            si p = NADA entonces devolver falso fin
+            pin := (pin + d) mod 4
+            b := bus_de(p)
+            d := disp_de(p)
+            n := n + 1
+        fin
+        devolver falso
+    fin
+
+    ; la GSI g, para el vector v (con sus marcas): falso si ya la tiene otro
+    ; vector (se comparte: el segundo sigue mirando) o ningún IOAPIC la lleva
+    público función pide_gsi(g: nat32, v: nat32, marcas: nat32): bool
+        si g >= MAX_GSI entonces devolver falso fin
+        si gsi_vector[g] <> 0 y gsi_vector[g] <> v entonces devolver falso fin
+        si no dirige(g, v, marcas, falso) entonces devolver falso fin
+        gsi_vector[g] := v
+        devolver cierto
+    fin
+
+    ; [lo de los drivers] la INTx del aparato i al vector v: por el _PRT (da
+    ; 4), por la línea de la configuración (da 3: se mira cada 10 ms igual,
+    ; que no se sabe si llega) o nada (0). En g, la GSI.
+    público función pon_intx(i: nat32, v: nat32, ref g: nat32): nat32
+        variable m, l: nat32
+        si v = 0 o (conf(i, 0x3C) >> 8) yb 0xFF = 0 entonces devolver 0 fin
+        si gsi_pci(i, g, m) y pide_gsi(g, v, m) entonces devolver 4 fin
+        l := conf(i, 0x3C) yb 0xFF
+        ; (por nivel y activa en alto, como QEMU dice de sus enlaces de PCI)
+        si l > 0 y l < 24 y dirige(l, v, 1 ob (3 << 2), falso) entonces
+            g := l
+            devolver 3
+        fin
+        devolver 0
+    fin
+
+    ; «, INTx por la GSI 16 (del _PRT)» y lo demás
+    público función escribe_intx(modo: nat32, g: nat32)
+        si modo = 1 entonces
+            escribir("MSI")
+        sino si modo = 2 entonces
+            escribir("MSI-X")
+        sino si modo = 4 entonces
+            escribir("INTx por la GSI ", g, " (del _PRT)")
+        sino si modo = 3 entonces
+            escribir("INTx por la GSI ", g, " (y mirando cada 10 ms)")
+        sino
+            escribir("sin interrupciones (mirando cada 10 ms)")
+        fin
+    fin
+
+    ; lo que se ha encontrado, para el arranque («prueba=prt»: cada dueño)
+    público función escribe_prt(detalle: bool)
+        variable k, j, n: nat32
+        prepara_prt()
+        escribir("INTx: las rutas de ACPI (_PRT): ", pd_n, " tablas resueltas")
+        si prt_sin_resolver > 0 entonces escribir(" (y ", prt_sin_resolver, " sin resolver: sus enlaces los hace un método)") fin
+        escribir(", ", prt_n, " entradas\n")
+        si no detalle entonces devolver fin
+        k := 0
+        mientras k < pd_n hacer
+            escribir("  ")
+            escribe_disp(pd_disp[k])
+            escribir(" (tabla ", disp_tabla(pd_disp[k]), "): ")
+            escribe_trozo(pd_seg[k])
+            escribir(", ", pd_total[k], " entradas (", pd_directas[k], " con la GSI escrita, ", pd_enlaces[k], " por enlaces de _CRS fijo; de ", pd_candidatos[k], " paquetes nombrados)")
+            si pd_bus[k] = NADA entonces escribir("; el bus, no se sabe") sino escribir("; el bus ", pd_bus[k]) fin
+            ; (las GSI distintas)
+            n := 0
+            j := 0
+            mientras j < prt_n hacer
+                si prt_dueño[j] = k entonces n := n + 1 fin
+                j := j + 1
+            fin
+            escribir("; GSI de la primera: ")
+            j := 0
+            mientras j < prt_n y prt_dueño[j] <> k hacer j := j + 1 fin
+            si j < prt_n entonces
+                escribir(prt_gsi[j], " (ranura ", prt_ranura[j], ", INT")
+                escribir_car(nat32('A') + prt_patilla[j])
+                si prt_marcas[j] yb 3 = 3 entonces escribir(", activa en bajo") sino escribir(", activa en alto") fin
+                si prt_marcas[j] yb 12 = 12 entonces escribir(", por nivel)") sino escribir(", por flanco)") fin
+            fin
+            escribir("\n")
+            k := k + 1
+        fin
+        k := 0
+        mientras k < prt_sin_resolver y k < MAX_DUEÑOS hacer
+            escribir("  ")
+            escribe_disp(ps_disp[k])
+            escribir(" (tabla ", disp_tabla(ps_disp[k]), "): sin resolver\n")
+            k := k + 1
+        fin
+    fin
+
+fin Prt64.
