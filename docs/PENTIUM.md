@@ -11695,6 +11695,13 @@ QEMU_MAS="-device qemu-xhci,id=x -chardev socket,id=bt,host=127.0.0.1,port=47123
   el código en grande); y el 0AAA con su firmware de mentira desde
   `C:\FIRMWARE`.
 
+Las pruebas, el 25/11 en el VPS: `bt` 18/0 (la del Intel, comprobada en la
+misma salida tras quitar el «^»: la línea va detrás del «C:\>»),
+`caliente` 79/0, `dispositivos` 85/0, `protege` 76/0, `paquetes` 108/0 (con
+18 paquetes del sistema), `panel` 108/0 (con el VPS muy cargado, sus tres de
+la hora por Internet fallan: el arranque tarda más de lo que da su margen; con
+la carga normal, bien).
+
 **Lo que solo se verá en el ASUS** (la memoria
 `Pruebas/Pendientes/ASUS-GL553V/Bluetooth/`): el 0A2A de verdad (su
 versión, si contesta por el extremo 0 y el de interrupción, el reset), un
