@@ -2552,6 +2552,26 @@ núcleo de la etapa 9 —119.600 líneas— da muchas más pasadas). Lo de la et
   hora adelantada del servidor; con `cmos=utc zona=UTC`, igual en UTC.
 - Lo de las etapas 0 a 8, igual (la unidad en memoria lleva ahora 36
   archivos; uname 0.9.0, «etapa 9 (la red)»).
+- Además, a mano, contra Internet de verdad (la red de usuario de QEMU sale
+  por el servidor): `DESCARGA https://hispados.es/` (TLS 1.2 con ChaCha20,
+  el certificado de verdad comprobado con las anclas de siempre),
+  `DESCARGA http://hispados.es/` (que redirige a HTTPS), `NTP -n`
+  (pool.ntp.org, estrato 1) y `PING -c 2 hispados.es`.
+
+`SOLO=castel64` (con CASTEL64 y ENSAMB64 el núcleo sale igual, octeto a
+octeto): **80 bien y 0 mal** (unos 85 minutos; dentro, `nucleo64/pruebas.sh`
+con CASTEL64 y ENSAMB64: 111 bien y 0 mal). Para que CASTEL64 los encuentre, los
+módulos se llaman con 8 letras como mucho (`objet64`, `redcom64`); y el del
+azar, `chacha64` (`azar64.cas` es el programa de cuentas al azar de
+pruebas64.sh).
+
+Las imágenes de la carpeta del taller
+(`Pruebas/Pendientes/VirtualBox/Hispa-64-etapa-9/`): el disco (`.vdi` y
+`.img`) y el CD, con LEEME.TXT y LEEME-CD.TXT: la tarjeta de red de
+VirtualBox **tal como viene** (NAT, «Intel PRO/1000 MT Desktop», la
+82540EM), y qué probar desde el intérprete (la entrada 3): IFCONFIG, PING,
+DESCARGA por HTTP y HTTPS y NTP. El disco, arrancado en QEMU por UEFI con la
+e1000: DHCP, MRED, «todo en orden» y el escritorio.
 
 ### Lo que queda para la etapa 10 (y más adelante)
 
