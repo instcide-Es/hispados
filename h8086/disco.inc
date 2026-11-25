@@ -1126,7 +1126,9 @@ fat_lee:
 .par:
         and ax, 0x0FFF
         cmp ax, 0x0FF8              ; el fin de cadena, igual en las dos FAT
-        jb .x
+        cmc
+        jnc .x
+        clc                         ; (CF=1 solo si falla el disco)
 .mal:
         mov ax, 0xFFFF
 .x:
@@ -1321,14 +1323,23 @@ dir_abre:
         mov ax, [raiz_sec]
         jmp short .c
 .sub:
+        cmp ax, 2                   ; (un primer grupo que no existe: como si
+        jb .malo                    ; el directorio estuviera vacío; con 1 se
+        cmp ax, [max_clus]          ; leía la raíz)
+        ja .malo
         mov [di_clus], ax
         call clus_lba
         mov [di_sec], ax
+        mov ax, [max_clus]          ; (ni más grupos de los que hay: con la
+        mov [di_quedan], ax         ; cadena en círculo no se acababa)
         mov ax, [spc]
 .c:
         mov [di_resto], ax
         mov word [di_off], -32
         ret
+.malo:
+        mov word [di_clus], 0
+        jmp short dir_sig.fin
 ; la entrada siguiente -> SI (dentro de `sector`; el sector es [di_sec]).
 ; CF=1 si se ha acabado el directorio (AX=0) o falla el disco (AX=error)
 dir_sig:
@@ -1341,8 +1352,11 @@ dir_sig:
         jnz .ent
         cmp word [di_clus], 0       ; se acabó el tramo: ¿hay otro grupo?
         je .fin
+        dec word [di_quedan]
+        jz .fin
         mov ax, [di_clus]
         call fat_lee
+        jc .roto                    ; (la FAT no se lee: no es el final)
         cmp ax, 2
         jb .fin
         cmp ax, [max_clus]
@@ -1366,6 +1380,9 @@ dir_sig:
         xor ax, ax
         stc
 .x:
+        ret
+.roto:
+        mov ax, E_DISCO
         ret
 
 ; ¿casa la entrada SI con el patrón nom11 («?» vale por cualquier letra)?
@@ -1887,6 +1904,10 @@ h_grupo:
 .hay:
         xor cx, cx                  ; por dónde se empieza: por el apuntado,
         mov ax, [bx+H_PRIM]         ; si no está más allá, o por el primero
+        cmp ax, 2                   ; (uno que no existe: con 1 se escribía
+        jb .no                      ; en la raíz)
+        cmp ax, [max_clus]
+        ja .no
         cmp word [bx+H_CCLU], 0
         je .anda
         cmp si, [bx+H_CIDX]

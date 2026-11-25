@@ -1746,6 +1746,7 @@ di_clus     resw 1                  ; dir_sig: por dónde va
 di_sec      resw 1
 di_resto    resw 1
 di_off      resw 1
+di_quedan   resw 1                  ; los grupos que puede tener aún (dir_sig)
 dh_dir      resw 1
 r_dir       resw 1                  ; ruta_resuelve: el directorio
 rn_sec      resw 1
