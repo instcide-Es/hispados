@@ -2425,7 +2425,7 @@ para 40 s, saca los registros por el monitor (los procesadores, todos en
   la red de casa sobra; la escala, SACK e IPv6 quedan para la etapa 10 (el
   navegador). Lo desordenado se tira (la otra punta lo repite). El TIME_WAIT
   dura 2 s (y las pruebas de musl esperan a que acabe: sin perder memoria).
-- **El azar, con ChaCha20** (`azar64.cas`, RFC 8439, la clave borrada en cada
+- **El azar, con ChaCha20** (`chacha64.cas`, RFC 8439, la clave borrada en cada
   pedido): getrandom, `/dev/urandom` y `/dev/random` (que nunca esperan, como
   en Linux desde la 5.6), los números de secuencia de TCP, los puertos, los
   identificadores de DHCP. La clave se mezcla en cada pedido con RDSEED y
@@ -2484,7 +2484,7 @@ Hispa-64 0.9.0. Los módulos y programas nuevos y lo que cambia:
 | `red64.cas` | los sockets de POSIX, sus opciones, FIONREAD, FIONBIO y los SIOCGIF*, poll; los archivos de texto de la red |
 | `sondeo64.cas` | la espera que despierta (arriba) |
 | `objet64.cas` | eventfd (284, 290), timerfd (283, 286, 287), `/dev/urandom`, `/dev/random` y los textos |
-| `azar64.cas` | ChaCha20 (arriba) |
+| `chacha64.cas` | ChaCha20 (arriba) |
 | `hora64.cas` | la hora y la zona (arriba) |
 | `intel64.cas`, `rtl64.cas`, `virtio64.cas` | los drivers (arriba) |
 | `prred64.cas` | las pruebas: lo que hay (las tarjetas, el azar, la hora y la zona) y, si en la unidad está `RED.PRB`, sus órdenes, mirando sus códigos; al acabar, que no quede ningún socket |

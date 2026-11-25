@@ -11,7 +11,7 @@
 ; =============================================================================
 módulo PrRed64
 
-    importar Cifras64, Pant64, Es64, Monton64, Reloj64, Hilos64, Unidad64, Procesos, Azar64, Hora64, Objet64, Redcom64, Ip64, Tcp64, Red64
+    importar Cifras64, Pant64, Es64, Monton64, Reloj64, Hilos64, Unidad64, Procesos, Chacha64, Hora64, Objet64, Redcom64, Ip64, Tcp64, Red64
 
     público variable fallos9: nat32
 

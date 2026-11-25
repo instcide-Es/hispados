@@ -16,7 +16,7 @@
 ; =============================================================================
 módulo Ip64
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Sondeo64, Azar64, Redcom64, Intel64, Rtl64, Virtio64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Monton64, Reloj64, Hilos64, Sinc64, Sondeo64, Chacha64, Redcom64, Intel64, Rtl64, Virtio64
 
     constante MAX_ARP = 32
     constante LO_N = 256

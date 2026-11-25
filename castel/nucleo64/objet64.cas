@@ -8,7 +8,7 @@
 ;     CLOCK_BOOTTIME o CLOCK_REALTIME (TFD_TIMER_ABSTIME), con o sin
 ;     intervalo; read da cuántas veces ha vencido (o espera); poll y epoll
 ;     duermen hasta el vencimiento (lo_más_tarde), sin mirar de 10 en 10;
-;   - /dev/urandom y /dev/random: el azar de Azar64 (los dos igual: nunca
+;   - /dev/urandom y /dev/random: el azar de Chacha64 (los dos igual: nunca
 ;     esperan, como en Linux desde la 5.6);
 ;   - los archivos de texto que hace el núcleo (/etc/resolv.conf,
 ;     /etc/hosts, /proc/net/route...): los hace quien los sabe (Red64) y
@@ -17,7 +17,7 @@
 ; =============================================================================
 módulo Objet64
 
-    importar Es64, Cerrojo, Monton64, Reloj64, Hilos64, Procesos, Sondeo64, Azar64, Hora64
+    importar Es64, Cerrojo, Monton64, Reloj64, Hilos64, Procesos, Sondeo64, Chacha64, Hora64
 
     público constante F_SOCKET = 11             ; (de Red64) las clases de archivo abierto nuevas
     público constante F_EVENTO = 12

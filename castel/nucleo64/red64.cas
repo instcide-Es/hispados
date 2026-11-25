@@ -22,7 +22,7 @@
 ; =============================================================================
 módulo Red64
 
-    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64, Procesos, Sondeo64, Azar64, Objet64, Redcom64, Ip64, Tcp64
+    importar Cifras64, Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64, Procesos, Sondeo64, Chacha64, Objet64, Redcom64, Ip64, Tcp64
 
     constante EPERM = -1
     constante EINTR = -4

@@ -1,5 +1,5 @@
 ; =============================================================================
-;  azar64.cas - Hispa-64, etapa 9: el azar del núcleo (docs/64/HISPA-64.md,
+;  chacha64.cas - Hispa-64, etapa 9: el azar del núcleo (docs/64/HISPA-64.md,
 ;  sección 15): getrandom, /dev/urandom y /dev/random, los números de
 ;  secuencia de TCP, los puertos y los identificadores de DHCP y DNS.
 ;  Un generador ChaCha20 (RFC 8439: 20 vueltas) con la clave borrada en cada
@@ -13,7 +13,7 @@
 ;  pero no se repite de un arranque a otro.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
-módulo Azar64
+módulo Chacha64
 
     importar Es64, Cerrojo, Reloj64, Entradas
 
@@ -211,4 +211,4 @@ módulo Azar64
         mezcla_clave()
     fin
 
-fin Azar64.
+fin Chacha64.

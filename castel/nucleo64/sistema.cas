@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Azar64, Hora64, Objet64, Redcom64, Red64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Red64
 
     constante EPERM = -1
     constante ENOENT = -2
@@ -1468,7 +1468,7 @@ módulo Sistema
     función azar_(p: puntero a Proceso, v: nat64, n: nat64): ent64
         variable t: arreglo [512] de byte
         variable hecho, trozo: nat64
-        ; [etapa 9] de Azar64 (ChaCha20 con RDSEED, RDRAND y los tiempos)
+        ; [etapa 9] de Chacha64 (ChaCha20 con RDSEED, RDRAND y los tiempos)
         si n > 1048576 entonces n := 1048576 fin
         hecho := 0
         mientras hecho < n hacer
