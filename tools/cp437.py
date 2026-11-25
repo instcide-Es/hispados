@@ -31,5 +31,16 @@ if ventanas:
     data = bytes(out)
 else:
     data = text.encode('cp437', errors='replace')
-with open(dst, 'wb') as f:
+# Si ya está igual, no se toca. Si no, se escribe con otro nombre y se cambia
+# al final: así, con «make -j», nadie lee un archivo a medias (lo que dejaba
+# programas de 0 octetos en las imágenes: auditoría del 25/11/2026).
+try:
+    with open(dst, 'rb') as f:
+        if f.read() == data:
+            sys.exit(0)
+except OSError:
+    pass
+tmp = '%s.%d.tmp' % (dst, os.getpid())
+with open(tmp, 'wb') as f:
     f.write(data)
+os.replace(tmp, dst)

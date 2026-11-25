@@ -5,8 +5,16 @@ B      = build
 IMG    = $(B)/hispados.img
 HDD    = $(B)/hdd.img
 NFLAGS = -f bin -i $(B)/gen/lib/ -i lib/
-# los fuentes están en UTF-8: se pasan a CP437 (la página de DOS) al ensamblar
-ASM = python3 tools/cp437.py lib/util.inc $(B)/gen/lib/util.inc && python3 tools/cp437.py $< $(B)/gen/$< && $(NASM) $(NFLAGS)
+# los fuentes están en UTF-8: se pasan a CP437 (la página de DOS) al ensamblar.
+# Los incluidos comunes (util.inc, red.inc) se pasan UNA vez, antes que nada
+# (son requisito de $(B)): con «make -j», que cada regla los reescribiera
+# mientras otro NASM los leía dejaba programas de 0 octetos en las imágenes
+# (auditoría 25/11/2026). cp437.py, además, escribe con un nombre aparte y
+# cambia el nombre al final (nadie lee nunca un archivo a medias).
+ASM = python3 tools/cp437.py $< $(B)/gen/$< && $(NASM) $(NFLAGS)
+GENCOMUN = $(B)/gen/lib/util.inc $(B)/gen/lib/red.inc
+# si una orden falla, su salida a medias se borra (no se da por hecha)
+.DELETE_ON_ERROR:
 ifdef TRACE
 KFLAGS = -DTRACE
 endif
@@ -16,8 +24,14 @@ endif
 
 all: $(IMG)
 
-$(B):
+$(B): $(GENCOMUN)
 	mkdir -p $(B)
+$(B)/gen/lib/util.inc: lib/util.inc tools/cp437.py
+	python3 tools/cp437.py $< $@
+$(B)/gen/lib/red.inc: lib/red.inc tools/cp437.py
+	python3 tools/cp437.py $< $@
+# ningún programa de 0 octetos (o que falte) en lo que va a una imagen
+SIN_VACIOS = python3 tools/sin_vacios.py
 
 $(B)/boot.bin: boot/boot.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -409,19 +423,19 @@ $(B)/HSPRED.COM: drivers/hspred.asm lib/redpref.inc lib/wifi_ids.inc | $(B)
 	python3 tools/initcheck.py $(B)/gen/HSPRED.lst init || { rm -f $@; exit 1; }
 RED_DEP = lib/red.inc lib/util.inc
 $(B)/CONFRED.COM: utils/confred.asm $(RED_DEP) | $(B)
-	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/PING.COM: utils/ping.asm $(RED_DEP) | $(B)
-	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+	$(ASM) -o $@ $(B)/gen/$<
 $(B)/DESCARGAR.COM: utils/descargar.asm $(RED_DEP) | $(B)
-	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+	$(ASM) -o $@ $(B)/gen/$<
 # CONSOLA (docs/CONSOLA.md): consola remota por red, abierta y con código de
 # acceso. Usa el modo servidor (tcp_escuchar) de la pila de lib/red.inc.
 $(B)/CONSOLA.COM: utils/consola.asm $(RED_DEP) | $(B)
-	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+	$(ASM) -o $@ $(B)/gen/$<
 # ACTUALIZAR (docs/RED.md): busca por HTTP si hay una versión más nueva del
 # sistema (lib/version.inc) y avisa. En el disco es ACTUALIZ.COM (8.3).
  $(B)/ACTUALIZAR.COM: utils/actualizar.asm $(RED_DEP) lib/version.inc lib/copiaarbol.inc lib/equipodet.inc | $(B)
-	python3 tools/cp437.py lib/red.inc $(B)/gen/lib/red.inc && $(ASM) -o $@ $(B)/gen/$<
+	$(ASM) -o $@ $(B)/gen/$<
 RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CONSOLA.COM $(B)/ACTUALIZAR.COM
 # Wi-Fi de Hispa-486 (docs/WIFI.md): HSPWIFI.COM (residente, packet driver),
 # su núcleo de 32 bits HSPWIFI.BIN (wifi/: la radio Broadcom con los fuentes
@@ -928,6 +942,7 @@ FILES = $(B)/KERNEL.SYS $(B)/COMMAND.COM $(B)/FDISK.COM $(B)/FORMAT.COM \
         $(B)/VENTANAS.COM $(HVPS) $(HVPSIS) $(HVPA) $(NESROMS) $(SMSROMS) $(SONS) $(RED)
 
 $(IMG): $(B)/boot.bin $(FILES) sistema/ALIAS.INI sistema/AYUDA.HLP sistema/MANDO.INI sistema/RED.INI sistema/TECLAS.INI sistema/DIAGNOST.BAT $(wildcard tests/disk/*.* tests/disk/*/*.*)
+	$(SIN_VACIOS) $(filter $(B)/%,$^)
 	rm -f $@
 	mformat -C -f 1440 -v HISPADOS -B $(B)/boot.bin -i $@ ::
 	mcopy -i $@ $(B)/KERNEL.SYS ::KERNEL.SYS
@@ -1072,6 +1087,7 @@ $(B)/BOOTIA32.EFI: $(HBEFI32) hispabios/pe.inc $(HBBIOS32) $(B)/FUENTE16.BIN
 hispabios: $(HBEFI)
 
 usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
+	$(SIN_VACIOS) $(filter $(B)/%,$^)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
 # [HISPA-486] la imagen USB de Hispa-486 (build/hispa486-usb.img) y su disquete
@@ -1084,6 +1100,7 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) 
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
 H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE $(B)/NAVES.EXE $(GLEXE)
 usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(GLDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
+	$(SIN_VACIOS) $(filter $(B)/%,$^)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
 # [CD] las imágenes de CD (docs/CD.md): lo mismo que la imagen USB de cada
