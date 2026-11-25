@@ -401,9 +401,12 @@ revisa_dir:
         push word [d_sec]           ; su sector otra vez
         push word [d_resto]
         push word [d_ent]
+        push word [d_quedan]
+        mov [d_quedan], cx          ; (sus grupos, los que contó cadena)
         inc word [nivel]
         call revisa_dir
         dec word [nivel]
+        pop word [d_quedan]
         pop word [d_ent]
         pop word [d_resto]
         pop word [d_sec]
@@ -422,6 +425,8 @@ revisa_dir:
         inc word [n_arch]
         add [g_arch], cx
 .a2:
+        cmp byte [c_cruce], 0       ; (cruzado: CX no son sus grupos, y con
+        jne .sig                    ; /F se recortaba: no se toca)
         ; ¿concuerda el tamaño? Hacen falta (tamaño + bpc - 1) / bpc grupos
         mov ax, [si+28]
         mov dx, [si+30]
@@ -472,6 +477,8 @@ revisa_dir:
         mov ax, [d_clus]
         test ax, ax
         jz .x                       ; (la raíz se acaba aquí)
+        dec word [d_quedan]         ; (ni un grupo más de los que tiene: con
+        jz .x                       ; la cadena en círculo, no acababa)
         call fat_lee
         cmp ax, 2
         jb .x
@@ -508,6 +515,8 @@ clus_sec:
 ; -> CX = cuántos tiene. Dice lo que encuentre mal (la entrada es [d_ent]) y,
 ; con /F, corta la cadena rota
 cadena:
+        mov [c_ini], ax
+        mov byte [c_cruce], 0
         xor cx, cx
         xor dx, dx                  ; DX = el anterior
         test ax, ax
@@ -541,6 +550,20 @@ cadena:
         mov dx, ULTIMO
         jmp fat_pon
 .cruce:
+        push ax                     ; ¿vuelve sobre sí misma? (AX, entre sus
+        push cx                     ; CX primeros): entonces es una cadena
+        mov bx, ax                  ; rota, y con /F se corta en el anterior
+        mov ax, [c_ini]
+        jcxz .cr1
+.v:
+        cmp ax, bx
+        je .circulo
+        call fat_lee
+        loop .v
+.cr1:
+        pop cx
+        pop ax
+        mov byte [c_cruce], 1
         push ax
         call pon_nombre
         mov si, m_cruce
@@ -551,6 +574,10 @@ cadena:
         mov byte [errores], 1
         mov byte [cruces], 1
         ret
+.circulo:
+        pop cx
+        pop ax
+        jmp .rota
 
 ; escribe «  NOMBRE.EXT» (la entrada de [d_ent]). Conserva los registros
 pon_nombre:
@@ -641,6 +668,10 @@ perdidos:
         inc word [n_cadenas]
         cmp byte [corrige], 0
         je .c1
+        cmp word [n_file], 0        ; (la primera vez: desde qué número)
+        jne .c2
+        call chk_libre
+.c2:
         mov ax, dx
         call guarda_cadena
 .c1:
@@ -689,6 +720,65 @@ perdidos:
         mov si, m_guardadas
         jmp pon_cad
 
+; [n_file] = el primer número de FILEnnnn.CHK detrás de los que ya hay en la
+; raíz (se empezaba siempre en 0: un REVISAR /F de otra vez repetía el nombre,
+; y borrar una de las dos entradas no soltaba la otra). Conserva DX
+chk_libre:
+        push dx
+        mov word [n_file], 1        ; (si no hay ninguno, FILE0000: n_file va
+                                    ; uno por delante, y 0 es «sin mirar»)
+        mov ax, [med+M_RAIZ]
+        mov [d_sec], ax
+        mov cx, [med+M_RAIZ_SEC]
+.sector:
+        mov dx, [d_sec]
+        call lee_sec
+        jc .x
+        mov si, sec
+.ent:
+        cmp byte [si], 0
+        je .x
+        push si
+        push cx
+        mov di, t_file              ; ¿FILE????CHK?
+        mov cx, 4
+        repe cmpsb
+        jne .no
+        add si, 4
+        add di, 4
+        mov cl, 3
+        repe cmpsb
+        jne .no
+        sub si, 7                   ; las cuatro cifras
+        xor ax, ax
+        mov cl, 4
+.d:
+        mov bl, [si]
+        sub bl, '0'
+        cmp bl, 9
+        ja .no
+        xor bh, bh
+        mov dx, 10
+        mul dx
+        add ax, bx
+        inc si
+        loop .d
+        add ax, 2
+        cmp ax, [n_file]
+        jb .no
+        mov [n_file], ax
+.no:
+        pop cx
+        pop si
+        add si, 32
+        cmp si, sec + 512
+        jb .ent
+        inc word [d_sec]
+        loop .sector
+.x:
+        pop dx
+        ret
+
 ; la cadena perdida que empieza en AX, a un archivo FILEnnnn.CHK de la raíz
 guarda_cadena:
         mov [gc_ini], ax
@@ -727,7 +817,8 @@ guarda_cadena:
         mov cx, 21
         rep stosb
         pop di
-        mov ax, [n_guardadas]       ; FILEnnnn
+        mov ax, [n_file]            ; FILEnnnn (n_file va uno por delante)
+        dec ax
         mov cx, 10
         mov bx, di
         mov si, 7
@@ -752,6 +843,7 @@ guarda_cadena:
         add [g_arch], ax
         inc word [n_arch]
         inc word [n_guardadas]
+        inc word [n_file]
         ret
 ; (interna) recorre la cadena perdida desde AX -> [gc_n] = sus grupos
 .sigue:
@@ -902,11 +994,15 @@ d_clus      resw 1                  ; el directorio que se recorre
 d_sec       resw 1
 d_resto     resw 1
 d_ent       resw 1
+d_quedan    resw 1                  ; los grupos del directorio que quedan
+c_ini       resw 1                  ; (cadena: dónde empieza, y si cruza)
+c_cruce     resb 1
 n_arch      resw 1                  ; cuántos hay de cada cosa...
 n_dirs      resw 1
 n_ocultos   resw 1
 n_cadenas   resw 1
 n_guardadas resw 1
+n_file      resw 1                  ; el número del siguiente FILEnnnn.CHK, +1
 g_arch      resw 1                  ; ...y cuántos grupos ocupan
 g_dirs      resw 1
 g_ocultos   resw 1

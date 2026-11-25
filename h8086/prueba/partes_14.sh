@@ -198,3 +198,52 @@ pantalla g2
 esta g2 "sigue vivo" "n.º 10: y el sistema sigue: "
 apaga
 }
+
+# ---- n.º 11, 12 y 13: REVISAR con archivos cruzados, cadenas en círculo y
+# FILEnnnn.CHK que ya existen ----
+p_auditoria_revisar() {
+echo "== Hispa-8086: auditoría 1, REVISAR (cruces, círculos, FILEnnnn.CHK) =="
+local F="python3 prueba/fat12.py"
+cp $IMG/hispa8086-360.img $T/a.img
+rm -f $T/b.img; mformat -C -f 360 -i $T/b.img ::
+head -c 3000 build/BASIC.COM > $T/UNO.TXT; cp $T/UNO.TXT $T/DOS.TXT; cp $T/UNO.TXT $T/TRES.TXT
+printf 'viejo' > $T/FILE0000.CHK
+mcopy -i $T/b.img $T/UNO.TXT $T/DOS.TXT $T/TRES.TXT $T/FILE0000.CHK ::
+local g1=$($F $T/b.img grupo UNO.TXT) g3=$($F $T/b.img grupo TRES.TXT)
+$F $T/b.img primero DOS.TXT $g1                        # DOS cruza con UNO desde el primer grupo
+$F $T/b.img pon $((g3 + 2)) $g3                        # TRES: su último grupo vuelve al primero
+local p=$($F $T/b.img libres 2); $F $T/b.img pon $p $((p + 1)); $F $T/b.img pon $((p + 1)) 0xFFF   # una cadena perdida
+# en A:, un directorio cuya cadena da la vuelta sobre sí misma
+mmd -i $T/a.img ::BUCLE
+local gd=$($F $T/a.img grupo BUCLE); $F $T/a.img pon $gd $gd
+QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
+escribe "limpiar"; escribe "revisar b: /f"; sleep 5
+pantalla r1
+esta r1 "DOS.TXT: cruzado con otro archivo en el grupo $g1" "n.º 11: el cruce, dicho: "
+noesta r1 "DOS.TXT: el tamaño no concuerda" "n.º 11: y el cruzado no se mide (ni se recorta): "
+esta r1 "TRES.TXT: su cadena de grupos está rota." "n.º 11: la cadena en círculo es una cadena rota: "
+noesta r1 "TRES.TXT: cruzado" ""
+esta r1 "2 cadenas perdidas guardadas en archivos FILEnnnn.CHK." "n.º 13 (la de la prueba y la que era de DOS.TXT): "
+escribe "limpiar"; escribe "dir b:file*.chk"
+pantalla r2
+esta r2 "FILE0001.CHK" "n.º 13: las cadenas perdidas, desde FILE0001.CHK (FILE0000.CHK ya estaba): "
+esta r2 "FILE0002.CHK" ""
+esta r2 "3 archivos" ""
+escribe "limpiar"; escribe "revisar"; sleep 6; escribe "eco sigue vivo"
+pantalla r3
+esta r3 "BUCLE: su cadena de grupos está rota." "n.º 12: un directorio cuya cadena da la vuelta: "
+esta r3 "sigue vivo" "n.º 12: y REVISAR acaba (no se queda dando vueltas): "
+apaga
+if [ "$(mtype -i $T/b.img ::DOS.TXT 2> /dev/null | wc -c)" = 3000 ] && [ "$(mtype -i $T/b.img ::FILE0000.CHK)" = viejo ]; then ok "n.º 11 y 13: DOS.TXT conserva su tamaño, y FILE0000.CHK lo que tenía"; else ko "n.º 11 y 13: DOS.TXT o FILE0000.CHK han cambiado"; mdir -i $T/b.img ::; fi
+if [ "$($F $T/b.img grupo TRES.TXT)" = $g3 ] && python3 - $T/b.img $g3 <<'PY'
+import struct, sys
+d = open(sys.argv[1], 'rb').read(); g = int(sys.argv[2])
+def fat(g):
+    w = struct.unpack_from('<H', d, 512 + g * 3 // 2)[0]
+    return (w >> 4) if g & 1 else w & 0xFFF
+n = 0
+while g < 0xFF8 and n < 10: g = fat(g); n += 1
+sys.exit(0 if g >= 0xFF8 and n == 3 else 1)
+PY
+then ok "n.º 11: con /F, la cadena de TRES.TXT queda cortada en su tercer grupo"; else ko "n.º 11: la cadena de TRES.TXT sigue en círculo"; fi
+}
