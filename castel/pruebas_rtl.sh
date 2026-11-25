@@ -71,8 +71,8 @@ MEMORIA=64 ESCRIBE=1 DISCO=$X/f.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/pro
 tr -d '\r' < $X/f.sal > $X/f.txt
 S=$X/f.txt
 mira "(RTL8723BS) sin rtl8723bs_nic.bin: lo dice, dónde lo ha buscado y de dónde se baja; y el DIAGNÓSTICO, en WIFI.LOG" \
-  "^wifi: FALTA EL FIRMWARE de la Realtek RTL8723BS (rtl8723bs_nic\.bin" "^wifi:   Se ha buscado rtl8723bs_nic\.bin (y cualquier \.BIN con su cabecera) en: X:.FIRMWARE .FIRMWARE .HISPA.FIRMWARE C:.FIRMWARE C:.HISPA.FIRMWARE$" \
-  "^wifi:   Póngalo en X:.FIRMWARE.rtl8723bs_nic\.bin de la memoria USB" "linux-firmware\.git/tree/rtlwifi" \
+  "^wifi: ERROR: FALTA EL FIRMWARE de la Realtek RTL8723BS (rtl8723bs_nic\.bin" "^wifi: ERROR:   Se ha buscado rtl8723bs_nic\.bin (y cualquier \.BIN con su cabecera) en: X:.FIRMWARE .FIRMWARE .HISPA.FIRMWARE C:.FIRMWARE C:.HISPA.FIRMWARE$" \
+  "^wifi: ERROR:   Póngalo en X:.FIRMWARE.rtl8723bs_nic\.bin de la memoria USB" "linux-firmware\.git/tree/rtlwifi" \
   "^wifi: ==== DIAGN.STICO: la tarjeta está, pero no se ha podido poner en marcha ====$" "^wifi: Tarjeta: Realtek RTL8723BS (SDIO); controlador: Realtek"
 # ---- 4. ACPI.BIN aprende la SDIO y cómo se enciende el chip; WIFI.BIN lo lee ----
 if ! bash $AQUI/../acpi/pentium/hacer.sh $X/ACPI.BIN > $X/acpi.txt 2>&1 || ! bash $AQUI/nucleo32/wifi/hacer.sh $X/WIFI.BIN > $X/hacer2.txt 2>&1; then
@@ -88,7 +88,7 @@ ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura=usb unidad=X registro" QEMU_MAS="
 tr -d '\r' < $X/aprende.sal > $X/aprende.txt
 S=$X/aprende.txt
 mira "(RTL8723BS) ACPI.BIN: la SDIO (INT33BB), su _PS0 y el de su hijo (OBDA8723), con la patilla de la controladora GPIO SUS (INT33FC _UID 3) por la región GeneralPurposeIo" \
-  "^ACPI: SDIO: controladora GPIO .._SB.GPO2: SUS, registros en FED0E000h$" "^ACPI: SDIO: .._SB.GPO2 patilla 26 (FED0E168h) := 0$" "^ACPI: SDIO: .._SB.GPO2 patilla 26 (FED0E168h) := 1$" \
+  "^ACPI: SDIO: controladora GPIO ._SB.GPO2: SUS, registros en FED0E000h$" "^ACPI: SDIO: ._SB.GPO2 patilla 26 (FED0E168h) := 0$" "^ACPI: SDIO: ._SB.GPO2 patilla 26 (FED0E168h) := 1$" \
   "^ACPI: SDIO: _PS0 de ._SB_\.SDHC: hecho$" "^ACPI: SDIO: hijo ._SB_\.SDHC\.RTLW OBDA8723 (dirección 1)$" "^ACPI: SDIO: _PS0 de ._SB_\.SDHC\.RTLW: hecho$" \
   "^ACPI: SDIO: lo aprendido, en .SDIO\.TXT ([0-9]* octetos: la controladora en FEB00000h, BAR1 FEB01000h, OBDA8723, 3 escrituras en las patillas)$"
 saca $X/u.img SDIO.TXT $X/sdio.txt
