@@ -174,6 +174,9 @@ f3C:
         jc .nuevo
         test byte [si+11], 0x11     ; ni directorios ni los de solo leer
         jnz f_acceso
+        call h_abierto              ; ni uno abierto: se leería lo que se va
+        mov ax, E_COMPARTIR         ; soltando (COPIAR X . lo dejaba en un
+        jc f_error                  ; grupo). Como DOS con SHARE: error 32
         mov ax, [si+26]
         call fat_suelta
         jmp short .comun
@@ -265,6 +268,37 @@ abre_fin:
         dec byte [abiertos]
         pop ax
         jmp f_error
+
+; (interna) ¿hay un archivo abierto sobre la entrada SI (del sector [di_sec]
+; de la unidad cargada)? CF=1 si lo hay. Cambia AX
+h_abierto:
+        push bx
+        push cx
+        mov bx, fichas
+        mov cl, [n_arch]
+        xor ch, ch
+.b:
+        cmp byte [bx+H_USO], 1
+        jne .s
+        mov al, [bx+H_UNI]
+        cmp al, [unidad_act]
+        jne .s
+        mov ax, [bx+H_DSEC]
+        cmp ax, [di_sec]
+        jne .s
+        mov ax, si
+        sub ax, sector
+        cmp ax, [bx+H_DOFF]
+        stc
+        je .x
+.s:
+        add bx, H_TAM_F
+        loop .b
+        clc
+.x:
+        pop cx
+        pop bx
+        ret
 
 ; abre para leer el archivo de `ruta` (para el propio núcleo) -> BX=su ficha.
 ; CF=1, AX=error

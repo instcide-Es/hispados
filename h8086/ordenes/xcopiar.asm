@@ -237,7 +237,12 @@ copia_arch:
         DOS 0x3C
         jnc .creado
         mov bx, [h1]
+        push ax
         DOS 0x3E
+        pop ax
+        mov si, m_e_mismo           ; (32: está abierto, es el mismo origen)
+        cmp ax, 32
+        je .dice
 .mal0:
         mov si, m_e_no
         jmp short .dice
@@ -321,6 +326,7 @@ m_uso       db "XCOPIAR - copia archivos y directorios enteros", 10
 m_copiados  db " archivos copiados.", 10, 0
 m_e_no      db "  no se ha podido copiar.", 10, 0
 m_e_lleno   db "  el disco está lleno.", 10, 0
+m_e_mismo   db "  no se puede copiar sobre sí mismo.", 10, 0
 con_sub     db 0
 mal         db 0
 sin_preguntar db 0

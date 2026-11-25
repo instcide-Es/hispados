@@ -73,6 +73,7 @@ E_OTRO_DISP equ 17
 E_NO_MAS    equ 18
 E_PROTEGIDO equ 19
 E_DISCO     equ 21
+E_COMPARTIR equ 32                  ; abierto: crearlo encima lo vaciaría
 CPU_286     equ 3
 CPU_386     equ 4
 
@@ -835,7 +836,7 @@ pon_error:
 errores     dw E_FORMATO, m_e_formato, E_ARCHIVO, m_e_no_esta, E_RUTA, m_e_ruta, E_MUCHOS, m_e_muchos
             dw E_ACCESO, m_e_acceso, E_DIR_ACT, m_e_dir_act, E_OTRO_DISP, m_e_otro_dir
             dw E_NO_MAS, m_e_no_esta, E_PROTEGIDO, m_e_protegido, E_DISCO, m_e_disco
-            dw E_UNIDAD, m_e_unidad
+            dw E_UNIDAD, m_e_unidad, E_COMPARTIR, m_e_mismo
             dw 0
 
 ; pide un trozo de memoria de borrador (8 K, o lo que haya) para la orden que

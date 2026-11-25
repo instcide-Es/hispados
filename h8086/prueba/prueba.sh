@@ -18,7 +18,7 @@ fail=0
 # como un 8086 (sin A20, HMA ni memoria extendida): se hace con copias de los
 # disquetes en las que se cambia el octeto que el núcleo lleva para eso
 # detrás de la marca «HCFG:»
-IMG=build
+IMG=${IMG:-build}
 if [ -n "${MODO:-}" ]; then
   IMG=$T/img; mkdir -p $IMG
   python3 - $IMG "$MODO" build/hispa8086-*.img <<'PY'
@@ -733,10 +733,12 @@ apaga
 . prueba/partes_cuentas.sh
 . prueba/partes_juegos.sh
 . prueba/partes_marcianos.sh
+. prueba/partes_14.sh
 PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 flechas v86 v86_flechas pasar duro formatea sistema partir medidas fuentes"
 PARTES="$PARTES pluma pluma_grande pluma_oficina"     # (PLUMA, del disquete de Oficina)
 PARTES="$PARTES cuentas cuentas_pantalla cuentas_ordenar cuentas_grande fat_sectores"     # (CUENTAS, del disquete de Oficina)
 PARTES="$PARTES derribo marcianos"     # (los juegos, del disquete de Juegos)
+PARTES="$PARTES auditoria1"     # (los arreglos de la auditoría de la 0.14)
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done
 n_ok=$(grep -c '^  OK' $T/salida.txt); n_fail=$(grep -c '^  FAIL' $T/salida.txt)

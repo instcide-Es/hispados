@@ -70,6 +70,7 @@ E_NO_MAS    equ 18                  ; no hay más archivos
 E_PROTEGIDO equ 19                  ; disco protegido contra escritura
 E_DISCO     equ 21                  ; unidad no preparada
 E_DISP      equ 29                  ; el dispositivo no ha podido escribir
+E_COMPARTIR equ 32                  ; está abierto (crearlo encima lo vaciaría)
 E_LLENO     equ 39                  ; disco lleno (interno)
 
 ; =============================================================================
