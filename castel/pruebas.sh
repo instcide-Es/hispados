@@ -235,6 +235,18 @@
 #      contra el modelo de la tarjeta (WIFISIM.BIN) con el microcódigo del
 #      disco, la BCM43224 y (BCM4313) la BCM4313 con su PHY LCN; y el escritorio: el icono con rayitas, la ventana del Wi-Fi
 #      (la lista, la contraseña con asteriscos, conectar) y Configuración.
+#  55. (MÓVIL, SOLO=movil) El móvil por USB, el «Anclaje de USB» de Android
+#      (pruebas_movil.sh): RNDIS y CDC-NCM (usbmovil.cas y rmovil.cas) en QEMU,
+#      con el móvil de mentira (tests/movil_ncm.py): DHCP, PING, la prioridad
+#      cable > móvil > Wi-Fi, enchufar y desenchufar.
+#  56. (BLUETOOTH, SOLO=bt) El Bluetooth (pruebas_bt.sh): la pila de BT.BIN contra
+#      el modelo (build/bt_prueba) y en QEMU con el adaptador de mentira por
+#      usb-redir (emparejar, teclear, reconectar, la ventana, el Intel 0AAA).
+#  57. (RTL8723BS, SOLO=rtl) El Wi-Fi por SDIO de las tabletas Bay Trail (pruebas_rtl.sh):
+#      el SDIO y la Realtek RTL8723BS contra un modelo (tests/wifi/rtl_sim.c), en el
+#      anfitrión (build/rtl_prueba) y en QEMU (WIFISIM.BIN «chiprtl»: WPA2, DHCP, PING);
+#      sin firmware; y ACPI.BIN, que aprende la SDIO y su _PS0 (las patillas GPIO) en
+#      \SDIO.TXT con una SSDT de tableta, y WIFI.BIN, que lo usa sin ACPI.
 #  54. (INTEL, SOLO=intel) El Wi-Fi de Intel (wifi/nucleo/radio_iwl.c): el lector del
 #      firmware (.ucode) y el controlador de la 7265 contra el modelo de la tarjeta
 #      (tests/wifi/iwl_modelo.c); en QEMU, la e1000 no pone en marcha WIFI.BIN.
@@ -445,6 +457,7 @@
 #   SOLO=touchpad ./pruebas.sh    la primera y la 50 (TOUCHPAD: el touchpad; pruebas_touchpad.sh)
 #   SOLO=sdhci ./pruebas.sh       la primera y la 53 (SDHCI: las tarjetas SD y el eMMC; pruebas_sdhci.sh)
 #   SOLO=movil ./pruebas.sh       la primera y la 55 (MÓVIL: el móvil por USB, el anclaje de USB de Android; pruebas_movil.sh)
+#   SOLO=rtl ./pruebas.sh         la primera y la 57 (RTL8723BS: el Wi-Fi por SDIO de las tabletas; pruebas_rtl.sh; RTL_FW=rtl8723bs_nic.bin)
 #   SOLO=punteros ./pruebas.sh    la primera y la 51 (PUNTEROS: los punteros del ratón; pruebas_punteros.sh)
 #   SOLO=bt ./pruebas.sh          la primera y la 56 (BLUETOOTH: pruebas_bt.sh)
 #   SOLO=i2chid ./pruebas.sh      la primera y la 52 (I2CHID: los touchpads HID sobre I2C; pruebas_i2chid.sh)
@@ -516,6 +529,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas_compat.sh          # (COMPAT) la parte 49, como parte_compat
 . $AQUI/pruebas_touchpad.sh        # (TOUCHPAD) la parte 50, como parte_touchpad
 . $AQUI/pruebas_sdhci.sh           # (SDHCI) la parte 53, como parte_sdhci
+. $AQUI/pruebas_rtl.sh             # (RTL8723BS) la parte 57, como parte_rtl
 . $AQUI/pruebas_punteros.sh        # (PUNTEROS) la parte 51, como parte_punteros
 . $AQUI/pruebas_i2chid.sh          # (I2CHID) la parte 52, como parte_i2chid
 . $AQUI/pruebas_movil.sh           # (MÓVIL) la parte 55, como parte_movil
@@ -542,7 +556,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil|bt) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil|bt|rtl) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -6143,6 +6157,8 @@ if parte08 compat; then parte_compat; else echo "  (SOLO=${SOLO08:-$SOLO}: sin e
 if parte08 touchpad; then parte_touchpad; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el touchpad)"; fi
 # ------------------------- 53. (SDHCI) las tarjetas SD y el eMMC (pruebas_sdhci.sh)
 if parte08 sdhci; then parte_sdhci; else echo "  (SOLO=${SOLO08:-$SOLO}: sin las tarjetas SD)"; fi
+# ------------------------- 57. (RTL8723BS) el Wi-Fi por SDIO de las tabletas (pruebas_rtl.sh)
+if parte08 rtl; then parte_rtl; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Wi-Fi por SDIO)"; fi
 # ------------------------- 51. (PUNTEROS) los punteros del ratón (pruebas_punteros.sh)
 if parte08 punteros; then parte_punteros; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los punteros del ratón)"; fi
 # ------------------------- 52. (I2CHID) los touchpads HID sobre I2C (pruebas_i2chid.sh)

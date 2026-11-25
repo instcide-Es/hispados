@@ -13,8 +13,9 @@
 #   3. sin tarjeta (la ranura vacía): lo dice enseguida; sin «escritura», ni
 #      un sector escrito;
 #   4. el modo ACPI: una SSDT de prueba (tests/acpi/hazsdhci.py) dice la
-#      controladora (80860F16, con su _CRS) y la SDIO (INT33BB, que no se
-#      toca); con «sdhcisinpci», el núcleo solo la conoce por ACPI.BIN (la
+#      controladora (80860F16, con su _CRS) y la SDIO (INT33BB, la del Wi-Fi:
+#      el núcleo no la toca; ACPI.BIN la apunta en \SDIO.TXT, lo de la parte
+#      55); con «sdhcisinpci», el núcleo solo la conoce por ACPI.BIN (la
 #      llamada 160) y la tarjeta sale como disco nuevo (y, como QEMU no deja
 #      el DMA sin el PCI, se ve el paso de ADMA2 a PIO); dada a mano
 #      («sdhci=XXXXXXXX»); y aprendida: \SDHCI.TXT en la memoria USB, que vale
@@ -93,9 +94,9 @@ I=$X/acpi.img; sdhc_tarjeta $I
 SD=$I MODULOS=$X/ACPI.BIN,$X/ORDENES.BIN ARRANQUE="ordenes sdhcisinpci" QEMU_MAS="-acpitable file=$X/sdhci.aml" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN \
   ":pausa 4" "type c:\\textos\\pirata.txt" salir sdhci apagar > $X/acpi.sal 2>&1
 S=$X/acpi.sal
-mira "SDHCI, modo ACPI: ACPI.BIN halla en la SSDT la controladora (80860F16: su _CRS con Memory32Fixed e Interrupt, su _PS0) y la SDIO del Wi-Fi (INT33BB _UID 2, que no se toca)" \
+mira "SDHCI, modo ACPI: ACPI.BIN halla en la SSDT la controladora (80860F16: su _CRS con Memory32Fixed e Interrupt, su _PS0) y la SDIO del Wi-Fi (INT33BB _UID 2: para WIFI.BIN)" \
   "^ACPI: SDHCI: ._SB_\.SDHB 80860F16 _UID 1 (SD), _STA Fh: memoria en ${base}h (4096 octetos), IRQ 46, _PS0 hecho$" \
-  "^ACPI: SDHCI: ._SB_\.SDHC INT33BB _UID 2 (SDIO), _STA Fh: memoria en FEB00000h (4096 octetos) (la SDIO, la del Wi-Fi: no se toca)$" \
+  "^ACPI: SDHCI: ._SB_\.SDHC INT33BB _UID 2 (SDIO), _STA Fh: memoria en FEB00000h (4096 octetos) (la SDIO, la del Wi-Fi)$" \
   "^ACPI: SDHCI: 2 controladoras SD/eMMC en ACPI$"
 mira "SDHCI, modo ACPI: sin verla en el PCI («sdhcisinpci»), el núcleo la arranca con lo que le da ACPI.BIN (llamada 160) y la tarjeta es un disco nuevo, C:" \
   "^sdhci: en el PCI no hay controladoras SD/eMMC (clase 08 05)$" "sdhci: ACPI dice ._SB_\.SDHB (80860F16, SD), _STA Fh, en $base, IRQ 46$" \

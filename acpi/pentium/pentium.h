@@ -142,5 +142,10 @@ struct pe_sdhci {
 	char ruta[48], hid[16], uid[16];
 };
 int sdhci_busca(struct pe_sdhci *f, int cabe);
+/* (RTL8723BS) la SDIO del Wi-Fi: su _PS0 y el de su hijo (con las patillas
+ * GPIO de Bay Trail) y lo aprendido, a \SDIO.TXT (acpi/pentium/sdio.c);
+ * con «sinsdio», no se toca */
+void sdio_aprende(void *h, struct pe_sdhci *f);
+extern int sdhci_sin_sdio;
 
 #endif

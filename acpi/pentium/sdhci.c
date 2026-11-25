@@ -59,6 +59,8 @@ static u32 clase_de(const char *hid, const char *uid)
 	return SDHCI_NOSE;
 }
 
+int sdhci_sin_sdio;		/* (RTL8723BS) «sinsdio» */
+
 struct busca {
 	struct pe_sdhci *f;
 	int n, cabe;
@@ -150,7 +152,7 @@ static ACPI_STATUS un_dispositivo(ACPI_HANDLE h, UINT32 nivel, void *ctx, void *
 	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
 		ruta[0] = 0;
 	copia(f->ruta, ruta, sizeof f->ruta);
-	/* encendida (D0), como Linux; la SDIO del Wi-Fi no se toca */
+	/* encendida (D0), como Linux; la SDIO del Wi-Fi, después (sdio.c) */
 	if (f->clase != SDHCI_SDIO && ACPI_SUCCESS(AcpiGetHandle(h, "_PS0", &ps0))) {
 		f->ps0 = ACPI_SUCCESS(AcpiEvaluateObject(h, "_PS0", NULL, NULL)) ? 1 : 2;
 	}
@@ -166,8 +168,11 @@ static ACPI_STATUS un_dispositivo(ACPI_HANDLE h, UINT32 nivel, void *ctx, void *
 	if (f->ps0)
 		reg(", _PS0 %s", f->ps0 == 1 ? "hecho" : "falla");
 	if (f->clase == SDHCI_SDIO)
-		reg(" (la SDIO, la del Wi-Fi: no se toca)");
+		reg(sdhci_sin_sdio ? " (la SDIO, la del Wi-Fi: «sinsdio», no se toca)" : " (la SDIO, la del Wi-Fi)");
 	reg("\n");
+	/* (RTL8723BS) la del Wi-Fi: encenderla con su hijo (el chip) y aprenderlo */
+	if (f->clase == SDHCI_SDIO && f->base && !sdhci_sin_sdio)
+		sdio_aprende(h, f);
 	return AE_OK;
 }
 

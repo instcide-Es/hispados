@@ -54,6 +54,9 @@
 # grub-efi-ia32-bin, solo BIOS, como antes; SIN_UEFI=1, también.
 # (SDHCI) Con PRUEBA_SDHCI=1, la memoria de prueba del eMMC y la tarjeta SD: sus
 # cuatro entradas primero (sin ACPI, con ACPI, la consola y por PIO).
+# (RTL8723BS) Con PRUEBA_WIFI_SDIO=1, la del Wi-Fi por SDIO de las tabletas: sus
+# tres entradas primero (sin ACPI, con ACPI —aprende \SDIO.TXT— y las órdenes)
+# y un RED.INI con Registro=SI (RED.LOG) y Preferir=WIFI.
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc); (UEFI) y grub-efi-amd64-bin
 # y grub-efi-ia32-bin (grub-mkimage).
@@ -107,6 +110,8 @@ if [ -n "${TERMO:-}" ]; then
   bash $AQUI/termo/prepara_memoria.sh $W/termo
 fi
 cp $W/f/* $W/m/
+# (RTL8723BS) la memoria de prueba del Wi-Fi por SDIO: RED.LOG y el Wi-Fi primero
+[ -n "${PRUEBA_WIFI_SDIO:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
 [ -n "${TERMO:-}" ] && cp -r $W/termo $W/m/TERMO
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
@@ -220,6 +225,11 @@ G
     # (SDHCI) con PRUEBA_SDHCI=1, la memoria de prueba del eMMC y la tarjeta SD
     # (las tabletas Bay Trail: Acer One 10, Medion S2217), primero: sin ACPI
     # (el Acer se congela con ACPI.BIN), con ACPI, la consola y por PIO
+    if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
+      menu_efi "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred" "$M2" auto
+      menu_efi "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred" "$M2" auto
+      menu_efi "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred" "$M2" auto
+    fi
     if [ -n "${PRUEBA_SDHCI:-}" ]; then
       menu_efi "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi" "$M2" auto
       menu_efi "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N" "$M2" auto
@@ -294,6 +304,11 @@ G
     entrada "Termometro + prueba COMPLETA de la memoria RAM (sola al abrirse; de 15 min a 1 h)" ESCRIT8.BIN "escritorio $N termo ramcompleta" "1920x1080x32,1920x1080x24,1366x768x32,1366x768x24,1024x768x32,1024x768x24,auto"
   fi
   # (SDHCI) la memoria de prueba del eMMC y la SD, por la BIOS (el Medion con la HispaBIOS)
+  if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
+    entrada "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred"
+    entrada "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred"
+    entrada "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred"
+  fi
   if [ -n "${PRUEBA_SDHCI:-}" ]; then
     entrada "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi"
     entrada "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N"

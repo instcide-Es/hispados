@@ -36,6 +36,15 @@ Las tarjetas que lleva:
     en esas carpetas; si falta, WIFI.LOG dice dónde ha mirado). Las Intel
     más nuevas (9560, AX201, AX211) se reconocen y lo dice WIFI.LOG, pero
     todavía no se llevan.
+  - (EN PRUEBAS) Realtek RTL8723BS por SDIO (la de las tabletas Bay Trail:
+    el Acer One 10, el Medion S2217): el controlador «rtl8723bs» de Linux
+    (lo mínimo). Solo se ha probado contra un modelo: si no va, mande
+    WIFI.LOG. Necesita el FIRMWARE DE REALTEK, que NO va en este paquete:
+    rtl8723bs_nic.bin de linux-firmware (carpeta rtlwifi; allí es un enlace
+    a rtl8723bu_nic.bin), en X:\FIRMWARE\ de la memoria USB (las mismas
+    carpetas que el de Intel). En las tabletas que esconden la controladora
+    del PCI, arranque UNA VEZ con ACPI: ACPI.BIN aprende dónde está y cómo
+    se enciende el chip (\SDIO.TXT) y desde entonces va también sin ACPI.
 Redes abiertas y con WPA2-Personal (AES); 2,4 GHz, 802.11b/g. No: WEP, WPA
 antigua (TKIP), WPA2-Empresa, WPA3.
 
@@ -50,6 +59,10 @@ WIFI.BIN junta código de varios:
     Communications Inc.; y sus contribuidores.
   - bcma (el bus de los chips de Broadcom) y cordic (contribuidores de
     Linux): GPL-2.0 (solo la versión 2, la del núcleo de Linux).
+  - (RTL8723BS) lo de la Realtek (radio_rtl.c y las tablas de
+    linux/rtl8723bs/) sale de drivers/staging/rtl8723bs de Linux 6.6:
+    GPL-2.0 (solo la versión 2). Copyright(c) 2007 - 2012 Realtek
+    Corporation; y los contribuidores de Linux.
   Por eso WIFI.BIN entero se reparte bajo la GPL-2.0 (el texto, al final de
   este archivo). Los fuentes: los de Linux 5.10, sin cambiar, y los nuestros,
   en el repositorio de Hispa-DOS (las carpetas wifi/ y castel/nucleo32/wifi/),
