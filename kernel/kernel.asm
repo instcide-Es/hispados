@@ -11105,7 +11105,36 @@ fn_0c:
         jmp fn_06
 
 ; ---- unidades ----
+; ---- 0Dh: restaurar disco. Como en MS-DOS, solo vacía los búferes (y
+; olvida las copias en memoria: los extraíbles se vuelven a leer en el
+; siguiente acceso); las carpetas actuales se conservan. Muchos programas
+; la llaman tras escribir. Volver a mirar los discos y las particiones
+; (FDISK, FORMAT) es la función propia AX=336Ah (disk_rescan).
 fn_0d:
+        call fat_flush
+        call fsinfo_flush
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+        mov si, drv_tab
+        mov cx, NDRV
+.l:
+        test byte [si+D_FLAGS], DF_FIXED
+        jnz .n
+        and byte [si+D_FLAGS], ~(DF_MOUNTED | DF_ISO)
+.n:
+        add si, DRV_LEN
+        loop .l
+        test byte [cur_drv+D_FLAGS], DF_FIXED
+        jnz .r
+        and byte [cur_drv+D_FLAGS], ~(DF_MOUNTED | DF_ISO)
+.r:
+        ret
+
+; volver a mirar los discos (lo que hacía antes 0Dh): las unidades y sus
+; particiones de nuevo, y las carpetas actuales de C: en adelante, a la raíz
+disk_rescan:
+        call fat_flush
+        call fsinfo_flush
         call drives_scan
         push es
         push ds
@@ -11115,6 +11144,7 @@ fn_0d:
         xor al, al
         rep stosb
         pop es
+        call cds_all
         ret
 fn_0e:
         mov al, [F_DL]
@@ -11861,6 +11891,14 @@ fn_33:
         je .letras
         cmp al, 0x69
         je .quees
+        cmp al, 0x6A
+        je .rescan
+        ret
+        ; AX=336Ah (propia): volver a mirar los discos y las particiones
+        ; (FDISK, FORMAT). Devuelve BX = 'HD' (en un DOS sin ella, BX igual)
+.rescan:
+        call disk_rescan
+        mov word [F_BX], 'HD'
         ret
 .get:
         mov al, [break_flag]

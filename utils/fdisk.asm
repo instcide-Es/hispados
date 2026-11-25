@@ -2023,8 +2023,16 @@ write_mbr:
         ret
 
 reread:
-        mov ah, 0x0D                ; el núcleo relee las particiones
+        ; el núcleo relee las particiones: AX=336Ah (propia de Hispa-DOS;
+        ; 0Dh ya solo vacía los búferes, como en MS-DOS). En otro DOS, 0Dh.
+        xor bx, bx
+        mov ax, 0x336A
         int 0x21
+        cmp bx, 'HD'
+        je .r
+        mov ah, 0x0D
+        int 0x21
+.r:
         ret
 
 ; CF (y mensaje) si el disco no tiene tabla de particiones
