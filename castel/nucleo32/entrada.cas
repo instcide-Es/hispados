@@ -21,6 +21,15 @@
 ;  Se salta si un usuario entra solo (cuentas.cas: «entra_solo», sin
 ;  contraseña: la biblioteca del HP Mini; y el usuario de antes de la 0.9,
 ;  hasta que se ponga una contraseña) y si no hay usuarios (sin instalar).
+;
+;  (0.8.11, SIN-ADMIN) SIN NINGÚN ADMINISTRADOR (Cuentas.sin_administrador:
+;  el HP Mini con solo «Biblio2», normal) no se salta: arriba, «Este equipo
+;  no tiene administrador» con «Crear un administrador» (F2: nombre y la
+;  contraseña dos veces) y «Hacer administrador a X» (F3: X, el elegido, si
+;  tiene contraseña, escribiéndola). Solo aquí y en la entrada en texto, que
+;  son la pantalla y el teclado de verdad: nunca por SSH ni por la red. Lo
+;  hace usuario.cas (recupera_admin_nuevo, recupera_admin_de) y queda en
+;  \HISPA\USUARIOS.LOG. Quien no quiera, entra como siempre.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
 módulo Entrada
@@ -31,6 +40,8 @@ módulo Entrada
     público constante E_DENTRO = 1              ; ha entrado alguien
     público constante E_APAGAR = 2
     público constante E_REINICIAR = 3
+    constante TECLA_F2 = 0x13C                  ; (SIN-ADMIN) crear un administrador
+    constante TECLA_F3 = 0x13D                  ; (SIN-ADMIN) hacer administrador al elegido
 
     constante TINTA = 0x14294A
     constante BLANCO = 0xFFFFFF
@@ -50,6 +61,18 @@ módulo Entrada
     variable fichas_x, fichas_y: ent32          ; dónde empieza la primera ficha
     variable por_fila: nat32
     variable campo_y: ent32
+    ; (0.8.11, SIN-ADMIN) sin ningún administrador: el aviso y lo de crear uno
+    variable recuperar: bool                    ; este equipo no tiene administrador
+    variable creando: bool                      ; con el formulario de «Crear un administrador»
+    variable foco: nat32                        ; 0: el nombre; 1: la contraseña; 2: otra vez
+    variable nuevo_n: arreglo [24] de byte
+    variable c1: arreglo [128] de byte
+    variable c2: arreglo [128] de byte
+    variable n1, n2: nat32
+    variable aviso_bueno: bool                  ; el aviso, en verde (no es un fallo)
+    variable ban_x, ban_y, ban_an, bot1_x, bot1_an, bot2_x, bot2_an, bot_y: ent32
+    variable form_x, form_y: ent32
+    variable hacer_t: arreglo [64] de byte      ; «Hacer administrador a X (F3)»
 
     ; ---- las caras (la imagen de cada usuario): un color y una forma (los
     ; dos: no depende solo del color) ----
@@ -98,6 +121,12 @@ módulo Entrada
         copiar_hasta(r, "versión ", 96)
         concatenar(r, VERSIÓN_TEXTO)
         texto(valor(l), 86, 46, r, 0xD3E7FD)
+        si recuperar entonces pinta_recuperar(valor(l)) fin
+        si creando entonces
+            pinta_formulario(valor(l))
+            repintada(v_entrada, 0, 0, an, al)
+            devolver
+        fin
         texto_negrita(valor(l), an div 2 - ancho_texto("Elija su usuario") div 2, fichas_y - 40, "Elija su usuario", BLANCO)
         para i desde 1 hasta n_ids hacer
             c := de_id(ids[i - 1])
@@ -146,15 +175,210 @@ módulo Entrada
             texto_negrita(valor(l), x, yy, "Sin contraseña: pulse «Entrar» (o Intro).", BLANCO)
             pinta_botón(valor(l), x + 276, yy + 21, 104, "Entrar", 0x5CC45E, 0x2A8A3C)
         fin
-        si aviso <> nulo entonces
-            rectángulo(valor(l), x - 4, yy + 64, ancho_texto(aviso) + 16, 26, 0xFEE2E2)
-            texto_negrita(valor(l), x + 4, yy + 69, aviso, ROJO)
-        fin
+        pinta_aviso(valor(l), x, yy + 64)
         texto(valor(l), 24, al - 74, "Flechas: otro usuario. Intro: entrar.", 0xD3E7FD)
         ; abajo a la derecha: apagar y reiniciar
         pinta_botón(valor(l), an - 252, al - 56, 110, "Reiniciar", 0x8FA6C4, 0x5F7699)
         pinta_botón(valor(l), an - 128, al - 56, 110, "Apagar", 0xE06A4A, 0xB0391C)
         repintada(v_entrada, 0, 0, an, al)
+    fin
+
+    función pinta_aviso(ref l: Lienzo, x: ent32, yy: ent32)
+        si aviso = nulo entonces devolver fin
+        si aviso_bueno entonces
+            rectángulo(l, x - 4, yy, ancho_texto(aviso) + 16, 26, 0xDCFCE7)
+            texto_negrita(l, x + 4, yy + 5, aviso, 0x166534)
+        sino
+            rectángulo(l, x - 4, yy, ancho_texto(aviso) + 16, 26, 0xFEE2E2)
+            texto_negrita(l, x + 4, yy + 5, aviso, ROJO)
+        fin
+    fin
+
+    ; (SIN-ADMIN) el elegido, si tiene contraseña (se le puede hacer administrador)
+    función elegido_con_clave(): puntero a Cuenta
+        variable c: puntero a Cuenta
+        si elegido >= n_ids entonces devolver nulo fin
+        c := de_id(ids[elegido])
+        si c = nulo o c.clave[0] = 0 entonces devolver nulo fin
+        devolver c
+    fin
+
+    ; (SIN-ADMIN) el aviso de arriba, con sus dos botones
+    función pinta_recuperar(ref l: Lienzo)
+        variable c: puntero a Cuenta
+        ban_an := an - 48
+        si ban_an > 760 entonces ban_an := 760 fin
+        ban_x := an div 2 - ban_an div 2
+        ban_y := 70
+        rectángulo(l, ban_x - 3, ban_y - 3, ban_an + 6, 106, BLANCO)
+        rectángulo(l, ban_x, ban_y, ban_an, 100, 0xFEF3C7)
+        texto_negrita(l, ban_x + 12, ban_y + 8, "Este equipo no tiene ningún administrador.", 0x7C2D12)
+        texto(l, ban_x + 12, ban_y + 28, "Sin él, nadie puede cambiar el sistema (C:\\HISPA) ni dar de alta a nadie.", 0x7C2D12)
+        bot_y := ban_y + 54
+        bot1_x := ban_x + 12
+        bot1_an := ancho_texto("Crear un administrador (F2)") + 28
+        pinta_botón(l, bot1_x, bot_y, bot1_an, "Crear un administrador (F2)", 0x5CC45E, 0x2A8A3C)
+        bot2_an := 0
+        c := elegido_con_clave()
+        si c <> nulo y no creando entonces
+            copiar_hasta(hacer_t, "Hacer administrador a ", 64)
+            concatenar(hacer_t, dirección(c.nombre[0]))
+            concatenar(hacer_t, " (F3)")
+            bot2_x := bot1_x + bot1_an + 16
+            bot2_an := ancho_texto(hacer_t) + 28
+            si bot2_x + bot2_an > ban_x + ban_an - 8 entonces bot2_an := 0 sino pinta_botón(l, bot2_x, bot_y, bot2_an, hacer_t, 0x5AA6F4, 0x2468C8) fin
+        fin
+    fin
+
+    función pinta_campo(ref l: Lienzo, x: ent32, yy: ent32, rótulo: puntero a byte, t: puntero a byte, n: nat32, oculto: bool, con_foco: bool)
+        variable i: nat32
+        texto_negrita(l, x, yy, rótulo, BLANCO)
+        si con_foco entonces rectángulo(l, x - 3, yy + 19, 386, 40, BLANCO) fin
+        rectángulo(l, x, yy + 22, 380, 34, AZUL)
+        rectángulo(l, x + 3, yy + 25, 374, 28, BLANCO)
+        si oculto entonces
+            para i desde 1 hasta n hacer
+                si i <= 40 entonces círculo(l, x + 14 + ent32(i - 1) * 9, yy + 39, 3, TINTA) fin
+            fin
+            si con_foco y n <= 40 entonces rectángulo(l, x + 10 + ent32(n) * 9, yy + 30, 2, 18, TINTA) fin
+        sino
+            texto(l, x + 10, yy + 31, t, TINTA)
+            si con_foco entonces rectángulo(l, x + 11 + ancho_texto(t), yy + 30, 2, 18, TINTA) fin
+        fin
+    fin
+
+    ; (SIN-ADMIN) «Crear un administrador»: el nombre y la contraseña dos veces
+    función pinta_formulario(ref l: Lienzo)
+        form_x := an div 2 - 190
+        form_y := ban_y + 120
+        texto_negrita(l, form_x, form_y, "Crear un administrador", BLANCO)
+        texto(l, form_x, form_y + 20, "Tab: el campo siguiente. Intro: crearlo. Esc: volver.", 0xD3E7FD)
+        pinta_campo(l, form_x, form_y + 44, "Nombre:", nuevo_n, 0, falso, foco = 0)
+        pinta_campo(l, form_x, form_y + 108, "Contraseña (al menos 4 letras):", nulo, n1, cierto, foco = 1)
+        pinta_campo(l, form_x, form_y + 172, "La misma, otra vez:", nulo, n2, cierto, foco = 2)
+        pinta_botón(l, form_x, form_y + 240, 104, "Crear", 0x5CC45E, 0x2A8A3C)
+        pinta_botón(l, form_x + 120, form_y + 240, 104, "Volver", 0x8FA6C4, 0x5F7699)
+        pinta_aviso(l, form_x, form_y + 288)
+        pinta_botón(l, an - 252, al - 56, 110, "Reiniciar", 0x8FA6C4, 0x5F7699)
+        pinta_botón(l, an - 128, al - 56, 110, "Apagar", 0xE06A4A, 0xB0391C)
+    fin
+
+    función limpia_formulario()
+        llenar(c1, 128, 0)
+        llenar(c2, 128, 0)
+        n1 := 0
+        n2 := 0
+    fin
+
+    ; (SIN-ADMIN) crea el administrador del formulario: cierto si ha entrado (como él)
+    función crea_admin(): bool
+        variable r: nat32
+        variable c: puntero a Cuenta
+        variable l: puntero a Lienzo
+        aviso_bueno := falso
+        si n1 <> n2 o comparar_memoria(c1, c2, n1) <> 0 entonces
+            aviso := texto_ra(RA_DISTINTAS)
+            limpia_formulario()
+            foco := 1
+            devolver falso
+        fin
+        l := lienzo_de(v_entrada)
+        si l <> nulo entonces
+            rectángulo(valor(l), form_x - 4, form_y + 288, 360, 26, 0xDCEAFB)
+            texto_negrita(valor(l), form_x + 4, form_y + 293, "Creando el administrador...", TINTA)
+            repintada(v_entrada, 0, 0, an, al)
+            pulso()
+        fin
+        r := recupera_admin_nuevo(nuevo_n, c1, n1, "en la pantalla de entrada")
+        limpia_formulario()
+        si r <> RA_HECHO entonces
+            aviso := texto_ra(r)
+            si r = RA_NOMBRE entonces foco := 0 sino foco := 1 fin
+            si r = RA_NO_HACE_FALTA entonces
+                creando := falso
+                recuperar := falso
+            fin
+            devolver falso
+        fin
+        escribir("entrada: se ha creado un administrador\n")
+        c := por_nombre(nuevo_n)
+        cierra_entrada()
+        si c <> nulo entonces abre_sesión(c.id) fin
+        devolver c <> nulo
+    fin
+
+    ; (SIN-ADMIN) hace administrador al elegido (con la contraseña escrita): cierto si ha entrado
+    función hace_admin(): bool
+        variable c: puntero a Cuenta
+        variable r: nat32
+        c := elegido_con_clave()
+        aviso_bueno := falso
+        si c = nulo entonces
+            aviso := texto_ra(RA_SIN_CLAVE)
+            devolver falso
+        fin
+        si n_clave = 0 entonces
+            aviso := "Escriba antes la contraseña de ese usuario."
+            devolver falso
+        fin
+        r := recupera_admin_de(c.id, clave, n_clave, "en la pantalla de entrada")
+        llenar(clave, 128, 0)
+        n_clave := 0
+        si r <> RA_HECHO entonces
+            aviso := texto_ra(r)
+            devolver falso
+        fin
+        escribir("entrada: un usuario pasa a ser administrador\n")
+        cierra_entrada()
+        abre_sesión(c.id)
+        devolver cierto
+    fin
+
+    ; (SIN-ADMIN) las teclas del formulario: E_DENTRO si ha entrado el nuevo
+    función tecla_formulario(k: nat32): nat32
+        variable n: nat32
+        si k = 27 entonces
+            creando := falso
+            limpia_formulario()
+            aviso := nulo
+        sino si k = 9 o k = TECLA_ABAJO entonces
+            foco := (foco + 1) mod 3
+        sino si k = TECLA_MAYÚS_TAB o k = TECLA_ARRIBA entonces
+            si foco = 0 entonces foco := 2 sino foco := foco - 1 fin
+        sino si k = '\n' entonces
+            si foco < 2 entonces
+                foco := foco + 1
+            sino
+                si crea_admin() entonces devolver E_DENTRO fin
+            fin
+        sino si k = 8 entonces
+            si foco = 0 entonces
+                n := longitud(nuevo_n)
+                si n > 0 entonces nuevo_n[n - 1] := 0 fin
+            sino si foco = 1 y n1 > 0 entonces
+                n1 := n1 - 1
+                c1[n1] := 0
+            sino si foco = 2 y n2 > 0 entonces
+                n2 := n2 - 1
+                c2[n2] := 0
+            fin
+        sino si k >= ' ' y k < 0x100 entonces
+            aviso := nulo
+            si foco = 0 entonces
+                n := longitud(nuevo_n)
+                si n < MAX_NOMBRE_C - 1 entonces
+                    nuevo_n[n] := byte(k)
+                    nuevo_n[n + 1] := 0
+                fin
+            sino si foco = 1 y n1 < 127 entonces
+                c1[n1] := byte(k)
+                n1 := n1 + 1
+            sino si foco = 2 y n2 < 127 entonces
+                c2[n2] := byte(k)
+                n2 := n2 + 1
+            fin
+        fin
+        devolver E_SIGUE
     fin
 
     ; abre la pantalla de entrada (el escritorio, al arrancar y al cerrar la sesión)
@@ -178,6 +402,16 @@ módulo Entrada
         filas := ent32((n_ids + por_fila - 1) div por_fila)
         fichas_x := an div 2 - (ent32(por_fila) * (FICHA_AN + 16) - 16) div 2
         fichas_y := 120
+        ; (SIN-ADMIN) sin administrador, el aviso de arriba (y las fichas, debajo)
+        recuperar := sin_administrador()
+        creando := falso
+        aviso_bueno := falso
+        nuevo_n[0] := 0
+        limpia_formulario()
+        si recuperar entonces
+            fichas_y := 230
+            escribir("entrada: este equipo no tiene administrador: se ofrece crear uno\n")
+        fin
         campo_y := fichas_y + filas * (FICHA_AL + 16) + 12
         si campo_y > al - 170 entonces campo_y := al - 170 fin
         elegido := 0
@@ -195,6 +429,8 @@ módulo Entrada
     función cierra_entrada()
         llenar(clave, 128, 0)
         n_clave := 0
+        limpia_formulario()
+        creando := falso
         cortina := 0
         si v_entrada <> 0 entonces cerrar_ventana(v_entrada, 0) fin
         v_entrada := 0
@@ -237,6 +473,53 @@ módulo Entrada
         devolver cierto
     fin
 
+    ; (SIN-ADMIN) un clic en los botones del aviso o del formulario: cierto si
+    ; era en uno (y «cambia»); si alguien ha entrado, la pantalla ya está cerrada
+    función toca_recuperar(x: ent32, yy: ent32, ref cambia: bool): bool
+        variable k: nat32
+        variable fy: ent32
+        si no creando y yy >= bot_y y yy < bot_y + 36 entonces
+            si x >= bot1_x y x < bot1_x + bot1_an entonces
+                creando := cierto
+                foco := 0
+                aviso := nulo
+                cambia := cierto
+                devolver cierto
+            fin
+            si bot2_an > 0 y x >= bot2_x y x < bot2_x + bot2_an entonces
+                hace_admin()
+                cambia := cierto
+                devolver cierto
+            fin
+        fin
+        si creando entonces
+            ; los campos y los botones del formulario
+            para k desde 0 hasta 2 hacer
+                fy := ent32(k) * 64
+                si x >= form_x y x < form_x + 380 y yy >= form_y + 66 + fy y yy < form_y + 100 + fy entonces
+                    foco := k
+                    cambia := cierto
+                    devolver cierto
+                fin
+            fin
+            si yy >= form_y + 240 y yy < form_y + 276 entonces
+                si x >= form_x y x < form_x + 104 entonces
+                    crea_admin()
+                    cambia := cierto
+                    devolver cierto
+                fin
+                si x >= form_x + 120 y x < form_x + 224 entonces
+                    creando := falso
+                    limpia_formulario()
+                    aviso := nulo
+                    cambia := cierto
+                    devolver cierto
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
     ; los sucesos de la pantalla de entrada (desde el bucle del escritorio):
     ; E_DENTRO si ha entrado alguien (el escritorio pone lo suyo), E_APAGAR o
     ; E_REINICIAR si se ha pedido; si no, E_SIGUE
@@ -248,7 +531,32 @@ módulo Entrada
         si v_entrada = 0 entonces devolver E_SIGUE fin
         mientras v_entrada <> 0 y saca_evento(v_entrada, 0, e) hacer
             cambia := falso
-            si e.clase = EV_TECLA entonces
+            si e.clase = EV_TECLA y creando entonces
+                si tecla_formulario(e.a) = E_DENTRO entonces devolver E_DENTRO fin
+                cambia := cierto
+            sino si e.clase = EV_TECLA y recuperar y e.a = TECLA_F2 entonces
+                creando := cierto
+                foco := 0
+                aviso := nulo
+                cambia := cierto
+            sino si e.clase = EV_TECLA y recuperar y e.a = TECLA_F3 entonces
+                si hace_admin() entonces devolver E_DENTRO fin
+                cambia := cierto
+            sino si e.clase = EV_RATÓN_BAJA y (recuperar o creando) y toca_recuperar(ent32(e.a), ent32(e.b), cambia) entonces
+                si v_entrada = 0 entonces devolver E_DENTRO fin
+            sino si e.clase = EV_RATÓN_BAJA y creando entonces
+                ; (con el formulario, las fichas no están; Reiniciar y Apagar, sí)
+                x := ent32(e.a)
+                yy := ent32(e.b)
+                si yy >= al - 56 y yy < al - 20 y x >= an - 252 y x < an - 142 entonces
+                    cierra_entrada()
+                    devolver E_REINICIAR
+                fin
+                si yy >= al - 56 y yy < al - 20 y x >= an - 128 y x < an - 18 entonces
+                    cierra_entrada()
+                    devolver E_APAGAR
+                fin
+            sino si e.clase = EV_TECLA entonces
                 si e.a = TECLA_IZQUIERDA o e.a = TECLA_ARRIBA o e.a = TECLA_MAYÚS_TAB entonces
                     si elegido > 0 entonces elegido := elegido - 1 sino elegido := n_ids - 1 fin
                     llenar(clave, 128, 0)
@@ -324,6 +632,96 @@ módulo Entrada
     ; -------------------------------------------------------------------------
     ;  Sin escritorio: en la consola de texto
     ; -------------------------------------------------------------------------
+    ; una línea tecleada en la consola (se ve lo que se escribe), a destino
+    función lee_línea_texto(destino: puntero a byte, cabe: nat32)
+        variable n, c: nat32
+        n := 0
+        mientras cierto hacer
+            c := leer_tecla()
+            si c = '\n' o c = '\r' entonces romper fin
+            si c = 8 entonces
+                si n > 0 entonces
+                    n := n - 1
+                    escribir("\x08 \x08")
+                fin
+            sino si c >= ' ' y c < 0x100 y n + 1 < cabe entonces
+                destino[n] := byte(c)
+                n := n + 1
+                escribir_car(c)
+            fin
+        fin
+        destino[n] := 0
+        escribir("\n")
+    fin
+
+    ; (0.8.11, SIN-ADMIN) sin ningún administrador, en la consola de texto (el
+    ; teclado de verdad): crear uno o hacerlo a uno con contraseña. Da el
+    ; número del que entra (el nuevo administrador), o 0 si no se hace nada
+    función recupera_en_texto(): nat32
+        variable w: arreglo [40] de byte
+        variable nombre: arreglo [40] de byte
+        variable r: nat32
+        variable cu: puntero a Cuenta
+        mientras sin_administrador() hacer
+            escribir("\nEste equipo no tiene ningún administrador: nadie puede cambiar el sistema (\\HISPA)\n")
+            escribir("ni dar de alta a nadie.\n")
+            escribir("  1  crear un administrador nuevo\n")
+            escribir("  2  hacer administrador a un usuario que tiene contraseña\n")
+            escribir("  Intro: ahora no\n")
+            escribir("¿Qué hacemos? ")
+            lee_línea_texto(w, 40)
+            si w[0] = 0 entonces devolver 0 fin
+            si w[0] = '1' entonces
+                escribir("Nombre del administrador: ")
+                lee_línea_texto(nombre, MAX_NOMBRE_C)
+                escribir("Su contraseña (al menos 4 letras): ")
+                si lee_clave_texto(0, c1, 128, n1) entonces
+                    escribir("Otra vez: ")
+                    si lee_clave_texto(0, c2, 128, n2) entonces
+                        si n1 <> n2 o comparar_memoria(c1, c2, n1) <> 0 entonces
+                            r := RA_DISTINTAS
+                        sino
+                            escribir("Un momento...\n")
+                            r := recupera_admin_nuevo(nombre, c1, n1, "en la consola")
+                        fin
+                        imprimir1("%s\n", nat32(texto_ra(r)))
+                        limpia_formulario()
+                        cu := por_nombre(nombre)
+                        si r = RA_HECHO y cu <> nulo entonces
+                            abre_sesión(cu.id)
+                            devolver cu.id
+                        fin
+                    fin
+                fin
+                limpia_formulario()
+            sino si w[0] = '2' entonces
+                escribir("Usuario: ")
+                lee_línea_texto(nombre, 40)
+                cu := por_nombre(nombre)
+                si cu = nulo entonces
+                    escribir("No hay ningún usuario que se llame así.\n")
+                sino si cu.clave[0] = 0 entonces
+                    imprimir1("%s\n", nat32(texto_ra(RA_SIN_CLAVE)))
+                sino
+                    si espera_por_fallos() > 0 entonces dormir(espera_por_fallos()) fin
+                    escribir("Su contraseña: ")
+                    si lee_clave_texto(0, clave, 128, n_clave) entonces
+                        escribir("Comprobando...\n")
+                        r := recupera_admin_de(cu.id, clave, n_clave, "en la consola")
+                        llenar(clave, 128, 0)
+                        imprimir1("%s\n", nat32(texto_ra(r)))
+                        si r = RA_HECHO entonces
+                            abre_sesión(cu.id)
+                            devolver cu.id
+                        fin
+                    fin
+                    llenar(clave, 128, 0)
+                fin
+            fin
+        fin
+        devolver 0
+    fin
+
     ; pregunta usuario y contraseña en la consola hasta que entra alguien (o,
     ; con «solo», si hay uno que entra solo, entra sin preguntar). Da su número
     público función entra_en_texto(solo: bool): nat32
@@ -331,6 +729,13 @@ módulo Entrada
         variable n, k, c: nat32
         variable cu: puntero a Cuenta
         si no hay_cuentas entonces devolver 0 fin
+        ; (SIN-ADMIN) sin ningún administrador, antes de nada (y nadie entra solo)
+        si sin_administrador() entonces
+            escribir("entrada: este equipo no tiene administrador: se ofrece crear uno\n")
+            k := recupera_en_texto()
+            si k <> 0 entonces devolver k fin
+            solo := falso
+        fin
         k := 0
         si solo entonces k := el_que_entra_solo() fin
         si k <> 0 entonces

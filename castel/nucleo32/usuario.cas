@@ -171,7 +171,7 @@ módulo Usuario
     ; de las pruebas mira que sea la misma que la de hpq.py)
     ; (PANEL) la 0.8.7: el Panel de control y la hora por Internet
     ; (TOUCHPAD) la 0.8.9 (antes, 0.8.8)
-    público constante VERSIÓN_TEXTO = "0.8.10"
+    público constante VERSIÓN_TEXTO = "0.8.11"
     público constante SIGUE = 0xFFFFFF00        ; (esperar sin quedarse) la tarea no ha acabado todavía
 
     ; ---- más errores (los de los archivos, en fat.cas) ----
@@ -1631,18 +1631,30 @@ módulo Usuario
                 devolver longitud(p)
             caso 5:
                 devolver sesión
+            caso 6:
+                ; (0.8.11, SIN-ADMIN) PAQUETES (su sello, nadie más) de un
+                ; usuario normal va a poner al día lo instalado con lo del
+                ; catálogo firmado: desde ahora escribe en la zona del sistema
+                ; (permisos.cas). Lo comprueba él (la firma, la serie, que
+                ; solo es ACTUALIZA, sin /FORZAR ni archivos sueltos)
+                si actual.sello <> SELLO_PAQUETES entonces devolver DENEGADO fin
+                si no actual.firmada entonces
+                    actual.firmada := cierto
+                    imprimir2("permisos: PAQUETES de %s pone al día lo del catálogo firmado (la tarea %u)\n", nat32(nombre_de_uid(actual.uid)), actual.id)
+                fin
+                devolver 0
         fin
         devolver NO_VALE
     fin
 
-    ; ¿queda algún administrador si el usuario id deja de serlo (o se quita)?
-    función queda_admin_sin(id: nat32): bool
-        variable i: nat32
-        para i desde 0 hasta MAX_CUENTAS - 1 hacer
-            si cuentas[i].usada y cuentas[i].admin y cuentas[i].id <> id entonces devolver cierto fin
-        fin
-        devolver falso
+    función nombre_de_uid(uid: nat32): puntero a byte
+        variable c: puntero a Cuenta
+        c := de_id(uid)
+        si c = nulo entonces devolver "el sistema" fin
+        devolver dirección(c.nombre[0])
     fin
+
+    ; (queda_admin_sin: en cuentas.cas, 0.8.11: solo cuentan los administradores con los que se puede entrar)
 
     ; la 201: Configuración › Usuarios (USUARIOS.BIN). Crear, quitar y cambiar
     ; los demás, solo un administrador; la contraseña propia, cada uno (con la
@@ -1744,6 +1756,142 @@ módulo Usuario
                 devolver 0
         fin
         devolver NO_VALE
+    fin
+
+    ; =========================================================================
+    ;  (0.8.11, SIN-ADMIN) Un equipo sin ningún administrador (el HP Mini de
+    ;  la asociación: solo «Biblio2», normal): nadie podría cambiar \HISPA,
+    ;  dar de alta a nadie ni encender SSHD. Lo arregla quien está delante de
+    ;  la pantalla de verdad (entrada.cas: la pantalla de entrada o la
+    ;  entrada en texto; NUNCA por SSH ni por la red: no hay llamada al
+    ;  sistema para esto), y solo mientras no haya ninguno:
+    ;   - crear uno nuevo, con nombre y contraseña (dos veces; al menos 4
+    ;     letras): el que entra solo sigue entrando solo, normal;
+    ;   - o hacer administrador a un usuario QUE TIENE contraseña,
+    ;     escribiéndola (la prueba de que es él). A uno sin contraseña no:
+    ;     sería dar el sistema entero a cualquiera que encienda el equipo
+    ;     (la biblioteca); para eso, crear uno.
+    ;  Queda en el registro del núcleo y en \HISPA\USUARIOS.LOG (lo lee
+    ;  cualquiera; solo lo escribe el núcleo).
+    ; =========================================================================
+    público constante RA_HECHO = 0
+    público constante RA_NO_HACE_FALTA = 1      ; ya hay un administrador
+    público constante RA_NOMBRE = 2             ; el nombre no vale o ya lo tiene otro
+    público constante RA_CORTA = 3              ; la contraseña, demasiado corta (al menos 4)
+    público constante RA_DISTINTAS = 4          ; las dos no son iguales
+    público constante RA_LLENO = 5
+    público constante RA_ARGON = 6              ; sin ARGON2.BIN
+    público constante RA_DISCO = 7              ; no se puede guardar
+    público constante RA_SIN_CLAVE = 8          ; (hacer administrador) ese no tiene contraseña
+    público constante RA_CLAVE_MALA = 9
+    público constante RA_ESPERA = 10            ; demasiados intentos
+    variable dd_ra: arreglo [8] de nat32
+
+    ; una línea a \HISPA\USUARIOS.LOG (con la fecha y la hora), y al registro
+    función apunta_usuarios_log(t: puntero a byte)
+        variable m, f, h: nat32
+        variable l: arreglo [200] de byte
+        ahora(f, h)
+        dd_ra[0] := (f >> 9) + 1980
+        dd_ra[1] := (f >> 5) yb 15
+        dd_ra[2] := f yb 31
+        dd_ra[3] := h >> 11
+        dd_ra[4] := (h >> 5) yb 63
+        dd_ra[5] := nat32(t)
+        formatear(l, 200, "%04u-%02u-%02u %02u:%02u %s\r\n", dirección(dd_ra[0]))
+        imprimir1("cuentas: %s\n", nat32(t))
+        si del_sistema = NINGUNA entonces devolver fin
+        m := abrir_archivo(del_sistema, "\\HISPA\\USUARIOS.LOG", PARA_AÑADIR)
+        si m >= PRIMER_ERROR entonces devolver fin
+        escribir_archivo(m, l, longitud(l))
+        cerrar_archivo(m)
+    fin
+
+    ; crea el administrador «nombre» con la contraseña (n letras, en la
+    ; página 437: la de la pantalla), si no hay ninguno. «dónde»: «en la
+    ; pantalla de entrada» o «en la consola». Da RA_...
+    público función recupera_admin_nuevo(nombre: puntero a byte, clave: puntero a byte, n: nat32, dónde: puntero a byte): nat32
+        variable id: nat32
+        variable c: puntero a Cuenta
+        variable t: arreglo [160] de byte
+        si no sin_administrador() entonces devolver RA_NO_HACE_FALTA fin
+        si n < 4 entonces devolver RA_CORTA fin
+        tomar(cerrojo_cuentas)
+        si no nombre_vale(nombre, 0) entonces
+            soltar(cerrojo_cuentas)
+            devolver RA_NOMBRE
+        fin
+        id := Cuentas.nueva(nombre, cierto, 0, falso)
+        si id = 0 entonces
+            soltar(cerrojo_cuentas)
+            devolver RA_LLENO
+        fin
+        c := de_id(id)
+        si no pon_clave(c, clave, n, falso) entonces
+            Cuentas.quita(id)
+            soltar(cerrojo_cuentas)
+            devolver RA_ARGON
+        fin
+        si no guarda_cuentas() entonces
+            carga_cuentas()
+            soltar(cerrojo_cuentas)
+            devolver RA_DISCO
+        fin
+        soltar(cerrojo_cuentas)
+        dd_ra[0] := nat32(dirección(c.nombre[0]))
+        dd_ra[1] := nat32(dónde)
+        formatear(t, 160, "no había ningún administrador: se crea «%s» (administrador, con contraseña) %s", dirección(dd_ra[0]))
+        apunta_usuarios_log(t)
+        devolver RA_HECHO
+    fin
+
+    ; hace administrador al usuario id, que tiene contraseña: hay que
+    ; escribirla (n letras, en la página 437). Da RA_...
+    público función recupera_admin_de(id: nat32, clave: puntero a byte, n: nat32, dónde: puntero a byte): nat32
+        variable c: puntero a Cuenta
+        variable t: arreglo [160] de byte
+        si no sin_administrador() entonces devolver RA_NO_HACE_FALTA fin
+        c := de_id(id)
+        si c = nulo entonces devolver RA_NOMBRE fin
+        si c.clave[0] = 0 entonces devolver RA_SIN_CLAVE fin
+        si espera_por_fallos() > 0 entonces devolver RA_ESPERA fin
+        si no comprueba_clave(c, clave, n, falso) entonces
+            apunta_fallo()
+            si falta_argon entonces devolver RA_ARGON fin
+            devolver RA_CLAVE_MALA
+        fin
+        apunta_acierto()
+        tomar(cerrojo_cuentas)
+        c.admin := cierto
+        si no guarda_cuentas() entonces
+            carga_cuentas()
+            soltar(cerrojo_cuentas)
+            devolver RA_DISCO
+        fin
+        soltar(cerrojo_cuentas)
+        dd_ra[0] := nat32(dirección(c.nombre[0]))
+        dd_ra[1] := nat32(dónde)
+        formatear(t, 160, "no había ningún administrador: «%s» pasa a serlo (con su contraseña) %s", dirección(dd_ra[0]))
+        apunta_usuarios_log(t)
+        devolver RA_HECHO
+    fin
+
+    ; lo que ha pasado, en palabras (para la pantalla y la consola)
+    público función texto_ra(r: nat32): puntero a byte
+        según r
+            caso RA_HECHO: devolver "Hecho."
+            caso RA_NO_HACE_FALTA: devolver "Ya hay un administrador."
+            caso RA_NOMBRE: devolver "Ese nombre no vale o ya lo tiene otro (de 1 a 20 letras, sin «|»)."
+            caso RA_CORTA: devolver "La contraseña es demasiado corta (al menos 4 letras)."
+            caso RA_DISTINTAS: devolver "Las dos contraseñas no son iguales."
+            caso RA_LLENO: devolver "No caben más usuarios (16)."
+            caso RA_ARGON: devolver "No se puede resumir la contraseña: falta ARGON2.BIN."
+            caso RA_DISCO: devolver "No se puede guardar en el disco (¿arrancado sin escritura?)."
+            caso RA_SIN_CLAVE: devolver "Ese usuario no tiene contraseña: cree un administrador nuevo."
+            caso RA_CLAVE_MALA: devolver "La contraseña no es esa."
+            caso RA_ESPERA: devolver "Demasiados intentos: espere un poco."
+        fin
+        devolver "No se ha podido."
     fin
 
     ; la 202: el servidor SSH (SSHD.BIN, su sello) pregunta. 0: ¿es esa la
@@ -2751,6 +2899,12 @@ módulo Usuario
             ; delante (en la pantalla de entrada, nadie: el sistema)
             si actual <> nulo y actual.usuario entonces
                 t.uid := actual.uid
+                ; (0.8.11, SIN-ADMIN) lo que lanza un programa «del sistema»
+                ; (uid 0) que no es un servicio, con alguien dentro, es del que
+                ; está dentro: ACTUALIZ /BANDEJA lo pone el núcleo al arrancar
+                ; y su «Verlas» abría «Programas y actualizaciones» como el
+                ; sistema (instalar y quitar sin ser administrador)
+                si actual.uid = 0 y no actual.servicio y hay_cuentas y sesión <> 0 y actual.uid_hijo = 0 entonces t.uid := sesión fin
                 t.remota := actual.remota o actual.uid_hijo <> 0
                 si actual.uid_hijo <> 0 entonces
                     t.uid := actual.uid_hijo

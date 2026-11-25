@@ -80,6 +80,18 @@ módulo UCuentas
         soy_admin := soy_administrador()
     fin
 
+    ; (0.8.11, SIN-ADMIN) ¿es el elegido el único administrador? Entonces ni
+    ; se le cambia el tipo ni se le quita (el núcleo, además, no deja)
+    función último_admin(): bool
+        variable i, n: nat32
+        si nuevo o elegida >= n_fichas o fichas[elegida].admin = 0 entonces devolver falso fin
+        n := 0
+        para i desde 1 hasta n_fichas hacer
+            si fichas[i - 1].admin <> 0 entonces n := n + 1 fin
+        fin
+        devolver n = 1
+    fin
+
     función por_nombre(n: puntero a byte): ent32
         variable i: nat32
         para i desde 1 hasta n_fichas hacer
@@ -94,7 +106,7 @@ módulo UCuentas
         según r
             caso DENEGADO: devolver "Eso solo lo puede hacer un administrador."
             caso YA_EXISTE: devolver "Ese nombre no vale o ya lo tiene otro (de 1 a 20 letras, sin «|»)."
-            caso EN_USO: devolver "No se puede: es usted, el que está dentro o el último administrador (o espere un poco)."
+            caso EN_USO: devolver "No se puede: es usted, el que está dentro o el único administrador (tiene que quedar uno; o espere un poco)."
             caso MAL: devolver "La contraseña de antes no es esa (o no se ha podido resumir)."
             caso NOMBRE_MALO: devolver "La contraseña es demasiado corta (al menos 4 letras)."
             caso PROTEGIDO: devolver "No se puede guardar en el disco (¿arrancado sin escritura?)."
@@ -201,7 +213,7 @@ módulo UCuentas
             ; (casilla devuelve lo ancho; campo y desplegable, lo alto; recuadro, dónde se empieza dentro)
             y2 := recuadro(x2, yy, w, 2 * (alto_caja() + LT + 6 * E) + 2 * LT + 12 * E, t)
             y2 := y2 + campo_de(ID_NOMBRE, x2 + LA, y2, w - 2 * LA, "Nombre", nombre, falso, no soy_admin) + 4 * E
-            desplegable(ID_TIPO, x2 + LA, y2, (w - 3 * LA) div 2, "Tipo", TIPOS, tipo_, no soy_admin)
+            desplegable(ID_TIPO, x2 + LA, y2, (w - 3 * LA) div 2, "Tipo", TIPOS, tipo_, no soy_admin o último_admin())
             y2 := y2 + desplegable(ID_IMAGEN, x2 + 2 * LA + (w - 3 * LA) div 2, y2, (w - 3 * LA) div 2, "Imagen", IMÁGENES, imagen, falso) + 4 * E
             casilla(ID_SOLO, x2 + LA, y2, "Entra solo al encender (sin contraseña)", solo)
             y2 := yy + 2 * (alto_caja() + LT + 6 * E) + 2 * LT + 12 * E + 6 * E
@@ -212,7 +224,7 @@ módulo UCuentas
                 botón(ID_CREAR, x2 + LA, y2, "Crear", cierto, falso)
             sino si elegida < n_fichas entonces
                 botón(ID_GUARDAR, x2 + LA, y2, "Guardar cambios", cierto, falso)
-                si soy_admin y no es_mía entonces botón(ID_QUITAR, x2 + LA + ancho_botón("Guardar cambios") + 2 * LA, y2, "Quitar usuario", falso, falso) fin
+                si soy_admin y no es_mía y no último_admin() entonces botón(ID_QUITAR, x2 + LA + ancho_botón("Guardar cambios") + 2 * LA, y2, "Quitar usuario", falso, falso) fin
                 y2 := y2 + alto_botón() + 6 * E
                 ; la contraseña
                 si es_mía y fichas[elegida].con_clave <> 0 entonces
@@ -268,7 +280,7 @@ módulo UCuentas
                 k := rejilla_elegido(g)
                 si k >= 0 entonces elige(renglón(g, k).id) fin
             caso ID_TIPO:
-                si soy_admin entonces abrir_desplegable(ID_TIPO, TIPOS) fin
+                si soy_admin y no último_admin() entonces abrir_desplegable(ID_TIPO, TIPOS) fin
             caso ID_IMAGEN:
                 abrir_desplegable(ID_IMAGEN, IMÁGENES)
             caso ID_SOLO:
@@ -358,7 +370,7 @@ módulo UCuentas
         sino si k = K_DESPLEGABLE entonces
             si c = '\n' o c = ' ' entonces
                 hace(foco)
-            sino si foco = ID_TIPO y soy_admin entonces
+            sino si foco = ID_TIPO y soy_admin y no último_admin() entonces
                 desplegable_tecla(TIPOS, tipo_, c)
             sino si foco = ID_IMAGEN entonces
                 desplegable_tecla(IMÁGENES, imagen, c)

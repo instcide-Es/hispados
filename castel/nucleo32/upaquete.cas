@@ -31,6 +31,13 @@
 ;  un aviso. Y (USUARIOS) instalar, actualizar, quitar y reparar, solo un
 ;  administrador (el núcleo, además, no le deja escribir en \HISPA a un
 ;  PAQUETES lanzado por un usuario normal: permisos.cas).
+;  (0.8.11, SIN-ADMIN) Salvo PONER AL DÍA lo instalado (ACTUALIZA, sin
+;  /FORZAR) con un catálogo FIRMADO (también el de una carpeta: sin
+;  CATALOGO.FIR, no) y con su serie sin ir atrás (tampoco el de una
+;  carpeta): eso puede hacerlo cualquiera, porque solo pone lo que ha
+;  firmado el proyecto (y así un equipo con solo usuarios normales recibe
+;  los arreglos). Entonces PAQUETES se lo dice al núcleo (la llamada 200, 6)
+;  y este le deja escribir en la zona del sistema.
 ;  La firma: el catálogo (que lleva el SHA-256 de cada paquete, y cada
 ;  paquete los de sus archivos) va firmado (Ed25519, firma.cas) en
 ;  CATALOGO.FIR, con la clave privada del proyecto; la pública va dentro
@@ -87,7 +94,7 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
-    constante VERSIÓN_PAQUETES = "1.7"                ; (CORTES) (COMPAT, 0.8.9: 1.6) (SDHCI, 0.8.10: 1.7)
+    constante VERSIÓN_PAQUETES = "1.8"                ; (CORTES) (COMPAT, 0.8.9: 1.6) (SDHCI, 0.8.10: 1.7) (SIN-ADMIN, 0.8.11: 1.8)
 
     ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
     ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)
@@ -192,6 +199,7 @@ módulo UPaquetes
     variable avance: arreglo [48] de byte       ; C:\HISPA\PAQUETES\AVANCE.TXT
     variable firmado: bool                      ; el catálogo lleva firma, y es buena
     variable cat_serie: nat32                   ; (USUARIOS) su «serie=» (0: no la trae)
+    variable normal_firmada: bool               ; (SIN-ADMIN) un usuario normal que pone al día lo firmado
     variable núcleo_nuevo: bool                 ; se ha cambiado \HISPA\NUCLEO.BIN
     variable con_avance: bool                   ; /AVANCE: lo pide la ventana
     ; (RÁPIDO) el avance dentro de un paquete grande (octetos) y «Cancelar»:
@@ -1257,7 +1265,7 @@ módulo UPaquetes
         variable vista, m: nat32
         vista := serie_vista()
         si cat_serie < vista o (cat_serie = 0 y vista > 0) entonces
-            si es_red entonces
+            si es_red o normal_firmada entonces
                 imprimir2("paquetes: el catálogo de Internet es más viejo (serie %u) que el último que se ha usado (serie %u): no se usa\n", cat_serie, vista)
                 escribir("  (alguien puede estar dando uno de antes, con versiones que tenían fallos ya arreglados)\n")
                 devolver falso
@@ -2204,7 +2212,7 @@ módulo UPaquetes
         escribir("  PAQUETES CATALOGO             lo que se puede instalar\n")
         escribir("  PAQUETES INSTALA nombre       instala un paquete (y lo que necesite)\n")
         escribir("  PAQUETES INSTALA X.HPQ        instala ese archivo de paquete\n")
-        escribir("  PAQUETES ACTUALIZA [nombre]   pone al día lo instalado\n")
+        escribir("  PAQUETES ACTUALIZA [nombre]   pone al día lo instalado (también un usuario normal, con el catálogo firmado)\n")
         escribir("  PAQUETES QUITA nombre         lo quita (/DEPENDIENTES: y lo que lo necesite)\n")
         escribir("  PAQUETES REPARA [nombre]      comprueba sus archivos y vuelve a poner lo dañado\n")
         escribir("  PAQUETES ARCHIVOS nombre      sus archivos, y si están como se instalaron\n")
@@ -3100,13 +3108,38 @@ módulo UPaquetes
             en_base("CANCELA.TXT", cancela)             ; (RÁPIDO)
             borrar(cancela)
         fin
-        ; (USUARIOS) instalar, actualizar, quitar y reparar: solo un administrador
-        si (iguales(orden_, "instala") o iguales(orden_, "actualiza") o iguales(orden_, "quita") o iguales(orden_, "repara")) y no soy_administrador() entonces
-            escribir("paquetes: solo un administrador puede instalar, actualizar o quitar programas (entre con su usuario)\n")
+        ; (USUARIOS) instalar, actualizar, quitar y reparar: solo un
+        ; administrador; (0.8.11, SIN-ADMIN) poner al día con lo firmado, cualquiera
+        si iguales(orden_, "actualiza") y no soy_administrador() entonces
+            si forzar o corte <> 0 entonces
+                escribir("paquetes: un usuario normal pone al día lo instalado con el catálogo firmado, sin /FORZAR\n")
+                devolver 1
+            fin
+            normal_firmada := cierto
+        sino si (iguales(orden_, "instala") o iguales(orden_, "actualiza") o iguales(orden_, "quita") o iguales(orden_, "repara")) y no soy_administrador() entonces
+            escribir("paquetes: solo un administrador puede instalar, reparar o quitar programas (entre con su usuario); poner al día lo instalado, cualquiera: PAQUETES ACTUALIZA\n")
             devolver 1
         fin
         si no existe(base) entonces crear_carpeta(base) fin
-        si soy_administrador() entonces recupera() fin       ; (USUARIOS) lo de una vez que se cortó
+        si normal_firmada entonces
+            ; (SIN-ADMIN) el catálogo, antes de nada: firmado y con su serie
+            si no carga_catálogo() entonces
+                escribir("paquetes: sin un catálogo firmado no se pone nada al día\n")
+                devolver 1
+            fin
+            si no firmado entonces
+                escribir("paquetes: este catálogo no lleva firma (CATALOGO.FIR): un usuario normal solo pone al día con un catálogo firmado\n")
+                devolver 1
+            fin
+            si es_error(actualización_firmada()) entonces
+                escribir("paquetes: este núcleo no deja poner al día a un usuario normal (hace falta la base 0.8.11): entre con un administrador\n")
+                devolver 1
+            fin
+            escribir("Un usuario normal pone al día lo instalado con el catálogo firmado.\n")
+            recupera()                                  ; (lo de una vez que se cortó)
+        sino si soy_administrador() entonces
+            recupera()                                  ; (USUARIOS) lo de una vez que se cortó
+        fin
         carga_instalados()
         bien := cierto
         si iguales(orden_, "lista") entonces

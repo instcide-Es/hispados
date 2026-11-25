@@ -25,6 +25,16 @@
 #   4. SSH con los usuarios (OpenSSH de aquí, por QEMU): Bea con su
 #      contraseña entra y es Bea; con otra, no; Biblioteca (sin contraseña),
 #      no; Ana con la llave de su carpeta; SSHD /ENCENDER, solo un administrador.
+#   5. (0.8.11, SIN-ADMIN, el HP Mini de la asociación) un sistema instalado
+#      con un solo usuario, «Biblio2», normal, y ningún administrador: al
+#      arrancar (en texto) no entra solo, se ofrece crear uno; se crea
+#      «Carlos» (la contraseña dos veces) y entra; C:\HISPA, editable con
+#      ADMIN y su contraseña; no se degrada al único administrador; queda en
+#      USUARIOS.LOG. El arranque siguiente: Biblio2 (normal) pone al día lo
+#      instalado con el catálogo firmado (no con uno sin firma, ni con
+#      /FORZAR, ni instala); lee y copia C:\HISPA\WIFI.LOG. Con el
+#      escritorio: el aviso «Este equipo no tiene ningún administrador», F2,
+#      el formulario y el administrador creado.
 
 parte_usuarios() {
 echo "== Hispa-Pentium: los usuarios (la entrada, Argon2id, las carpetas), la serie del catálogo, el azar del núcleo y SSH con los usuarios =="
@@ -54,6 +64,10 @@ if [ -n "${a1:-}" ] && [ -n "${a2:-}" ] && [ "$a2" -gt "$a1" ] && [ "$a1" -ge 17
   ok "hpq.py firma: «serie=N» en la segunda línea del catálogo, dentro de lo firmado, y sube cada vez ($a1, $a2: como poco, los segundos desde 1970)"
 else ko "hpq.py firma: la serie no sube ($a1, $a2) o la firma no vale"; fi
 $HPQ catalogo $X/raiz/pentium/nuevo --clave $X/prueba.key --serie 100 > /dev/null && $HPQ firma $X/raiz/pentium/viejo $X/prueba.key --serie 50 > /dev/null || hechos=0
+# (SIN-ADMIN) NOTA 1.1 en otro catálogo firmado (serie 200), para que la ponga al día un usuario normal
+mkdir -p $X/raiz/pentium/n2 $X/f2 && printf 'la nota nueva\r\n' > $X/f2/NOTA.TXT
+( cd $X/f2 && $HPQ crea $X/raiz/pentium/n2/NOTA.HPQ --nombre nota --version 1.1 --descripcion 'Una nota' NOTA.TXT='\HISPA\NOTA.TXT' ) >> $X/hpq.txt 2>&1 || hechos=0
+$HPQ catalogo $X/raiz/pentium/n2 --clave $X/prueba.key --serie 200 > /dev/null || hechos=0
 # ---- los programas y los discos ----
 python3 -I $AQUI/ccastel.py $AQUI/nucleo32/semilla.cas -o $X/semilla.asm > /dev/null 2>&1 && nasm -f bin $X/semilla.asm -o $X/SEMILLA.BIN || hechos=0
 cp $AQUI/nucleo32/upaquete.cas $X/upaquete.cas
@@ -99,6 +113,7 @@ módulo UEspia
         abre("leer USUARIOS.TXT", abrir("\\HISPA\\USUARIOS.TXT"))
         abre("leer AZAR.SEM", abrir("\\HISPA\\AZAR.SEM"))
         abre("escribir en su carpeta", crear("\\USUARIOS\\BIBLIOTE\\DOCUMENT\\MIO.TXT"))
+        abre("leer el diagnóstico del Wi-Fi (WIFI.LOG)", abrir("\\HISPA\\WIFI.LOG"))
         pedido[0] := 0
         pedido[1] := 1
         pedido[2] := nat32(dirección(sector[0]))
@@ -124,9 +139,10 @@ CAS
 python3 -I $AQUI/ccastel.py $X/uespia.cas -o $X/uespia.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $X/uespia.asm -o $X/ESPIA.BIN || hechos=0
 $AQUI/nucleo32/disco.sh $X/vivo.img 32 red ssh > $X/disco.txt 2>&1 && mcopy -n -i $X/vivo.img '::*.BIN' $X/v/ > /dev/null 2>&1 || hechos=0
 printf '[hispa]\r\nusuario=Ana\r\nequipo=PRUEBA\r\nteclado=es\r\n' > $X/HISPA.INI
+printf 'wifi: un diagnóstico de prueba\r\n' > $X/WIFI.LOG
 mkfs.fat -F 32 -s 1 -n HISPA -C $X/sis.img 65536 > /dev/null && mmd -i $X/sis.img ::HISPA ::HISPA/PAQUETES ::DOCUMENT \
   && mcopy -i $X/sis.img $X/v/ORDENES.BIN $X/v/RED.BIN $X/v/IPCONFIG.BIN $X/v/DESCARGA.BIN $X/v/SSHD.BIN $X/v/ARGON2.BIN $X/v/HOLA.BIN \
-       $X/v/BLOC.BIN $X/v/CONSOLA.BIN $X/v/EQUIPO.BIN $X/PAQUETES.BIN $X/USUARIOS.BIN $X/HISPA.INI ::HISPA/ \
+       $X/v/BLOC.BIN $X/v/CONSOLA.BIN $X/v/EQUIPO.BIN $X/PAQUETES.BIN $X/USUARIOS.BIN $X/HISPA.INI $X/WIFI.LOG ::HISPA/ \
   && mcopy -i $X/sis.img $X/ESPIA.BIN :: && mcopy -i $X/sis.img $X/SEMILLA.BIN ::HISPA/NUCLEO.BIN || hechos=0
 if [ $hechos != 1 ]; then ko "no se han podido hacer los programas o los discos de las pruebas de los usuarios: $(tail -n 2 $X/disco.txt) $(tail -n 2 $X/hpq.txt)"; return; fi
 ok "el disco de las pruebas: un sistema de antes (HISPA.INI con «usuario=Ana», sin USUARIOS.TXT) con USUARIOS.BIN, ARGON2.BIN, PAQUETES (la clave de prueba), la red y SSHD"
@@ -173,7 +189,7 @@ ESCRIBE=1 SATA=$X/s2.img MEMORIA=128 MODULOS= ARRANQUE=ordenes \
   "type \\usuarios\\ana\\document\\secreto.txt" ":pausa 1" "admin" ":pausa 1" "uno2tres" ":pausa 6" "type \\hispa\\usuarios.txt" ":pausa 1" "admin no" ":pausa 1" > $X/t2.sal 2>&1
 tr -d '\r' < $X/t2.sal > $X/t2.txt
 S=$X/t2.txt
-mira "al arrancar entra sola Biblioteca (normal, sin contraseña)" "^cuentas: 3 usuarios (USUARIOS.TXT)$" "^Entra Biblioteca (sin contraseña)\.$" "^espia: soy el usuario 3; administrador: no$"
+mira "al arrancar entra sola Biblioteca (normal, sin contraseña)" "^cuentas: 3 usuarios (USUARIOS.TXT); administradores: 1$" "^Entra Biblioteca (sin contraseña)\.$" "^espia: soy el usuario 3; administrador: no$"
 mira "Biblioteca no lee ni ve la carpeta de Ana, ni escribe en ella, ni borra ni se lleva lo suyo, ni hace carpetas en \\USUARIOS, ni lanza un programa de Ana: acceso denegado" \
   "^espia: leer el secreto de Ana: no (acceso denegado" "^espia: ver la carpeta de Ana: no (acceso denegado" "^espia: escribir en la carpeta de Ana: no (acceso denegado" \
   "^espia: borrar el secreto de Ana: no (acceso denegado" "^espia: llevarse el secreto de Ana: no (acceso denegado" "^espia: hacer una carpeta en .USUARIOS: no (acceso denegado" \
@@ -279,8 +295,70 @@ if command -v ssh > /dev/null && command -v ssh-keygen > /dev/null; then
   S=$X/s_ana.txt
   mira "Ana, con la llave de su \\USUARIOS\\ANA\\AJUSTES\\AUTORIZA.TXT, entra y lee lo suyo" "^secreto de Ana$" "^código 0$"
 else echo "  (sin ssh de OpenSSH aquí: sin la prueba de SSH con los usuarios)"; fi
+# ---- 5. (SIN-ADMIN) un sistema con solo «Biblio2», normal, y ningún administrador ----
+cp $X/sis.img $X/n.img
+printf 'HISPA-USUARIOS 1\r\nu=1|N|0|1|BIBLIO2|Biblio2|\r\n' > $X/U5.TXT
+mmd -i $X/n.img ::PAQSIN && mcopy -i $X/n.img $X/U5.TXT ::HISPA/USUARIOS.TXT && mcopy -i $X/n.img $X/raiz/pentium/n2/CATALOGO.TXT $X/raiz/pentium/n2/NOTA.HPQ ::PAQSIN/
+ESCRIBE=1 SATA=$X/n.img MEMORIA=128 MODULOS= ARRANQUE=ordenes QEMU_MAS="-nic user,model=e1000" \
+  $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "1" "Carlos" "clave1234" "clave1234" ":pausa 12" \
+  "echo Registro=SI > \\hispa\\red.ini" ":pausa 1" "admin" ":pausa 1" "clave1234" ":pausa 6" "echo Registro=SI > \\hispa\\red.ini" "type \\hispa\\red.ini" "admin no" ":pausa 1" \
+  "usuarios /tipo Carlos normal" ":pausa 1" "usuarios /lista" ":pausa 1" "type \\hispa\\usuarios.log" "ipconfig" ":pausa 8" "paquetes instala nota /desde=$U/viejo/" ":pausa 8" > $X/n1.sal 2>&1
+tr -d '\r' < $X/n1.sal > $X/n1.txt
+S=$X/n1.txt
+mira "(SIN-ADMIN) solo Biblio2, normal: el núcleo ve que no hay administrador, no deja entrar solo a nadie y ofrece crear uno (en la consola de verdad)" \
+  "^cuentas: 1 usuarios (USUARIOS.TXT); administradores: 0$" "^cuentas: este equipo no tiene ningún administrador con el que se pueda entrar" \
+  "^Este equipo no tiene ningún administrador: nadie puede cambiar el sistema" "^  1  crear un administrador nuevo$"
+mira "(SIN-ADMIN) se crea «Carlos» (la contraseña dos veces, con asteriscos; Argon2id) y entra; queda en el registro" \
+  "^Nombre del administrador: Carlos$" "^Su contraseña (al menos 4 letras): \*\*\*\*\*\*\*\*\*$" "^Otra vez: \*\*\*\*\*\*\*\*\*$" \
+  "^cuentas: no había ningún administrador: se crea «Carlos» (administrador, con contraseña) en la consola$" "^cuentas: entra Carlos (el usuario 2)$"
+mira "(SIN-ADMIN) C:\\HISPA: sin el modo administrador, no; con ADMIN y la contraseña de Carlos, sí (RED.INI con Registro=SI)" \
+  "permisos: acceso denegado a .*[Rr][Ee][Dd]\.[Ii][Nn][Ii] para escribir" "^permisos: modo administrador para ORDENES.BIN" "^Registro=SI$"
+mira "(SIN-ADMIN) al único administrador no se le hace normal; Biblio2 sigue normal y entrando sola; USUARIOS.LOG lo cuenta (con la fecha)" \
+  "^usuarios: No se puede: es usted, el que está dentro o el único administrador" "^  Carlos  administrador, con contraseña, carpeta .USUARIOS.CARLOS  (usted)$" \
+  "^  Biblio2  normal, sin contraseña, entra solo, carpeta .USUARIOS.BIBLIO2$" "^20[0-9-]* [0-9:]* no había ningún administrador: se crea «Carlos»"
+mira "(SIN-ADMIN) y el administrador instala (la NOTA 1.0, del catálogo firmado)" "^La firma del catálogo es buena" "nota 1\.0"
+if saca $X/n.img HISPA/USUARIOS.TXT $X/U6.TXT && grep -q '^u=1|N|0|1|BIBLIO2|Biblio2|' $X/U6.TXT && grep -q '^u=2|A|0|0|CARLOS|Carlos|argon2id\$12288\$3\$' $X/U6.TXT \
+   && saca $X/n.img HISPA/RED.INI $X/red5.ini && grep -q '^Registro=SI' $X/red5.ini && saca $X/n.img HISPA/NOTA.TXT $X/nota5.txt && sano $X/n.img; then
+  ok "(SIN-ADMIN) desde fuera: USUARIOS.TXT con Biblio2 (normal, entra sola) y Carlos (administrador, Argon2id); RED.INI con Registro=SI; la NOTA instalada; el disco sano"
+else ko "(SIN-ADMIN) el disco no queda como debe:"; sed 's/^/        /' $X/U6.TXT 2> /dev/null | head -4; fi
+cp $X/n.img $X/n2.img
+ESCRIBE=1 SATA=$X/n2.img MEMORIA=128 MODULOS= ARRANQUE=ordenes QEMU_MAS="-nic user,model=e1000" \
+  $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" "espia" ":pausa 3" "copy \\hispa\\wifi.log \\usuarios\\biblio2\\document\\wifi.log" ":pausa 1" "ipconfig" ":pausa 8" \
+  "paquetes instala nota /desde=$U/n2/" ":pausa 6" "paquetes actualiza /forzar /desde=$U/n2/" ":pausa 6" "paquetes actualiza /desde=c:\\paqsin\\" ":pausa 6" \
+  "paquetes actualiza /desde=$U/n2/" ":pausa 10" "type \\hispa\\nota.txt" ":pausa 1" > $X/n2.sal 2>&1
+tr -d '\r' < $X/n2.sal > $X/n2.txt
+S=$X/n2.txt
+mira "(SIN-ADMIN) ya hay administrador: Biblio2 entra sola otra vez, normal; lee el diagnóstico del Wi-Fi (C:\\HISPA\\WIFI.LOG) y lo copia a lo suyo" \
+  "^cuentas: 2 usuarios (USUARIOS.TXT); administradores: 1$" "^Entra Biblio2 (sin contraseña)\.$" "^espia: soy el usuario 1; administrador: no$" \
+  "^espia: leer el diagnóstico del Wi-Fi (WIFI.LOG): SE PUEDE$"
+mira "(SIN-ADMIN) Biblio2 no instala, ni pone al día con /FORZAR, ni con un catálogo sin firma" \
+  "^paquetes: solo un administrador puede instalar, reparar o quitar programas" "^paquetes: un usuario normal pone al día lo instalado con el catálogo firmado, sin /FORZAR$" \
+  "^paquetes: este catálogo no lleva firma (CATALOGO.FIR): un usuario normal solo pone al día con un catálogo firmado$"
+mira "(SIN-ADMIN) pero SÍ pone al día lo instalado con el catálogo firmado (la NOTA 1.0 a la 1.1): el núcleo lo deja (la 200, 6)" \
+  "^Un usuario normal pone al día lo instalado con el catálogo firmado\.$" "^permisos: PAQUETES de Biblio2 pone al día lo del catálogo firmado" "^la nota nueva$"
+if saca $X/n2.img HISPA/NOTA.TXT $X/nota6.txt && grep -q "la nota nueva" $X/nota6.txt && saca $X/n2.img HISPA/PAQUETES/SERIE.TXT $X/serie6.txt && [ "$(tr -d '\r\n' < $X/serie6.txt)" = 200 ] \
+   && saca $X/n2.img USUARIOS/BIBLIO2/DOCUMENT/WIFI.LOG $X/wl6.txt && sano $X/n2.img; then
+  ok "(SIN-ADMIN) desde fuera: \\HISPA\\NOTA.TXT nuevo, SERIE.TXT con la 200, la copia de WIFI.LOG en los documentos de Biblio2; el disco sano"
+else ko "(SIN-ADMIN) la puesta al día del usuario normal no ha dejado el disco como debe"; fi
+# con el escritorio: el aviso y el formulario (F2)
+cp $X/sis.img $X/ne.img
+mcopy -i $X/ne.img $X/U5.TXT ::HISPA/USUARIOS.TXT
+CAPTURAS=$X ESCRIBE=1 SATA=$X/ne.img MEMORIA=128 MODULOS= ARRANQUE=escritorio \
+  $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 6" ":captura ue7" ":tecla f2" ":pausa 1" ":escribe Carlos" ":tecla tab" ":escribe clave1234" ":tecla tab" ":escribe clave1234" \
+  ":pausa 1" ":captura ue8" ":tecla ret" ":pausa 8" ":tecla meta_l" ":pausa 2" ":captura ue9" > $X/ne.sal 2>&1
+tr -d '\r' < $X/ne.sal > $X/ne.txt
+S=$X/ne.txt
+miracap "(SIN-ADMIN) la pantalla de entrada sin administrador: el aviso arriba, «Crear un administrador (F2)», y Biblio2 debajo" ue7 \
+  negrita 20 70 500 100 "Este equipo no tiene ningún administrador." negrita 30 120 330 165 "Crear un administrador (F2)" negrita 300 240 500 400 "Biblio2"
+miracap "(SIN-ADMIN) F2: el formulario (el nombre, la contraseña dos veces con puntos, Crear y Volver)" ue8 \
+  negrita 200 180 500 210 "Crear un administrador" texto 205 250 600 290 "Carlos" negrita 200 420 330 470 "Crear"
+mira "(SIN-ADMIN) con el escritorio: no entra sola Biblio2; se crea Carlos (administrador) en la pantalla de entrada y entra" \
+  "entrada: este equipo no tiene administrador: se ofrece crear uno$" "cuentas: no había ningún administrador: se crea «Carlos» (administrador, con contraseña) en la pantalla de entrada$" \
+  "^entrada: se ha creado un administrador$" "^cuentas: entra Carlos (el usuario 2)$"
+miracap "(SIN-ADMIN) y el menú Inicio saluda al nuevo: «Hola, Carlos»" ue9 negrita 0 90 400 130 "Hola, Carlos"
+if grep -q "^cuentas: entra Biblio2" $S; then ko "(SIN-ADMIN) Biblio2 ha entrado sola sin administrador"; else ok "(SIN-ADMIN) y Biblio2 no ha entrado sola mientras no había administrador"; fi
 kill $SPID 2> /dev/null
 # (las quejas del núcleo empiezan por «*** »; los asteriscos de las contraseñas, no)
-if ! cat $X/t1.txt $X/t2.txt $X/t3.sal $X/e.txt | grep -q "excepción\|^\*\*\* "; then ok "en esos arranques, ni una excepción ni una queja del núcleo"
-else ko "el núcleo se ha quejado:"; cat $X/t1.txt $X/t2.txt $X/t3.sal $X/e.txt | grep "excepción\|^\*\*\* " | head -3 | sed 's/^/        /'; fi
+if ! cat $X/t1.txt $X/t2.txt $X/t3.sal $X/e.txt $X/n1.txt $X/n2.txt $X/ne.txt | grep -q "excepción\|^\*\*\* "; then ok "en esos arranques, ni una excepción ni una queja del núcleo"
+else ko "el núcleo se ha quejado:"; cat $X/t1.txt $X/t2.txt $X/t3.sal $X/e.txt $X/n1.txt $X/n2.txt $X/ne.txt | grep "excepción\|^\*\*\* " | head -3 | sed 's/^/        /'; fi
 }

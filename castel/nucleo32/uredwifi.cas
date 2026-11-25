@@ -216,6 +216,29 @@ módulo UredWifi
         si n = 0 entonces copiar(destino, "(red oculta)") fin
     fin
 
+    ; (SIN-ADMIN) dónde deja WIFI.BIN su registro: «C:\HISPA\WIFI.LOG» (la unidad del sistema)
+    función ruta_log(destino: puntero a byte)
+        variable i: nat32
+        variable u: Info_unidad
+        variable letra: byte
+        letra := 'C'
+        i := 0
+        mientras info_unidad(i, u) hacer
+            si u.del_sistema = 1 entonces letra := u.letra fin
+            i := i + 1
+        fin
+        destino[0] := letra
+        destino[1] := 0
+        ; (en la memoria USB de arranque, sin \HISPA, va en la raíz)
+        i := abrir("\\HISPA")
+        si es_error(i) entonces
+            concatenar(destino, ":\\WIFI.LOG")
+        sino
+            cerrar(i)
+            concatenar(destino, ":\\HISPA\\WIFI.LOG")
+        fin
+    fin
+
     ; cómo está, en una línea
     función línea_estado(destino: puntero a byte)
         variable nom: arreglo [40] de byte
@@ -224,8 +247,9 @@ módulo UredWifi
         si no hay_servicio entonces
             copiar(destino, "Wi-Fi: no está en marcha (no hay tarjeta Wi-Fi, o se usa solo el cable).")
         sino si est.radio = 0 entonces
+            ; (0.8.11, SIN-ADMIN) cuál, y dónde está el diagnóstico (línea_detalle)
             dd[0] := nat32(dirección(est.tarjeta[0]))
-            formatear(destino, 160, "Wi-Fi: la radio no se ha podido encender (%s). Ver WIFI.LOG.", dd)
+            formatear(destino, 160, "No se ha podido usar la tarjeta %s.", dd)
         sino si est.calculando <> 0 entonces
             formatear(destino, 160, "Preparando la clave de «%s»...", dd)
         sino si est.estado = W_CONECTADO entonces
@@ -259,6 +283,11 @@ módulo UredWifi
             sino
                 formatear(destino, 160, "Señal %d dBm, canal %u; la red va por el cable (IP %s)", dd)
             fin
+        sino si hay_servicio y est.radio = 0 entonces
+            ; (SIN-ADMIN) lo puede leer y copiar cualquiera (no hace falta Registro=SI)
+            ruta_log(ipt)
+            dd[0] := nat32(dirección(ipt[0]))
+            formatear(destino, 160, "El diagnóstico está en %s: páseselo a quien le ayude.", dd)
         sino si hay_servicio y est.aviso[0] <> 0 entonces
             copiar_hasta(destino, dirección(est.aviso[0]), 160)
         sino
@@ -676,7 +705,15 @@ módulo UredWifi
                 si hay_servicio y est.barriendo <> 0 entonces
                     Controles.texto(2 * LA, yy + 2 * E + 4, "Buscando redes...", C_SUAVE)
                 sino
-                    Controles.texto(2 * LA, yy + 2 * E + 4, "No se ve ninguna red. Pulse «Buscar».", C_SUAVE)
+                    si hay_servicio y est.radio <> 0 entonces
+                        ; (SIN-ADMIN) con la tarjeta en marcha: dónde mirar por qué
+                        ruta_log(nom)
+                        dd[0] := nat32(dirección(nom[0]))
+                        formatear(t, 160, "No se ve ninguna red. Pulse «Buscar» (el diagnóstico, en %s).", dd)
+                        Controles.texto(2 * LA, yy + 2 * E + 4, t, C_SUAVE)
+                    sino
+                        Controles.texto(2 * LA, yy + 2 * E + 4, "No se ve ninguna red. Pulse «Buscar».", C_SUAVE)
+                    fin
                 fin
             fin
             si elegida >= 0 y elegida < primera entonces primera := elegida fin
