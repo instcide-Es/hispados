@@ -82,3 +82,38 @@ apaga
 if cmp -s <(mtype -i $T/b.img ::H.CTA) $T/h_bien.cta; then ok "n.º 5: con el disco lleno, la hoja vieja sigue entera"; else ko "n.º 5: el disco lleno ha estropeado la hoja vieja ($(mtype -i $T/b.img ::H.CTA | wc -c) octetos)"; fi
 if ! mdir -i $T/b.img '::H.$$$' > /dev/null 2>&1 && fsck.fat -n $T/b.img > $T/fsck.txt 2>&1; then ok "n.º 5: no queda H.\$\$\$ y fsck.fat no encuentra errores"; else ko "n.º 5: queda el temporal o hay errores"; cat $T/fsck.txt; fi
 }
+
+# ---- n.º 6: EDITAR no guarda un archivo que no ha cabido entero, y guarda en
+# un temporal ----
+p_auditoria_editar() {
+echo "== Hispa-8086: auditoría 1, EDITAR con un archivo que no cabe y con el disco lleno =="
+cp $IMG/hispa8086-360.img $T/a.img
+local i; for ((i=1; i<=1300; i++)); do printf 'linea %04d del texto grande de la prueba de EDITAR\r\n' $i; done > $T/GRANDE.TXT
+head -c 3070 $T/GRANDE.TXT > $T/N.TXT
+mcopy -o -i $T/a.img $T/GRANDE.TXT $T/N.TXT ::
+llena $T/a.img 0
+arranca $T/a.img 486
+escribe "editar grande.txt"; sleep 3
+pantalla e1
+esta e1 "No cabe entero: se ve el principio y no se puede guardar." "n.º 6: al abrir uno que no cabe, lo dice: "
+tecla spc; sleep 0.5; tecla x f2; sleep 2
+pantalla e2
+esta e2 "No cabe entero: se ve el principio y no se puede guardar." "n.º 6: y F2 no lo guarda: "
+tecla spc; sleep 0.5; tecla esc; sleep 0.5; tecla n; sleep 1
+escribe "editar n.txt"; sleep 2
+teclea "0123456789"; tecla f2; sleep 3
+pantalla e3
+esta e3 "No se ha podido guardar (¿disco lleno o protegido?)." "n.º 6: con el disco lleno, guardar falla y lo dice: "
+tecla spc; sleep 0.5; tecla esc; sleep 0.5; tecla n; sleep 1
+apaga
+if cmp -s <(mtype -i $T/a.img ::GRANDE.TXT) $T/GRANDE.TXT; then ok "n.º 6: el archivo grande sigue entero ($(stat -c %s $T/GRANDE.TXT) octetos)"; else ko "n.º 6: el archivo grande ha quedado en $(mtype -i $T/a.img ::GRANDE.TXT | wc -c) octetos"; fi
+if cmp -s <(mtype -i $T/a.img ::N.TXT) $T/N.TXT; then ok "n.º 6: con el disco lleno, el original sigue como estaba"; else ko "n.º 6: el disco lleno ha estropeado el original ($(mtype -i $T/a.img ::N.TXT | wc -c) octetos)"; fi
+if ! mdir -i $T/a.img '::N.$$$' > /dev/null 2>&1 && fsck.fat -n $T/a.img > $T/fsck.txt 2>&1; then ok "n.º 6: no queda N.\$\$\$ y fsck.fat no encuentra errores"; else ko "n.º 6: queda el temporal o hay errores"; cat $T/fsck.txt; fi
+# y con sitio, guardar (por el temporal) funciona
+mdel -i $T/a.img ::RELLENO.BIN
+arranca $T/a.img 486
+escribe "editar n.txt"; sleep 2
+teclea "0123456789"; tecla f2; sleep 2; tecla esc; sleep 1
+apaga
+if [ "$(mtype -i $T/a.img ::N.TXT | head -c 10)" = 0123456789 ] && [ "$(mtype -i $T/a.img ::N.TXT | wc -c)" = $((3070 + 10)) ] && ! mdir -i $T/a.img '::N.$$$' > /dev/null 2>&1; then ok "n.º 6: con sitio, F2 guarda (y no queda el temporal)"; else ko "n.º 6: con sitio no ha guardado bien"; mdir -i $T/a.img ::; fi
+}

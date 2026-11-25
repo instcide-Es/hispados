@@ -72,6 +72,11 @@ inicio:
         mov word [n_lin], 1
         mov byte [insertar], 1
         call trae_lin
+        cmp byte [cortado], 0       ; no ha cabido entero: se dice
+        je bucle
+        call pinta
+        mov si, m_cortado
+        call aviso
 
 ; ---- una tecla tras otra ----
 bucle:
@@ -212,9 +217,41 @@ carga:
         ret
 
 ; ---- F2: guardar. CF=1 si no se ha podido ----
+; Se escribe en NOMBRE.$$$ y solo cuando está entero se borra el viejo y el
+; temporal pasa a llamarse como él: con el disco lleno, el viejo no se pierde.
+; Uno que no ha cabido entero no se guarda (se perdería lo que no se ve)
 guardar:
+        mov si, m_cortado
+        cmp byte [cortado], 0
+        jne .dice
         call deja_lin
-        mov dx, nombre
+        mov si, nombre              ; el temporal: el nombre con la extensión $$$
+        mov di, tmpn
+        xor bx, bx
+.t:
+        lodsb
+        cmp al, '.'
+        jne .t1
+        mov bx, di
+.t1:
+        cmp al, '\'
+        jne .t2
+        xor bx, bx
+.t2:
+        stosb
+        test al, al
+        jnz .t
+        dec di
+        test bx, bx
+        jz .t3
+        mov di, bx
+.t3:
+        mov ax, '.$'
+        stosw
+        mov ax, '$$'
+        stosw
+        mov byte [di], 0
+        mov dx, tmpn
         xor cx, cx
         DOS 0x3C
         jc .mal
@@ -248,15 +285,25 @@ guardar:
 .hecho:
         mov bx, [h]
         DOS 0x3E
-        jc .mal
+        jc .mal_b
+        mov dx, nombre              ; el viejo, fuera (si lo había), y el
+        DOS 0x41                    ; nuevo, en su sitio
+        mov dx, tmpn
+        mov di, nombre
+        DOS 0x56
+        jc .mal_b
         mov byte [cambiado], 0
         clc
         ret
 .mal_c:
         mov bx, [h]
         DOS 0x3E
+.mal_b:
+        mov dx, tmpn                ; lo escrito a medias, fuera
+        DOS 0x41
 .mal:
         mov si, m_e_guardar
+.dice:
         call aviso
         stc
         ret
@@ -950,6 +997,7 @@ m_sob       db "SOB"
 m_buscar    db " Buscar:", 0
 m_cambios   db " Hay cambios sin guardar. ¿Guardarlos? (S: sí, N: no, otra: seguir)", 0
 m_e_guardar db " No se ha podido guardar (¿disco lleno o protegido?). Pulse una tecla.", 0
+m_cortado   db " No cabe entero: se ve el principio y no se puede guardar. Pulse una tecla.", 0
 cur_x       dw 0                    ; la columna, dentro de la línea
 izq         dw 0                    ; la primera columna que se ve
 busca_n     dw 0
@@ -974,6 +1022,7 @@ modo        resb 1
 insertar    resb 1
 lin_sucia   resb 1
 nombre      resb 82
+tmpn        resb 82                 ; el temporal de guardar (NOMBRE.$$$)
 busca       resb 32
 lin         resb LIN_MAX + 6
 clip        resb LIN_MAX + 6
