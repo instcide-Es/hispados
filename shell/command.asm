@@ -7186,40 +7186,31 @@ start_batch:
 batch_read:
         mov [br_pos], eax
         push bx
+        push ebp
         lea dx, [bx+BC_NAME]
         mov ax, 0x3D00
         int 0x21
         jc .eofp
+        mov [br_h], ax
         mov bx, ax
         mov dx, [br_pos]
         mov cx, [br_pos+2]
         mov ax, 0x4200
         int 0x21
-        mov dx, rbuf
-        mov cx, BLINE
-        mov ah, 0x3F
-        int 0x21
-        jnc .rd
-        xor ax, ax
-.rd:
-        push ax
-        mov ah, 0x3E
-        int 0x21
-        pop ax
-        pop bx
+        call .read
         test ax, ax
-        jz .eof
+        jz .eofc
         mov cx, ax
         mov si, rbuf
         mov di, bline
-        xor dx, dx
+        xor ebp, ebp                ; EBP = octetos de la línea (con CR LF)
         cmp byte [si], 0x1A
-        je .eof
+        je .eofc
 .l:
-        jcxz .done
+        jcxz .more
         lodsb
         dec cx
-        inc dx
+        inc ebp
         cmp al, 13
         je .cr
         cmp al, 10
@@ -7230,24 +7221,68 @@ batch_read:
         jae .l
         stosb
         jmp .l
+        ; se acaba lo leído sin fin de línea: una línea de más de BLINE
+        ; letras. Como MS-DOS, lo que sobra se descarta hasta el LF (antes se
+        ; ejecutaba como otra orden: «REM ...» + 196 letras + « DEL ...»)
+.more:
+        cmp word [br_got], BLINE    ; leído de menos: fin del archivo
+        jb .done
+        call .read
+        test ax, ax
+        jz .done
+        mov cx, ax
+        mov si, rbuf
+        jmp .l
 .cr:
-        jcxz .done
+        jcxz .crm
         cmp byte [si], 10
         jne .done
-        inc dx
+        inc ebp
+        jmp .done
+.crm:
+        ; CR al final de lo leído: ¿el LF viene en lo siguiente?
+        cmp word [br_got], BLINE
+        jb .done
+        call .read
+        test ax, ax
+        jz .done
+        cmp byte [rbuf], 10
+        jne .done
+        inc ebp
         jmp .done
 .z:
-        dec dx
+        dec ebp
 .done:
         mov byte [di], 0
-        movzx eax, dx
+        mov bx, [br_h]
+        mov ah, 0x3E
+        int 0x21
+        mov eax, ebp
         add eax, [br_pos]
+        pop ebp
+        pop bx
         clc
         ret
+.eofc:
+        mov bx, [br_h]
+        mov ah, 0x3E
+        int 0x21
 .eofp:
+        pop ebp
         pop bx
-.eof:
         stc
+        ret
+; leer lo siguiente del lote en rbuf -> AX = octetos (0 si error)
+.read:
+        mov bx, [br_h]
+        mov dx, rbuf
+        mov cx, BLINE
+        mov ah, 0x3F
+        int 0x21
+        jnc .rd
+        xor ax, ax
+.rd:
+        mov [br_got], ax
         ret
 
 ; siguiente línea del lote -> eline; CF si no hay nada que ejecutar
@@ -8515,6 +8550,8 @@ if_not      resb 1
 es_name     resw 1
 es_val      resw 1
 br_pos      resd 1
+br_h        resw 1
+br_got      resw 1
 sname       resb 64
 pbuf        resb 258
 vname       resb 64
