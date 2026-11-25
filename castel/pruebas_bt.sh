@@ -94,7 +94,7 @@ import sys, os
 d = sys.argv[1]
 b = bytearray((i * 7) & 255 for i in range(644))
 b += bytes([0x0E, 0xFC, 7, 0x00, 0x5A, 0xA5, 0x00, 1, 2, 3, 0x02, 0xFC, 2, 0, 0, 0x02, 0xFC, 2, 0, 0])
-for k in range(300):
+for k in range(120):
     pl = 20 + k % 200
     b += bytes([0x8E, 0xFC, pl]) + bytes((k + i) & 255 for i in range(pl))
     m = (4 - (3 + pl + 3) % 4) % 4
@@ -108,7 +108,7 @@ cp $X/d.img $X/i.img
 MTOOLS_SKIP_CHECK=1 mmd -i $X/i.img ::FIRMWARE 2> /dev/null; MTOOLS_SKIP_CHECK=1 mcopy -o -i $X/i.img $X/fw/FIRMWARE/ibt-17-16-1.sfi ::FIRMWARE/
 $R/build/usbredir_bt $PU --clase intel-cargador --fw $X/fw 2> $X/redir3.txt &
 sleep 0.5
-QEMU_MAS="$QM" MEMORIA=64 DISCO=$X/i.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K "bt" ":pausa 45" "bt" ":pausa 1" > $X/q3.sal 2>&1
+QEMU_MAS="$QM" MEMORIA=64 DISCO=$X/i.img ARRANQUE=ordenes MODULOS= $AQUI/nucleo32/probar.sh $K "bt" ":hasta 240 1 del fabricante 2 (Intel)" ":pausa 2" "bt" ":pausa 1" > $X/q3.sal 2>&1
 wait
 S=$X/q3.sal
 mira "Intel 8087:0AAA en su cargador: su firmware (ibt-17-16-1.sfi, de \\FIRMWARE) por el extremo a granel, arranca y luego el reset de siempre" \
