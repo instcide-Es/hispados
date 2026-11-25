@@ -155,3 +155,29 @@ esta n1 "Parametros: tres" "n.º 8: y después, otro programa: "
 esta n1 "Libre para los programas: " "n.º 8: la cadena de la memoria sigue bien (MEMORIA): "
 apaga
 }
+
+# ---- n.º 9: PLUMA abre un documento que no cabe en la memoria con el disco
+# lleno: lo dice, y el documento se queda sin nombre ----
+p_auditoria_pluma() {
+echo "== Hispa-8086: auditoría 1, PLUMA con un documento grande y el disco lleno =="
+cp $IMG/hispa8086-720.img $T/a.img
+mcopy -i $T/a.img $IMG/PLUMA.COM ::
+python3 -c "
+import sys
+open(sys.argv[1],'wb').write(b''.join(b'Linea %04d de un documento grande que no cabe en la memoria de Pluma.\r\n' % i for i in range(1,1401)))" $T/GRANDE.TXT
+mcopy -i $T/a.img $T/GRANDE.TXT ::
+llena $T/a.img 4096
+arranca $T/a.img 486
+escribe "pluma grande.txt"; sleep 5
+pantalla q1
+esta q1 "No ha cabido entero: solo se ha leído una parte." "n.º 9: lo dice: "
+tecla spc; sleep 1; tecla f2; sleep 1
+pantalla q2
+esta q2 "Guardar como:" "n.º 9: y Guardar pide otro nombre (no pisa el bueno): "
+tecla esc; sleep 0.5; tecla alt-x; sleep 1
+pantalla q3
+esta q3 "Hay cambios sin guardar." "n.º 9: y al salir, pregunta: "
+tecla n; sleep 1
+apaga
+if cmp -s <(mtype -i $T/a.img ::GRANDE.TXT) $T/GRANDE.TXT; then ok "n.º 9: GRANDE.TXT sigue entero"; else ko "n.º 9: GRANDE.TXT ha cambiado"; fi
+}

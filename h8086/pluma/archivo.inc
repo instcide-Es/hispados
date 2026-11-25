@@ -195,7 +195,11 @@ carga:
         ret
 .hay:
         call carga_de
-        jc .x
+        jnc .entero
+        mov byte [nombre], 0        ; a medias: sin nombre (Guardar pregunta
+        mov byte [cambiado], 1      ; cuál, y no pisa el bueno) y con cambios
+        jmp short .x
+.entero:
         mov ax, 0                   ; el cursor al principio
         call mueve_hueco
         call asegura
@@ -229,6 +233,7 @@ carga_de:
 .a:
         mov byte [cg_aC], 0
         mov byte [cg_fin], 0
+        mov byte [cg_corto], 0
         mov byte [cg_blando], 0
         mov byte [cg_ult], 10
         mov word [cv_n], 0
@@ -301,6 +306,9 @@ carga_de:
         mov bx, [cg_h]
         DOS 0x3E
         mov byte [u_apag], 0
+        mov si, m_e_corto
+        cmp byte [cg_corto], 0
+        jne .dice
         clc
         ret
 .mal:
@@ -308,6 +316,7 @@ carga_de:
         DOS 0x3E
         mov byte [u_apag], 0
         mov si, m_e_leer
+.dice:
         call aviso
         stc
         ret
@@ -427,19 +436,25 @@ entrega:
 .mem:
         mov si, cbuf
         call inserta
+        jc .no
         jmp short .x
 .aC:
         mov byte [cg_aC], 1
         mov bx, hC
         call abre_tmp
-        jc .x
+        jc .no
         mov bx, [hC]
         mov dx, cbuf
         DOS 0x40
-        jc .x
+        jc .no
         add [clen], ax
         adc word [clen+2], 0
-.x:
+        cmp ax, cx
+        je .x
+.no:
+        mov byte [cg_corto], 1      ; no ha cabido (ni en la memoria ni en C,
+        mov byte [cg_fin], 1        ; con el disco lleno): no se lee más, y se
+.x:                                 ; dirá
         mov word [cv_n], 0
         pop cx
         pop si

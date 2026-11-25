@@ -38,6 +38,7 @@ m_disco     db " No se puede usar el disco para el documento (¿lleno o protegid
 m_nuevo     db " Documento nuevo.", 0
 m_de_ws     db " Abierto de WordStar: se guardará como .PLU.", 0
 m_e_leer    db " No se ha podido leer el archivo. Pulse una tecla.", 0
+m_e_corto   db " No ha cabido entero: solo se ha leído una parte. Pulse una tecla.", 0
 m_abrir     db " Abrir: ", 0
 m_leer      db " Insertar el archivo: ", 0
 m_no_existe db " No existe ese archivo. Pulse una tecla.", 0
@@ -329,6 +330,7 @@ p_virgen    resb 1
 cg_ins      resb 1
 cg_modo     resb 1
 cg_aC       resb 1
+cg_corto    resb 1                  ; lo leído no ha cabido entero
 cg_fin      resb 1
 cg_blando   resb 1
 cg_ult      resb 1
