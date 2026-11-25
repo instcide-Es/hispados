@@ -66,9 +66,12 @@ CAB_TAM     equ 128
 
 inicio:
         cld
-        mov sp, 0xFFFE              ; (por si DOS no lo deja arriba del todo)
-        cmp word [2], 0x1000        ; ¿hay 64 K para el programa?
+        mov ax, [2]                 ; ¿hay 64 K para el programa? (lo que
+        mov bx, cs                  ; tiene, desde su segmento: se miraba el
+        sub ax, bx                  ; final de la memoria, y con poca, la pila
+        cmp ax, 0x1000              ; quedaba fuera de la RAM)
         jb .poca
+        mov sp, 0xFFFE              ; (por si DOS no lo deja arriba del todo)
         mov word [bfin], 0xFFFE - PILA
         mov ax, [bfin]
         sub ax, BUF
