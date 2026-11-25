@@ -268,7 +268,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
 | 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). El navegador, en la 10 b | (8–12 sem.) |
-| 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). IPP y la energía, en la 11 b | (en paralelo) |
+| 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
 
@@ -453,8 +453,9 @@ fallo del planificador, los dos intermitentes de las pruebas, TCP con
 NewReno y los SACK de la otra punta, la INTx del `_PRT` para los discos y
 el USB, `select` de más de 64, ITIMER_VIRTUAL y PROF), lo que encontró KVM
 (STAR sin el RPL 3) y, de la 11, **el sonido**: HD Audio en el núcleo y
-/dev/dsp como OSS. Queda (la «11 b»): IPP, suspender, la batería, el
-brillo, HWP (piden ACPICA y mDNS).
+/dev/dsp como OSS. La «11 b» (sección 18): el tic estable, ACPICA en el
+núcleo (la batería, el cable, el EC, apagar por `_S5`, los enlaces de los
+`_PRT`), el brillo y HWP. Quedan IPP (mDNS), suspender y los P-states sin HWP.
 
 - IPP Everywhere (descubrir con mDNS, mandar PDF), HDA, suspender (S3 o S0ix con
   ACPICA), la batería, el brillo, HWP/P-states.

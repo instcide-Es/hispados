@@ -454,7 +454,7 @@ for maq in pc q35; do
      && hay $S "^  y al 41 % sin el cable: 1 puesta(s), al 41 %, 2050 de 5000 mAh (de fábrica 7350), sin el cable" \
      && hay $S "^  y quitada: 0 baterías puestas$" \
      && hay $S "^Prueba de ACPICA: el brillo, \\\\_SB_.HLCD, 10 niveles: a 30 % (_BCM) y leído (_BQC): 30; pedido el 77 %: 80 (el nivel de _BCL más cercano)$" \
-     && ! hay $S "  MAL" && hay $S "^Hispa-64 etapa 11: todo en orden.$"; then
+     && ! hay $S "  MAL:" && hay $S "^Hispa-64 etapa 11: todo en orden.$"; then
     ok "etapa 11 b, ACPICA en «$maq»: las tablas y el espacio de nombres, la batería de mentira por _BIF, _BIX y _BST (73 % cargando, 41 % sin el cable, quitada) y el adaptador (_PSR); el brillo por _BCL, _BCM y _BQC; $(serie $S | grep -o '[0-9]* KB de su montón')"
   else ko "etapa 11 b, ACPICA en «$maq» no sale (código $c): $(serie $S | grep -E '^ACPICA|^Prueba de ACPICA|^  y |MAL|parado|ACPI: falla' | head -8 | cut -c1-140 | paste -sd '|')"; fi
 done
@@ -1460,12 +1460,19 @@ if grep -q "^INTx: las rutas de ACPI (_PRT): 1 tablas resueltas, 128 entradas$" 
    && grep -qE "^  eth0: .*; [0-9]+ tramas recibidas y [0-9]+ enviadas, [1-9][0-9]+ interrupciones$" <<< "$v" && ! grep -q "mirando cada 10 ms" <<< "$v"; then
   ok "etapa 10, la INTx por el _PRT en QEMU q35: $(grep -o 'INTx por la GSI [0-9]* (del _PRT)' <<< "$v"), $(grep '^  eth0:' <<< "$v" | tail -1 | grep -o '[0-9]* interrupciones'), sin mirar cada 10 ms"
 else ko "etapa 10, la e1000 de q35 no va por la GSI del _PRT: $(grep -E '^INTx|^Red: 00|^  eth0' <<< "$v" | paste -sd '|')"; fi
-mb1 "apagar sinmusl sinpruebas" "$T/e10pc.txt" 256 -machine pc -nic user,model=e1000; c=$?
+mb1 "apagar sinmusl sinpruebas sinacpica" "$T/e10pc.txt" 256 -machine pc -nic user,model=e1000; c=$?
 v=$(serie "$T/e10pc.txt")
 if [ $c = 85 ] && grep -q "^INTx: las rutas de ACPI (_PRT): 0 tablas resueltas (y 1 sin resolver: sus enlaces los hace un método), 0 entradas$" <<< "$v" \
    && grep -q "^Red: 00:03.0 8086:100E .*, INTx por la GSI 1[01] (y mirando cada 10 ms)$" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"; then
-  ok "etapa 10, con «pc» (los enlaces LNKA, de _CRS hecho por un método): la línea de la configuración, y mirando cada 10 ms"
+  ok "etapa 10, con «pc» y sinacpica (los enlaces LNKA, de _CRS hecho por un método): la línea de la configuración, y mirando cada 10 ms"
 else ko "etapa 10, con «pc» la INTx no sale como debe (código $c): $(grep -E '^INTx|^Red: 00|parado' <<< "$v" | paste -sd '|')"; fi
+# [etapa 11 b] y con ACPICA: el _CRS de los LNKA evaluado, la e1000 por la GSI de su enlace, sin mirar cada 10 ms
+mb1 "apagar sinmusl sinpruebas" "$T/e10pca.txt" 256 -machine pc -nic user,model=e1000; c=$?
+v=$(serie "$T/e10pca.txt")
+if [ $c = 85 ] && grep -q "^INTx: las rutas de ACPI (_PRT): 1 tablas resueltas (1 por ACPICA, con 128 entradas por enlaces de _CRS hecho por un método), 128 entradas$" <<< "$v" \
+   && grep -q "^Red: 00:03.0 8086:100E .*, INTx por la GSI 1[01] (del _PRT)$" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"; then
+  ok "etapa 11 b, con «pc» y ACPICA: el _CRS de los enlaces LNKA (un método) evaluado; la e1000 $(grep -o 'INTx por la GSI [0-9]* (del _PRT)' <<< "$v"), sin mirar cada 10 ms"
+else ko "etapa 11 b, con «pc» y ACPICA la INTx no sale como debe (código $c): $(grep -E '^INTx|^Red: 00|parado' <<< "$v" | paste -sd '|')"; fi
 # [etapa 10] TCP entre dos de Hispa-64 (MRED, por 127.0.0.1): la escala de
 # ventana y SACK por las dos puntas; con «red=pierde», lo desordenado se
 # guarda, los ACK llevan SACK, y los 256 KB de ida y vuelta salen iguales
