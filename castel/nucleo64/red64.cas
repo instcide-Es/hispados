@@ -1437,7 +1437,7 @@ módulo Red64
 
     ; ¿es una de las rutas de texto de la red?
     público función es_texto_red(t: puntero a byte): bool
-        devolver igual(t, "/etc/resolv.conf") o igual(t, "/etc/hosts") o igual(t, "/etc/hostname") o igual(t, "/etc/services") o igual(t, "/proc/net/route") o igual(t, "/proc/net/dev") o igual(t, "/etc/protocols") o igual(t, "/etc/localtime")
+        devolver igual(t, "/etc/resolv.conf") o igual(t, "/etc/hosts") o igual(t, "/etc/hostname") o igual(t, "/etc/services") o igual(t, "/proc/net/route") o igual(t, "/proc/net/dev") o igual(t, "/etc/protocols") o igual(t, "/etc/localtime") o ruta_zona(t) = 2
     fin
 
     ; hace el texto de la ruta t: el objeto (Objet64.nuevo_texto), o 0
@@ -1490,7 +1490,7 @@ módulo Red64
             fin
         sino si igual(t, "/etc/hostname") entonces
             pon(e, "hispa-64\n")
-        sino si igual(t, "/etc/localtime") entonces
+        sino si igual(t, "/etc/localtime") o ruta_zona(t) = 2 entonces      ; [etapa 10 b] y adonde «apunta»: /usr/share/zoneinfo/...
             ; [etapa 10] la zona, en TZif (Hora64), para los que no miran TZ
             e.n := nat64(tzif(e.d))
         sino si igual(t, "/etc/services") entonces

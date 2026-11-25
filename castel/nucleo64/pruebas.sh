@@ -1,6 +1,6 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
-# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0 a 11:
+# nucleo64/pruebas.sh - las pruebas de Hispa-64 (docs/64/HISPA-64.md), etapas 0 a 11 (y la 10 b):
 #   - el núcleo (hispa64.cas) se compila igual con ccastel.py y NASM que con
 #     ensambla.py (y, si se da CASTEL64=ruta y ENSAMB64=ruta, con ellos);
 #   - arranca en QEMU por multiboot (-kernel, con HISPA64.SIM de módulo) con
@@ -122,6 +122,13 @@
 #     MSONIDO, en cada arranque con musl; con intel-hda y hda-output, y con
 #     ich9-intel-hda y hda-duplex, lo que graba QEMU, mirado con
 #     nucleo32/sonido/oye.py: un segundo de 440 Hz y medio de 1000 Hz, sin cortes).
+#   - [etapa 10 b] ICU 77.1 (MICU, en cada arranque con musl: 28 pruebas, las
+#     mismas líneas que en Linux; la zona por readlink de /etc/localtime) y
+#     libcurl 8.14.1 con BearSSL (MCURL: 20 pruebas por 127.0.0.1, con su
+#     servidor dentro; 16 a la vez con «multi»); y por la red, contra los
+#     servidores de prueba: MCURL (cinco a la vez, HTTP, a trozos, 5
+#     redirecciones y HTTPS, con su sha256) y la orden CURL (-L, --cacert,
+#     --resolve, sin la autoridad de prueba, -f con un 404, DNS).
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
@@ -178,6 +185,14 @@ MODS="$T/HISPA64.SIM"
 for f in "$T"/prog/*; do MODS="$MODS,$f"; done
 # [etapa 10] lo que dibuja MTEXTO (HarfBuzz y FreeType) en Linux: en Hispa-64, lo mismo
 MTX=$(cd "$T/prog" && ./MTEXTO DEJAVU.TTF 2> /dev/null | grep '^  dibujado: ')
+# [etapa 10 b] lo que dice MICU (ICU: el orden, los cortes, los números, las
+# fechas, IDNA...) en Linux: en Hispa-64, las mismas líneas
+MIC=$(cd "$T/prog" && ./MICU 2> /dev/null | grep '^  ')
+mismas() {   # LÍNEAS TEXTO: ¿están todas las LÍNEAS, tal cual, en TEXTO?
+  local l
+  [ -n "$1" ] || return 1
+  while IFS= read -r l; do grep -qxF -- "$l" <<< "$2" || return 1; done <<< "$1"
+}
 
 # ---- por multiboot (QEMU -kernel): rápido, solo el puerto serie ----
 mb1() {   # LÍNEA SALIDA MEMORIA [más opciones de QEMU]
@@ -238,8 +253,8 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 41 archivos: " <<< "$v" \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.1 x86_64$" <<< "$v" \
+    && grep -q "^Unidad en memoria: 45 archivos: " <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.2 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -280,7 +295,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.1 x86_64 (etapa 11 b (ACPICA, la batería y el tic estable))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.2 x86_64 (etapa 10 b (curl e ICU))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -300,6 +315,8 @@ e7_bien() {   # SALIDA N [avx]
     && grep -qE "^  TCP \[etapa 10\]: [1-9][0-9]* conexiones con escala de ventana" <<< "$v" \
     && grep -qE "^MSONIDO: todo bien \((1|15) pruebas\)$" <<< "$v" && grep -q "^Programa «MSONIDO»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MTEXTO: todo bien (6 pruebas)$" <<< "$v" && [ -n "$MTX" ] && grep -qxF "$MTX" <<< "$v" \
+    && grep -q "^MICU: todo bien (28 pruebas)$" <<< "$v" && grep -q "^MICU: la zona del sistema: Europe/Madrid (readlink de /etc/localtime: /usr/share/zoneinfo/Europe/Madrid)$" <<< "$v" && grep -q "^Programa «MICU»: acaba con el código 0, como debe" <<< "$v" && mismas "$MIC" "$v" \
+    && grep -q "^MCURL: todo bien (20 pruebas)$" <<< "$v" && grep -q "^Programa «MCURL»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
     && grep -q "^Después de musl: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas, 0 tuberías; " <<< "$v" \
@@ -310,7 +327,7 @@ e7_bien() {   # SALIDA N [avx]
 e7_ok() {   # SALIDA N QUÉ [avx]
   local v; v=$(serie "$1")
   if e7_bien "$1" "$2" "${4:-}"; then
-    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua y [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
+    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi»), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
   else ko "etapa 7 $3 no dice lo que debe: $(grep -E '^Programa «[ML]|^M[A-Z]*: [0-9]* mal|^LUA:|^Después de musl|^  la memoria|MAL|parado' <<< "$v" | cut -c1-110 | paste -sd '|' | cut -c1-1500)"; fi
 }
 e3_dice() {   # SALIDA: lo que dice, para cuando sale mal
@@ -330,7 +347,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.1 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.2 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 1[12][0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -1027,8 +1044,8 @@ TECLAS7+='LUA /PRUEBA.LUA uno dos{intro}{indicador}LUA{intro}{pausa}{pausa}print
 TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{indicador}salir{intro}'
 con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
 v=$(serie "$T/e7.txt")
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.1, etapa 11 " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  41 archivos (" <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.2, etapa 11 " <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  45 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
    && grep -q "^mkdir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
@@ -1070,7 +1087,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   }
   uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.1 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.2 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
@@ -1345,6 +1362,7 @@ srv9 PH9 http 0 a.bin; srv9 PS9 https 0 a.bin certs/servidor.pem certs/servidor.
 srv9 PD9 dns 53 10.0.2.2
 red9() {   # SALIDA NIC CPUS LÍNEA [dns]: arranca con RED.PRB y el cliente del eco
   local s=$1 nic=$2 n=$3 l=$4 m="RED.PRB,CA.PEM"
+  if [ -n "${PRB9:-}" ]; then cp "$PRB9" "$R9/RED.PRB"; else   # [etapa 10 b] otras órdenes
   {
     echo "PING -c 3 -i 200 10.0.2.2"
     echo "IFCONFIG"
@@ -1361,6 +1379,7 @@ red9() {   # SALIDA NIC CPUS LÍNEA [dns]: arranca con RED.PRB y el cliente del 
     echo "ECO cliente 10.0.2.2 $PE9 1000000"
     echo "ECO servidor 7000 1"
   } > "$R9/RED.PRB"
+  fi
   for f in "$T"/prog/*; do m="$m,$f"; done
   # [etapa 10] la red por USB: usb-net (CDC-ECM) detrás de un xHCI
   local nicq="-nic user,model=$nic,hostfwd=tcp:127.0.0.1:$((17000 + n))-:7000"
@@ -1429,6 +1448,37 @@ if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
   if grep -q "^Red: USB 1-[0-9]* 0525:A4A2 «RNDIS/QEMU USB Network Device», CDC-ECM (la configuración 1 de 2), MAC 40:54:00:12:34:56, a granel por los extremos 0x82 y 0x02 (de 64 octetos), con las interrupciones del xHCI$" <<< "$v"; then
     ok "etapa 10, la red por USB: la configuración de CDC-ECM (la 2.ª de las dos: la 1.ª es RNDIS), la variante 1 de los datos, la MAC de su iMACAddress, recibir sin el mutex del aparato (el xHCI despierta al hilo «red»)"
   else ko "etapa 10, la red por USB no dice lo que debe: $(grep -E '^Red: USB|^USB|^  1-' <<< "$v" | paste -sd '|')"; fi
+  # [etapa 10 b] curl (la orden) y libcurl (MCURL: la interfaz «multi»), con
+  # BearSSL, contra los mismos servidores: cinco a la vez (HTTP, a trozos, cinco
+  # redirecciones y HTTPS con la autoridad de prueba y --resolve), con su
+  # sha256; CURL con -L, con --cacert, sin ella (las autoridades de siempre, que
+  # lleva dentro: rechazado), -f con un 404 y, con el DNS de prueba, por su
+  # nombre y uno que no existe
+  {
+    echo "MCURL -c /CA.PEM -r anfitrion.prueba:$PS9:10.0.2.2 http://10.0.2.2:$PH9/a.bin http://10.0.2.2:$PH9/trozos http://10.0.2.2:$PH9/redir5 https://anfitrion.prueba:$PS9/a.bin https://anfitrion.prueba:$PS9/trozos"
+    echo "CURL -sS -L -o /dev/null -w CURL:%{http_code}:%{size_download}:%{num_redirects}\\n http://10.0.2.2:$PH9/redir5"
+    echo "CURL -sS -o /dev/null -w CURL:%{http_code}:%{size_download}:%{ssl_verify_result}\\n --cacert /CA.PEM --resolve anfitrion.prueba:$PS9:10.0.2.2 https://anfitrion.prueba:$PS9/a.bin"
+    echo "=60 CURL -sS -o /dev/null --resolve anfitrion.prueba:$PS9:10.0.2.2 https://anfitrion.prueba:$PS9/a.bin"
+    echo "=22 CURL -sSf -o /dev/null http://10.0.2.2:$PH9/no"
+    if [ -n "$PD9" ]; then
+      echo "CURL -sS -o /dev/null -w CURL:%{http_code}:%{size_download}:%{remote_ip}\\n --cacert /CA.PEM https://anfitrion.prueba:$PS9/a.bin"
+      echo "=6 CURL -sS http://noexiste.zz/"
+    fi
+  } > "$R9/CURL.PRB"
+  if [ -n "$PD9" ]; then l10b="ip=10.0.2.15/24,10.0.2.2,10.0.2.2 sindhcp"; else l10b=""; fi
+  PRB9=$R9/CURL.PRB red9 "$T/e10b.txt" e1000e 2 "$l10b"
+  v=$(serie "$T/e10b.txt")
+  if [ "$(grep -c "^MCURL: http.*: 200, 1048576 octetos; sha256 = $SHA9 (https*, HTTP/1.1)$" <<< "$v")" = 5 ] \
+     && grep -q "^MCURL: 5 direcciones a la vez en [0-9]* ms, 0 mal$" <<< "$v" \
+     && grep -q "^CURL:200:1048576:5$" <<< "$v" && grep -q "^CURL:200:1048576:0$" <<< "$v" \
+     && grep -q "^Programa «=60 CURL .*»: acaba con el código 60, como debe" <<< "$v" \
+     && grep -q "^Programa «=22 CURL .*»: acaba con el código 22, como debe" <<< "$v" \
+     && { [ -z "$PD9" ] || { grep -q "^CURL:200:1048576:10.0.2.2$" <<< "$v" && grep -q "^Programa «=6 CURL .*»: acaba con el código 6, como debe" <<< "$v"; }; } \
+     && ! grep -q "^Programa .*: acaba con el código [0-9]*$" <<< "$v" \
+     && grep -q "^Después de la red: 0 sockets (.*0 objetos$" <<< "$v" \
+     && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"; then
+    ok "etapa 10 b, curl 8.14.1 con BearSSL (e1000e, 2 procesadores$( [ -n "$PD9" ] && echo ', IP fija y el DNS de prueba')): MCURL, cinco a la vez con la interfaz «multi» (HTTP, a trozos, 5 redirecciones, HTTPS), sha256 bien ($(grep -o 'a la vez en [0-9]* ms' <<< "$v" | head -1)); CURL con -L, --cacert y --resolve, sin la autoridad de prueba (60), -f con un 404 (22)$( [ -n "$PD9" ] && echo ', por su nombre con DNS y uno que no existe (6)'); sin sockets al acabar"
+  else ko "etapa 10 b, curl no hace lo que debe: $(serie "$T/e10b.txt" | grep -E '^MCURL|^CURL:|^curl:|^Programa .*CURL|MAL|parado|^Después de la red' | cut -c1-140 | paste -sd '|' | cut -c1-1800)"; fi
   # la zona: la hora local con cambio de horario, y el CMOS en UTC o en hora local
   v=$(serie "$T/e9b.txt"); w=$(serie "$T/e9a.txt")
   if grep -q "zona UTC (TZ=UTC0), el CMOS en UTC$" <<< "$v" && grep -q "zona Europa/Madrid (TZ=CET-1CEST,M3.5.0,M10.5.0/3), el CMOS en hora local$" <<< "$w" \

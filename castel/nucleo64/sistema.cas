@@ -680,6 +680,69 @@ módulo Sistema
         devolver ent64(l)
     fin
 
+    ; [etapa 10 b] readlink y readlinkat: en Hispa-64 no hay enlaces
+    ; simbólicos, salvo /etc/localtime, que «apunta» a la zona en
+    ; /usr/share/zoneinfo (ICU y otros sacan de ahí el nombre de la zona, con
+    ; TZ en la forma de POSIX); lo que existe da EINVAL (no es un enlace), lo
+    ; que no, su error (ENOENT)
+    función readlink_(p: puntero a Proceso, dirfd: ent64, ruta: nat64, v: nat64, n: nat64): ent64
+        variable t, base, z: puntero a byte
+        variable err: ent64
+        variable st: arreglo [18] de nat64
+        variable d: arreglo [96] de byte
+        variable i, j: nat32
+        t := ruta_de(p, ruta, err)
+        si t = nulo entonces devolver err fin
+        si t[0] = 0 entonces
+            libera(t)
+            devolver ENOENT
+        fin
+        z := "/etc/localtime"
+        i := 0
+        mientras t[i] <> 0 y t[i] = z[i] hacer i := i + 1 fin
+        si t[i] = 0 y z[i] = 0 entonces
+            libera(t)
+            z := zona_iana()
+            si z = nulo entonces devolver EINVAL fin
+            base := "/usr/share/zoneinfo/"
+            i := 0
+            mientras base[i] <> 0 hacer
+                d[i] := base[i]
+                i := i + 1
+            fin
+            j := 0
+            mientras z[j] <> 0 y i < 95 hacer
+                d[i] := z[j]
+                i := i + 1
+                j := j + 1
+            fin
+            si n < nat64(i) entonces i := nat32(n) fin
+            si no copia_a(p, v, nat64(dirección(d[0])), nat64(i)) entonces devolver EFAULT fin
+            devolver ent64(i)
+        fin
+        ; las carpetas que «hay» en el camino: /etc, /dev, /proc, y las de la zona
+        z := t
+        si t[0] = '/' y ((t[1] = 'e' y t[2] = 't' y t[3] = 'c') o (t[1] = 'd' y t[2] = 'e' y t[3] = 'v') o (t[1] = 'p' y t[2] = 'r' y t[3] = 'o' y t[4] = 'c')) entonces
+            si t[4] = 0 o (t[4] = '/' y t[5] = 0) o (t[1] = 'p' y (t[5] = 0 o (t[5] = '/' y t[6] = 0))) entonces z := nulo fin
+        fin
+        si z = nulo o es_consola(t) o es_disp(t) <> 0 o ruta_zona(t) <> 0 o es_texto_red(t) entonces
+            libera(t)
+            devolver EINVAL
+        fin
+        base := nulo
+        si t[0] <> '/' entonces
+            base := base_de(p, dirfd, err)
+            si base = nulo entonces
+                libera(t)
+                devolver err
+            fin
+        fin
+        err := vfs_stat(base, t, nat64(dirección(st[0])))
+        libera(t)
+        si err < 0 entonces devolver err fin
+        devolver EINVAL
+    fin
+
     ; chdir (fd < 0) y fchdir
     función chdir_(p: puntero a Proceso, ruta: nat64, fd: ent64): ent64
         variable t, base, nueva: puntero a byte
@@ -1070,8 +1133,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.1")
-        pon_texto(dirección(t[0]), 195, "etapa 11 b (ACPICA, la batería y el tic estable)")
+        pon_texto(dirección(t[0]), 130, "0.11.2")
+        pon_texto(dirección(t[0]), 195, "etapa 10 b (curl e ICU)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -1883,6 +1946,8 @@ módulo Sistema
             caso 83: r := con_ruta(p, -100, a1, 0)
             caso 84: r := con_ruta(p, -100, a1, 2)
             caso 87: r := con_ruta(p, -100, a1, 1)
+            caso 89: r := readlink_(p, -100, a1, a2, a3)        ; [etapa 10 b]
+            caso 267: r := readlink_(p, ent64(a1), a2, a3, a4)
             caso 102, 104, 107, 108: r := 0
             caso 158: r := arch_(p, a1, a2)
             caso 162:

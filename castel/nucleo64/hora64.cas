@@ -253,6 +253,49 @@ módulo Hora64
         devolver n
     fin
 
+    ; [etapa 10 b] el nombre de la zona en la base de datos de la IANA (el que
+    ; da readlink de /etc/localtime), o nulo si es una de POSIX sin nombre
+    público función zona_iana(): puntero a byte
+        variable n: puntero a byte
+        n := dirección(zona_nombre[0])
+        si n[0] = 0 o igual(n, "Europa/Madrid") o igual(n, "Europe/Madrid") o igual(n, "Madrid") entonces devolver "Europe/Madrid" fin
+        si igual(n, "Atlántico/Canarias") o igual(n, "Atlantico/Canarias") o igual(n, "Atlantic/Canary") o igual(n, "Canarias") entonces devolver "Atlantic/Canary" fin
+        si igual(n, "Europa/Lisboa") o igual(n, "Europe/Lisbon") o igual(n, "Lisboa") entonces devolver "Europe/Lisbon" fin
+        si igual(n, "Europa/Londres") o igual(n, "Europe/London") o igual(n, "Londres") entonces devolver "Europe/London" fin
+        si igual(n, "Europa/París") o igual(n, "Europe/Paris") entonces devolver "Europe/Paris" fin
+        si igual(n, "Europa/Berlín") o igual(n, "Europe/Berlin") entonces devolver "Europe/Berlin" fin
+        si igual(n, "Europa/Roma") o igual(n, "Europe/Rome") entonces devolver "Europe/Rome" fin
+        si igual(n, "UTC") o igual(n, "GMT") entonces devolver "UTC" fin
+        devolver nulo
+    fin
+
+    ; [etapa 10 b] ¿es t la ruta de la zona en /usr/share/zoneinfo (2), o una
+    ; de sus carpetas (/usr, /usr/share... : 1)? (0: ni lo uno ni lo otro)
+    público función ruta_zona(t: puntero a byte): nat32
+        variable z, b: puntero a byte
+        variable i, j: nat32
+        z := zona_iana()
+        si z = nulo o t[0] <> '/' entonces devolver 0 fin
+        b := "/usr/share/zoneinfo/"
+        i := 0
+        mientras b[i] <> 0 y t[i] = b[i] hacer i := i + 1 fin
+        si b[i] <> 0 entonces
+            ; una carpeta de antes: /usr, /usr/share o /usr/share/zoneinfo (con «/» o sin él)
+            si i > 1 y (t[i] = 0 o (t[i] = '/' y t[i + 1] = 0)) y b[i] = '/' entonces devolver 1 fin
+            si i > 1 y t[i] = 0 y b[i - 1] = '/' entonces devolver 1 fin
+            devolver 0
+        fin
+        si t[i] = 0 entonces devolver 1 fin
+        j := 0
+        mientras z[j] <> 0 y t[i] = z[j] hacer
+            i := i + 1
+            j := j + 1
+        fin
+        si z[j] = 0 y t[i] = 0 entonces devolver 2 fin
+        si t[i] = 0 y z[j] = '/' entonces devolver 1 fin            ; /usr/share/zoneinfo/Europe
+        devolver 0
+    fin
+
     ; ---- el reloj ----
     ; los ns desde 1970 (UTC)
     público función real_ns(): nat64

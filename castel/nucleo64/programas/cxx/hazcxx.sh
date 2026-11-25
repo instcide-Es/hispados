@@ -7,9 +7,13 @@
 #               contenedores, flujos, regex, cientos de hilos, thread_local...
 #   MTEXTO      HarfBuzz sobre FreeType (mtexto.c), con DEJAVU.TTF
 #   DEJAVU.TTF  DejaVu Sans entera (terceros/dejavu/DejaVuSans.ttf)
+#   MICU        [etapa 10 b] la prueba de ICU 77.1 (micu.cpp), con
+#   icudt77l.dat sus datos (terceros/icu/data: es, ca, gl, eu, en)
 # FreeType (terceros/freetype, en C: con musl-gcc) y HarfBuzz
 # (terceros/harfbuzz, en C++: con cxx.sh) se compilan en build/ la primera
-# vez (libfreetype.a y libharfbuzz.a), de uno en uno.
+# vez (libfreetype.a y libharfbuzz.a), de uno en uno; e ICU (terceros/icu,
+# en C++: libicu.a, common, i18n y stubdata), un archivo cada vez, solo lo
+# que ha cambiado.
 # Uso: hazcxx.sh SALIDA   (dice en la última línea los que ha hecho; sin g++
 # o sin las cabeceras de la libstdc++, ninguno)
 set -e
@@ -48,4 +52,26 @@ fi
 "$AQUI/cxx.sh" -o "$S/MTEXTO" "$B/harfbuzz-obj/mtexto.o" "$LH" "$LF"
 strip --strip-unneeded "$S/MTEXTO"
 cp "$R/terceros/dejavu/DejaVuSans.ttf" "$S/DEJAVU.TTF"
-echo "hechos: MCXX MTEXTO DEJAVU.TTF"
+# [etapa 10 b] ICU: common, i18n y stubdata (los datos van aparte, en
+# icudt77l.dat); un archivo cada vez, solo lo que ha cambiado
+IC=$R/terceros/icu/source
+OI=$B/icu-obj
+mkdir -p "$OI"
+IF="-std=c++17 -O2 -fno-stack-protector -DU_STATIC_IMPLEMENTATION -DU_ATTRIBUTE_DEPRECATED= -DU_CHARSET_IS_UTF8=1 -DU_USING_ICU_NAMESPACE=0 -DU_HAVE_STRTOD_L=0 -I$IC/common"
+cambio=0
+for d in common i18n stubdata; do
+  case $d in common) DF="-DU_COMMON_IMPLEMENTATION" ;; i18n) DF="-DU_I18N_IMPLEMENTATION -I$IC/i18n" ;; *) DF="-DU_COMMON_IMPLEMENTATION -I$IC/stubdata" ;; esac
+  for f in "$IC/$d"/*.cpp; do
+    o=$OI/${d}_$(basename "$f" .cpp).o
+    if [ ! -f "$o" ] || [ "$f" -nt "$o" ]; then
+      # shellcheck disable=SC2086
+      nice "$AQUI/cxx.sh" $IF $DF -c "$f" -o "$o"
+      cambio=1
+    fi
+  done
+done
+if [ $cambio = 1 ] || [ ! -f "$OI/libicu.a" ]; then rm -f "$OI/libicu.a"; ar rcs "$OI/libicu.a" "$OI"/*.o; fi
+nice "$AQUI/cxx.sh" -std=c++17 -O2 -Wall -Wno-unused-function -DU_STATIC_IMPLEMENTATION -DU_USING_ICU_NAMESPACE=0 -I"$IC/common" -I"$IC/i18n" -o "$S/MICU" "$AQUI/micu.cpp" "$OI/libicu.a"
+strip --strip-unneeded "$S/MICU"
+cp "$R/terceros/icu/data/icudt77l.dat" "$S/icudt77l.dat"
+echo "hechos: MCXX MTEXTO DEJAVU.TTF MICU icudt77l.dat"
