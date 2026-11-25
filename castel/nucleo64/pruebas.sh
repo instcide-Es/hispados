@@ -103,6 +103,13 @@
 #     ensayo»), con 1, 2, 4 y 8 procesadores: DHCP o IP fija, PING, IFCONFIG,
 #     DESCARGA por HTTP y HTTPS (sha256), DNS, NTP (la hora puesta) y ECO de ida
 #     y vuelta, contra los servidores de prueba del anfitrión; la zona horaria.
+#   - [etapa 10] MSENALES con alarm y setitimer; MRED con /etc/localtime; MCXX
+#     (C++ con la libstdc++ y musl: cxx.sh) y MTEXTO (HarfBuzz y FreeType: lo
+#     mismo que en Linux) en cada arranque con musl; la red por USB (usb-net,
+#     CDC-ECM), también enchufada y desenchufada en marcha; el CMOS puesto en
+#     hora por NTP; las INTx por el _PRT (MIRAPRT con las tablas del ASUS, el
+#     Toshiba y el HP Mini; q35 y pc); TCP con pérdidas (red=pierde): lo
+#     desordenado, la escala de ventana y SACK, de Hispa-64 a Hispa-64.
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
