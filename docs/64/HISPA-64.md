@@ -2457,6 +2457,14 @@ para 40 s, saca los registros por el monitor (los procesadores, todos en
     lleva con este driver, y así se prueban sus anillos.
   - **virtio-net** (`virtio64.cas`), por la forma de siempre (la de
     transición, 1AF4:1000): la «paravirtualizada» de QEMU y de VirtualBox.
+- Al hacerla salió **un fallo de la etapa 7**: el bloque de los registros de
+  la FPU de un hilo nuevo no se ponía a cero, y `xsave` no escribe los
+  octetos 528 a 575 de su cabecera (reservados, que `xrstor` quiere a 0): con
+  `-cpu max` (xsave) y un bloque del montón ya usado (un socket soltado), el
+  núcleo se paraba con un #GP en `pon_fpu` al cambiar a ese hilo (MRED, con
+  1 procesador también). Ahora `nuevo_fpu` lo pone a cero. Y en Sondeo64
+  se despierta a cada uno con el cerrojo de la cola tomado (así no puede
+  acabar su hilo entre sacarlo de la cola y despertarlo).
 - La **red por USB (RTL8153, CDC-ECM/NCM)** no ha entrado: pide elegir otra
   configuración del aparato (la 1 de la RTL8153 es la propia de Realtek; la
   de CDC-ECM es otra), la variante 1 de la interfaz de datos y una
@@ -2481,7 +2489,7 @@ Hispa-64 0.9.0. Los módulos y programas nuevos y lo que cambia:
 | `intel64.cas`, `rtl64.cas`, `virtio64.cas` | los drivers (arriba) |
 | `prred64.cas` | las pruebas: lo que hay (las tarjetas, el azar, la hora y la zona) y, si en la unidad está `RED.PRB`, sus órdenes, mirando sus códigos; al acabar, que no quede ningún socket |
 | `sistema.cas` | las llamadas nuevas (41-55, 288, 283-290, 227 clock_settime, 164 settimeofday), los sockets y los objetos en read, write, close, dup, fcntl, fstat, lseek, ioctl, poll, select y epoll; el reloj de Hora64; uname 0.9.0 |
-| `procesos.cas` | TZ en el entorno de los programas |
+| `procesos.cas` | TZ en el entorno de los programas; el bloque de la FPU a cero (arriba) |
 | `tubos64.cas`, `tty64.cas` | avisan a Sondeo64 |
 | `programas/red/` | PING, IFCONFIG, DESCARGA (HTTP y HTTPS con BearSSL), NTP, ECO y MRED (en C con musl; `hazred.sh`), y `servidores.py`: los servidores de las pruebas (HTTP, HTTPS, NTP, eco, DNS y los certificados) |
 

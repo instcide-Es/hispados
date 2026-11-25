@@ -615,6 +615,10 @@ módulo Procesos
         fpu := 0
         si b = 0 entonces devolver 0 fin
         fpu := (b + 63) yb (nob nat64(63))
+        ; [etapa 9] a cero: xsave no escribe los octetos 528 a 575 de la
+        ; cabecera (reservados), y xrstor da #GP si no son 0; un bloque del
+        ; montón ya usado (un socket soltado) los traía con algo
+        ceros_mem(fpu, tam_fpu)
         devolver b
     fin
 

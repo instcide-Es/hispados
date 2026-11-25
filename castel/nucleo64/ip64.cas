@@ -909,15 +909,28 @@ módulo Ip64
         devolver s
     fin
 
+    público variable socks_dobles: nat64
+
     público función quita_sock(s: puntero a Sock)
         variable i: nat32
+        variable estaba: bool
+        estaba := falso
         i := 0
         mientras i < MAX_SOCK hacer
             si socks[i] = nat64(s) entonces
                 socks[i] := 0
                 socks_vivos := socks_vivos - 1
+                estaba := cierto
             fin
             i := i + 1
+        fin
+        si no estaba entonces
+            ; (ya soltado: no se suelta otra vez)
+            socks_dobles := socks_dobles + 1
+            escribir("[red: un socket soltado dos veces (estado ", s.estado, ", marcas ")
+            hex16(nat64(s.marcas))
+            escribir(")]\n")
+            devolver
         fin
         si s.rx <> 0 entonces libera(puntero(s.rx)) fin
         si s.tx <> 0 entonces libera(puntero(s.tx)) fin

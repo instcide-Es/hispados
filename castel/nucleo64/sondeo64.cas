@@ -24,10 +24,26 @@ módulo Sondeo64
 
     ; algo ha cambiado: a mirar otra vez
     público función avisa()
+        variable b: nat64
+        variable h: puntero a Hilo
         suma_atómica(dirección(gen), 1)
         ; (siempre con el cerrojo de la cola: mirar «primero» sin él podría
-        ; perder a uno que se está poniendo a dormir)
-        si despierta_todos(dirección(cola)) > 0 entonces avisos := avisos + 1 fin
+        ; perder a uno que se está poniendo a dormir; y se despierta a cada
+        ; uno con el cerrojo aún tomado: así no puede irse —ni acabar su hilo y
+        ; soltarse— entre sacarlo de la cola y despertarlo, porque para volver
+        ; de espera_cambio necesita este cerrojo. Despertar después, sin él
+        ; —lo de despierta_todos—, con muchos hilos que duermen y despiertan
+        ; a la vez, podía despertar a un hilo ya soltado: el núcleo se paraba
+        ; con un #GP en pon_fpu, con 8 procesadores)
+        b := toma(dirección(cola.cerrojo))
+        si cola.primero <> 0 entonces avisos := avisos + 1 fin
+        mientras cola.primero <> 0 hacer
+            h := puntero(cola.primero)
+            quita_de_espera(dirección(cola), h)
+            si cola.primero = nat64(h) entonces romper fin          ; (no debería pasar)
+            despierta(h)
+        fin
+        suelta(dirección(cola.cerrojo), b)
     fin
 
     ; el hilo que corre (de p) duerme hasta que haya un cambio después de g0,

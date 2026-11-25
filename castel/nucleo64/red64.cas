@@ -879,6 +879,14 @@ módulo Red64
         sino
             ; varios trozos: se recibe en el primero que quepa todo, a pelo: trozo a trozo (TCP) o el datagrama al primero y se reparte
             r := recibe_k(p, fd, s, k, todo, marcas_, ip, pt, trunc)
+            ; (TCP con MSG_WAITALL: hasta llenar todos los trozos, o el final)
+            si s.tipo_ = S_STREAM y marcas_ yb MSG_WAITALL <> 0 y marcas_ yb MSG_PEEK = 0 entonces
+                mientras r > 0 y nat64(r) < todo hacer
+                    err := recibe_k(p, fd, s, puntero(nat64(k) + nat64(r)), todo - nat64(r), marcas_, ip, pt, trunc)
+                    si err <= 0 entonces romper fin
+                    r := r + err
+                fin
+            fin
             si r > 0 entonces
                 hecho := 0
                 i := 0
