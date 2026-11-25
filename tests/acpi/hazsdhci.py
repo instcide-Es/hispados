@@ -116,6 +116,14 @@ def gpioio(pin, fuente):
     return d
 
 
+def i2c(direccion, hz, fuente):
+    # (0.8.12, «fichaequipo») el descriptor I2cSerialBus (8Eh): consumidor, 7 bits
+    f = fuente.encode() + b'\0'
+    cuerpo = bytes([1, 0, 1, 0x02]) + struct.pack('<H', 0) + bytes([1]) + struct.pack('<H', 6) \
+        + struct.pack('<IH', hz, direccion) + f
+    return bytes([0x8E]) + struct.pack('<H', len(cuerpo)) + cuerpo
+
+
 def ruta_wfd3():
     return b'\x5C\x2F\x03' + seg('_SB') + seg('GPO2') + seg('WFD3')
 
@@ -150,7 +158,20 @@ def main():
                            + nombre('_CRS', plantilla(mem32fija(0xFEB00000, 0x1000), mem32fija(0xFEB01000, 0x1000)))
                            + metodo('_PS0', b'\x70\x00' + ruta_wfd3() + b'\x5B\x22' + byte_(20) + b'\x70\x01' + ruta_wfd3())
                            + rtlw)
-    cuerpo = b'\x10' + pkg(b'\x5C' + seg('_SB') + gpo2 + sdhb + sdhc)
+    i2c5 = b''
+    if con_sdio:
+        # (0.8.12, «fichaequipo») una I2C de Bay Trail con el acelerómetro
+        # (BOSC0200) y la pantalla táctil (MSSL1680, _STA 0; sin el _CID PNP0C50, para que no la tome por un
+        # touchpad I2C-HID): lo que lista
+        # ACPI.BIN en ACPI.TXT para saber qué chips lleva la tableta
+        accl = dispositivo('ACCL', nombre('_HID', cadena('BOSC0200')) + nombre('_CRS', plantilla(i2c(0x18, 400000, '\\_SB.I2C5'), interrupcion(70)))
+                           + metodo('_STA', b'\xA4' + byte_(0x0F)))
+        tcsc = dispositivo('TCSC', nombre('_HID', cadena('MSSL1680'))
+                           + nombre('_CRS', plantilla(i2c(0x40, 400000, '\\_SB.I2C5')))
+                           + metodo('_STA', b'\xA4' + byte_(0x00)))
+        i2c5 = dispositivo('I2C5', nombre('_HID', cadena('80860F41')) + nombre('_UID', byte_(5))
+                           + nombre('_CRS', plantilla(mem32fija(0xFEB10000, 0x1000))) + accl + tcsc)
+    cuerpo = b'\x10' + pkg(b'\x5C' + seg('_SB') + gpo2 + sdhb + sdhc + i2c5)
     cab = b'SSDT' + struct.pack('<I', 36 + len(cuerpo)) + bytes([2, 0]) + b'HISPA ' + b'SDHCIPRU' + struct.pack('<I', 1) \
         + b'INTL' + struct.pack('<I', 0x20260101)
     t = bytearray(cab + cuerpo)

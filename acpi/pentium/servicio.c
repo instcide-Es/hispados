@@ -762,12 +762,17 @@ static void ta_lee_bateria(void)
  * leer el equipo (la configuración PCI, sin tocar nada: sin medir las zonas,
  * que pararía los aparatos un momento); las tablas no llevan datos
  * personales. Una vez, la primera vez que el Termómetro pregunta */
+/* (0.8.12) la carpeta: \TERMO\EQUIPO (el Termómetro) o, con «fichaequipo» en
+ * la línea del cargador, también \EQUIPO (la memoria del Acer One 10: la
+ * pantalla táctil y el acelerómetro) */
+static const char *ta_carpeta = "\\TERMO\\EQUIPO";
+
 static int ta_archivo(const char *nombre, const void *d, u32 n)
 {
 	char r[48];
 	u32 m, w;
 
-	snprintf(r, sizeof r, "\\TERMO\\EQUIPO\\%s", nombre);
+	snprintf(r, sizeof r, "%s\\%s", ta_carpeta, nombre);
 	m = sc(SC_ABRIR, (u32)r, 2, 0);
 	if (ES_ERROR(m))
 		return 0;
@@ -789,8 +794,9 @@ static void ta_equipo(void)
 	char nombre[16];
 
 	ta.equipo_hecho = 1;
-	sc(SC_CREAR_CARPETA, (u32)"\\TERMO", 0, 0);
-	sc(SC_CREAR_CARPETA, (u32)"\\TERMO\\EQUIPO", 0, 0);
+	if (ta_carpeta[1] == 'T')
+		sc(SC_CREAR_CARPETA, (u32)"\\TERMO", 0, 0);
+	sc(SC_CREAR_CARPETA, (u32)ta_carpeta, 0, 0);
 	for (i = 0; i < 64; i++) {
 		if (ACPI_FAILURE(AcpiGetTableByIndex(i, &h)))
 			break;
@@ -813,7 +819,7 @@ static void ta_equipo(void)
 			n++;
 		else if (n == 0) {
 			ta.equipo_hecho = 2;
-			reg("ACPI: (TERMO) no se puede escribir en \\TERMO\\EQUIPO\n");
+			reg("ACPI: (TERMO) no se puede escribir en %s\n", ta_carpeta);
 			return;
 		}
 	}
@@ -862,7 +868,21 @@ static void ta_equipo(void)
 			}
 	if (ta_archivo("PCI.TXT", t, k))
 		ta.equipo_pci = 1;
-	reg("ACPI: (TERMO) en \\TERMO\\EQUIPO: %u tablas ACPI y la lista PCI%s\n", ta.equipo_tablas, ta.equipo_pci ? "" : " (NO)");
+	reg("ACPI: (TERMO) en %s: %u tablas ACPI y la lista PCI%s\n", ta_carpeta, ta.equipo_tablas, ta.equipo_pci ? "" : " (NO)");
+}
+
+/* (0.8.12) «fichaequipo»: la ficha técnica en \EQUIPO (las tablas ACPI sin MSDM
+ * ni SLIC y PCI.TXT, como el Termómetro), sin tocar lo del Termómetro */
+static void ficha_equipo(void)
+{
+	u32 h = ta.equipo_hecho, n = ta.equipo_tablas, p = ta.equipo_pci;
+
+	ta_carpeta = "\\EQUIPO";
+	ta_equipo();
+	ta_carpeta = "\\TERMO\\EQUIPO";
+	ta.equipo_hecho = h;
+	ta.equipo_tablas = n;
+	ta.equipo_pci = p;
 }
 
 /* (TERMO) (NVIDIA) los puertos PCI Express del bus 0 en el ACPI (los de la
@@ -1170,6 +1190,12 @@ int servicio_principal(void)
 				for (k = 0; k < m; k++)
 					sc(SC_I2CHID, (u32)&tp[k], 0, 0);
 				sc(SC_I2CHID, 0, 0, 0);
+			}
+			/* (0.8.12) la ficha técnica en \EQUIPO y, en ACPI.TXT, los aparatos de
+			 * las I2C (la pantalla táctil, el acelerómetro), solo leer */
+			if (tiene(args, "fichaequipo")) {
+				ficha_equipo();
+				i2c_lista();
 			}
 			/* (SDHCI) las controladoras SD/eMMC de «modo ACPI», para el núcleo
 			 * (llamada 160): el eMMC y la microSD de las tabletas Bay Trail */

@@ -4892,6 +4892,21 @@ sobre la 0.8.11). Lo que se tocó al juntar:
 - **`usb.sh`** con `PRUEBA_SDHCI=1` y `PRUEBA_WIFI_SDIO=1` a la vez (la
   memoria de instalar del Acer One 10): el eMMC y la SD son las entradas 1 a
   4 y el Wi-Fi, la 5 a la 7 (las dos se numeraban desde la 1).
+- **«fichaequipo»** (ACPI.BIN, para la pantalla táctil y el giro de la
+  pantalla del Acer One 10): con esa palabra en la línea del cargador, al
+  ponerse en marcha deja la ficha técnica en **`\EQUIPO`** de la unidad del
+  sistema (las tablas ACPI, sin MSDM ni SLIC, y `PCI.TXT`: lo mismo que el
+  Termómetro deja en `\TERMO\EQUIPO`, sin tocar lo suyo) y en `ACPI.TXT` una
+  línea «ACPI: I2C (ficha):» por cada aparato con un I2cSerialBus en su
+  `_CRS` (o en sus ResourceTemplate) o con un `_HID`/`_CID` de pantalla
+  táctil o acelerómetro conocido (PNP0C50, MSSL1680, GDIX1001, EGA0001...;
+  BOSC0200, KIOX000A, KXCJ9000, SMO8500, BMA250E...): su ruta, `_HID`,
+  `_CID`, `_STA`, la dirección y la velocidad, la controladora, la GpioInt
+  y la interrupción. Solo leer: ni `_INI` ni `_PS0` (`i2c_lista`, en
+  `i2chid.c`). La llevan las entradas «con ACPI» de `PRUEBA_SDHCI` y
+  `PRUEBA_WIFI_SDIO`; la parte 57 lo prueba con la SSDT de tableta
+  (`hazsdhci.py ... sdio`: una I2C5 con un BOSC0200 y un MSSL1680 de `_STA`
+  0).
 
 Los paquetes: base **0.8.12**, red **0.8.12**, wifi **0.8.12**, termo **1.2**,
 equipo **0.9.6**, el nuevo **bluetoot 0.1** (`base >= 0.8.12`); lo demás, tal

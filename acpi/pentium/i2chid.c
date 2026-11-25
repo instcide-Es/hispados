@@ -336,3 +336,109 @@ int i2chid_busca(struct pe_i2chid *f, int cabe)
 	reg("ACPI: I2C-HID: %d dispositivos HID sobre I2C (PNP0C50)\n", bu.n);
 	return bu.n;
 }
+
+/* ---- (0.8.12) «fichaequipo»: los aparatos de las I2C, para saber qué chips
+ * lleva una tableta (el Acer One 10: la pantalla táctil y el giro de la
+ * pantalla). Solo leer: _HID, _CID, _STA y el _CRS (o sus ResourceTemplate);
+ * nada de _INI ni _PS0 ---- */
+static const char *const conocidos[] = {
+	/* pantallas táctiles */
+	"PNP0C50", "ACPI0C50", "MSSL1680", "MSSL0001", "MSSL0002", "MSSL0017", "GDIX1001", "GDIX1002", "GDIX1003",
+	"EGA0001", "EETI7900", "ATML1000", "ELAN0001", "FTSC1000", "CHPN0001", "SIS0817", "ILTK0001", "HIMX0001",
+	/* acelerómetros y sensores de giro */
+	"BOSC0200", "BMA250E", "BMA222E", "BMA0255", "KIOX000A", "KIOX010A", "KIOX020A", "KXCJ9000", "KXJ2109",
+	"SMO8500", "SMO8840", "NXP3301", "MXC4005", "MXC6655", "STK8BA50", "DUAL250E", "INVN6500", "ACCL0001",
+	0 };
+
+static int conocido(const char *s)
+{
+	int i;
+
+	for (i = 0; s && conocidos[i]; i++)
+		if (!strcmp(s, conocidos[i]))
+			return 1;
+	return 0;
+}
+
+struct lista_i2c {
+	int n;
+	u32 irq;
+};
+
+static ACPI_STATUS una_irq(ACPI_RESOURCE *r, void *ctx)
+{
+	u32 *irq = ctx;
+
+	if (r->Type == ACPI_RESOURCE_TYPE_EXTENDED_IRQ && r->Data.ExtendedIrq.InterruptCount && *irq == 0xFFFFFFFFu)
+		*irq = r->Data.ExtendedIrq.Interrupts[0];
+	else if (r->Type == ACPI_RESOURCE_TYPE_IRQ && r->Data.Irq.InterruptCount && *irq == 0xFFFFFFFFu)
+		*irq = r->Data.Irq.Interrupts[0];
+	return AE_OK;
+}
+
+static ACPI_STATUS un_aparato_i2c(ACPI_HANDLE h, UINT32 nivel, void *ctx, void **ret)
+{
+	struct lista_i2c *l = ctx;
+	static struct pe_i2chid f;
+	ACPI_DEVICE_INFO *info;
+	ACPI_BUFFER b;
+	char ruta[64], hid[16], cids[64];
+	u32 i, k, irq = 0xFFFFFFFFu, sta;
+	int es = 0;
+
+	(void)nivel; (void)ret;
+	if (ACPI_FAILURE(AcpiGetObjectInfo(h, &info)))
+		return AE_OK;
+	hid[0] = cids[0] = 0;
+	if (info->Valid & ACPI_VALID_HID) {
+		copia(hid, info->HardwareId.String, sizeof hid);
+		es = conocido(hid);
+	}
+	if (info->Valid & ACPI_VALID_CID)
+		for (i = 0; i < info->CompatibleIdList.Count; i++) {
+			const char *c = info->CompatibleIdList.Ids[i].String;
+
+			es |= conocido(c);
+			k = (u32)strlen(cids);
+			if (k + strlen(c) + 2 < sizeof cids)
+				snprintf(cids + k, sizeof cids - k, "%s%s", k ? "," : "", c);
+		}
+	ACPI_FREE(info);
+	memset(&f, 0, sizeof f);
+	f.gpio_pin = 0xFFFFFFFFu;
+	AcpiWalkResources(h, METHOD_NAME__CRS, un_recurso, &f);
+	AcpiWalkResources(h, METHOD_NAME__CRS, una_irq, &irq);
+	if (f.velocidad == 0) {
+		AcpiWalkNamespace(ACPI_TYPE_BUFFER, h, 1, un_buffer, NULL, &f, NULL);
+		if (f.velocidad)
+			f.origen = 1;
+	}
+	if (!es && f.velocidad == 0)
+		return AE_OK;
+	sta = entero(h, "_STA", 0x0F);
+	b.Length = sizeof ruta;
+	b.Pointer = ruta;
+	if (ACPI_FAILURE(AcpiGetName(h, ACPI_FULL_PATHNAME, &b)))
+		ruta[0] = 0;
+	l->n++;
+	reg("ACPI: I2C (ficha): %s _HID %s%s%s, _STA %Xh", ruta, hid[0] ? hid : "-", cids[0] ? " _CID " : "", cids, sta);
+	if (f.velocidad)
+		reg(": I2cSerialBus %Xh a %u Hz%s por %s%s", f.esclavo, f.velocidad, f.diez ? " (10 bits)" : "", f.fuente[0] ? f.fuente : "?",
+		    f.origen & 1 ? " (de su ResourceTemplate, no del _CRS)" : "");
+	else
+		reg(": sin I2cSerialBus en el _CRS");
+	if (f.gpio_pin != 0xFFFFFFFFu)
+		reg(", GpioInt %u (disparo %u, polaridad %u)", f.gpio_pin, f.gpio_modo & 0xFF, f.gpio_modo >> 8);
+	if (irq != 0xFFFFFFFFu)
+		reg(", Interrupt %u", irq);
+	reg("\n");
+	return AE_OK;
+}
+
+void i2c_lista(void)
+{
+	struct lista_i2c l = { 0, 0 };
+
+	AcpiWalkNamespace(ACPI_TYPE_DEVICE, ACPI_ROOT_OBJECT, ACPI_UINT32_MAX, un_aparato_i2c, NULL, &l, NULL);
+	reg("ACPI: I2C (ficha): %d aparatos en las I2C o de pantalla táctil y acelerómetro conocidos\n", l.n);
+}

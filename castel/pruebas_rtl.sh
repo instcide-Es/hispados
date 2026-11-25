@@ -84,7 +84,7 @@ $AQUI/nucleo32/disco.sh $X/u.img 32 red > $X/disco32.txt 2>&1
 mcopy -o -i $X/u.img $X/ACPI.BIN ::ACPI.BIN && mcopy -o -i $X/u.img $X/WIFI.BIN ::WIFI.BIN && mcopy -o -i $X/u.img $X/RED.INI :: \
   && mmd -i $X/u.img ::FIRMWARE && mcopy -i $X/u.img $X/rtl8723bs_nic.bin ::FIRMWARE/
 U="-device qemu-xhci,id=u -drive id=mu,file=$X/u.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu"
-ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura=usb unidad=X registro" QEMU_MAS="$U -acpitable file=$X/sdio.aml" $AQUI/nucleo32/probar.sh "" \
+ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura=usb unidad=X registro fichaequipo" QEMU_MAS="$U -acpitable file=$X/sdio.aml" $AQUI/nucleo32/probar.sh "" \
   ":pausa 12" salir apagar > $X/aprende.sal 2>&1
 tr -d '\r' < $X/aprende.sal > $X/aprende.txt
 S=$X/aprende.txt
@@ -92,6 +92,16 @@ mira "(RTL8723BS) ACPI.BIN: la SDIO (INT33BB), su _PS0 y el de su hijo (OBDA8723
   "^ACPI: SDIO: controladora GPIO ._SB.GPO2: SUS, registros en FED0E000h$" "^ACPI: SDIO: ._SB.GPO2 patilla 26 (FED0E168h) := 0$" "^ACPI: SDIO: ._SB.GPO2 patilla 26 (FED0E168h) := 1$" \
   "^ACPI: SDIO: _PS0 de ._SB_\.SDHC: hecho$" "^ACPI: SDIO: hijo ._SB_\.SDHC\.RTLW OBDA8723 (dirección 1)$" "^ACPI: SDIO: _PS0 de ._SB_\.SDHC\.RTLW: hecho$" \
   "^ACPI: SDIO: lo aprendido, en .SDIO\.TXT ([0-9]* octetos: la controladora en FEB00000h, BAR1 FEB01000h, OBDA8723, 3 escrituras en las patillas)$"
+# (0.8.12) «fichaequipo» (la entrada con ACPI de la memoria del Acer One 10): la
+# ficha técnica en X:\EQUIPO y, en el registro, los aparatos de las I2C
+mira "(0.8.12) «fichaequipo»: ACPI.BIN deja en el registro los aparatos de las I2C (el acelerómetro y la pantalla táctil, con _HID, _STA y su I2cSerialBus) y la ficha en \\EQUIPO" \
+  "^ACPI: I2C (ficha): ._SB_\.I2C5\.ACCL _HID BOSC0200, _STA Fh: I2cSerialBus 18h a 400000 Hz por ._SB\.I2C5, Interrupt 70$" \
+  "^ACPI: I2C (ficha): ._SB_\.I2C5\.TCSC _HID MSSL1680, _STA 0h: I2cSerialBus 40h a 400000 Hz por ._SB\.I2C5$" \
+  "^ACPI: I2C (ficha): 2 aparatos en las I2C o de pantalla táctil y acelerómetro conocidos$" "^ACPI: (TERMO) en .EQUIPO: [0-9]* tablas ACPI y la lista PCI$"
+if mdir -i $X/u.img ::EQUIPO 2> /dev/null | grep -q "^DSDT *BIN" && mdir -i $X/u.img ::EQUIPO 2> /dev/null | grep -q "^SSDT1 *BIN" \
+  && mdir -i $X/u.img ::EQUIPO 2> /dev/null | grep -q "^PCI *TXT" && ! mdir -i $X/u.img ::TERMO > /dev/null 2>&1; then
+  ok "(0.8.12) y en X:\\EQUIPO, DSDT.BIN, las SSDT y PCI.TXT (sin \\TERMO: el Termómetro no se ha abierto)"
+else ko "(0.8.12) X:\\EQUIPO no tiene la ficha:"; mdir -i $X/u.img ::EQUIPO 2>&1 | sed 's/^/        /' | head -8; fi
 saca $X/u.img SDIO.TXT $X/sdio.txt
 tr -d '\r' < $X/sdio.txt > $X/sdio2.txt 2> /dev/null
 k=$(sed -n 's/^espera=\([0-9]*\)$/\1/p' $X/sdio2.txt | head -1)

@@ -121,6 +121,10 @@ struct pe_i2chid {
 	char ruta[48], hid[16], cid[16], fuente[48];
 };
 int i2chid_busca(struct pe_i2chid *f, int cabe);
+/* (0.8.12) «fichaequipo»: en el registro (ACPI.TXT), los aparatos de las I2C y
+ * los de pantalla táctil y acelerómetro conocidos, con _HID, _CID, _STA y _CRS;
+ * solo leer (acpi/pentium/i2chid.c) */
+void i2c_lista(void);
 
 /* (SDHCI) una controladora SD/eMMC de «modo ACPI» que ha hallado el
  * servicio (acpi/pentium/sdhci.c), para el núcleo (la llamada 160). La misma

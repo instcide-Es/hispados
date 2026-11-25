@@ -57,6 +57,9 @@
 # (RTL8723BS) Con PRUEBA_WIFI_SDIO=1, la del Wi-Fi por SDIO de las tabletas: sus
 # tres entradas primero (sin ACPI, con ACPI —aprende \SDIO.TXT— y las órdenes)
 # y un RED.INI con Registro=SI (RED.LOG) y Preferir=WIFI.
+# (0.8.12) Las entradas con ACPI de las dos llevan «fichaequipo»: ACPI.BIN deja
+# la ficha técnica en X:\EQUIPO (las tablas ACPI y PCI.TXT) y en ACPI.TXT los
+# aparatos de las I2C (la pantalla táctil y el acelerómetro).
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc); (UEFI) y grub-efi-amd64-bin
 # y grub-efi-ia32-bin (grub-mkimage).
@@ -231,13 +234,13 @@ G
     # (el Acer se congela con ACPI.BIN), con ACPI, la consola y por PIO
     if [ -n "${PRUEBA_SDHCI:-}" ]; then
       menu_efi "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi" "$M2" auto
-      menu_efi "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N" "$M2" auto
+      menu_efi "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N fichaequipo" "$M2" auto
       menu_efi "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi" "$M2" auto
       menu_efi "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento" "$M2" auto
     fi
     if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
       menu_efi "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred" "$M2" auto
-      menu_efi "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred" "$M2" auto
+      menu_efi "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred fichaequipo" "$M2" auto
       menu_efi "${W3}Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred" "$M2" auto
     fi
     menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (la medida de la pantalla, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "$M2" auto '  if [ "$modo" = auto ]; then
@@ -310,13 +313,13 @@ G
   # (SDHCI) la memoria de prueba del eMMC y la SD, por la BIOS (el Medion con la HispaBIOS)
   if [ -n "${PRUEBA_SDHCI:-}" ]; then
     entrada "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi"
-    entrada "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N"
+    entrada "2. eMMC y SD, CON ACPI: el escritorio (si con la 1 no salen; puede congelarse)" ESCRIT8.BIN "escritorio $N fichaequipo"
     entrada "3. eMMC y SD, SIN ACPI: la consola del nucleo (texto: dice los discos)" SEMILLA.BIN "$N sinacpi"
     entrada "4. eMMC y SD, SIN ACPI, despacio (PIO, 1 bit, sin alta velocidad)" ESCRIT8.BIN "escritorio $N sinacpi sdhcipio sdhci1bit sdhcilento"
   fi
   if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
     entrada "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred"
-    entrada "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred"
+    entrada "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred fichaequipo"
     entrada "${W3}Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred"
   fi
   # [EDID] la primera, con la medida de PANTALLA.ENV si la hay (y lo dice
