@@ -113,5 +113,6 @@ int rh_galletas_guarda(const char *ruta) { (void)ruta; return 1; }
 
 /* [JS] lo de fetch y document.cookie (guion.c): en el anfitrión no hay JavaScript */
 void rh_metodo(void *r, const char *metodo) { (void)r; (void)metodo; }
+void rh_js(void *r, int cruzada, int sin_galletas) { (void)r; (void)cruzada; (void)sin_galletas; }
 char *rh_galletas_de(const char *url) { (void)url; return NULL; }
 void rh_pon_galleta(const char *url, const char *linea) { (void)url; (void)linea; }

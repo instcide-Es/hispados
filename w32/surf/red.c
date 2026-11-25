@@ -37,6 +37,7 @@ typedef struct Pedido {
   int de_golpe;             /* HTML: el cuerpo entero de una vez (ver cabeceras) */
   red_js_cb js;             /* [JS] una petición de fetch o XMLHttpRequest (sin padre de NetSurf) */
   void *js_ctx;
+  int js_cruzada, js_sin_galletas;   /* [JS] SameSite y credentials (guion.c, con cors.h) */
   char *metodo;
 } Pedido;
 
@@ -245,6 +246,7 @@ static void r_sondea2(void) {
     surf_reg("pide %s", u ? u : "?");
     p->r = u ? rh_nueva(u, p->post, p->cuerpo, p->n_cuerpo, p->tipo[0] ? p->tipo : NULL, p->cab, p->js != NULL, 8u << 20) : NULL;
     if (p->r && p->metodo) rh_metodo(p->r, p->metodo);
+    if (p->r && p->js) rh_js(p->r, p->js_cruzada, p->js_sin_galletas);
     free(u);
     if (!p->r) {
       fetch_msg m;
@@ -327,11 +329,12 @@ static void js_sondea(void *x) {
   else js_sondeando = 0;
 }
 int red_js_pide(const char *url, const char *metodo, const char *cuerpo, unsigned n_cuerpo, const char *cab,
-                red_js_cb cb, void *ctx) {
+                int cruzada, int sin_galletas, red_js_cb cb, void *ctx) {
   Pedido *p = calloc(1, sizeof *p), **q;
   if (!p) return 0;
   if (nsurl_create(url, &p->url) != NSERROR_OK) { free(p); return 0; }
   p->js = cb; p->js_ctx = ctx;
+  p->js_cruzada = cruzada; p->js_sin_galletas = sin_galletas;
   if (metodo && strcmp(metodo, "GET") && strcmp(metodo, "POST")) p->metodo = strdup(metodo);
   if (cuerpo) {
     p->post = 1;

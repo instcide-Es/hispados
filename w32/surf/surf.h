@@ -49,8 +49,10 @@ void red_fin(void);
 extern int surf_cifrada;              /* la última página llegó por https */
 /* [JS] fetch y XMLHttpRequest (guion.c): la respuesta entera (estado 0: error) */
 typedef void (*red_js_cb)(void *ctx, int estado, const char *cab, const unsigned char *datos, unsigned n, const char *error);
+/* cruzada: la página que pide es de otro sitio (SameSite); sin_galletas: ni
+ * se mandan ni se guardan (lo decide guion.c con cors.h) */
 int red_js_pide(const char *url, const char *metodo, const char *cuerpo, unsigned n_cuerpo, const char *cab,
-                red_js_cb cb, void *ctx);
+                int cruzada, int sin_galletas, red_js_cb cb, void *ctx);
 void red_js_cancela(void *ctx);
 
 /* surf.c */

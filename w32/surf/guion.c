@@ -63,6 +63,8 @@
 #include "rh.h"
 #include "guion.h"
 #include "surf_js.h"                    /* (build/surf: dom.js y surf.js, como texto) */
+#include "../navega/cors.h"              /* el origen, SameSite y CORS: lo mismo que el Navegador propio */
+int a_utf8(const char *o, int n, char *d);    /* (red_http.c) */
 
 #define WINAPI __attribute__((stdcall))
 typedef void *HANDLE;
@@ -1253,23 +1255,65 @@ FN(f_des_temporiza) {
 }
 
 /* ---- la red: fetch y XMLHttpRequest, por red.c; las redirecciones, aquí ---- */
-typedef struct Pet { struct Pet *sig; struct jsthread *t; int id, redirs; char *metodo, *url, *cab, *cuerpo; u32 n_cuerpo; } Pet;
+/* cred: las galletas que pide la página (0 «omit», 1 «same-origin», 2
+ * «include» o withCredentials); otro: ha ido (o ido a parar) a otro origen,
+ * y entonces la respuesta solo la lee si el servidor lo deja (CORS);
+ * pagina: la dirección de la página que pide, la de cuando lo pidió */
+typedef struct Pet { struct Pet *sig; struct jsthread *t; int id, redirs, cred, otro, sin_galletas, mirada; char *metodo, *url, *cab, *cuerpo, *pagina; u32 n_cuerpo; } Pet;
 static Pet *pets;
 static void pet_suelta(Pet *p) {
   Pet **q;
   for (q = &pets; *q; q = &(*q)->sig) if (*q == p) { *q = p->sig; break; }
-  free(p->metodo); free(p->url); free(p->cab); free(p->cuerpo); free(p);
+  free(p->metodo); free(p->url); free(p->cab); free(p->cuerpo); free(p->pagina); free(p);
 }
 static void llega(void *ctx, int estado, const char *cab, const unsigned char *datos, unsigned n, const char *error);
 typedef struct { Pet *p; int estado; char *cab, *datos, *err; unsigned n; } Espera;
 static void espera_tic(void *x);
+/* por qué no se ha podido pedir (para el error de fetch: en UTF-8) */
+static char pet_por[300];
+static void pet_rechaza(Pet *p, const char *por) {
+  int n = strlen(por);
+  if (n > 140) n = 140;
+  pet_por[a_utf8(por, n, pet_por)] = 0;
+  regf("[error] ", "%.200s: %s", p->url ? p->url : "", pet_por);
+}
 static int pet_lanza(Pet *p) {
-  return red_js_pide(p->url, p->metodo, p->cuerpo, p->n_cuerpo, p->cab, llega, p);
+  /* a otro origen (o tras pasar por otro), sin las cabeceras que no sean
+   * «simples» ni otro método que GET, HEAD o POST (no se pregunta antes con
+   * OPTIONS); nunca las prohibidas (Cookie, Host, Origin...); las galletas
+   * según credentials. docs/486/NAVEGADOR2.md, «JavaScript» */
+  char o[160], *cab = NULL;
+  const char *por;
+  int hay = cors_origen(p->pagina, o, sizeof o);
+  if (!cors_mismo(p->pagina, p->url)) p->otro = 1;
+  por = cors_pide(p->metodo, p->cab, p->otro, hay ? o : NULL, &cab);
+  if (por) { pet_rechaza(p, por); return 0; }
+  free(p->cab);
+  p->cab = cab;
+  p->sin_galletas = !(p->cred == 2 || (p->cred == 1 && !p->otro));
+  if (!red_js_pide(p->url, p->metodo, p->cuerpo, p->n_cuerpo, p->cab, cors_cruzada(p->pagina, p->url), p->sin_galletas, llega, p)) {
+    strcpy(pet_por, "demasiadas peticiones");
+    return 0;
+  }
+  return 1;
 }
 static void llama_llega(struct jsthread *t, int id, int estado, const char *url, const char *cab, const unsigned char *d, unsigned n, const char *err);
 static void llega(void *ctx, int estado, const char *cab, const unsigned char *datos, unsigned n, const char *error) {
   Pet *p = ctx;
   struct jsthread *t = p->t;
+  char *vis = NULL;
+  int mirada = p->mirada;
+  p->mirada = 0;
+  if (estado && p->otro && !mirada) {
+    /* de otro origen: la respuesta (también la de una redirección) solo si
+     * el servidor la deja leer (Access-Control-Allow-Origin...) */
+    char o[160];
+    int hay = cors_origen(p->pagina, o, sizeof o);
+    if (!cors_deja(cab, hay ? o : NULL, !p->sin_galletas)) {
+      pet_rechaza(p, "CORS: el servidor de otro origen no deja leer la respuesta (Access-Control-Allow-Origin)");
+      estado = 0; cab = ""; datos = NULL; n = 0; error = pet_por;
+    }
+  }
   if (estado >= 301 && estado <= 308 && estado != 304 && estado != 305 && estado != 306 && p->redirs < 10) {
     /* una redirección: la Location, contra la dirección de ahora */
     const char *l = cab ? strcasestr(cab, "\nLocation:") : NULL;
@@ -1288,9 +1332,13 @@ static void llega(void *ctx, int estado, const char *cab, const unsigned char *d
         if (estado != 307 && estado != 308) { free(p->metodo); p->metodo = strdup("GET"); free(p->cuerpo); p->cuerpo = NULL; p->n_cuerpo = 0; }
         nsurl_unref(u); nsurl_unref(b);
         if (p->url && pet_lanza(p)) return;
+        estado = 0; cab = ""; datos = NULL; n = 0; error = pet_por;
       } else if (b) nsurl_unref(b);
     }
   }
+  /* las cabeceras que ve la página: sin Set-Cookie; de otro origen, solo
+   * las que deja CORS */
+  if (estado && cab && !mirada) { vis = cors_visibles(cab, p->otro, !p->sin_galletas); if (vis) cab = vis; }
   if (!t->cerrado && t->html && t->html->box_conversion_context) {
     /* NetSurf está haciendo las cajas (a trozos, con el planificador): ahora
      * no se puede tocar el árbol; la respuesta, guardada, un poco después */
@@ -1298,12 +1346,15 @@ static void llega(void *ctx, int estado, const char *cab, const unsigned char *d
     if (e && (e->datos = malloc(n + 1)) && (e->cab = strdup(cab ? cab : "")) && (e->err = strdup(error ? error : ""))) {
       memcpy(e->datos, datos ? (const char *)datos : "", n);
       e->n = n; e->estado = estado; e->p = p;
+      p->mirada = 1;                    /* (ya está mirada: CORS y las cabeceras) */
       framebuffer_schedule(50, espera_tic, e);
+      free(vis);
       return;
     }
     if (e) { free(e->datos); free(e->cab); free(e); }
   }
   if (!t->cerrado) llama_llega(t, p->id, estado, p->url, cab, datos, n, error);
+  free(vis);
   pet_suelta(p);
 }
 static void espera_tic(void *x) {
@@ -1314,7 +1365,7 @@ static void espera_tic(void *x) {
   free(e->datos); free(e->cab); free(e->err); free(e);
 }
 FN(f_pide) {
-  int id = 0;
+  int id = 0, cred = 1;
   const char *m, *u, *h, *b = NULL;
   size_t nb = 0;
   Pet *p;
@@ -1322,12 +1373,19 @@ FN(f_pide) {
   JS_ToInt32(c, &id, a[0]);
   m = JS_ToCString(c, a[1]); u = JS_ToCString(c, a[2]); h = JS_ToCString(c, a[3]);
   if (argc > 4 && !JS_IsNull(a[4]) && !JS_IsUndefined(a[4])) b = JS_ToCStringLen(c, &nb, a[4]);
+  if (argc > 5) JS_ToInt32(c, &cred, a[5]);
   if (m && u && h && (p = calloc(1, sizeof *p))) {
-    p->t = H; p->id = id;
+    p->t = H; p->id = id; p->cred = cred;
+    p->pagina = strdup(url_pagina());
     p->metodo = strdup(m); p->url = strdup(u); p->cab = strdup(h);
     if (b) { p->cuerpo = malloc(nb + 1); if (p->cuerpo) { memcpy(p->cuerpo, b, nb); p->n_cuerpo = nb; } }
     p->sig = pets; pets = p;
-    if (!pet_lanza(p)) { pet_suelta(p); difiere(D_EVENTO, NULL, NULL, "red", id); }
+    if (!pet_lanza(p)) {
+      char por[320];
+      snprintf(por, sizeof por, "red %s", pet_por);
+      pet_suelta(p);
+      difiere(D_EVENTO, NULL, NULL, por, id);
+    }
   }
   if (m) JS_FreeCString(c, m);
   if (u) JS_FreeCString(c, u);
@@ -1363,7 +1421,7 @@ static const JSCFunctionListEntry funciones_n[] = {
   JS_CFUNC_DEF("ancho", 0, f_ancho), JS_CFUNC_DEF("alto", 0, f_alto), JS_CFUNC_DEF("ahora", 0, f_ahora),
   JS_CFUNC_DEF("idioma", 0, f_idioma), JS_CFUNC_DEF("agente", 0, f_agente), JS_CFUNC_DEF("registro", 2, f_registro), JS_CFUNC_DEF("almacen", 2, f_almacen),
   JS_CFUNC_DEF("guardaAlmacen", 3, f_guarda_almacen), JS_CFUNC_DEF("temporiza", 2, f_temporiza),
-  JS_CFUNC_DEF("desTemporiza", 1, f_des_temporiza), JS_CFUNC_DEF("pide", 5, f_pide), JS_CFUNC_DEF("cancela", 1, f_cancela),
+  JS_CFUNC_DEF("desTemporiza", 1, f_des_temporiza), JS_CFUNC_DEF("pide", 6, f_pide), JS_CFUNC_DEF("cancela", 1, f_cancela),
   /* (los de surf.js) */
   JS_CFUNC_DEF("caja", 1, f_caja), JS_CFUNC_DEF("estilo", 2, f_estilo), JS_CFUNC_DEF("desp", 0, f_desp),
   JS_CFUNC_DEF("veA", 2, f_ve_a), JS_CFUNC_DEF("altoPagina", 0, f_alto_pagina),
@@ -1478,8 +1536,8 @@ static void diferido_tic(void *p) {
         form_submit(content_get_url(&t->html->base), t->bw, f, k);
         sin_evento_submit = 0;
       }
-    } else if (d->que == D_EVENTO && d->texto && !strcmp(d->texto, "red")) {
-      llama_llega(t, d->k, 0, "", "", NULL, 0, "demasiadas peticiones");
+    } else if (d->que == D_EVENTO && !d->n && d->texto && !strncmp(d->texto, "red", 3) && (!d->texto[3] || d->texto[3] == ' ')) {
+      llama_llega(t, d->k, 0, "", "", NULL, 0, d->texto[3] ? d->texto + 4 : "demasiadas peticiones");
     } else if (d->que == D_EVENTO && d->texto && d->n) {
       guion_evento(t, d->n, d->texto, d->otro);
     } else if (d->que == D_FOCO) {

@@ -1036,12 +1036,14 @@ function cuerpoDe(b, h) {
 }
 const pendientes = new Map();
 let nPet = 0;
-function pidePet(metodo, url, h, cuerpo, llega) {
+// cred: las galletas (0 omit, 1 same-origin, 2 include). Lo que se deja pedir a
+// otro origen y leer de él (CORS) lo decide C (script.c y guion.c, con cors.h)
+function pidePet(metodo, url, h, cuerpo, llega, cred) {
   const id = ++nPet;
   let cab = '';
   for (const [k, v] of h) cab += k.replace(/(^|-)([a-z])/g, (m, a, b) => a + b.toUpperCase()) + ': ' + v + '\r\n';
   pendientes.set(id, llega);
-  N.pide(id, metodo, url, cab, cuerpo === null ? null : cuerpo);
+  N.pide(id, metodo, url, cab, cuerpo === null ? null : cuerpo, cred === undefined ? 1 : cred);
   return id;
 }
 oculto(G, '__llega', function (id, estado, url, cab, cuerpo) {
@@ -1060,7 +1062,7 @@ function fetch(u, op) {
       if (!estado) { no(new TypeError('Failed to fetch: ' + texto)); return; }
       const st = /^HTTP\/[\d.]+ \d+ ?(.*)$/m.exec(S(cab));
       si(new Response(texto, { status: estado, statusText: st ? st[1] : '', headers: cabecerasDe(cab), url, redirected: url !== r.url }));
-    });
+    }, r.credentials === 'include' ? 2 : r.credentials === 'omit' ? 0 : 1);
     if (r.signal) r.signal.addEventListener('abort', () => { if (pendientes.delete(id)) { N.cancela(id); no(r.signal.reason); } });
   });
 }
@@ -1087,7 +1089,7 @@ class XMLHttpRequest extends EventTarget {
       this.readyState = 3; this.__ev('readystatechange');
       this.readyState = 4; this.__ev('readystatechange');
       this.__ev('load'); this.__ev('loadend');
-    });
+    }, this.withCredentials ? 2 : 1);
   }
   abort() { if (this.__id && pendientes.delete(this.__id)) { N.cancela(this.__id); this.readyState = 0; this.__ev('abort'); } }
   get response() {
