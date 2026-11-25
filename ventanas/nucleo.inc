@@ -77,6 +77,8 @@ mem_pedir:
         push ecx
         push edx
         push edi
+        cmp ecx, MONTON_TAM         ; [0.9.31] más que el montón entero no
+        jae .no                     ; cabe (y al sumar daría la vuelta)
         add ecx, 8 + 3
         and ecx, ~3
         mov ebx, [mon_ini]
