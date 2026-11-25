@@ -1587,12 +1587,12 @@ static int carga_fuerte, fuerte_puede, sse_nucleo;
 static int ap_fuertes, ap_cache_apagada;	/* (de los demás procesadores: los que hacen la fuerte; los que llegaron con la caché apagada, CR0.CD) */
 static int puede_enviar, puede_terminal, enviando;	/* (TERMO) */
 static u32 t_envio;
-static char aviso_envio[420];
+static char aviso_envio[820];
 /* (TERMO 1.2) «Enviar a Carlos» (tecla E): cómo ha ido, en un cartel con
  * letras («ENVIANDO», «ENVIADO», «NO ENVIADO»: nunca solo el color) hasta la
  * siguiente tecla; y en el .LOG y en INFORME.TXT. envio_ok: -1 sin enviar
  * en este arranque, 1 enviado, 0 no */
-static char envio_fin[460], envio_hora[6];
+static char envio_fin[820], envio_hora[6];
 static int envio_ok = -1, envio_cartel;
 static void envio_acaba(const char *t);
 
@@ -4418,7 +4418,7 @@ static int hay_red_ya(void)
 	return sc(97, (u32)&ip, 0, 0) == 4;	/* (SC_ESTADO_RED: RED_CONECTADA) */
 }
 
-static const char *sin_red_texto = "No hay red: enchufe el cable o conecte el Wi-Fi (Inicio > Configuración > Red; o en la Consola: REDWIFI /CONECTAR nombre). Luego, otra vez.";
+static const char *sin_red_texto = "No hay red: enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) (el Wi-Fi: Inicio > Configuración > Red; o en la Consola: REDWIFI /CONECTAR nombre). Luego, otra vez.";
 
 static void lanza_envio(void)
 {
@@ -4431,9 +4431,9 @@ static void lanza_envio(void)
 	}
 	envio_cartel = 1;
 	if (!hay_red_ya()) {
-		char t[400];
+		char t[800];
 
-		snprintf(t, sizeof t, "NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez; "
+		snprintf(t, sizeof t, "NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez; "
 			 "o súbalo al FTP: los archivos siguen en %s.", carpeta);
 		envio_acaba(t);
 		return;
@@ -4460,7 +4460,7 @@ static void lanza_envio(void)
 /* cada 2 s, mientras se envía: lo que dice ENVIO.EST */
 static void mira_envio(void)
 {
-	char r[120], t[400];
+	char r[120], t[800];
 	u32 m, n;
 
 	if (!enviando)

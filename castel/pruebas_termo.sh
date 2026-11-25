@@ -616,7 +616,7 @@ termo_enviar() {
   cp $E/termo.img $E/sin.img
   TQ_RED="-nic none" termo_qemu $E/sin.img e1 60 "$cpu" "45:sendkey e" "50:screendump $E/e1.ppm"
   mira "«Enviar a Carlos» sin red (la tecla E): «NO ENVIADO: sin red», qué hacer y dónde siguen los archivos; en el .LOG" \
-    "termo: suceso: Enviar a Carlos: NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez; o súbalo al FTP: los archivos siguen en X:.TERMO"
+    "termo: suceso: Enviar a Carlos: NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes . Conexión y compartir . Anclaje de USB) y pulse E otra vez; o súbalo al FTP: los archivos siguen en X:.TERMO"
   if [ -s $E/e1.ppm ] && td_cap $E/e1.ppm texto 40 0 120 2000 "NO ENVIADO: sin red"; then ok "(1.2) sin red, en pantalla: el cartel con «NO ENVIADO: sin red» en letras"
   else ko "(1.2) el cartel sin red (e1.ppm): $(head -c 300 $Y/cap.txt 2> /dev/null)"; fi
   if mtype -i $E/sin.img@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' | grep -q '^Enviado a Carlos: NO, a las [0-9:]*: NO ENVIADO: sin red'; then ok "(1.2) INFORME.TXT: «Enviado a Carlos: NO, ...: NO ENVIADO: sin red»"

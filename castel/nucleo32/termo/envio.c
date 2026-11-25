@@ -79,7 +79,7 @@ static int fallo_http;
 static void di(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void di(const char *fmt, ...)
 {
-	char t[400], u[420];
+	char t[800], u[820];
 	va_list v;
 	int n;
 
@@ -145,7 +145,7 @@ static void motivo_llano(char *d, int cabe, const char *por_que)
 	else if (fallo_http)
 		snprintf(d, (size_t)cabe, "el servidor ha contestado con un error (%d: %s). Pruebe más tarde (E).", fallo_http, por_que);
 	else if (fallo_red == SIN_CABLE || fallo_red == SIN_IP || fallo_red == SIN_RED || fallo_red == SIN_TARJETA)
-		snprintf(d, (size_t)cabe, "sin red (%s). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez.", texto_red(fallo_red));
+		snprintf(d, (size_t)cabe, "sin red (%s). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez.", texto_red(fallo_red));
 	else if (fallo_red == NO_RESUELVE)
 		snprintf(d, (size_t)cabe, "no se encuentra el servidor (el DNS no da su dirección: ¿hay salida a Internet?). Compruébelo y pulse E otra vez.");
 	else if (fallo_red == TLS_CERTIFICADO)
@@ -509,7 +509,7 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 	if (!hay_red()) {
 		u32 ip, e = sc(SC_ESTADO_RED, (u32)&ip, 0, 0);
 
-		di("NO ENVIADO: sin red (%s). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez; o súbalo al FTP: los archivos siguen en %s.",
+		di("NO ENVIADO: sin red (%s). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez; o súbalo al FTP: los archivos siguen en %s.",
 		   ES_ERROR_RED(e) ? texto_red(e) : "no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP", carpeta);
 		return 2;
 	}
@@ -624,7 +624,7 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 			if (r == 1 && (busca_en(por_que, "testigo") || fallo_http == 429))
 				break;	/* (sin testigo, lo demás tampoco va a ir) */
 			if (r == 2 && !hay_red()) {
-				di("NO ENVIADO: se ha ido la red a mitad (enviados %d de %d). Enchufe el cable de red (o conecte el Wi-Fi) y pulse E otra vez (solo irá lo que falta); o súbalo al FTP: los archivos siguen en %s.",
+				di("NO ENVIADO: se ha ido la red a mitad (enviados %d de %d). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez (solo irá lo que falta); o súbalo al FTP: los archivos siguen en %s.",
 				   buenos, nn - iguales, carpeta);
 				return 2;
 			}
@@ -633,7 +633,7 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 	if (no_leidos)
 		snprintf(nl, sizeof nl, "; %d no se %s podido leer (%s%s)", no_leidos, no_leidos == 1 ? "ha" : "han", no_leido, no_leidos > 1 ? " y otros" : "");
 	if (malos) {
-		char mot[360];
+		char mot[600];
 
 		motivo_llano(mot, sizeof mot, por_que);
 		if (buenos)
