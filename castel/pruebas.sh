@@ -5194,8 +5194,10 @@ for i in range(1, 401): sys.stdout.write('linea %03d de un texto largo\r\n' % i)
   miracap "Mi equipo: un paso de rueda, una fila de iconos (A06 arriba), sin elegir nada" ru5 texto 210 160 300 200 A06.TXT notexto 210 160 300 200 A01.TXT texto 10 478 300 500 "Nada elegido"
   miracap "Ctrl+rueda hacia abajo: la vista, más pequeña (de los iconos a la lista)" ru6 texto 210 130 320 160 A01.TXT texto 440 130 560 160 A16.TXT
   miracap "en los detalles (F8), la rueda baja seis renglones de la rejilla" ru7 negrita 220 150 320 180 A07.TXT notexto 210 130 320 470 A01.TXT
+  # (0.8.12, RECOGIDO) se abre con lo que funciona recogido: desplegado todo con
+  # «*» (21 renglones; ya no hay «Procesador»), la rueda baja hasta el final
   miracap "el Administrador de dispositivos: la rueda baja la lista y la elegida («Pantalla», arriba) se queda elegida, aunque ya no se vea" ru8 \
-    notexto 40 120 400 520 "[-] Pantalla (1)" negrita 40 120 400 520 "[-] Procesador (1)" texto 40 520 300 545 "16 dispositivos"
+    notexto 40 120 400 520 "[-] Pantalla (2)" negrita 40 120 400 520 "[-] Sistema y ACPI (8)" texto 40 520 300 545 "16 dispositivos"
   miracap "MUESTRA: la rueda baja la rejilla seis renglones (el 20, arriba) sin mover la elegida (la 8, que ya no se ve)" ru9 \
     negrita 0 0 400 30 "Muestra de controles" texto 40 195 300 220 "Persona de ejemplo 20" notexto 0 190 800 520 "Persona de ejemplo 8"
   miracap "MUESTRA: Ctrl+rueda hacia arriba, la letra más grande (vez y media)" ru10 negrita15 0 150 800 300 "Nombre"
