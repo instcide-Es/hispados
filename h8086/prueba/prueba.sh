@@ -32,6 +32,23 @@ for f in sys.argv[3:]:
     open(os.path.join(dst, os.path.basename(f)), 'wb').write(d)
 PY
 fi
+# El AUTOEXEC.BAT de los disquetes del sistema pone el teclado español
+# (TECLADO). La batería teclea con el americano: sus copias ($IMG) van sin
+# esa línea, y lo demás (los disquetes de Oficina y Juegos, PLUMA.COM...) se
+# enlaza tal cual, del $IMG que se diga o de build/. Las partes del teclado
+# español y de INSTALAR usan los de verdad: $IMG_REAL
+IMG_REAL=$T/img_real; mkdir -p $IMG_REAL $T/img0
+for f in build/* $IMG/*; do
+  b=$(basename "$f"); [ -e "$IMG/$b" ] && f="$IMG/$b"
+  ln -sfn "$(realpath "$f")" "$IMG_REAL/$b"
+  case $b in
+    hispa8086-*.img) cp "$f" $T/img0/$b
+      mtype -i "$f" ::AUTOEXEC.BAT | grep -v '^TECLADO' > $T/auto.bat
+      mcopy -o -i $T/img0/$b $T/auto.bat ::AUTOEXEC.BAT;;
+    *) ln -sfn "$(realpath "$f")" "$T/img0/$b";;
+  esac
+done
+IMG=$T/img0
 ok() { [ -n "${SIN_QEMU:-}" ] && return; echo "  OK   $1" | tee -a $T/salida.txt; }
 ko() { [ -n "${SIN_QEMU:-}" ] && return; echo "  FAIL $1" | tee -a $T/salida.txt; fail=1; }
 : > $T/salida.txt
@@ -124,7 +141,7 @@ pantalla p2
 esta p2 "Hispa-8086 versión 0.14" "VER: "
 escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"; escribe "dir"
 pantalla p2
-esta p2 "23 archivos, " "DIR: "
+esta p2 "25 archivos, " "DIR: "
 escribe "limpiar"; escribe "dir *.sys"; escribe "dir h*.*"; escribe "dir c*.com"
 pantalla p2
 esta p2 "NUCLEO86.SYS" "DIR: "
@@ -737,10 +754,12 @@ apaga
 . prueba/partes_juegos.sh
 . prueba/partes_marcianos.sh
 . prueba/partes_14.sh
+. prueba/partes_instalar.sh
 PARTES="basico lotes ordenes dir config alta dispositivos reserva discos fantasma editar teclado teclado9 flechas v86 v86_flechas pasar duro formatea sistema partir medidas fuentes"
 PARTES="$PARTES pluma pluma_grande pluma_oficina"     # (PLUMA, del disquete de Oficina)
 PARTES="$PARTES cuentas cuentas_pantalla cuentas_ordenar cuentas_grande fat_sectores"     # (CUENTAS, del disquete de Oficina)
 PARTES="$PARTES derribo marcianos"     # (los juegos, del disquete de Juegos)
+PARTES="$PARTES espanol instalar instalar2"     # (el teclado español al arrancar, INSTALAR y MENU)
 PARTES="$PARTES auditoria1 auditoria_cuentas auditoria_editar auditoria_pasar auditoria_entorno auditoria_pluma auditoria_basic auditoria_revisar auditoria_bpb auditoria_ruta auditoria_sistema auditoria_xcopiar auditoria_cuentas2 auditoria_save auditoria_bajos"     # (los arreglos de la auditoría de la 0.14)
 [ -n "${MAS_SH:-}" ] && . "$MAS_SH"     # (para probar a mano: más partes, de otro archivo)
 for parte in ${SOLO:-$PARTES}; do p_$parte; done

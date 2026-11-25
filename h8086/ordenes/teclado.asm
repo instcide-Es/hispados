@@ -3,7 +3,9 @@
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ;
 ;       TECLADO         pone el teclado español (se queda en la memoria)
-;       TECLADO /N      vuelve al normal (el de la BIOS, el americano)
+;       TECLADO /N      vuelve al normal (el de la BIOS, el americano); lo
+;       TECLADO EE.UU.  mismo (el disquete de Hispa-8086 y lo instalado en C:
+;                       arrancan con el español: lo pone su AUTOEXEC.BAT)
 ;       TECLADO /9      lo pone por la interrupción del teclado (INT 9), como
 ;                       en un PC o un XT, aunque la BIOS sea de AT (para
 ;                       probar ese camino, o por si la BIOS no cumple)
@@ -322,6 +324,10 @@ instala:
         cmp al, ' '
         je .a
         mov byte [quitar], 0
+        cmp al, 'E'                 ; TECLADO EE.UU. (o EEUU): como /N
+        je .q
+        cmp al, 'e'
+        je .q
         cmp al, '/'
         jne .ya
         cmp byte [si], '9'          ; /9: por INT 9 aunque la BIOS pregunte
