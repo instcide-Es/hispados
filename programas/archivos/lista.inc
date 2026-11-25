@@ -988,6 +988,12 @@ lista_pintar:
         mov ecx, 32
         mov edx, 32
         HV dc_copiar_clave
+        mov eax, [pi_x]             ; [0.9.31] cortado: una trama encima (no
+        add eax, (CEL_AN - 32) / 2  ; solo el color: también sin ver colores
+        mov ebx, [pi_y]             ; y sobre una fila elegida)
+        add ebx, 4
+        mov ecx, 32
+        call trama_cortado
         ; el nombre, centrado debajo
         mov esi, [pi_e]
         call largo
@@ -1040,6 +1046,36 @@ lista_pintar:
 .f2:
         HV dc_cerrar
         jmp hecho
+
+; (interna) [0.9.31] si [pi_e] está cortado, una trama de puntos blancos,
+; uno sí y otro no, sobre su icono en EAX, EBX (ECX de lado): así se ve
+; «cortado» sin depender del color (accesibilidad: el gris claro del nombre,
+; solo, no se distingue sobre una fila elegida). Conserva los registros
+trama_cortado:
+        pushad
+        mov esi, [pi_e]
+        test byte [esi+E_MARCA], 2
+        jz .x
+        COLOR C_BLANCO
+        mov esi, eax                ; ESI, EDI: la esquina
+        mov edi, ebx
+        xor edx, edx                ; EDX: la fila
+.f:
+        mov ebp, edx                ; EBP: la columna (empieza en 0 o en 1)
+        and ebp, 1
+.c:
+        lea eax, [esi+ebp]
+        lea ebx, [edi+edx]
+        HV dc_punto
+        add ebp, 2
+        cmp ebp, ecx
+        jb .c
+        inc edx
+        cmp edx, ecx
+        jb .f
+.x:
+        popad
+        ret
 
 ; (interna) el nombre de [pi_e] en EAX, EBX (ECX letras), con lo elegido
 ; resaltado y el destino de arrastrar enmarcado
@@ -1274,6 +1310,11 @@ fila_pintar:
         mov ecx, 16
         mov edx, 16
         HV dc_copiar_clave
+        mov eax, 3                  ; [0.9.31] cortado: la trama (como en los
+        mov ebx, [pi_y]             ; iconos grandes)
+        inc ebx
+        mov ecx, 16
+        call trama_cortado
         ; el color del texto
         mov esi, [pi_e]
         COLOR C_TINTA
