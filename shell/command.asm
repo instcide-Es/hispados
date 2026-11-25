@@ -6910,6 +6910,28 @@ env_set:
         mov [es_val], di
         call env_find
         jc .add
+        ; antes de borrar la entrada vieja, ¿cabe la nueva en su lugar? Si
+        ; no, se queda la vieja (antes se borraba y luego no cabía: PATH
+        ; podía desaparecer)
+        mov si, [es_val]
+        cmp byte [si], 0
+        je .del
+        push di
+        mov si, di
+.ol:
+        inc si
+        cmp byte [es:si-1], 0
+        jne .ol
+        sub si, di                  ; SI = lo que ocupa la vieja
+        push si
+        call .endp                  ; DI = final del entorno
+        pop si
+        sub di, si
+        call .need
+        pop di
+        cmp bx, [env_size]
+        ja .full
+.del:
         ; borrar la entrada existente
         mov si, di
 .sk:
@@ -6935,27 +6957,9 @@ env_set:
         mov si, [es_val]
         cmp byte [si], 0
         je .done
-        ; final del entorno
-        mov es, [0x2C]
-        xor di, di
-.e:
-        cmp byte [es:di], 0
-        je .gotend
-.e2:
-        inc di
-        cmp byte [es:di-1], 0
-        jne .e2
-        jmp .e
-.gotend:
+        call .endp
         ; ¿cabe?
-        mov si, [es_name]
-        call strlen
-        mov bx, cx
-        mov si, [es_val]
-        call strlen
-        add bx, cx
-        add bx, 3
-        add bx, di
+        call .need
         cmp bx, [env_size]
         ja .full
         mov si, [es_name]
@@ -6984,6 +6988,31 @@ env_set:
         pop es
         mov si, msg_envfull
         jmp puts
+; ES:DI = el final del entorno (el cero que lo cierra)
+.endp:
+        mov es, [0x2C]
+        xor di, di
+.e:
+        cmp byte [es:di], 0
+        je .ee
+.e2:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .e2
+        jmp .e
+.ee:
+        ret
+; BX = DI + lo que ocupa «nombre=valor» con sus dos ceros
+.need:
+        mov si, [es_name]
+        call strlen
+        mov bx, cx
+        mov si, [es_val]
+        call strlen
+        add bx, cx
+        add bx, 3
+        add bx, di
+        ret
 
 ; SI -> CX = longitud
 strlen:
@@ -7797,9 +7826,12 @@ do_if:
         call skip_sp
         call parse_dec
         jc .syn
+        test dl, dl                 ; 256 o más: nunca (antes valía módulo
+        jnz .el0                    ; 256: IF ERRORLEVEL 256 era como 0)
         cmp [errlvl], al
         mov al, 1
         jae .res
+.el0:
         xor al, al
         jmp .res
 .ex:
@@ -7901,6 +7933,7 @@ parse_u16:
 parse_dec:
         xor ax, ax
         xor cx, cx
+        xor dx, dx                  ; DL = 1 si pasa de 255
 .l:
         mov bl, [si]
         sub bl, '0'
@@ -7909,7 +7942,9 @@ parse_dec:
         ja .e
         mov bh, 10
         mul bh
+        or dl, ah
         add al, bl
+        adc dl, 0
         inc si
         inc cx
         jmp .l
