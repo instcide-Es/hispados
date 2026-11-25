@@ -76,7 +76,7 @@ módulo Hispa64
     importar Disp64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.10.0"
+    constante VERSIÓN = "0.11.0"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
@@ -1397,7 +1397,7 @@ módulo Hispa64
         si no tiene("sinpruebas") y no tiene("sinred") y tic_va entonces pruebas_red() fin
         si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 + fallos9 > 0 entonces
             pon_color(12, 0)
-            escribir("Hispa-64 etapa 10: con fallos (los «MAL» de arriba).\n")
+            escribir("Hispa-64 etapa 11: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
             si apagar_al_fallar entonces
                 al_apagar()
@@ -1405,7 +1405,7 @@ módulo Hispa64
             fin
         sino
             pon_color(10, 0)
-            escribir("Hispa-64 etapa 10: todo en orden.\n")
+            escribir("Hispa-64 etapa 11: todo en orden.\n")
             pon_color(7, 0)
         fin
         al_apagar()
