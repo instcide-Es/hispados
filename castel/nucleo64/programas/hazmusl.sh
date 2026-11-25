@@ -14,6 +14,7 @@
 #   libsaludo.so                una biblioteca compartida de prueba
 #   LUA, PRUEBA.LUA             Lua 5.5 y su prueba
 #   PING IFCONFIG DESCARGA NTP ECO MRED   los de red (hazred.sh, etapa 9)
+#   MCXX                        la prueba de C++ (cxx/hazcxx.sh, etapa 10)
 # Uso: hazmusl.sh SALIDA   (dice en la última línea los que ha hecho; si no
 # hay gcc, no hace nada)
 set -e
@@ -64,4 +65,5 @@ for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCES
   strip --strip-unneeded "$S/$f"
 done
 RED=$("$AQUI/hazred.sh" "$S"); RED=${RED##*hechos: }   # [etapa 9] los programas de red (programas/red/)
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED"
+CXX=$("$AQUI/cxx/hazcxx.sh" "$S"); CXX=${CXX##*hechos: }   # [etapa 10] los de C++ (programas/cxx/)
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CXX"

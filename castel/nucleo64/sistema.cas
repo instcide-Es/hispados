@@ -1207,7 +1207,7 @@ módulo Sistema
         devolver listos
     fin
 
-    ; select y pselect6 (los descriptores hasta MAX_FD)
+    ; select y pselect6 (los descriptores hasta el 63: lo demás, con poll)
     función selecciona(p: puntero a Proceso, n: nat64, vr: nat64, vw: nat64, ve: nat64, límite: nat64): ent64
         variable g0, lt: nat64
         variable r, w, e, rr, ww: nat64
@@ -1253,7 +1253,7 @@ módulo Sistema
             g0 := Sondeo64.gen
             lt := límite
             i := 0
-            mientras i < MAX_FD hacer
+            mientras i < 64 hacer
                 si r yb (nat64(1) << i) <> 0 entonces
                     si listo_de(p, ent64(i), 1) <> 0 entonces
                         rr := rr ob (nat64(1) << i)

@@ -63,9 +63,9 @@ módulo Procesos
 
     importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Sinc64, Entradas, Espacios, Unidad64, Vfs64, Hora64
 
-    público constante MAX_REG = 256             ; (48 hasta la etapa 6)
-    público constante MAX_HILOS = 64            ; [etapa 7] los hilos de un proceso
-    público constante MAX_FD = 32               ; (16 hasta la etapa 4)
+    público constante MAX_REG = 1024            ; (48 hasta la etapa 6; 256 hasta la 9)
+    público constante MAX_HILOS = 512           ; [etapa 7] los hilos de un proceso (64 hasta la 9: el navegador, a cientos)
+    público constante MAX_FD = 256              ; (16 hasta la etapa 4; 32 hasta la 9)
     público constante LEER = 1                  ; los permisos (los PROT_ de Linux)
     público constante ESCRIBE = 2
     público constante EJECUTAR = 4
