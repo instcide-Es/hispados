@@ -319,6 +319,10 @@ umb_alloc:
         push si
         push di
         push cx
+        test dx, dx                 ; 0 párrafos: no se da un bloque vacío
+        jnz .dx                     ; (partía una entrada en dos y daba uno
+        dec dx                      ; de tamaño 0): B0h y el mayor, en DX
+.dx:
         xor di, di                  ; el mejor (el menor que sirva)
         xor cx, cx                  ; el mayor libre
         mov si, umb_tab
