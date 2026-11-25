@@ -22,7 +22,7 @@ cd "${SRC:-$(dirname "$0")/..}"
 NOMBRE=${NOMBRE:-hispados}
 J=10
 if [ "${1:-}" = "-j" ]; then J=$2; shift 2; fi
-DEST=${1:-carlos@100.126.100.79}
+DEST=${1:-carlos@100.112.44.3}
 PORT=${2:-2222}
 KEY=${3:-/root/.ssh/id_ed25519_pc_albinyana}
 SSH="ssh -p $PORT -i $KEY -o BatchMode=yes -o ConnectTimeout=15 $DEST"
