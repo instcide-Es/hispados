@@ -88,6 +88,7 @@ módulo Redcom64
     público constante T_ÚLTIMO_ACK = 9
     público constante T_ESPERA_TIEMPO = 10      ; TIME_WAIT
     público constante COLA_ESCUCHA = 32
+    público constante MAX_OOO = 8               ; [etapa 10] los trozos desordenados que se guardan
 
     público tipo Sock = estructura
         refs: nat64                             ; los descriptores que lo tienen
@@ -120,6 +121,12 @@ módulo Redcom64
         rcvbuf, sndbuf: nat64
         rcv_plazo, snd_plazo: nat64             ; SO_RCVTIMEO y SO_SNDTIMEO (ns; 0: sin plazo)
         segs_rx, segs_tx, retx_total: nat64
+        ; [etapa 10] lo que ha llegado desordenado: ya está en su sitio del
+        ; búfer de recibir (detrás de lo que va en orden); aquí, sus trozos
+        ; [ini, fin) en números de secuencia. sack_ok: la otra punta sabe SACK
+        ooo_n, sack_ok: nat32
+        ooo_ini, ooo_fin: arreglo [MAX_OOO] de nat32
+        ooo_guardados: nat64
     fin
 
     público variable socks: arreglo [MAX_SOCK] de nat64
@@ -313,6 +320,14 @@ módulo Redcom64
         devolver s.rx_tam - s.rx_n
     fin
 
+    ; [etapa 10] pone n octetos de d «desde» octetos más allá de lo recibido
+    ; en orden (lo desordenado: en su sitio, sin contarlo aún)
+    público función rx_pon_en(s: puntero a Sock, desde_: nat64, d: nat64, n: nat64): bool
+        si s.rx = 0 o desde_ + n > s.rx_tam - s.rx_n entonces devolver falso fin
+        al_anillo(s.rx, s.rx_tam, s.rx_ini + s.rx_n + desde_, d, n)
+        devolver cierto
+    fin
+
     ; mete n octetos de d en lo recibido (todos o ninguno)
     público función rx_mete(s: puntero a Sock, d: nat64, n: nat64): bool
         si s.rx = 0 o n > s.rx_tam - s.rx_n entonces devolver falso fin
@@ -329,7 +344,7 @@ módulo Redcom64
         si n > s.rx_n entonces n := s.rx_n fin
         s.rx_ini := (s.rx_ini + n) mod s.rx_tam
         s.rx_n := s.rx_n - n
-        si s.rx_n = 0 entonces s.rx_ini := 0 fin
+        si s.rx_n = 0 y s.ooo_n = 0 entonces s.rx_ini := 0 fin        ; ([etapa 10] lo desordenado va detrás: no se mueve)
     fin
 
     ; lo que sale: mete lo que quepa (cuántos)

@@ -15,7 +15,11 @@
 ;     CLOSING, CLOSE_WAIT, LAST_ACK y TIME_WAIT (2 s aquí); RST a lo que no
 ;     tiene conexión, y si se cierra con algo sin leer (como Linux);
 ;   - la ventana que se anuncia, al día cuando el programa lee.
-;  Sin escala de ventana ni SACK (quedan para la etapa 10, como IPv6).
+;  [etapa 10] La escala de ventana (RFC 7323: la nuestra, 3; búferes de
+;  256 KB), y lo que llega desordenado se guarda en su sitio (8 trozos) y se
+;  dice con SACK (RFC 2018) en los ACK si la otra punta lo sabe; al llegar
+;  lo que faltaba, se junta. (Al mandar, los SACK de la otra punta no se
+;  miran: se repite desde lo primero sin confirmar.)
 ;  Lo de Hispa-Pentium (castel/nucleo32/rtcp.cas) es el modelo.
 ;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 ; =============================================================================
@@ -39,8 +43,12 @@ módulo Tcp64
     constante ECONNRESET = -104
     constante ETIMEDOUT = -110
     constante EHOSTUNREACH = -113
-    público constante TCP_RX = 65536
-    público constante TCP_TX = 65536
+    público constante TCP_RX = 262144           ; [etapa 10] 256 KB (64 KB hasta la 9)
+    público constante TCP_TX = 262144
+    constante ESCALA = 3                        ; [etapa 10] la escala de la ventana que se anuncia (hasta 512 KB)
+    público variable tcp_escaladas, tcp_sack, tcp_guardados, tcp_juntados: nat64
+    público variable pierde_cada: nat32         ; [etapa 10] «red=pierde»: se tira uno de cada tantos segmentos con datos que llegan (para probar)
+    variable pierde_cuenta: nat32
 
     público variable tcp_rst_rx, tcp_rst_tx, tcp_retx, tcp_rápidas, tcp_tirados, tcp_abiertas: nat64
 
@@ -58,23 +66,123 @@ módulo Tcp64
         devolver b
     fin
 
-    ; la ventana que se anuncia
+    ; la ventana que se anuncia (con la escala: lo que cabe, en múltiplos de 2^escala)
     función ventana(s: puntero a Sock): nat32
         variable v: nat64
         v := rx_sitio(s)
         si s.marcas yb M_NO_LEE <> 0 entonces v := s.rx_tam fin
-        si v > 65535 entonces v := 65535 fin
+        si v > nat64(65535) << s.escala_rx entonces v := nat64(65535) << s.escala_rx fin
+        v := (v >> s.escala_rx) << s.escala_rx
         devolver nat32(v)
+    fin
+
+    ; [etapa 10] las opciones de un SYN: la MSS, la escala (0xFF: no viene) y si sabe SACK
+    función opciones_syn(d: nat64, lh: nat32, ref escala: nat32, ref sack: nat32)
+        variable i, op, l: nat32
+        escala := 0xFF
+        sack := 0
+        i := 20
+        mientras i < lh hacer
+            op := m8(d + i)
+            si op = 0 entonces romper fin
+            si op = 1 entonces
+                i := i + 1
+                seguir
+            fin
+            si i + 1 >= lh entonces romper fin
+            l := m8(d + i + 1)
+            si l < 2 entonces romper fin
+            si op = 3 y l = 3 entonces escala := m8(d + i + 2) fin
+            si op = 4 y l = 2 entonces sack := 1 fin
+            i := i + l
+        fin
+        si escala <> 0xFF y escala > 14 entonces escala := 14 fin
+    fin
+
+    ; ---- [etapa 10] lo desordenado ----
+    ; apunta el trozo [ini, fin) (ya puesto en el búfer), juntándolo con los que toque
+    función apunta_ooo(s: puntero a Sock, ini: nat32, fin_: nat32)
+        variable i, j: nat32
+        i := 0
+        mientras i < s.ooo_n hacer
+            ; (se tocan o se pisan: uno solo)
+            si antes_o_igual(s.ooo_ini[i], fin_) y antes_o_igual(ini, s.ooo_fin[i]) entonces
+                si antes(s.ooo_ini[i], ini) entonces ini := s.ooo_ini[i] fin
+                si antes(fin_, s.ooo_fin[i]) entonces fin_ := s.ooo_fin[i] fin
+                j := i
+                mientras j + 1 < s.ooo_n hacer
+                    s.ooo_ini[j] := s.ooo_ini[j + 1]
+                    s.ooo_fin[j] := s.ooo_fin[j + 1]
+                    j := j + 1
+                fin
+                s.ooo_n := s.ooo_n - 1
+                i := 0
+                seguir
+            fin
+            i := i + 1
+        fin
+        si s.ooo_n >= MAX_OOO entonces devolver fin
+        ; (el más reciente, el primero: así va el primero en el SACK, como pide la RFC 2018)
+        j := s.ooo_n
+        mientras j > 0 hacer
+            s.ooo_ini[j] := s.ooo_ini[j - 1]
+            s.ooo_fin[j] := s.ooo_fin[j - 1]
+            j := j - 1
+        fin
+        s.ooo_ini[0] := ini
+        s.ooo_fin[0] := fin_
+        s.ooo_n := s.ooo_n + 1
+    fin
+
+    ; lo que ya tocaba de lo desordenado pasa a estar en orden
+    función junta_ooo(s: puntero a Sock)
+        variable i, j: nat32
+        variable más: bool
+        más := cierto
+        mientras más hacer
+            más := falso
+            i := 0
+            mientras i < s.ooo_n hacer
+                si antes_o_igual(s.ooo_ini[i], s.rcv_nxt) entonces
+                    si antes(s.rcv_nxt, s.ooo_fin[i]) entonces
+                        s.rx_n := s.rx_n + nat64(s.ooo_fin[i] - s.rcv_nxt)
+                        s.rcv_nxt := s.ooo_fin[i]
+                        tcp_juntados := tcp_juntados + 1
+                    fin
+                    j := i
+                    mientras j + 1 < s.ooo_n hacer
+                        s.ooo_ini[j] := s.ooo_ini[j + 1]
+                        s.ooo_fin[j] := s.ooo_fin[j + 1]
+                        j := j + 1
+                    fin
+                    s.ooo_n := s.ooo_n - 1
+                    más := cierto
+                    romper
+                fin
+                i := i + 1
+            fin
+        fin
+        Sondeo64.avisa()
     fin
 
     ; ---- mandar un segmento ----
     ; con las marcas f, la secuencia seq, y n octetos del búfer de envío desde «off»
     función manda(s: puntero a Sock, f: nat32, seq: nat32, off: nat64, n: nat32)
         variable u: nat64
-        variable lh, v: nat32
+        variable lh, v, k: nat32
         u := sitio_datos()
         lh := 20
-        si f yb F_SYN <> 0 entonces lh := 24 fin
+        si f yb F_SYN <> 0 entonces
+            ; [etapa 10] la MSS, y la escala y SACK (en el SYN; en el SYN+ACK, si los ha pedido la otra punta)
+            lh := 24
+            si s.escala_rx <> 0 o f = F_SYN entonces lh := lh + 4 fin
+            si s.sack_ok <> 0 o f = F_SYN entonces lh := lh + 4 fin
+        sino si f yb F_ACK <> 0 y n = 0 y s.sack_ok <> 0 y s.ooo_n > 0 entonces
+            ; [etapa 10] los SACK de lo desordenado (como mucho 4 trozos; solo en
+            ; los ACK sin datos: con datos, la trama se pasaría de la MTU)
+            lh := 20 + 4 + 8 * s.ooo_n
+            si s.ooo_n > 4 entonces lh := 20 + 4 + 32 fin
+        fin
         pon_be16(u, s.l_puerto)
         pon_be16(u + 2, s.r_puerto)
         pon_be32(u + 4, seq)
@@ -82,13 +190,45 @@ módulo Tcp64
         pon_m8(u + 12, (lh div 4) << 4)
         pon_m8(u + 13, f)
         v := ventana(s)
-        pon_be16(u + 14, v)
+        si f yb F_SYN <> 0 entonces
+            ; (la ventana de un SYN nunca va con escala)
+            si v > 65535 entonces v := 65535 fin
+            pon_be16(u + 14, v)
+        sino
+            pon_be16(u + 14, v >> s.escala_rx)
+        fin
         pon_be16(u + 16, 0)
         pon_be16(u + 18, 0)
-        si lh = 24 entonces
+        si f yb F_SYN <> 0 entonces
             pon_m8(u + 20, 2)
             pon_m8(u + 21, 4)
             pon_be16(u + 22, MTU - 40)
+            k := 24
+            si s.escala_rx <> 0 o f = F_SYN entonces
+                pon_m8(u + k, 1)
+                pon_m8(u + k + 1, 3)
+                pon_m8(u + k + 2, 3)
+                pon_m8(u + k + 3, ESCALA)
+                k := k + 4
+            fin
+            si s.sack_ok <> 0 o f = F_SYN entonces
+                pon_m8(u + k, 1)
+                pon_m8(u + k + 1, 1)
+                pon_m8(u + k + 2, 4)
+                pon_m8(u + k + 3, 2)
+            fin
+        sino si lh > 20 entonces
+            pon_m8(u + 20, 1)
+            pon_m8(u + 21, 1)
+            pon_m8(u + 22, 5)
+            pon_m8(u + 23, lh - 22)
+            k := 0
+            mientras k < s.ooo_n y k < 4 hacer
+                pon_be32(u + 24 + nat64(k) * 8, s.ooo_ini[k])
+                pon_be32(u + 28 + nat64(k) * 8, s.ooo_fin[k])
+                k := k + 1
+            fin
+            tcp_sack := tcp_sack + 1
         fin
         si n > 0 entonces tx_mira(s, off, u + nat64(lh), nat64(n)) fin
         pon_be16(u + 16, plegar(suma(u, nat64(lh + n), suma_falsa(s.l_ip, s.r_ip, 6, lh + n))))
@@ -200,6 +340,10 @@ módulo Tcp64
         s.mss := 536
         s.rto := RTO_INI
         s.srtt := 0
+        s.escala_rx := 0                    ; [etapa 10] (se ofrecen la escala y SACK en el SYN: se ponen si los da la otra punta)
+        s.escala_tx := 0
+        s.sack_ok := 0
+        s.ooo_n := 0
         s.estado := T_SYN_ENVIADO
         manda(s, F_SYN, s.iss, 0, 0)
         s.t_retx := ahora_ns() + s.rto
@@ -397,7 +541,7 @@ módulo Tcp64
     ; uno que llega a una que escucha: un SYN
     función llega_syn(esc: puntero a Sock, de: nat32, a: nat32, d: nat64, n: nat32, lh: nat32)
         variable c: puntero a Sock
-        variable i, pend: nat32
+        variable i, pend, esc_, sack_: nat32
         ; (los que ya están llegando a ella cuentan para la cola)
         pend := 0
         i := 0
@@ -430,6 +574,14 @@ módulo Tcp64
         c.snd_wl1 := c.irs
         c.snd_wl2 := c.iss
         c.mss := mss_de(d, lh)
+        ; [etapa 10] la escala y SACK, si los pide
+        opciones_syn(d, lh, esc_, sack_)
+        si esc_ <> 0xFF entonces
+            c.escala_tx := esc_
+            c.escala_rx := ESCALA
+            tcp_escaladas := tcp_escaladas + 1
+        fin
+        c.sack_ok := sack_
         c.rto := RTO_INI
         c.estado := T_SYN_RECIBIDO
         c.t_vivo := ahora_ns()
@@ -460,7 +612,7 @@ módulo Tcp64
     ; lo que ha llegado (Ip64.ent_*): el segmento
     función tcp_entra()
         variable d: nat64
-        variable n, de, a, de_p, a_p, seq, ack, f, lh, wnd, lon, cabe, dentro, k: nat32
+        variable n, de, a, de_p, a_p, seq, ack, f, lh, wnd, lon, cabe, dentro, k, esc_, sack_: nat32
         variable s: puntero a Sock
         variable fin_aquí: bool
         d := ent_d
@@ -488,6 +640,13 @@ módulo Tcp64
         fin
         s.segs_rx := s.segs_rx + 1
         s.t_vivo := ahora_ns()
+        ; [etapa 10] la ventana de la otra punta, con su escala (la de un SYN, nunca)
+        si f yb F_SYN = 0 entonces wnd := wnd << s.escala_tx fin
+        ; [etapa 10] «red=pierde»: para probar lo desordenado, uno de cada tantos, fuera
+        si pierde_cada > 0 y lon > 0 y s.estado = T_ESTABLECIDO entonces
+            pierde_cuenta := pierde_cuenta + 1
+            si pierde_cuenta mod pierde_cada = 0 entonces devolver fin
+        fin
         ; ---- uno que escucha ----
         si s.estado = T_ESCUCHA entonces
             si f yb F_RST <> 0 entonces devolver fin
@@ -520,6 +679,14 @@ módulo Tcp64
                 s.snd_wl1 := seq
                 s.snd_wl2 := ack
                 s.mss := mss_de(d, lh)
+                ; [etapa 10] ¿ha contestado a la escala y a SACK?
+                opciones_syn(d, lh, esc_, sack_)
+                si esc_ <> 0xFF entonces
+                    s.escala_tx := esc_
+                    s.escala_rx := ESCALA
+                    tcp_escaladas := tcp_escaladas + 1
+                fin
+                s.sack_ok := sack_
                 si s.retx_n = 0 y s.t_retx <> 0 entonces mide(s, ahora_ns() - (s.t_retx - s.rto)) fin
                 s.t_retx := 0
                 s.retx_n := 0
@@ -617,7 +784,8 @@ módulo Tcp64
                             fin
                             si cabe < lon entonces tcp_tirados := tcp_tirados + 1 fin
                         fin
-                        si cabe = lon y f yb F_FIN <> 0 entonces fin_aquí := cierto fin
+                        si cabe = lon y f yb F_FIN <> 0 y s.ooo_n = 0 entonces fin_aquí := cierto fin
+                        si s.ooo_n > 0 entonces junta_ooo(s) fin
                     sino si antes(seq, s.rcv_nxt) entonces
                         ; (empieza antes: lo que ya se tenía, fuera)
                         k := s.rcv_nxt - seq
@@ -629,10 +797,16 @@ módulo Tcp64
                                 s.rcv_nxt := s.rcv_nxt + cabe
                                 Sondeo64.avisa()
                             fin
-                            si cabe = lon - k y f yb F_FIN <> 0 entonces fin_aquí := cierto fin
+                            si cabe = lon - k y f yb F_FIN <> 0 y s.ooo_n = 0 entonces fin_aquí := cierto fin
+                            si s.ooo_n > 0 entonces junta_ooo(s) fin
                         fin
+                    sino si s.marcas yb M_NO_LEE = 0 y rx_pon_en(s, nat64(seq - s.rcv_nxt), d + lh, nat64(lon)) entonces
+                        ; [etapa 10] desordenado: a su sitio, apuntado (y el FIN, si lo trae, lo repetirá)
+                        apunta_ooo(s, seq, seq + lon)
+                        tcp_guardados := tcp_guardados + 1
+                        s.ooo_guardados := s.ooo_guardados + 1
                     sino
-                        tcp_tirados := tcp_tirados + 1          ; (desordenado: fuera)
+                        tcp_tirados := tcp_tirados + 1          ; (desordenado y sin sitio: fuera)
                     fin
                 sino si seq = s.rcv_nxt entonces
                     fin_aquí := cierto

@@ -109,6 +109,9 @@ módulo PrRed64
         escribe_local()
         escribir(", zona ", dirección(zona_nombre[0]), " (TZ=", dirección(zona_tz[0]), "), el CMOS ")
         si cmos_local entonces escribir("en hora local\n") sino escribir("en UTC\n") fin
+        escribir("  TCP [etapa 10]: ", tcp_escaladas, " conexiones con escala de ventana, ", tcp_guardados, " trozos desordenados guardados y ", tcp_juntados, " juntados, ", tcp_sack, " ACK con SACK")
+        si pierde_cada > 0 entonces escribir(" (red=pierde: uno de cada ", pierde_cada, " con datos, tirado)") fin
+        escribir("\n")
         k := busca_archivo("RED.PRB")
         si k < 0 entonces devolver fin
         si n_ifz > 1 entonces

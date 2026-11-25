@@ -259,6 +259,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MCXX: todo bien (35 pruebas)$" <<< "$v" && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -qE "^  TCP \[etapa 10\]: [1-9][0-9]* conexiones con escala de ventana" <<< "$v" \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
     && grep -q "^Después de musl: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas, 0 tuberías; " <<< "$v" \
@@ -1300,8 +1301,11 @@ red9_ok() {   # SALIDA QUÉ [dns]
 if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
   red9 "$T/e9a.txt" e1000 1 ""
   red9_ok "$T/e9a.txt" "e1000 (la de VirtualBox), 1 procesador, DHCP"
-  RTC9=utc red9 "$T/e9b.txt" e1000e 2 "cmos=utc zona=UTC"
-  red9_ok "$T/e9b.txt" "e1000e (82574L, con MSI), 2 procesadores"
+  RTC9=utc red9 "$T/e9b.txt" e1000e 2 "cmos=utc zona=UTC red=pierde"
+  red9_ok "$T/e9b.txt" "e1000e (82574L, con MSI), 2 procesadores, [etapa 10] tirando uno de cada 23 segmentos que llegan (red=pierde)"
+  if serie "$T/e9b.txt" | grep -qE "^  TCP \[etapa 10\]: [0-9]+ conexiones con escala de ventana, [1-9][0-9]* trozos desordenados guardados y [1-9][0-9]* juntados"; then
+    ok "etapa 10, TCP: lo desordenado (red=pierde), guardado en su sitio y juntado al llegar lo que faltaba: $(serie "$T/e9b.txt" | grep -o '[0-9]* trozos desordenados guardados y [0-9]* juntados'), y las descargas, con su sha256"
+  else ko "etapa 10, TCP no guarda lo desordenado: $(serie "$T/e9b.txt" | grep '^  TCP \[')"; fi
   if [ -n "$PD9" ]; then
     red9 "$T/e9c.txt" virtio-net-pci 4 "ip=10.0.2.15/24,10.0.2.2,10.0.2.2 sindhcp" dns
     red9_ok "$T/e9c.txt" "virtio-net, 4 procesadores, IP fija y DNS (el de prueba)" dns
@@ -1355,6 +1359,16 @@ if [ $c = 85 ] && grep -q "^INTx: las rutas de ACPI (_PRT): 0 tablas resueltas (
    && grep -q "^Red: 00:03.0 8086:100E .*, INTx por la GSI 1[01] (y mirando cada 10 ms)$" <<< "$v" && grep -q "^Hispa-64 etapa 10: todo en orden.$" <<< "$v"; then
   ok "etapa 10, con «pc» (los enlaces LNKA, de _CRS hecho por un método): la línea de la configuración, y mirando cada 10 ms"
 else ko "etapa 10, con «pc» la INTx no sale como debe (código $c): $(grep -E '^INTx|^Red: 00|parado' <<< "$v" | paste -sd '|')"; fi
+# [etapa 10] TCP entre dos de Hispa-64 (MRED, por 127.0.0.1): la escala de
+# ventana y SACK por las dos puntas; con «red=pierde», lo desordenado se
+# guarda, los ACK llevan SACK, y los 256 KB de ida y vuelta salen iguales
+mb1 "apagar red=pierde" "$T/e10p.txt" 512 -machine q35 -smp 2; c=$?
+v=$(serie "$T/e10p.txt")
+if [ $c = 85 ] && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
+   && grep -qE "^  TCP \[etapa 10\]: [1-9][0-9]* conexiones con escala de ventana, [1-9][0-9]* trozos desordenados guardados y [1-9][0-9]* juntados, [1-9][0-9]* ACK con SACK \(red=pierde" <<< "$v" && grep -q "^Hispa-64 etapa 10: todo en orden.$" <<< "$v"; then
+  ok "etapa 10, TCP de Hispa-64 a Hispa-64 (MRED por 127.0.0.1, tirando uno de cada 23): $(grep -o '[0-9]* conexiones con escala de ventana, .* ACK con SACK' <<< "$v"); MRED, todo bien"
+else ko "etapa 10, TCP con pérdidas por 127.0.0.1 no sale (código $c): $(grep -E '^MRED|^  TCP \[|MAL|parado' <<< "$v" | head -5 | paste -sd '|')"; fi
+
 # [etapa 10] la red por USB enchufada en marcha (device_add, por el monitor de
 # QEMU): el vigía USB la enumera, la red la toma y DHCP le da la IP; al
 # desenchufarla (device_del), sin enlace

@@ -663,6 +663,7 @@ módulo Hispa64
         prepara_red(dirección(v[0]), tiene("sindhcp"), tiene("realtek=ensayo"))
         prepara_sockets(dirección(h[0]))
         Tcp64.traza := tiene("red=traza")
+        si tiene("red=pierde") entonces Tcp64.pierde_cada := 23 fin       ; [etapa 10] (para probar lo desordenado y SACK)
     fin
 
     función etapa4()
