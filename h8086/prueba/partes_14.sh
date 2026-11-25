@@ -247,3 +247,58 @@ sys.exit(0 if g >= 0xFF8 and n == 3 else 1)
 PY
 then ok "n.º 11: con /F, la cadena de TRES.TXT queda cortada en su tercer grupo"; else ko "n.º 11: la cadena de TRES.TXT sigue en círculo"; fi
 }
+
+# ---- n.º 14 y 15: una BPB que no vale y grupos que no existen ----
+p_auditoria_bpb() {
+echo "== Hispa-8086: auditoría 1, discos con la BPB o los grupos estropeados =="
+local F="python3 prueba/fat12.py"
+cp $IMG/hispa8086-360.img $T/a.img
+rm -f $T/b.img; mformat -C -f 1440 -i $T/b.img ::; mcopy -i $T/b.img build/LEEME.TXT ::
+printf '\0\0' | dd of=$T/b.img bs=1 seek=$((0x18)) conv=notrunc 2> /dev/null     # 0 sectores por pista
+rm -f $T/c.img; mformat -C -f 360 -i $T/c.img ::; mcopy -i $T/c.img build/LEEME.TXT ::; mcopy -i $T/c.img build/HOLA.COM ::UNO.TXT
+local i; for ((i=1; i<=100; i++)); do printf 'x' > $T/R$i.TXT; done   # (las últimas, en el último sector de la raíz)
+(cd $T && mcopy -i c.img R*.TXT ::); rm -f $T/R*.TXT
+$F $T/c.img primero UNO.TXT 1                       # el primer grupo de UNO.TXT, el 1
+QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
+escribe "limpiar"; escribe "dir b:"; sleep 3; escribe "eco sigue vivo"
+pantalla x1
+esta x1 "sigue vivo" "n.º 14: un disquete con 0 sectores por pista no cuelga el equipo: "
+noesta x1 "LEEME.TXT" "n.º 14: y no se lee como si valiera: "
+apaga
+QMAS="-drive file=$T/c.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
+escribe "limpiar"; escribe "eco escrito en el grupo 1 >> b:uno.txt"; sleep 2; escribe "dir b:leeme.txt"; sleep 2
+pantalla x2
+esta x2 "LEEME.TXT" "n.º 15: escribir en un archivo cuyo primer grupo es el 1 no machaca la raíz: "
+apaga
+if cmp -s <(mtype -i $T/c.img ::LEEME.TXT) build/LEEME.TXT && [ "$(mdir -b -i $T/c.img :: 2> /dev/null | grep -c '/R[0-9]*.TXT')" = 100 ]; then ok "n.º 15: desde fuera, la raíz entera (102 archivos) y LEEME.TXT siguen bien"; else ko "n.º 15: la raíz se ha estropeado"; mdir -i $T/c.img ::; fi
+}
+
+# ---- n.º 16: una ruta de más de 79 letras ya no se corta en silencio ----
+p_auditoria_ruta() {
+echo "== Hispa-8086: auditoría 1, rutas de más de 79 letras =="
+cp $IMG/hispa8086-360.img $T/a.img
+local d="" l
+for l in A B C D E F G H; do d="$d/$l$l$l$l$l$l$l$l"; mmd -i $T/a.img "::$d"; done
+local r="${d//\//\\}\\DATOS.TXT"          # 82 letras: cortada en 79, «...\DATOS.»
+arranca $T/a.img 486
+escribe "limpiar"; escribe "eco hola > $r"; sleep 1
+pantalla l1
+esta l1 "No existe esa ruta." "n.º 16: ${#r} letras: «No existe esa ruta» (error 3), como en DOS: "
+apaga
+if [ -z "$(mdir -b -i $T/a.img "::$d" 2> /dev/null | grep -i datos)" ]; then ok "n.º 16: y no se ha creado «DATOS» (lo que quedaba al cortarla)"; else ko "n.º 16: se ha creado $(mdir -b -i $T/a.img "::$d" | grep -i datos)"; fi
+}
+
+# ---- n.º 17: SISTEMA en un disquete casi lleno no toca su arranque ----
+p_auditoria_sistema() {
+echo "== Hispa-8086: auditoría 1, SISTEMA en un disquete sin sitio =="
+cp $IMG/hispa8086-360.img $T/a.img
+rm -f $T/b.img; mformat -C -f 360 -i $T/b.img ::; mcopy -i $T/b.img build/LEEME.TXT ::
+llena $T/b.img 4096
+dd if=$T/b.img of=$T/arr0.bin bs=512 count=1 2> /dev/null
+QMAS="-drive file=$T/b.img,format=raw,if=floppy,index=1" arranca $T/a.img 486
+escribe "limpiar"; escribe "sistema b: /a"; sleep 10
+pantalla y1
+esta y1 "No se ha podido copiar el sistema: ¿está lleno el disco?" "n.º 17: no caben los archivos, y lo dice: "
+apaga
+if cmp -s <(dd if=$T/b.img bs=512 count=1 2> /dev/null) $T/arr0.bin; then ok "n.º 17: el sector de arranque sigue como estaba"; else ko "n.º 17: el sector de arranque ha cambiado aunque no cabía el sistema"; fi
+}

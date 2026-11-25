@@ -226,25 +226,9 @@ inicio:
         mov [arr+26], ax
         mov byte [arr+36], 0x80
 .escribe:
-        xor ax, ax
-        mov bx, arr
-        call disco_escribe
-        jc .mal_escribir
-        cmp byte [unidad], 2
-        jne .copia
-        mov si, [fila]              ; la partición, activa; y un sector de
-        call duro_codigo            ; particiones que la arranque
-        call duro_activa
-        call duro_escribe
-        jnc .copia
-.mal_escribir:
-        mov si, m_e_escribir
-        cmp byte [d_err], 3
-        jne .me
-        mov si, m_e_protegido
-.me:
-        jmp error
-.copia:
+        ; primero los archivos y luego el arranque: si no caben, el disco se
+        ; queda como estaba (antes el arranque ya estaba cambiado, y el
+        ; disquete de otro DOS no arrancaba con nada)
         call avisa_nucleo
         cmp byte [unidad], 2
         jae .c0
@@ -255,10 +239,31 @@ inicio:
         mov al, [unidad]
         add al, 'A'
         call sis_escribe
-        jnc .hecho
+        jnc .sector0
         mov si, m_e_copiar
         jmp error
+.sector0:
+        call avisa_nucleo
+        xor ax, ax
+        mov bx, arr
+        call disco_escribe
+        jc .mal_escribir
+        cmp byte [unidad], 2
+        jne .hecho
+        mov si, [fila]              ; la partición, activa; y un sector de
+        call duro_codigo            ; particiones que la arranque
+        call duro_activa
+        call duro_escribe
+        jnc .hecho
+.mal_escribir:
+        mov si, m_e_escribir
+        cmp byte [d_err], 3
+        jne .me
+        mov si, m_e_protegido
+.me:
+        jmp error
 .hecho:
+        call avisa_nucleo
         mov si, m_hecho
         call pon_cad
         mov ax, 0x4C00
