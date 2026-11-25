@@ -226,9 +226,9 @@ G
     # (las tabletas Bay Trail: Acer One 10, Medion S2217), primero: sin ACPI
     # (el Acer se congela con ACPI.BIN), con ACPI, la consola y por PIO
     if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
-      menu_efi "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi" "$M2" auto
-      menu_efi "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N" "$M2" auto
-      menu_efi "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi" "$M2" auto
+      menu_efi "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred" "$M2" auto
+      menu_efi "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred" "$M2" auto
+      menu_efi "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred" "$M2" auto
     fi
     if [ -n "${PRUEBA_SDHCI:-}" ]; then
       menu_efi "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi" "$M2" auto
@@ -305,9 +305,9 @@ G
   fi
   # (SDHCI) la memoria de prueba del eMMC y la SD, por la BIOS (el Medion con la HispaBIOS)
   if [ -n "${PRUEBA_WIFI_SDIO:-}" ]; then
-    entrada "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi"
-    entrada "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N"
-    entrada "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi"
+    entrada "1. Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred"
+    entrada "2. Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred"
+    entrada "3. Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred"
   fi
   if [ -n "${PRUEBA_SDHCI:-}" ]; then
     entrada "1. eMMC y SD, SIN ACPI: el escritorio (pruebe esta primero)" ESCRIT8.BIN "escritorio $N sinacpi"

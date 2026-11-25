@@ -81,10 +81,11 @@ if ! bash $AQUI/../acpi/pentium/hacer.sh $X/ACPI.BIN > $X/acpi.txt 2>&1 || ! bas
 fi
 python3 -I $AQUI/../tests/acpi/hazsdhci.py FEBF1000 $X/sdio.aml sdio
 $AQUI/nucleo32/disco.sh $X/u.img 32 red > $X/disco32.txt 2>&1
-mcopy -i $X/u.img $X/ACPI.BIN ::ACPI.BIN && mcopy -o -i $X/u.img $X/WIFI.BIN ::WIFI.BIN && mcopy -o -i $X/u.img $X/RED.INI ::
+mcopy -o -i $X/u.img $X/ACPI.BIN ::ACPI.BIN && mcopy -o -i $X/u.img $X/WIFI.BIN ::WIFI.BIN && mcopy -o -i $X/u.img $X/RED.INI :: \
+  && mmd -i $X/u.img ::FIRMWARE && mcopy -i $X/u.img $X/rtl8723bs_nic.bin ::FIRMWARE/
 U="-device qemu-xhci,id=u -drive id=mu,file=$X/u.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu"
 ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura=usb unidad=X registro" QEMU_MAS="$U -acpitable file=$X/sdio.aml" $AQUI/nucleo32/probar.sh "" \
-  ":pausa 8" salir apagar > $X/aprende.sal 2>&1
+  ":pausa 12" salir apagar > $X/aprende.sal 2>&1
 tr -d '\r' < $X/aprende.sal > $X/aprende.txt
 S=$X/aprende.txt
 mira "(RTL8723BS) ACPI.BIN: la SDIO (INT33BB), su _PS0 y el de su hijo (OBDA8723), con la patilla de la controladora GPIO SUS (INT33FC _UID 3) por la región GeneralPurposeIo" \
@@ -97,13 +98,13 @@ k=$(sed -n 's/^espera=\([0-9]*\)$/\1/p' $X/sdio2.txt | head -1)
 if grep -q "^equipo=[0-9A-F]\{8\} [0-9A-F]\{8\}$" $X/sdio2.txt && grep -q "^sdio=FEB00000 0$" $X/sdio2.txt && grep -q "^sdio1=FEB01000$" $X/sdio2.txt \
   && grep -q "^hijo=OBDA8723$" $X/sdio2.txt && [ "$(grep -c "^gpio=FED0E168 [0-9A-F]\{8\} 32$" $X/sdio2.txt)" = 3 ] && [ "${k:-0}" -ge 18 ] && [ "${k:-0}" -le 60 ]; then
   ok "(RTL8723BS) \\SDIO.TXT: el equipo, la controladora y su BAR1, el chip y las tres escrituras en la patilla, con la espera de 20 ms del _PS0 ($k ms)"
-else ko "(RTL8723BS) \\SDIO.TXT no es como debe:"; sed 's/^/        /' $X/sdio2.txt 2> /dev/null | head -12; fi
+else ko "(RTL8723BS) \\SDIO.TXT no es como debe:"; sed 's/^/        /' $X/sdio2.txt 2> /dev/null | head -12; mdir -i $X/u.img :: 2>&1 | grep -i "txt" | sed 's/^/        /'; fi
 if ! grep -q "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S; then ok "(RTL8723BS) ni una excepción del núcleo ni un error de ACPICA"
 else ko "(RTL8723BS) hay excepciones o errores de ACPICA:"; grep "excepción\|\*\*\*\|ACPI Error\|ACPI Exception" $S | head -4 | sed 's/^/        /'; fi
 # el arranque siguiente, sin ACPI: WIFI.BIN (el de verdad; RED.BIN lo pone en
 # marcha con WifiSimulada=CHIP) usa \SDIO.TXT: la controladora a D0 por su
 # BAR1, las escrituras repetidas; en QEMU no hay nada en FEB00000
-ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura=usb unidad=X registro sinacpi" QEMU_MAS="$U" $AQUI/nucleo32/probar.sh "" ":pausa 6" salir apagar > $X/usa.sal 2>&1
+ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura=usb unidad=X registro sinacpi" QEMU_MAS="$U" $AQUI/nucleo32/probar.sh "" "ipconfig" ":pausa 10" salir apagar > $X/usa.sal 2>&1
 tr -d '\r' < $X/usa.sal > $X/usa.txt
 S=$X/usa.txt
 mira "(RTL8723BS) y en el arranque siguiente, sin ACPI: WIFI.BIN lee \\SDIO.TXT (de este equipo), repite las escrituras y va a la controladora aprendida" \
