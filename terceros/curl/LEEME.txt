@@ -1,0 +1,25 @@
+curl 8.14.1 (https://curl.se/), licencia de curl (MIT/X, compatible con la
+GPL): ver COPYING.
+  curl-8.14.1.tar.xz  (curl.se/download)
+  SHA-256: f4619a1e2474c4bbfedc88a7c2191209c8334b48fa1f4e53fd584cc12e9120dd
+
+Lo usa Hispa-64 desde la etapa 10 b (docs/64/HISPA-64.md, sección 19): la
+orden curl y libcurl, con BearSSL (terceros/bearssl, src y src64), para el
+navegador. Es la última versión de curl con BearSSL (la 8.15 lo quitó).
+Aquí va, sin cambiar nada, lo de lib/, src/ e include/ (con sus
+Makefile.inc, que dicen qué archivos se compilan), sin los guiones de
+autotools ni cmake, las pruebas ni la documentación. Lo único nuevo:
+lib/curl_config.h, el que saca su configure para x86_64-linux-musl con la
+musl de Hispa-64 (build/musl), con estas opciones:
+  --host=x86_64-linux-musl --disable-shared --enable-static --with-bearssl
+  --without-libpsl --without-zlib --without-brotli --without-zstd
+  --without-libidn2 --without-nghttp2 --without-libssh2 --disable-ldap
+  --disable-ldaps --disable-rtsp --disable-dict --disable-telnet
+  --disable-tftp --disable-pop3 --disable-imap --disable-smtp
+  --disable-gopher --disable-mqtt --disable-smb --disable-manual
+  --enable-ipv6 --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt
+  --without-ca-path --disable-docs
+(HTTP/1.1, HTTPS, FTP, FILE y WebSocket; el resolutor de nombres en su hilo).
+Se compila un archivo cada vez en build/curl-obj
+(castel/nucleo64/programas/hazcurl.sh). La orden lleva dentro las
+autoridades de w32/tls/raices (CURL_CA_EMBED), las mismas que DESCARGA.

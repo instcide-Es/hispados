@@ -1,0 +1,18 @@
+{
+  "localeFilter": {
+    "filterType": "language",
+    "includelist": ["es", "ca", "gl", "eu", "en"]
+  },
+  "featureFilters": {
+    "translit": "exclude",
+    "conversion_mappings": {
+      "includelist": ["ibm-5348_P100-1997"]
+    },
+    "brkitr_dictionaries": "exclude",
+    "rbnf_tree": "exclude",
+    "unames": "exclude",
+    "cnvalias": "include",
+    "confusables": "exclude"
+  },
+  "resourceFilters": []
+}

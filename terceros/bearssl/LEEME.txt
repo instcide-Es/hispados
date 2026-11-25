@@ -17,3 +17,12 @@ archivos (el enlazado dirá qué símbolo br_... falta), se copian del original.
 Se compila con las opciones del Makefile (BEARCF): sin biblioteca del
 sistema, para i486, y con todo lo que BearSSL detecta solo del sistema
 anfitrión (generador de azar, reloj, SSE2, AES-NI) desactivado.
+
+src64/ (Hispa-64, etapa 10 b, docs/64/HISPA-64.md sección 19): lo que pide
+además curl 8.14.1 (terceros/curl, br_ssl_client_init_full: todas las
+suites de cliente, 3DES, CBC, CCM, RSA para el intercambio, las curvas y las
+de AES-NI, SSE2 y POWER8 que BearSSL elige al arrancar), copiado sin cambiar
+nada del mismo bearssl-0.6.tar.gz: los 43 archivos que enlaza curl y no
+están en src/. Solo los compila hazcurl.sh (castel/nucleo64/programas), con
+musl, en build/bearssl64-obj: el Makefile, hazred.sh y los de Hispa-Pentium
+siguen con src/ solo, como antes.
