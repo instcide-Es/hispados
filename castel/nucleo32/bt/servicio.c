@@ -481,7 +481,7 @@ static int servicio(void)
 		} else if (info.cambios != visto) {
 			visto = info.cambios;
 			nombre_adaptador(&info);
-			bt_log("Adaptador: %s, USB %u.%02u\n", adaptador, info.version >> 8, info.version & 0xFF);
+			bt_log("Adaptador: %s (aparato USB %u)\n", adaptador, info.aparato);
 			cada_linea = 1;
 			if (bt_arranca(info.fabricante, info.producto) < 0) {
 				estado_bt = BTE_FALLO;

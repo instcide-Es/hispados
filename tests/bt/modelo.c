@@ -21,7 +21,9 @@ typedef uint32_t u32;
 #define DE_INT 1
 #define DE_GRANEL 2
 
-int mod_fallos, mod_firmware_bien, mod_ddc, mod_parche;
+int mod_fallos, mod_firmware_bien, mod_ddc, mod_parche, mod_cambio_claves, mod_tecleado, mod_movido;
+static int automatico;
+static char auto_texto[64];
 u32 mod_ordenes;
 static int clase_ad;
 static u32 ahora;
@@ -183,6 +185,11 @@ static struct remoto *por_handle(u16 h)
 #define P_CONN 3
 #define P_CONN_FALLA 4
 #define P_LE 5
+#define P_TECLEA_CODIGO 6
+#define P_TECLEA 7
+#define P_MUEVE 8
+#define P_DESPIERTA 9
+#define P_SUELTA 10
 static struct { int usado, que, r; u32 cuando; } pend[MAX_PEND];
 static u16 siguiente_handle = 0x0B;
 
@@ -436,7 +443,8 @@ static void sdp(struct remoto *r, struct canal_r *c, const u8 *d, int n)
 
 static void canal_abierto(struct remoto *r, struct canal_r *c)
 {
-	(void)c;
+	if (automatico && c->psm == 0x13)
+		programa(r == &rem[R_RATON] ? P_MUEVE : P_TECLEA, r - rem, 400);
 	/* si se ha despertado él: tras el de control, el de interrupción */
 	if (r->sale_el && c->psm == 0x11 && !canal_psm(r, 0x13))
 		abre_el(r, 0x13);
@@ -594,6 +602,7 @@ static void acaba_emparejar(struct remoto *r, int st)
 			r->clave[i] = rand();
 		r->con_clave = 1;
 		r->emparejable = 0;
+		mod_cambio_claves++;
 		memcpy(p, r->dir, 6);
 		memcpy(p + 6, r->clave, 16);
 		p[22] = r->io == 3 ? 0x04 : 0x05;
@@ -930,6 +939,8 @@ static void orden(const u8 *d, int n, int por_granel)
 		if (r->io == 2) {
 			r->esperando = 1;
 			ev(0x3B, o, 10);	/* User Passkey Notification */
+			if (automatico)
+				programa(P_TECLEA_CODIGO, r - rem, 300);
 		} else {
 			r->confirma_host = r->confirma_el = 0;
 			if (r->io == 3)
@@ -964,6 +975,8 @@ static void orden(const u8 *d, int n, int por_granel)
 		/* el PIN: lo que haya que teclear en el teclado */
 		r->codigo = atoi((const char *)p + 7);
 		r->esperando = 1;
+		if (automatico)
+			programa(P_TECLEA_CODIGO, r - rem, 300);
 		return;
 	case 0x040E:
 		o[0] = 0;
@@ -1089,6 +1102,58 @@ void mod_tic(u32 t)
 				programa(P_LE, pend[i].r, 100);
 			}
 			break;
+		case P_TECLEA_CODIGO:
+			fprintf(stderr, "modelo: la persona teclea el código en «%s»\n", r->nombre);
+			mod_teclea_codigo(pend[i].r, r->codigo);
+			break;
+		case P_TECLEA:
+			/* «auto_texto», letra a letra: pulsa y suelta */
+			if (r->conectado && r->cifrado && r->protocolo >= 0) {
+				static int k;
+				int c = auto_texto[k];
+				u8 uso = c >= 'a' && c <= 'z' ? 4 + c - 'a' : c >= '1' && c <= '9' ? 0x1E + c - '1' : c == '0' ? 0x27 :
+					 c == ' ' ? 0x2C : c == '\n' ? 0x28 : c == '/' ? 0x24 : 0;
+				if (!c) {
+					k = 0;
+					fprintf(stderr, "modelo: la persona ha tecleado «%s» en «%s»\n", auto_texto, r->nombre);
+					break;
+				}
+				/* (la barra, Mayús+7 en el teclado español) */
+				mod_tecla(pend[i].r, c == '/' ? 0x02 : 0, uso);
+				mod_tecleado++;
+				programa(P_SUELTA, pend[i].r, 4);
+				k++;
+				programa(P_TECLEA, pend[i].r, 10);
+			} else
+				programa(P_TECLEA, pend[i].r, 100);
+			break;
+		case P_SUELTA:
+			mod_tecla(pend[i].r, 0, 0);
+			break;
+		case P_MUEVE:
+			if (r->conectado && r->cifrado && r->protocolo >= 0) {
+				static int k;
+				if (k < 6) {
+					mod_mueve(pend[i].r, 10, 5, k == 4 ? 1 : 0, k == 5 ? 1 : 0);
+					mod_movido++;
+					k++;
+					programa(P_MUEVE, pend[i].r, 10);
+				} else {
+					mod_mueve(pend[i].r, 0, 0, 0, 0);
+					fprintf(stderr, "modelo: la persona ha movido «%s» (6 veces, un clic y la rueda)\n", r->nombre);
+					k = 0;
+				}
+			}
+			break;
+		case P_DESPIERTA:
+			if (!r->conectado && r->con_clave) {
+				if (scan_enable & 2) {
+					fprintf(stderr, "modelo: «%s» se despierta (una tecla) y se conecta solo\n", r->nombre);
+					mod_despierta(pend[i].r);
+				} else
+					programa(P_DESPIERTA, pend[i].r, 100);
+			}
+			break;
 		}
 	}
 	/* el que se ha despertado: cifrado ya, abre el de control */
@@ -1151,6 +1216,53 @@ int mod_mueve(int i, int dx, int dy, int b, int rueda)
 	if (!c || !r->cifrado)
 		return -1;
 	manda_l2(r, c, d, r->protocolo == 1 ? 6 : 5);
+	return 0;
+}
+
+int mod_en_cargador(void) { return cargador; }
+
+void mod_auto(const char *t)
+{
+	automatico = 1;
+	snprintf(auto_texto, sizeof auto_texto, "%s", t);
+	/* el teclado y el ratón, en modo de emparejar (o, si ya lo están, despiertos) */
+	if (rem[R_TECLADO].con_clave)
+		programa(P_DESPIERTA, R_TECLADO, 800);
+	else
+		mod_emparejable(R_TECLADO, 1);
+	if (!rem[R_RATON].con_clave)
+		mod_emparejable(R_RATON, 1);
+}
+
+int mod_guarda(const char *a)
+{
+	FILE *f = fopen(a, "wb");
+	int i;
+
+	if (!f)
+		return -1;
+	for (i = 0; i < N_REMOTOS; i++) {
+		fwrite(&rem[i].con_clave, sizeof(int), 1, f);
+		fwrite(rem[i].clave, 16, 1, f);
+	}
+	fclose(f);
+	return 0;
+}
+
+int mod_lee(const char *a)
+{
+	FILE *f = fopen(a, "rb");
+	int i;
+
+	if (!f)
+		return -1;
+	for (i = 0; i < N_REMOTOS; i++) {
+		if (fread(&rem[i].con_clave, sizeof(int), 1, f) != 1 || fread(rem[i].clave, 16, 1, f) != 1)
+			break;
+		if (rem[i].con_clave)
+			rem[i].emparejable = 0;
+	}
+	fclose(f);
 	return 0;
 }
 

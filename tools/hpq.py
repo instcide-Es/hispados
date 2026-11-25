@@ -124,6 +124,7 @@ TIPO_POR_NOMBRE = {
     'base': 'sistema', 'paquetes': 'sistema', 'equipo': 'sistema', 'hvprun': 'sistema',
     'red': 'internet', 'tls': 'internet', 'navega': 'internet', 'ssh': 'internet',
     'tailscal': 'internet', 'wifi': 'internet', 'correo': 'internet',  # (CORREO)
+    'bluetoot': 'sistema',  # (BLUETOOTH)
     'bloc': 'oficina', 'oficina': 'oficina', 'pdf': 'oficina', 'pluma': 'oficina', 'agenda': 'oficina',   # (PLUMA32: pluma) (AGENDA)
     'cuentas': 'oficina',   # (CUENTAS32)
     'consola': 'herramientas', 'accesori': 'herramientas', 'comprim': 'herramientas', 'termo': 'herramientas', 'compat': 'herramientas',   # (TERMO) termo (COMPAT)
@@ -274,6 +275,15 @@ VERSION_0810 = '0.8.10'
 # entrado; y el diagnóstico del Wi-Fi en WIFI.LOG sin «Registro=SI». Suben
 # base, paquetes 1.8, red (RED.BIN: «/OTRA» al relanzar WIFI.BIN) y wifi
 VERSION_0811 = '0.8.11'
+# (BLUETOOTH, 25/11/2026, rama bluetooth) el Bluetooth: en el núcleo, el
+# transporte por USB (usbbt.cas: las llamadas 240 a 248), los teclados y
+# ratones Bluetooth en usbhid.cas, el sello y los secretos de BT.BIN y el
+# icono «Bluetooth» del Panel de control (solo con un adaptador); y el
+# paquete nuevo «bluetoot» (8 letras, como tailscal y accesori) 0.1: BT.BIN
+# (el servicio, la orden BT y su ventana) y BT.TXT. Pide la base con las
+# llamadas del Bluetooth: la que salga con esta rama (al juntarla, la
+# siguiente a la 0.8.11)
+VERSION_BT = VERSION_0811
 SISTEMA = [
     ('base', VERSION_0811, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'), ('RATON.BIN', r'\HISPA\RATON.BIN'),
@@ -331,6 +341,10 @@ SISTEMA = [
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
+    # (BLUETOOTH) etapas 1 y 2: el HCI por USB (también los Intel, con su firmware aparte), emparejar con SSP y los teclados y ratones (HID)
+    ('bluetoot', '0.1', 'El Bluetooth: el servicio Bluetooth (BT.BIN: adaptadores USB, también los de Intel), emparejar y los teclados y ratones Bluetooth; la orden BT y su ventana',
+     'base >= ' + VERSION_BT, [
+        ('BT.BIN', r'\HISPA\BT.BIN'), ('BT.TXT', r'\HISPA\BT.TXT')]),
     ('sonido', '1.0', 'El sonido: el servicio de sonido (HD Audio, AC\'97 y Sound Blaster 16; SONIDO.BIN y la orden SONIDO) y los sonidos del sistema',
      'base >= ' + VERSION_SONIDO, [
         ('SONIDO.BIN', r'\HISPA\SONIDO.BIN'), ('INICIO.WAV', r'\HISPA\INICIO.WAV'), ('APAGAR.WAV', r'\HISPA\APAGAR.WAV'),

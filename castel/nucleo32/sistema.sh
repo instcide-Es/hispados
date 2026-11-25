@@ -81,6 +81,15 @@ for N in WIFI.BIN BCM43XX.FW BCM43XXH.FW; do
   MODULOS="$MODULOS  module /$N $N
 "
 done
+# (BLUETOOTH) el servicio Bluetooth (nucleo32/bt/: el HCI por USB, emparejar y
+# los teclados y ratones; la orden BT y su ventana) y BT.TXT (lo que es y las
+# licencias, con la GPL-2.0 entera detrás), igual: en la raíz, como módulo y,
+# al instalar, a \HISPA. Los firmwares de Intel NO van (no son libres: se
+# ponen aparte en \FIRMWARE, docs/PENTIUM.md «El Bluetooth»)
+bash $AQUI/bt/hacer.sh $W/f/BT.BIN
+{ cat $AQUI/bt/BT.TXT; echo "------------------------------------------------------------------------"; cat $AQUI/../../LICENSE; } | iconv -f UTF-8 -t CP437 | sed 's/$/\r/' > $W/i/BT.TXT
+MODULOS="$MODULOS  module /BT.BIN BT.BIN
+"
 # lo que se instala en el disco: el núcleo (con el nombre que tendrá allí), los
 # programas, los textos del sistema instalado y el arranque del disco
 INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
@@ -89,6 +98,7 @@ INSTALA="  module /ESCRIT8.BIN NUCLEO.BIN
 $MODULOS  module /INSTALA/LEEME.TXT LEEME.TXT
   module /INSTALA/MANUAL.TXT MANUAL.TXT
   module /INSTALA/WIFI.TXT WIFI.TXT
+  module /INSTALA/BT.TXT BT.TXT
   module /INSTALA/BCM43XX.TXT BCM43XX.TXT
   module /INSTALA/BOOT.IMG BOOT.IMG
   module /INSTALA/CORE.IMG CORE.IMG

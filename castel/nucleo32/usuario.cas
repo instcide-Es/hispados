@@ -136,6 +136,9 @@
 ;  (TERMO) 238: los discos de dentro, para el Termómetro: quiénes son, su
 ;       SMART (o el registro de salud de NVMe) y medir lecturas; solo leer, y
 ;       lo leído no sale del núcleo (tdisco.cas)
+;  (BLUETOOTH) 240 a 248: el Bluetooth, con el servicio Bluetooth (BT.BIN):
+;       el transporte por USB, los teclados y ratones y lo que pide su
+;       ventana (la 246, de cualquiera); los cuenta usbbt.cas
 ;  (SONIDO) 190 a 199: el sonido, con el servicio de sonido (SONIDO.BIN):
 ;       los canales de los programas, el volumen, los sonidos del sistema y
 ;       tocar un .WAV (la 194); los cuenta sonido.cas
@@ -161,7 +164,7 @@
 ; =============================================================================
 módulo Usuario
 
-    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, I2chid, Termo, Termoram, Apuntero, Sdacpi, Tdisco
+    importar Tareas, Paginas, Marcos, Multiboot, Cpu, Monton, Consola, Discos, Fat, Unidades, Fecha, Mem32, Formato, Terminal, Ventanas, Video, Grafico, Emergente, Ajustes, Textos32, Usbcal, Cdcal, Red, Energia, Dispositivos, Win32, Permisos, Sonido, Cuentas, Pozo, Preferencias, Cdrom, I2chid, Termo, Termoram, Apuntero, Sdacpi, Tdisco, Usbbt
 
     constante MAGIA = 0x33555048                ; «HPU3»
     público constante MATADA = 255              ; el código de una tarea que el núcleo ha tenido que acabar
@@ -1011,6 +1014,11 @@ módulo Usuario
                 devolver atender_ram(a, b, c)          ; (RAM) la prueba de la memoria RAM del Termómetro (termoram.cas)
             caso 180..189:
                 devolver atender_win32(n, a, b, c)     ; [WIN32] los programas de Windows (win32.cas)
+            caso 240..248:
+                ; (BLUETOOTH) el Bluetooth (usbbt.cas); si no hay servicio y sí
+                ; adaptador, se pone en marcha cuando un programa le pide algo
+                si n = 246 y quiere_bt() entonces lanza_bt() fin
+                devolver atender_bt(n, a, b, c)
             caso 190..199:
                 ; (SONIDO) el sonido (sonido.cas); si no hay servicio de sonido,
                 ; se pone en marcha (una vez) al abrir un canal o tocar un .WAV
@@ -1089,6 +1097,56 @@ módulo Usuario
             si t = nulo o t.estado = ACABADA entonces romper fin
         fin
         devolver hay_servicio_sonido()
+    fin
+
+    ; (BLUETOOTH) pone en marcha el servicio Bluetooth (BT.BIN, de la carpeta
+    ; del sistema, con su sello) si hay un adaptador y no está ya; y espera a
+    ; que se apunte (hasta 3 s). Si no está BT.BIN, no se vuelve a intentar
+    público función lanza_bt(): bool
+        variable t: puntero a Tarea
+        variable e, k, id: nat32
+        si no quiere_bt() entonces devolver hay_servicio_bt() fin
+        Usbbt.lanzado_en := tics ob 1
+        t := cargar_servicio("BT.BIN", "/SERVICIO", e)
+        si t = nulo entonces
+            Usbbt.no_está := cierto
+            escribir("bt: hay un adaptador Bluetooth y no está BT.BIN (el paquete «bluetooth»)\n")
+            devolver falso
+        fin
+        t.padre := 0
+        t.terminal := 0
+        t.salida := SIN_SALIDA
+        t.carpeta[0] := 0
+        t.unidad := 0
+        id := t.id
+        k := 0
+        mientras no hay_servicio_bt() y k < 300 hacer
+            dormir(1)
+            k := k + 1
+            t := tarea_de(id)
+            si t = nulo o t.estado = ACABADA entonces romper fin
+        fin
+        devolver hay_servicio_bt()
+    fin
+
+    ; (BLUETOOTH) el escritorio, al arrancar y cada segundo: si hay un
+    ; adaptador (también uno que se acaba de enchufar) y no hay servicio
+    público función mira_bt()
+        variable t: puntero a Tarea
+        variable e: nat32
+        si no quiere_bt() entonces devolver fin
+        Usbbt.lanzado_en := tics ob 1
+        t := cargar_servicio("BT.BIN", "/SERVICIO", e)
+        si t = nulo entonces
+            Usbbt.no_está := cierto
+            escribir("bt: hay un adaptador Bluetooth y no está BT.BIN (el paquete «bluetooth»)\n")
+            devolver
+        fin
+        t.padre := 0
+        t.terminal := 0
+        t.salida := SIN_SALIDA
+        t.carpeta[0] := 0
+        t.unidad := 0
     fin
 
     ; (SONIDO) el servicio de sonido al arrancar el escritorio, sin esperarlo
@@ -2709,6 +2767,7 @@ módulo Usuario
         soltar_terminales_de(actual.id)
         acabó(actual)
         acabó_sonido(actual)                    ; (SONIDO)
+        acabó_bt(actual)                        ; (BLUETOOTH)
         quita_iconos_de(actual.id)              ; (REPRODUCTOR) su icono de la bandeja
     fin
 

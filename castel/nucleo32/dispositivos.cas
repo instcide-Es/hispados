@@ -34,7 +34,7 @@
 ; =============================================================================
 módulo Dispositivos
 
-    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid, Sonido, I2c, I2chid, Sdhci
+    importar Cpu, Pci, Tareas, Paginas, Mem32, Textos32, Formato, Multiboot, Ata, Ahci, Discos, Unidades, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Video, Raton, Red, Energia, Edid, Sonido, I2c, I2chid, Sdhci, Usbbt
 
     ; ---- los buses ----
     público constante BUS_PCI = 1
@@ -711,6 +711,21 @@ módulo Dispositivos
                     sino si h = 3 entonces
                         lleva(EST_FUNCIONA, "usbhid.cas")
                         Textos32.copiar(uno.detalle, "teclado y ratón")
+                    sino si Usbbt.lleva(i) entonces
+                        ; (BLUETOOTH) un adaptador Bluetooth: lo lleva BT.BIN (lo que dice, en texto)
+                        si hay_servicio_bt() entonces
+                            si estado_bt = BTE_FALLO entonces lleva(EST_ERROR, "BT.BIN") sino lleva(EST_FUNCIONA, "BT.BIN") fin
+                            dd[0] := nat32(dirección(texto_bt[0]))
+                            dd[1] := Usbhid.bt_hay() yb 0x0F
+                            dd[2] := Usbhid.bt_hay() >> 4
+                            formatear(uno.detalle, 80, "Bluetooth: %s (teclados: %u, ratones: %u)", dd)
+                        sino si sin_bt entonces
+                            lleva(EST_APAGADO, "usbbt.cas")
+                            Textos32.copiar(uno.detalle, "Bluetooth: apagado («sinbt»)")
+                        sino
+                            lleva(EST_FUNCIONA, "usbbt.cas")
+                            Textos32.copiar(uno.detalle, "Bluetooth: el servicio BT.BIN no está en marcha")
+                        fin
                     sino
                         para k desde 0 hasta MAX_MEMORIAS - 1 hacer
                             si memorias[k].hay y memorias[k].aparato = i entonces

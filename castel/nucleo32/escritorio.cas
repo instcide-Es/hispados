@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Escritorio
 
-    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada, Preferencias, Iconpanel, Organiza, Apuntero, Cursores
+    importar Cpu, Tareas, Multiboot, Marcos, Monton, Grafico, Letra, Video, Raton, Ventanas, Emergente, Consola, Fat, Unidades, Fecha, Usuario, Ajustes, Textos32, Formato, Usbcal, Red, Energia, Mem32, Accesos, Dock, Iconos, Edid, Registro, Inicio, Sonido, Cuentas, Entrada, Preferencias, Iconpanel, Organiza, Apuntero, Cursores, Usbbt
 
     público constante ALTO_BARRA = 34
     constante INICIO_ANCHO = 100
@@ -122,7 +122,7 @@ módulo Escritorio
     constante AC_MODO = 40                      ; 40 y los siguientes: los modos de la lista
     constante AC_PREFIERE = 75                  ; (WIFI) 75, 76 y 77: la red por Automático, Cable o Wi-Fi (Configuración)
     constante AC_PANEL = 120                    ; (PANEL) 120 a 131: los iconos del Panel de control (Configuración)
-    constante N_PANEL = 12                      ; (USUARIOS) con Usuarios, antes de Acerca de
+    constante N_PANEL = 12                      ; (USUARIOS) con Usuarios, antes de Acerca de (BLUETOOTH: y 13 con un adaptador Bluetooth: n_panel())
 
     ; ---- los menús del botón secundario (la etiqueta de cada uno) ----
     constante ME_FONDO = 1                      ; el del tapiz
@@ -1623,12 +1623,29 @@ módulo Escritorio
     ; el ratón, el teclado, la red, la energía, la personalización), el
     ; Panel de control (PANEL.BIN) en esa sección
     constante PANEL_AN = 560
-    constante CONFIG_AL = 404
+    constante CONFIG_AL3 = 404                  ; (BLUETOOTH) con tres filas de iconos; con cuatro (Bluetooth), 96 más: config_al()
     constante CELDA_P_AN = 128
     constante CELDA_P_AL = 96
     constante PANEL_Y = 76
 
+    ; (BLUETOOTH) con un adaptador Bluetooth, un icono más (el 11, antes de
+    ; Acerca de) y una fila más; sin él, como siempre
+    función panel_bt(): bool
+        devolver Usbbt.n_adaptadores > 0
+    fin
+
+    función n_panel(): nat32
+        si panel_bt() entonces devolver N_PANEL + 1 fin
+        devolver N_PANEL
+    fin
+
+    función config_al(): ent32
+        si panel_bt() entonces devolver CONFIG_AL3 + CELDA_P_AL fin
+        devolver CONFIG_AL3
+    fin
+
     función nombre_panel(i: nat32): puntero a byte
+        si i = 11 y no panel_bt() entonces i := 12 fin
         según nat16(i)
             caso 0: devolver "Fecha y hora"
             caso 1: devolver "Pantalla"
@@ -1641,11 +1658,13 @@ módulo Escritorio
             caso 8: devolver "Personalizaci\xA2n"
             caso 9: devolver "Dispositivos"
             caso 10: devolver "Usuarios"
+            caso 11: devolver "Bluetooth"       ; (BLUETOOTH)
         fin
         devolver "Acerca de"
     fin
 
     función icono_de_panel(i: nat32): nat32
+        si i = 11 y no panel_bt() entonces i := 12 fin
         según nat16(i)
             caso 0: devolver IP_FECHA
             caso 1: devolver IP_PANTALLA
@@ -1658,6 +1677,7 @@ módulo Escritorio
             caso 8: devolver IP_PERSONALIZA
             caso 9: devolver IP_DISPOSITIVOS
             caso 10: devolver IP_USUARIOS
+            caso 11: devolver IP_BLUETOOTH       ; (BLUETOOTH)
         fin
         devolver IP_ACERCA
     fin
@@ -1671,7 +1691,7 @@ módulo Escritorio
         l := lienzo_de(v_config)
         si l = nulo entonces devolver fin
         quita_pulsadores(v_config)
-        degradado(valor(l), 0, 0, PANEL_AN, CONFIG_AL, 0xF4F8FE, 0xD6E6FA)
+        degradado(valor(l), 0, 0, PANEL_AN, config_al(), 0xF4F8FE, 0xD6E6FA)
         disquete(valor(l), 14, 10, 48)
         une_versión(renglón, "Hispa-Pentium ")
         concatenar(renglón, ": Panel de control")
@@ -1688,7 +1708,7 @@ módulo Escritorio
         formatear(renglón, 96, "Memoria:   %u MB (%u MB libres); %u tareas", d)
         texto(valor(l), 74, 48, renglón, TINTA_SUAVE)
         rectángulo(valor(l), 14, 68, PANEL_AN - 28, 1, 0xA9C6EC)
-        para i desde 0 hasta N_PANEL - 1 hacer
+        para i desde 0 hasta n_panel() - 1 hacer
             x := 24 + ent32(i mod 4) * CELDA_P_AN
             yy := PANEL_Y + ent32(i div 4) * CELDA_P_AL
             si i = foco_panel entonces
@@ -1702,14 +1722,14 @@ módulo Escritorio
             texto_negrita(valor(l), x + (CELDA_P_AN - 8 - w) div 2, yy + 62, t, TINTA)
             zona(v_config, x, yy, CELDA_P_AN - 8, CELDA_P_AL - 6, AC_PANEL + i)
         fin
-        texto(valor(l), 24, CONFIG_AL - 34, "Elija una sección (o con las flechas e Intro)", TINTA_SUAVE)
-        pulsador(v_config, PANEL_AN - 114, CONFIG_AL - 42, 100, 30, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
-        repintada(v_config, 0, 0, PANEL_AN, CONFIG_AL)
+        texto(valor(l), 24, config_al() - 34, "Elija una sección (o con las flechas e Intro)", TINTA_SUAVE)
+        pulsador(v_config, PANEL_AN - 114, config_al() - 42, 100, 30, "Cerrar", 0x5AA6F4, 0x2468C8, AC_CERRAR_CONFIG)
+        repintada(v_config, 0, 0, PANEL_AN, config_al())
     fin
 
     función abre_config()
         si v_config <> 0 entonces cierra_cuadro(v_config) fin
-        v_config := crear_ventana("Configuraci\xA2n", (pantalla.ancho - PANEL_AN) div 2, (pantalla.alto - ALTO_BARRA - CONFIG_AL) div 2, PANEL_AN, CONFIG_AL, FIJA, 0)
+        v_config := crear_ventana("Configuraci\xA2n", (pantalla.ancho - PANEL_AN) div 2, (pantalla.alto - ALTO_BARRA - config_al()) div 2, PANEL_AN, config_al(), FIJA, 0)
         pinta_config()
     fin
 
@@ -1718,6 +1738,7 @@ módulo Escritorio
         tomar_consola()
         imprimir1("escritorio: Panel de control > %s\n", nat32(nombre_panel(i)))
         soltar_consola()
+        si i = 11 y no panel_bt() entonces i := 12 fin
         según nat16(i)
             caso 0: lanza("\\PANEL.BIN", "/FECHA")
             caso 1:
@@ -1732,6 +1753,7 @@ módulo Escritorio
             caso 8: lanza("\\PANEL.BIN", "/PERSONALIZA")
             caso 9: lanza("\\DISPOSIT.BIN", nulo)
             caso 10: lanza("\\USUARIOS.BIN", nulo)       ; (USUARIOS) Configuración > Usuarios
+            caso 11: lanza("\\BT.BIN", "/VENTANA")         ; (BLUETOOTH) Configuración > Bluetooth
             si no: abre_acerca()
         fin
     fin
@@ -1747,17 +1769,17 @@ módulo Escritorio
             sino si e.clase = EV_TECLA entonces
                 a := foco_panel
                 según nat16(e.a)
-                    caso TECLA_DERECHA: si foco_panel + 1 < N_PANEL entonces foco_panel := foco_panel + 1 fin
+                    caso TECLA_DERECHA: si foco_panel + 1 < n_panel() entonces foco_panel := foco_panel + 1 fin
                     caso TECLA_IZQUIERDA: si foco_panel > 0 entonces foco_panel := foco_panel - 1 fin
-                    caso TECLA_ABAJO: si foco_panel + 4 < N_PANEL entonces foco_panel := foco_panel + 4 fin
+                    caso TECLA_ABAJO: si foco_panel + 4 < n_panel() entonces foco_panel := foco_panel + 4 fin
                     caso TECLA_ARRIBA: si foco_panel >= 4 entonces foco_panel := foco_panel - 4 fin
-                    caso '\t': foco_panel := (foco_panel + 1) mod N_PANEL
+                    caso '\t': foco_panel := (foco_panel + 1) mod n_panel()
                     caso '\n', ' ': abre_panel(foco_panel)
                 fin
                 si v_config <> 0 y a <> foco_panel entonces pinta_config() fin
             sino si e.clase = EV_RATÓN_BAJA entonces
                 a := pulsador_en(v_config, ent32(e.a), ent32(e.b))
-                si a >= AC_PANEL y a < AC_PANEL + N_PANEL entonces
+                si a >= AC_PANEL y a < AC_PANEL + n_panel() entonces
                     foco_panel := a - AC_PANEL
                     pinta_config()
                     abre_panel(a - AC_PANEL)
@@ -4295,6 +4317,7 @@ módulo Escritorio
             ; cada segundo: el reloj (si ha cambiado el minuto) y las tareas acabadas
             si tics div HZ <> segundo_visto entonces
                 segundo_visto := tics div HZ
+                si arranque_hecho entonces mira_bt() fin      ; (BLUETOOTH) un adaptador que se acaba de enchufar
                 ahora(f, h)
                 si (h >> 5) yb 63 <> minuto_visto entonces pinta_barra() fin
                 recoger_huérfanas()
@@ -4468,6 +4491,7 @@ módulo Escritorio
             si t <> nulo entonces t.padre := 0 fin
         fin
         arranca_sonido()              ; (SONIDO) el servicio de sonido (y el sonido de inicio)
+        mira_bt()                     ; (BLUETOOTH) el servicio Bluetooth, si hay adaptador
         ; (AGENDA) el vigilante de los avisos de la Agenda (si está: de la raíz
         ; o de \HISPA). (USUARIOS, 0.8.8) con usuarios, al entrar cada uno
         ; (lanza_vigilante_agenda en lo_del_usuario: es suyo, lee su

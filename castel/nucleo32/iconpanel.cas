@@ -24,6 +24,7 @@ módulo Iconpanel
     público constante IP_DISPOSITIVOS = 10
     público constante IP_ACERCA = 11
     público constante IP_USUARIOS = 12          ; (USUARIOS) dos personas
+    público constante IP_BLUETOOTH = 13         ; (BLUETOOTH) la runa en un óvalo azul
 
     constante BLANCO = 0xFFFFFF
     constante TRAZO = 0x2C4468
@@ -197,6 +198,17 @@ módulo Iconpanel
         rr(3, 21, 18, 9, 5, 0x5AA6F4, 0x2468C8)
     fin
 
+    ; (BLUETOOTH) la runa del Bluetooth, blanca, en un óvalo azul
+    función bluetooth()
+        rr(7, 1, 18, 30, 9, TRAZO, TRAZO)
+        rr(8, 2, 16, 28, 8, 0x3D8FE8, 0x1C4FA0)
+        li2(15, 5, 15, 27, BLANCO)
+        li2(15, 5, 21, 11, BLANCO)
+        li2(21, 11, 10, 21, BLANCO)
+        li2(15, 27, 21, 21, BLANCO)
+        li2(21, 21, 10, 11, BLANCO)
+    fin
+
     función acerca()
         ci(16, 16, 14, TRAZO)
         ci(16, 16, 13, 0x1D4ED8)
@@ -225,6 +237,7 @@ módulo Iconpanel
             caso IP_DISPOSITIVOS: dispositivos()
             caso IP_ACERCA: acerca()
             caso IP_USUARIOS: usuarios()
+            caso IP_BLUETOOTH: bluetooth()
         fin
     fin
 

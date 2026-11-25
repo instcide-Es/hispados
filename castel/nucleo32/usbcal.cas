@@ -29,7 +29,7 @@
 ; =============================================================================
 módulo Usbcal
 
-    importar Tareas, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Discos, Fat, Unidades, Ventanas, Registro, Textos32, Formato, Cdcal
+    importar Tareas, Usbbase, Usb, Xhci, Ehci, Uhci, Usbhid, Usbalm, Usbbt, Discos, Fat, Unidades, Ventanas, Registro, Textos32, Formato, Cdcal
 
     ; ---- lo que da quitar() ----
     público constante Q_BIEN = 0                ; ya se puede quitar
@@ -178,6 +178,7 @@ módulo Usbcal
                 fin
                 m := Usbalm.nueva(j)
                 si m <> NINGUNO entonces memoria_nueva(m) fin
+                Usbbt.nuevo(j)                  ; (BLUETOOTH) un adaptador: el escritorio pone en marcha BT.BIN
             fin
         fin
     fin
@@ -191,6 +192,7 @@ módulo Usbcal
                 desenchufados := desenchufados + 1
                 apunta1("usb: se desenchufa el aparato %u\n", j)
                 Usbhid.se_va(j)
+                Usbbt.se_va(j)                  ; (BLUETOOTH)
                 m := Usbalm.se_va(j)
                 si m <> NINGUNO entonces memoria_ida(m) fin
             fin

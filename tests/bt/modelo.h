@@ -42,4 +42,15 @@ extern int mod_firmware_bien;				/* (Intel) el firmware ha llegado entero y en o
 extern int mod_ddc;					/* (Intel) las partes de su configuración que han llegado */
 extern int mod_parche;					/* (Intel ROM) órdenes del parche */
 extern uint32_t mod_ordenes;				/* las órdenes HCI que han llegado */
+
+/* (QEMU, usbredir_bt.c) «la persona» hace sola lo que toca: teclea el código
+ * de emparejar en el teclado, y cuando el teclado y el ratón están listos,
+ * teclea «texto» y mueve el ratón; si el aparato ya estaba emparejado (de
+ * un arranque anterior: mod_lee), se despierta solo a los pocos segundos */
+void mod_auto(const char *texto_teclado);
+int mod_en_cargador(void);
+int mod_guarda(const char *archivo);			/* las claves de los aparatos */
+int mod_lee(const char *archivo);
+extern int mod_cambio_claves;				/* (sube cuando hay que guardarlas) */
+extern int mod_tecleado, mod_movido;			/* lo que ha mandado «la persona» */
 #endif
