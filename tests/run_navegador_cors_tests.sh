@@ -7,6 +7,9 @@
 #     prohibidas; a otro origen, solo las simples y GET, HEAD o POST), si
 #     puede leer la respuesta (Access-Control-Allow-Origin y -Credentials) y
 #     las cabeceras que ve (nunca Set-Cookie).
+#  2. w32/navega/dom.js con node (tests/navjs/origen.js): localStorage no le
+#     da ningún origen a C (cambiar URL.prototype.origin no sirve) y fetch y
+#     XMLHttpRequest dicen qué galletas piden.
 # Lo mismo con el Navegador entero, en el anfitrión con gcc -m32 (la página
 # /js/cors): tests/run_navegador_js_tests.sh.
 # Browser origin rules (CORS, SameSite, localStorage origin) host test.
@@ -20,5 +23,9 @@ if command -v gcc > /dev/null && gcc -Wall -Wextra -Werror -O1 -o $T/cors tests/
   echo "-- cors.h (gcc) --"
   $T/cors || fail=1
 else echo "  FAIL cors.h no se compila"; fail=1; fi
+if command -v node > /dev/null; then
+  echo "-- dom.js (node) --"
+  node tests/navjs/origen.js w32/navega/dom.js || fail=1
+else echo "  (sin node: lo de dom.js se salta)"; fi
 [ $fail = 0 ] && echo "  el origen: todo bien" || echo "  el origen: HAY FALLOS"
 exit $fail

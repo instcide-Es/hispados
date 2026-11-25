@@ -815,14 +815,16 @@ oculto(G, '__tic', function (id) {
     else (0, eval)(S(t.f));
   } catch (e) { informa(e); }
 });
-// el almacén (localStorage, en el disco; sessionStorage, mientras dure el Navegador)
+// el almacén (localStorage, en el disco; sessionStorage, mientras dure el Navegador).
+// El origen lo pone C, con la dirección de la página (no location.origin: la
+// página podría cambiar URL.prototype y leer el almacén de otro sitio)
 class Storage {
   constructor(local) { oculto(this, '__local', local); oculto(this, '__d', null); }
   __datos() {
-    if (!this.__d) { let d = {}; try { d = JSON.parse(N.almacen(location.origin, this.__local) || '{}'); } catch (e) {} oculto(this, '__d', d); }
+    if (!this.__d) { let d = {}; try { d = JSON.parse(N.almacen(this.__local) || '{}'); } catch (e) {} oculto(this, '__d', d); }
     return this.__d;
   }
-  __guarda() { N.guardaAlmacen(location.origin, this.__local, JSON.stringify(this.__d)); }
+  __guarda() { N.guardaAlmacen(this.__local, JSON.stringify(this.__d)); }
   get length() { return Object.keys(this.__datos()).length; }
   key(i) { return Object.keys(this.__datos())[i] ?? null; }
   getItem(k) { const d = this.__datos(); return Object.prototype.hasOwnProperty.call(d, k) ? d[k] : null; }

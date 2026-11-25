@@ -572,7 +572,12 @@ FN(f_url) { USA; (void)a; return a_js(pg->url, -1); }
 FN(f_pon_url) {
   char *t;
   USA;
-  if ((t = de_js(a[0], NULL))) { pg->url = ar_texto(&pg->doc.ar, t, -1); nav->pon_url(t); free(t); }
+  if ((t = de_js(a[0], NULL))) {
+    /* (history.pushState y location.hash: solo dentro del mismo origen; con
+     * otro, la página pasaría por otro sitio: sus galletas y su almacén) */
+    if (!cors_mismo(pg->url, t)) { free(t); return JS_ThrowTypeError(c, "SecurityError: pushState a otro origen"); }
+    pg->url = ar_texto(&pg->doc.ar, t, -1); nav->pon_url(t); free(t);
+  }
   return JS_UNDEFINED;
 }
 FN(f_absoluta) {
@@ -677,28 +682,33 @@ static void alm_guarda(const char *origen, const char *datos) {
   }
   free(todo); free(l);
 }
+/* el origen del almacén: el de la dirección de la página, que sabe C (no el
+ * que diga el JavaScript de la página, que puede cambiar URL.prototype);
+ * 0 si no tiene (about:, file:...: sin almacén en el disco) */
+static int alm_origen(char *o) { return pg && cors_origen(pg->url, o, 160); }
 FN(f_almacen) {
-  const char *o;
+  char o[160];
   char *d = NULL;
   JSValue r;
   int k;
   USA;
-  if (!(o = JS_ToCString(c, a[0]))) return JS_EXCEPTION;
-  if (JS_ToBool(c, a[1])) d = alm_lee(o);
+  if (!alm_origen(o)) return JS_NewString(c, "");
+  if (JS_ToBool(c, a[0])) d = alm_lee(o);
   else for (k = 0; k < SES_MAX; k++) if (ses[k].origen && !strcmp(ses[k].origen, o)) { d = malloc(strlen(ses[k].datos) + 1); if (d) strcpy(d, ses[k].datos); }
-  JS_FreeCString(c, o);
   r = JS_NewString(c, d ? d : "");
   free(d);
   return r;
 }
 FN(f_guarda_almacen) {
-  const char *o, *d;
+  const char *d;
+  char o[160];
   int k, libre = 0;
   USA;
-  if (!(o = JS_ToCString(c, a[0]))) return JS_EXCEPTION;
-  if (!(d = JS_ToCString(c, a[2]))) { JS_FreeCString(c, o); return JS_EXCEPTION; }
-  if (strlen(d) > 60000) { JS_FreeCString(c, o); JS_FreeCString(c, d); return JS_ThrowRangeError(c, "QuotaExceededError: el almacen esta lleno"); }
-  if (JS_ToBool(c, a[1])) alm_guarda(o, d);
+  if (!alm_origen(o)) return JS_UNDEFINED;
+  if (!(d = JS_ToCString(c, a[1]))) return JS_EXCEPTION;
+  if (strlen(d) > 60000) { JS_FreeCString(c, d); return JS_ThrowRangeError(c, "QuotaExceededError: el almacen esta lleno"); }
+  if (strchr(d, '\n') || strchr(d, '\r')) { JS_FreeCString(c, d); return JS_UNDEFINED; }   /* (JSON.stringify no los deja; una línea por origen) */
+  if (JS_ToBool(c, a[0])) alm_guarda(o, d);
   else {
     for (k = 0; k < SES_MAX && !(ses[k].origen && !strcmp(ses[k].origen, o)); k++) if (!ses[k].origen) libre = k;
     if (k == SES_MAX) { k = libre; free(ses[k].origen); free(ses[k].datos); ses[k].origen = malloc(strlen(o) + 1); if (ses[k].origen) strcpy(ses[k].origen, o); ses[k].datos = NULL; }
@@ -706,7 +716,7 @@ FN(f_guarda_almacen) {
     ses[k].datos = malloc(strlen(d) + 1);
     if (ses[k].datos) strcpy(ses[k].datos, d);
   }
-  JS_FreeCString(c, o); JS_FreeCString(c, d);
+  JS_FreeCString(c, d);
   return JS_UNDEFINED;
 }
 
@@ -828,8 +838,8 @@ static const JSCFunctionListEntry funciones_n[] = {
   JS_CFUNC_DEF("absoluta", 1, f_absoluta), JS_CFUNC_DEF("absolutaDe", 2, f_absoluta_de), JS_CFUNC_DEF("ir", 2, f_ir),
   JS_CFUNC_DEF("historia", 1, f_historia), JS_CFUNC_DEF("galletas", 0, f_galletas), JS_CFUNC_DEF("ponGalleta", 1, f_pon_galleta),
   JS_CFUNC_DEF("ancho", 0, f_ancho), JS_CFUNC_DEF("alto", 0, f_alto), JS_CFUNC_DEF("ahora", 0, f_ahora),
-  JS_CFUNC_DEF("idioma", 0, f_idioma), JS_CFUNC_DEF("agente", 0, f_agente), JS_CFUNC_DEF("registro", 2, f_registro), JS_CFUNC_DEF("almacen", 2, f_almacen),
-  JS_CFUNC_DEF("guardaAlmacen", 3, f_guarda_almacen), JS_CFUNC_DEF("temporiza", 2, f_temporiza),
+  JS_CFUNC_DEF("idioma", 0, f_idioma), JS_CFUNC_DEF("agente", 0, f_agente), JS_CFUNC_DEF("registro", 2, f_registro), JS_CFUNC_DEF("almacen", 1, f_almacen),
+  JS_CFUNC_DEF("guardaAlmacen", 2, f_guarda_almacen), JS_CFUNC_DEF("temporiza", 2, f_temporiza),
   JS_CFUNC_DEF("desTemporiza", 1, f_des_temporiza), JS_CFUNC_DEF("pide", 6, f_pide), JS_CFUNC_DEF("cancela", 1, f_cancela),
 };
 

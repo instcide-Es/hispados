@@ -7,7 +7,9 @@
 #     vuelta a texto: el buscador que sugiere al escribir (fetch, JSON,
 #     flechas, Intro, clic en una sugerencia), pestañas, <details>, confirm y
 #     alert, onsubmit, localStorage, setTimeout, XMLHttpRequest,
-#     DOMContentLoaded, un error al registro y un bucle sin fin cortado; y
+#     DOMContentLoaded, un error al registro y un bucle sin fin cortado; CORS
+#     (fetch y XMLHttpRequest a otro origen: lo que se deja leer, las
+#     galletas con credentials, lo no simple, pushState a otro origen); y
 #     lo de la maqueta de la prueba de uso (/uso: autofocus, dónde empieza el
 #     Tab, la marca #resultados, los botones .btn y btn-danger, los campos
 #     desde la primera letra y la pregunta de confirm(this.dataset...)).
@@ -75,6 +77,24 @@ if tests/navjs/hazlo.sh > $T/hazlo.log 2>&1; then
   tiene gal "ECO galletas=[vista=1; sesion=S1; js=1] agente=[HispaNavegador/"
   notiene gal "oculta"
   tiene gal "[log] HispaNavegador/"
+  # [CORS] fetch y XMLHttpRequest a otro origen (localhost frente a 127.0.0.1)
+  an cors /js/cors cors
+  tiene cors "abierto: OTRO galletas=[] origin=[http://127.0.0.1:$P] propia=[] secreto=- galleta=-"
+  tiene cors "cerrado: ERROR Failed to fetch: CORS"
+  notiene cors "SECRETO"
+  tiene cors "sin: OTRO galletas=[] "
+  tiene cors "con: OTRO galletas=[otra=O1] origin=[http://127.0.0.1:$P]"
+  tiene cors "conmal: ERROR Failed to fetch: CORS"
+  tiene cors "json: ERROR Failed to fetch: a otro origen solo van las cabeceras simples"
+  tiene cors "put: ERROR Failed to fetch: a otro origen solo se piden GET, HEAD y POST"
+  tiene cors "propia: ERROR Failed to fetch: a otro origen solo van las cabeceras simples"
+  tiene cors "origin=[] propia=[mia] secreto=S7 galleta=-"
+  tiene cors "mismo: OTRO galletas=[propia=P1"
+  notiene cors "robada"
+  tiene cors "xhr: ERROR"
+  tiene cors "push: NO SecurityError"
+  tiene cors "fin: FIN"
+  if grep -q "^PUT /js/otro\|^POST /js/otro" $T/pedidos.log; then ko "cors: (no debía llegar) PUT o POST no simple"; else ok "cors: lo no simple no llega al servidor"; fi
   an uso /uso uso
   tiene uso "AUTOFOCO: q"
   tiene uso "(sin texto)"

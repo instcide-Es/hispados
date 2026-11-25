@@ -102,6 +102,32 @@ PAGINAS = {
                   '<script>document.getElementById("d").textContent = "Sigue: sí";</script>'),
 }
 
+# [CORS] lo que prueba /js/cors (docs/486/NAVEGADOR.md, «Lo que puede pedir una página»)
+CORS_IDS = ['abierto', 'cerrado', 'pon', 'sin', 'con', 'conmal', 'json', 'put', 'propia', 'mismo', 'xhr', 'push', 'fin']
+CORS_JS = r'''
+(async () => {
+  const o = 'http://localhost:' + location.port, pon = (id, t) => { document.getElementById(id).textContent = id + ': ' + t; };
+  const t = async (id, u, op) => {
+    try { const r = await fetch(u.startsWith('/') ? o + u : u, op); pon(id, await r.text() + ' secreto=' + (r.headers.get('x-secreto') || '-') + ' galleta=' + (r.headers.get('set-cookie') || '-')); }
+    catch (e) { pon(id, 'ERROR ' + e.message); }
+  };
+  await t('abierto', '/js/otro?acao=*');
+  await t('cerrado', '/js/otro');
+  await t('pon', '/js/otro?pon=1&acao=o&acac=1', { credentials: 'include' });
+  await t('sin', '/js/otro?acao=*');
+  await t('con', '/js/otro?acao=o&acac=1', { credentials: 'include' });
+  await t('conmal', '/js/otro?acao=*', { credentials: 'include' });
+  await t('json', '/js/otro?acao=*', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  await t('put', '/js/otro?acao=*', { method: 'PUT' });
+  await t('propia', '/js/otro?acao=*', { headers: { 'X-Propia': '1' } });
+  await t('mismo', '/js/otro?pon=1'.replace(/^/, location.origin), { headers: { 'X-Propia': 'mia', 'Cookie': 'robada=1' } });
+  await new Promise((si) => { const x = new XMLHttpRequest(); x.open('GET', o + '/js/otro'); x.onload = () => { pon('xhr', 'LEIDO ' + x.responseText); si(); };
+    x.onerror = () => { pon('xhr', 'ERROR'); si(); }; x.send(); });
+  try { history.pushState(null, '', o + '/'); pon('push', 'SI ' + location.href); } catch (e) { pon('push', 'NO ' + e.message + ' ' + location.host); }
+  pon('fin', 'FIN');
+})();
+'''
+
 
 def atiende(h, u, q):
     """sirve una página de /js/...; False si no es de aquí"""
@@ -125,6 +151,26 @@ def atiende(h, u, q):
     if u.path == '/js/eco':           # lo que llega: las galletas y el User-Agent
         h.manda(('ECO galletas=[%s] agente=[%s]' % (h.headers.get('Cookie', ''), h.headers.get('User-Agent', ''))).encode('utf-8'),
                 tipo='text/plain; charset=UTF-8')
+        return True
+    if u.path == '/js/cors':          # fetch a otro origen (localhost frente a 127.0.0.1): CORS
+        h.manda((CAB % 'CORS' + '<h1>CORS</h1>' + ''.join('<p id="%s">%s: ?</p>' % (i, i) for i in CORS_IDS)
+                 + '<script>' + CORS_JS + '</script>' + PIE).encode('utf-8'),
+                cab=(('Set-Cookie', 'propia=P1; Path=/'),))
+        return True
+    if u.path == '/js/otro':          # el «otro origen»: Access-Control-Allow-* según la consulta
+        cab = [('X-Secreto', 'S7')]
+        a = q.get('acao', [''])[0]
+        if a == 'o':
+            a = h.headers.get('Origin', '')
+        if a:
+            cab.append(('Access-Control-Allow-Origin', a))
+        if q.get('acac', [''])[0]:
+            cab.append(('Access-Control-Allow-Credentials', 'true'))
+        if q.get('pon', [''])[0]:
+            cab.append(('Set-Cookie', 'otra=O1; Path=/; SameSite=None'))
+        h.manda(('OTRO galletas=[%s] origin=[%s] propia=[%s]' % (h.headers.get('Cookie', ''), h.headers.get('Origin', ''),
+                                                                 h.headers.get('X-Propia', ''))).encode('utf-8'),
+                tipo='text/plain; charset=UTF-8', cab=cab)
         return True
     if u.path == '/js/ficha':
         h.manda((CAB % 'Ficha' + '<h1>Ficha</h1><p>FICHA DE %s</p>' % q.get('n', ['?'])[0] + PIE).encode('utf-8'))

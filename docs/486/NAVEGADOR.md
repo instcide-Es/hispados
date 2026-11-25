@@ -345,7 +345,8 @@ lecturas: ni préstamos ni cambios), capturas en `docs/486/navegador/`
   (`HispaNavegador/0.3 (Hispa-486)`); `document.cookie` lee y escribe las
   mismas galletas, las que se guardan en `GALLETAS.TXT` también, pero no ve
   las `HttpOnly` ni las puede pisar; `fetch` sigue SameSite como lo demás
-  (a otro sitio solo van las `SameSite=None`). Si un guion cambia el `src`
+  (a otro sitio solo van las `SameSite=None`) y, a otro origen, CORS (abajo,
+  «Lo que puede pedir una página»). Si un guion cambia el `src`
   de un `<img>`, se baja la imagen nueva. Las imágenes y las peticiones de
   JavaScript usan la misma conexión: primero lo de JavaScript, y una imagen
   que ya se está bajando acaba antes.
@@ -410,7 +411,7 @@ JS /E "print(2 ** 10)"
   cabeceras, JSON, `FormData` y `URLSearchParams`, que van como un
   formulario corriente), por http.c, con las galletas y siguiendo las
   redirecciones. Una petición a la vez, y solo cuando el Navegador no está
-  cargando una página.
+  cargando una página. A otro origen, con las reglas de CORS (abajo).
 - **console:** `log`, `warn`, `error`... van a **NAVEGA.LOG**, junto al
   programa, con los errores que nadie recoge (con su pila: archivo, línea y
   columna) y las promesas rechazadas sin `catch`. Cada página empieza con
@@ -441,6 +442,62 @@ JS /E "print(2 ** 10)"
   se para (en NAVEGA.LOG: «un guion ha tardado más de 15 s y se ha parado»;
   abajo, en la línea de estado, también) y el Navegador sigue. Y el
   JavaScript de una página no puede usar más de `MemoriaJS` KB (7 MB).
+
+### Lo que puede pedir una página (el origen, CORS)
+
+El **origen** de una página es «esquema://servidor[:puerto]» de su dirección
+(`https://clicgest.es`; el puerto, solo si no es el de siempre). Lo calcula
+siempre C (`w32/navega/cors.h`, el mismo en los dos Navegadores) desde la
+dirección que sabe C, nunca con lo que diga el JavaScript de la página (que
+puede cambiar `URL.prototype` o `location`). Una página `about:` o `file:`
+no tiene origen («null»).
+
+- **localStorage y sessionStorage:** van por el origen que pone C. dom.js no
+  le pasa ninguno (antes sí, el de `location.origin`, y una página podía leer
+  y cambiar el almacén de otro sitio cambiando `URL.prototype.origin`). Una
+  página sin origen no guarda nada en el disco.
+- **history.pushState / replaceState** (y `location.hash`): solo a una
+  dirección del mismo origen; si no, `SecurityError`. (Si no, la página
+  pasaba a ser «de otro sitio» para sus galletas y su almacén.)
+- **fetch y XMLHttpRequest al mismo origen:** como siempre, con sus
+  galletas y sus cabeceras, menos las **prohibidas**, que pone el Navegador o
+  nadie (`Cookie`, `Host`, `Origin`, `Referer`, `Connection`,
+  `Content-Length`, `Transfer-Encoding`, `User-Agent`, `Accept-Language`,
+  `Sec-*`, `Proxy-*`...; se quitan sin decir nada, como en los navegadores) y
+  las mal hechas (un nombre que no es de HTTP, un salto de línea en el
+  valor). Un método con espacios o saltos de línea, o `CONNECT`, `TRACE` y
+  `TRACK`, no se pide.
+- **fetch y XMLHttpRequest a otro origen** (o que van a parar a otro tras una
+  redirección):
+  - El Navegador **no pregunta antes** con `OPTIONS` (el «preflight»): por
+    eso solo se piden las peticiones **simples**: `GET`, `HEAD` o `POST`, y
+    solo con las cabeceras `Accept`, `Content-Language` y `Content-Type` de
+    formulario o de texto (`application/x-www-form-urlencoded`,
+    `multipart/form-data`, `text/plain`). Lo demás (un `PUT`, un JSON, una
+    cabecera propia como `X-Requested-With`) **no sale**: fetch falla
+    («a otro origen solo...») y lo dice NAVEGA.LOG. Va con `Origin:`.
+  - **Galletas:** solo con `credentials: 'include'` (en XMLHttpRequest,
+    `withCredentials = true`), y entonces las que deje SameSite (a otro
+    sitio, solo las `SameSite=None`). Sin eso (`same-origin`, lo de
+    siempre, u `omit`) no va ninguna, ni se guardan las que mande el
+    servidor.
+  - **La respuesta solo la lee la página si el servidor la deja:**
+    `Access-Control-Allow-Origin: *` (sin galletas) o el origen de la
+    página tal cual (con galletas, además
+    `Access-Control-Allow-Credentials: true`). Si no, fetch falla («CORS: el
+    servidor de otro origen no deja leer la respuesta») y la página no ve
+    nada. Lo mismo con cada redirección de otro origen.
+  - De las cabeceras de la respuesta solo ve las simples (`Cache-Control`,
+    `Content-Language`, `Content-Length`, `Content-Type`, `Expires`,
+    `Last-Modified`, `Pragma`) y las de `Access-Control-Expose-Headers`.
+- **Set-Cookie** no lo ve nunca la página en las cabeceras de una respuesta
+  (llevaba las `HttpOnly` dentro), tampoco al mismo origen.
+- Los guiones de fuera (`<script src>` de otro sitio) se siguen bajando sin
+  CORS, como en los navegadores, con las galletas que deje SameSite.
+- En el **Navegador completo** (NAVEGA2.EXE) es lo mismo para fetch y
+  XMLHttpRequest (`w32/surf/guion.c` con cors.h); lo que pide NetSurf por su
+  cuenta (las páginas, las hojas de estilo, las imágenes, los formularios)
+  no sabe qué página lo pide, y va sin SameSite (como antes).
 
 ### Cómo está hecho
 
@@ -632,11 +689,19 @@ tarde el servidor, descifrar la página y maquetarla.
   NAVEGA.ALM), setTimeout, XMLHttpRequest, DOMContentLoaded, un error que va
   a NAVEGA.LOG, las galletas desde JavaScript (`document.cookie` sin las
   `HttpOnly`, que tampoco se pueden pisar; `fetch` con las galletas y el
-  User-Agent del Navegador), un bucle sin fin que se corta (`TiempoJS=3`), y con
+  User-Agent del Navegador), CORS (`/js/cors`: fetch y XMLHttpRequest de
+  `127.0.0.1` a `localhost`, que es otro origen: lo que se deja leer y lo que
+  no, las galletas con `credentials: 'include'`, lo no simple que no llega al
+  servidor, sin `Set-Cookie` y sin las cabeceras prohibidas, `pushState` a
+  otro origen), un bucle sin fin que se corta (`TiempoJS=3`), y con
   `JavaScript=NO` el `<noscript>`. Primero en el anfitrión, si hay `gcc -m32`
   con su biblioteca (`tests/navjs/`: html.c, pagina.c, http.c, dom.c y
   script.c tal cual, con QuickJS para Linux, la página vuelta a texto y unas
   órdenes: `clic`, `escribe`, `tecla`...), y luego en Hispa Ventanas.
+- `tests/run_navegador_cors_tests.sh`: sin QEMU ni `gcc -m32`, las reglas
+  del origen de `w32/navega/cors.h` (con gcc: `tests/cors/prueba.c`) y lo de
+  dom.js que toca al origen (con node: `tests/navjs/origen.js`: cambiar
+  `URL.prototype.origin` ya no lleva al almacén de otro sitio).
 - `tests/run_js_tests.sh`: HSPJS.DLL con JS.EXE: las pruebas de QuickJS (el
   lenguaje, clausuras, bucles, lo de serie y BigInt), lo que usa ClicGest y
   las cuentas de Math, una excepción, el tope de tiempo.
