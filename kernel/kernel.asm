@@ -4518,6 +4518,11 @@ mount:
         dec cx
         test cx, ax
         jnz .bad
+        ; grupos de 64 KB (128 sectores, FAT16 de NT/2000/XP): los octetos
+        ; por grupo no caben en D_BPC (16 bits) y las divisiones de leer y
+        ; escribir fallarían; MS-DOS 6.22 tampoco los monta
+        cmp ax, 64
+        ja .bad
         mov [cur_drv+D_SPCW], ax
         mov cx, ax
         shl cx, 4
