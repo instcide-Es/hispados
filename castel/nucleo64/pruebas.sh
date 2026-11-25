@@ -118,7 +118,10 @@
 #     otra punta (de Hispa-64 a Hispa-64 con pérdidas); la INTx del _PRT para
 #     NVMe, AHCI y xHCI sin MSI (q35); select y poll de 100 tuberías
 #     (MPROCESOS); ITIMER_VIRTUAL, ITIMER_PROF, getrusage y
-#     CLOCK_PROCESS_CPUTIME_ID (MSENALES).
+#     CLOCK_PROCESS_CPUTIME_ID (MSENALES); el sonido (HD Audio y /dev/dsp:
+#     MSONIDO, en cada arranque con musl; con intel-hda y hda-output, y con
+#     ich9-intel-hda y hda-duplex, lo que graba QEMU, mirado con
+#     nucleo32/sonido/oye.py: un segundo de 440 Hz y medio de 1000 Hz, sin cortes).
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
@@ -221,7 +224,7 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 39 archivos: " <<< "$v" \
+    && grep -q "^Unidad en memoria: 40 archivos: " <<< "$v" \
     && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.0 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
@@ -281,6 +284,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MCXX: todo bien (35 pruebas)$" <<< "$v" && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -qE "^  TCP \[etapa 10\]: [1-9][0-9]* conexiones con escala de ventana" <<< "$v" \
+    && grep -qE "^MSONIDO: todo bien \((1|15) pruebas\)$" <<< "$v" && grep -q "^Programa «MSONIDO»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MTEXTO: todo bien (6 pruebas)$" <<< "$v" && [ -n "$MTX" ] && grep -qxF "$MTX" <<< "$v" \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
@@ -726,7 +730,7 @@ mb1 "apagar escribir sinmsix sinmusl" "$T/e6b.txt" 256 -machine q35 -smp 2 -devi
   -device qemu-xhci,id=x2 -drive if=none,id=u2,format=raw,file=$T/w6/usbexfat.img -device usb-storage,bus=x2.0,drive=u2; c=$?
 S=$T/e6b.txt
 if [ $c = 85 ] && hay $S "^xHCI: 00:0[0-9A-F].0 1033:0194 en " && hay $S "^  versión 1.00, 8 puertos .*; MSI$" \
-   && hay $S "^  versión 1.00, 8 puertos .*; sin interrupciones (se mira la cola)$" && hay $S "^USB: 3 aparatos (0 concentradores)" \
+   && hay $S "^  versión 1.00, 8 puertos .*; INTx por la GSI [0-9]* (del _PRT)$" && hay $S "^USB: 3 aparatos (0 concentradores)" \
    && hay $S "^  2-[0-9]: 46F4:0001 «QEMU USB HARDDRIVE»" && hay $S "^ARCHIVOS: 2 discos de prueba (2 escritos); todo bien ([0-9]* pruebas)$" && e4_bien $S 2; then
   ok "etapa 6, dos controladoras: el nec-usb-xhci con MSI y el qemu-xhci sin MSI-X (se mira la cola); las dos memorias, escritas por ARCHIVOS"
 else ko "etapa 6 con dos controladoras no dice lo que debe (código $c): $(e6_dice $S)"; fi
@@ -973,7 +977,7 @@ TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{indicador}salir{intro}'
 con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
 v=$(serie "$T/e7.txt")
 if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.0, etapa 11 " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  39 archivos (" <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  40 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
    && grep -q "^mkdir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
@@ -1427,5 +1431,50 @@ if grep -q "USB: se ha enchufado 1-[0-9]*: 0525:A4A2 «RNDIS/QEMU USB Network De
    && grep -q "^Red: eth0: IP 10.0.2.15/24 (DHCP de 10.0.2.2" <<< "$v" && grep -q "USB: se ha desenchufado 1-" <<< "$v" && grep -q "^Red: eth0: sin enlace" <<< "$v" && ! grep -q "parado" <<< "$v"; then
   ok "etapa 10, la red por USB enchufada en marcha (device_add): enumerada, a la red y con IP por DHCP; desenchufada (device_del): sin enlace"
 else ko "etapa 10, la red por USB en marcha no sale como debe: $(grep -E 'USB: se|^Red|parado' <<< "$v" | cut -c1-120 | paste -sd '|')"; fi
+# ---- [etapa 11] con KVM (si lo hay): el procesador de verdad, no el TCG de
+# QEMU, que deja pasar cosas (en la 10, el SS de sysret sin el RPL 3: con KVM
+# en un AMD, #GP en el iretq y el doble fallo después de HOLACAS) ----
+if [ -w /dev/kvm ]; then
+  mb1 apagar "$T/kvm1.txt" 512 -enable-kvm -cpu host -machine q35 -smp 4; c=$?
+  if [ $c = 85 ] && e4_bien "$T/kvm1.txt" 4 && e7_bien "$T/kvm1.txt" 4; then
+    ok "etapa 11, con KVM (-cpu host, q35, 4 procesadores): las etapas 4 y 7 enteras (los programas, musl, C++, la letra, MRED, MSONIDO), todo en orden"
+  else ko "etapa 11, con KVM (-cpu host) no sale (código $c): $(e4_dice "$T/kvm1.txt") $(serie "$T/kvm1.txt" | grep -E 'Doble|parado|  MAL' | head -5 | paste -sd '|')"; fi
+  mb1 "apagar sinred" "$T/kvm2.txt" 256 -enable-kvm -machine pc; c=$?
+  if [ $c = 85 ] && e4_bien "$T/kvm2.txt" 1 && hay "$T/kvm2.txt" "^MRED: todo bien (126 pruebas)$"; then
+    ok "etapa 11, con KVM (el procesador de QEMU por omisión, «pc», 1 procesador, sinred: solo «lo»): las etapas 4 y 7, y MRED por 127.0.0.1"
+  else ko "etapa 11, con KVM («pc», 1 procesador) no sale (código $c): $(e4_dice "$T/kvm2.txt") $(serie "$T/kvm2.txt" | grep -E 'Doble|parado|  MAL' | head -5 | paste -sd '|')"; fi
+  if [ -f "$T/uefi/hispa64.img" ] && [ -f $OVMF_C ]; then
+    cp $OVMF_V "$T/kvm-vars.fd"; rm -f "$T/kvm3.txt"
+    timeout 300 qemu-system-x86_64 -enable-kvm -cpu host -machine q35 -smp 2 -m 1G -drive if=pflash,format=raw,readonly=on,file=$OVMF_C \
+      -drive if=pflash,format=raw,file="$T/kvm-vars.fd" -drive file="$T/uefi/hispa64.img",format=raw,if=virtio,snapshot=on -display none -serial file:"$T/kvm3.txt" \
+      -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
+    if [ $c = 85 ] && hay "$T/kvm3.txt" "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" && hay "$T/kvm3.txt" "^Hispa-64 etapa 11: todo en orden.$"; then
+      ok "etapa 11, con KVM por UEFI (OVMF y GRUB, el disco de la imagen): todo en orden"
+    else ko "etapa 11, con KVM por UEFI no sale (código $c): $(serie "$T/kvm3.txt" | grep -E 'Cargador|Doble|parado|  MAL|todo en orden' | head -5 | paste -sd '|')"; fi
+  fi
+else
+  echo "  (sin /dev/kvm: sin las vueltas con KVM)"
+fi
+# ---- [etapa 11] el sonido: HD Audio y /dev/dsp (MSONIDO), lo que graba QEMU ----
+OYE="$C/nucleo32/sonido/oye.py"
+sonido_bien() {   # SALIDA GRABACIÓN: dos ráfagas, de 440 Hz (1 s) y de 1000 Hz (0,5 s), sin cortes
+  local r0 r1
+  r0=$(python3 -I "$OYE" "$2" 440,1000 2> /dev/null | sed -n 1p); r1=$(python3 -I "$OYE" "$2" 440,1000 2> /dev/null | sed -n 2p)
+  [ "$(python3 -I "$OYE" "$2" 440,1000 2> /dev/null | wc -l)" = 2 ] && hay "$1" "^MSONIDO: todo bien (15 pruebas)$" \
+    && awk -v a="$r0" -v b="$r1" 'BEGIN { split(a, x, " "); split(b, y, " ");
+         exit !(x[5] >= 950 && x[5] <= 1060 && x[6] >= 400 && x[6] <= 480 && x[9] == 0 && x[10] ~ /^440=(8[5-9]|9[0-9])[0-9][0-9]$/ &&
+                y[5] >= 470 && y[5] <= 560 && y[6] >= 920 && y[6] <= 1080 && y[9] == 0 && y[11] ~ /^1000=(8[5-9]|9[0-9])[0-9][0-9]$/) }'
+}
+SON=$T/s11; mkdir -p "$SON"; rm -f "$SON"/*.wav
+mb1 "apagar sinred" "$T/e11s.txt" 256 -machine q35 -smp 2 -audiodev wav,id=snd0,path="$SON/ich6.wav",out.frequency=48000 -device intel-hda -device hda-output,audiodev=snd0; c=$?
+if [ $c = 85 ] && hay "$T/e11s.txt" "^Sonido: 00:0[0-9A-F].0 8086:2668, HD Audio (GCAP 4401), el códec 1AF4:0012 (con las órdenes inmediatas); el pin [0-9]* (línea) desde el DAC [0-9]*; /dev/dsp$" \
+   && sonido_bien "$T/e11s.txt" "$SON/ich6.wav" && hay "$T/e11s.txt" "^Hispa-64 etapa 11: todo en orden.$"; then
+  ok "etapa 11, el sonido (intel-hda y hda-output, 2 procesadores): «$(serie "$T/e11s.txt" | grep '^Sonido:' | cut -d, -f2- | sed 's/^ //')»; MSONIDO por /dev/dsp; lo grabado: $(python3 -I "$OYE" "$SON/ich6.wav" 440,1000 | awk '{ printf "%s%s ms a %s Hz (%s cortes)", (NR > 1 ? " y " : ""), $5, $6, $9 }')"
+else ko "etapa 11, el sonido (intel-hda) no sale (código $c): $(serie "$T/e11s.txt" | grep -E '^Sonido|^MSONIDO|^  /dev/dsp|MAL|parado' | paste -sd '|') $(python3 -I "$OYE" "$SON/ich6.wav" 440,1000 2>&1 | paste -sd '|')"; fi
+mb1 "apagar sinred" "$T/e11s9.txt" 256 -machine q35 -audiodev wav,id=snd0,path="$SON/ich9.wav",out.frequency=48000 -device ich9-intel-hda -device hda-duplex,audiodev=snd0; c=$?
+if [ $c = 85 ] && hay "$T/e11s9.txt" "^Sonido: 00:0[0-9A-F].0 8086:293E, HD Audio (GCAP 4401), el códec 1AF4:0022 " \
+   && sonido_bien "$T/e11s9.txt" "$SON/ich9.wav" && hay "$T/e11s9.txt" "^Hispa-64 etapa 11: todo en orden.$"; then
+  ok "etapa 11, el sonido (ich9-intel-hda y hda-duplex, 1 procesador): lo grabado, $(python3 -I "$OYE" "$SON/ich9.wav" 440,1000 | awk '{ printf "%s%s ms a %s Hz (%s cortes)", (NR > 1 ? " y " : ""), $5, $6, $9 }')"
+else ko "etapa 11, el sonido (ich9-intel-hda) no sale (código $c): $(serie "$T/e11s9.txt" | grep -E '^Sonido|^MSONIDO|MAL|parado' | paste -sd '|') $(python3 -I "$OYE" "$SON/ich9.wav" 440,1000 2>&1 | paste -sd '|')"; fi
 echo "== Hispa-64: $BIEN bien, $MAL mal =="
 [ $MAL = 0 ]

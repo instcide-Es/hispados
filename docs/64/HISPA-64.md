@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0, 1, 2, 3, 4, 5, 6 y 7 están hechas** (secciones 6 a 13), y la **8**, en lo principal (sección 14).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 y 17).
 
 ---
 
@@ -268,7 +268,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
 | 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). El navegador, en la 10 b | (8–12 sem.) |
-| 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | 4–6 sem. | (en paralelo) |
+| 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). IPP y la energía, en la 11 b | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
 
@@ -446,7 +446,15 @@ libstdc++ compilada para musl y el navegador mismo.
 - Es la etapa con más riesgo: puede pedir más memoria, `mmap` con más formas,
   señales finas y hilos a cientos. De ahí los 8–12 semanas.
 
-### Etapa 11 — imprimir, sonar, ahorrar
+### Etapa 11 — imprimir, sonar, ahorrar (la base y el sonido, hechos: sección 17)
+
+Lo hecho el 25/11 (sección 17): primero lo de fondo que dejó la 10 (el
+fallo del planificador, los dos intermitentes de las pruebas, TCP con
+NewReno y los SACK de la otra punta, la INTx del `_PRT` para los discos y
+el USB, `select` de más de 64, ITIMER_VIRTUAL y PROF), lo que encontró KVM
+(STAR sin el RPL 3) y, de la 11, **el sonido**: HD Audio en el núcleo y
+/dev/dsp como OSS. Queda (la «11 b»): IPP, suspender, la batería, el
+brillo, HWP (piden ACPICA y mDNS).
 
 - IPP Everywhere (descubrir con mDNS, mandar PDF), HDA, suspender (S3 o S0ix con
   ACPICA), la batería, el brillo, HWP/P-states.
@@ -2817,3 +2825,118 @@ el arranque; NTP y el CMOS).
   hilo); `select` de más de 64 descriptores.
 - Lo de la sección 15 que sigue: las I219 en el taller (ULP y K1), el
   cliente SSH, la Wi-Fi en paralelo.
+
+## 17. La etapa 11, hecha la base (25/11/2026): el planificador, los intermitentes, TCP con congestión, la INTx, el tiempo de procesador y el sonido
+
+### Las decisiones
+
+- **Primero, lo de fondo** (lo que dejó la 10 en la sección 16):
+  - **El fallo del planificador.** La causa: `despierta_todos` era
+    «mientras haya alguien esperando, despierta al primero», y el que
+    despertaba a uno de más prioridad le daba el procesador **en el acto**
+    (en `encola`). Con un procesador, el hilo «alarmas» (INTERACTIVO)
+    despertado por `alarm(0)` corría, volvía a esperar en **el mismo
+    suceso** (espera en bucle) antes de que el bucle de `despierta_todos`
+    diera la vuelta, y el bucle lo encontraba otra vez: sin fin, y el
+    programa no volvía de la llamada (con el procesador en el núcleo, sin
+    interrupciones: lo enseñó «info registers» del monitor de QEMU, en
+    `despierta_uno`, `encola` y `carga_cr3`). El hilo «red» no lo hacía
+    porque lo despiertan las interrupciones, que no expropian en el acto.
+    El arreglo, en Hilos64, en dos partes:
+    1. `despierta_todos` despierta **a los que esperan ahora**, de una vez,
+       con el cerrojo de la espera tomado (y `despierta_uno` también, como
+       ya hacía Sondeo64: el despertado no puede irse ni soltarse entre
+       sacarlo de la cola y despertarlo); uno que vuelve a esperar espera
+       al cerrojo y queda para la próxima.
+    2. **Los puntos de expropiar** (`expropia_aquí`, como el
+       `need_resched` de Linux): despertar a uno que pasa por delante solo
+       lo apunta (`expropiar`), y se le da el procesador después, en un
+       punto seguro: al soltar el cerrojo de la espera (un hilo del núcleo),
+       **al acabar la llamada al sistema** (el hilo de un programa: nunca en
+       medio de ella) y **al volver de una interrupción al anillo 3** (si la
+       interrupción ha despertado a uno, sin esperar al tic). Con las
+       interrupciones quitadas, nunca.
+    Con eso, «alarmas» va como INTERACTIVO.
+  - **MDISP en el CD por BIOS** («lo copiado está en la pantalla», a
+    veces). La causa: el hilo «pantalla» mira `modo_gráfico` al empezar a
+    dibujar, y una vuelta ya empezada (toda la pantalla tras subir una
+    línea: milisegundos, o más si se le quita el procesador a medias)
+    seguía pintando encima de lo del programa que acababa de tomar
+    /dev/fb0. Ahora `pon_modo_gráfico(cierto)` toma el mutex del pintor:
+    al volver, nadie pinta.
+  - **La tecla que se adelanta en el intérprete.** La causa: la prueba
+    tecleaba la orden siguiente mientras la de antes (CUENTA) aún
+    escribía, y el eco de la terminal (como en Linux) la ponía en medio de
+    su salida. No es un fallo del sistema sino de la prueba: `teclas.py`
+    sabe ahora `{indicador}` (espera a que el intérprete dé otra vez su
+    indicador, mirando lo que sale por el puerto serie), y la prueba
+    teclea cada orden al ver acabada la de antes, como una persona.
+- **TCP al mandar** (`tcp64.cas`): el **control de congestión NewReno**
+  (RFC 5681 y 6582: 10 segmentos al empezar, RFC 6928; el arranque lento y
+  la evitación de la congestión; la recuperación rápida al tercer ACK
+  repetido, con la ventana a la mitad e inflada en cada ACK repetido, los
+  ACK parciales y el final al confirmarse todo lo de antes de la pérdida; al
+  vencer el plazo, un segmento) y **los SACK de la otra punta** (RFC 2018 y
+  lo de RFC 6675: lo que dice tener se apunta, y en la recuperación se
+  repiten solo los huecos, no todo desde lo primero sin confirmar). SACK
+  también en los segmentos con datos (con menos datos: la MSS no cuenta
+  las opciones, RFC 6691). CUBIC, no: NewReno basta para la red de casa y
+  es lo que piden las RFC; se puede cambiar en `confirma` sin tocar lo demás.
+- **La INTx del `_PRT` para el xHCI, la AHCI y el NVMe** sin MSI
+  (`Prt64.intx_prt`): solo si el `_PRT` dice su GSI y nadie más la tiene
+  (una línea que no se sabe si es la buena, por nivel, podría no apagarse
+  nunca); si no, se mira la cola, como antes. Por nivel: el xHCI y la AHCI
+  la apagan al borrar sus avisos; el NVMe, con INTMS al llegar e INTMC
+  antes de dormir el que espera. La que llega muchas veces seguidas sin
+  nada (20.000) se tapa (`intx_vacía`). Y `pon_intx` ya no pisa la GSI de
+  otro vector (antes, las interrupciones del otro iban a parar al nuevo).
+- **`select` y `poll` de más de 64**: `fd_set` de 1024 (FD_SETSIZE; los
+  descriptores abiertos llegan a 256) y `poll` de hasta 1024 entradas,
+  mirándolas de 64 en 64.
+- **El tiempo de procesador**: el tic sabe si ha llegado en el anillo 3
+  (la entrada lo apunta en el bloque del procesador, `desde_usuario`, y la
+  vuelta lo borra) y se lo cuenta al hilo y a su proceso (en el programa o
+  en el núcleo, de 10 en 10 ms). Con eso: **ITIMER_VIRTUAL** (SIGVTALRM) e
+  **ITIMER_PROF** (SIGPROF), que vencen en el tic y se mandan al volver al
+  programa; `getrusage` (RUSAGE_SELF, RUSAGE_CHILDREN con los hijos
+  recogidos, RUSAGE_THREAD) y el de `wait4`; CLOCK_PROCESS_CPUTIME_ID y
+  CLOCK_THREAD_CPUTIME_ID (antes daban el tiempo en marcha).
+- **De la 11 del plan, el sonido**: **HD Audio en el núcleo** (`hda64.cas`,
+  lo de Hispa-Pentium —`nucleo32/sonido/hda.c`, que viene de HSPSND de
+  Hispa-DOS— en Castel: el enlace, las órdenes inmediatas o CORB y RIRB,
+  las GPIO, el camino de cada pin que suena hasta un DAC por mezcladores y
+  selectores, EAPD) con **/dev/dsp como OSS** (lo más sencillo de POSIX
+  para los programas: `write` de muestras de 16 bits; SETFMT, SPEED,
+  CHANNELS, STEREO, SYNC, RESET, GETOSPACE, GETODELAY, GETBLKSIZE,
+  GETFMTS): 48 y 44,1 kHz (los que tienen todas las tarjetas, sin
+  remuestrear), mono (se dobla) o estéreo; uno a la vez (EBUSY). El
+  anillo de 64 KB (341 ms) va por delante de por dónde va la tarjeta, y lo
+  ya tocado se pone a cero en cuanto se ve: si el programa no da más,
+  suena silencio y no lo de la vuelta anterior. Sin la interrupción de la
+  tarjeta (el hilo «sonido» mira cada 10 ms), como en Hispa-Pentium. El
+  flujo no se para al cerrar sino tras medio segundo de silencio: lo que la
+  tarjeta ya ha leído (la de QEMU, unos 30 ms) tiene que salir.
+- **Lo demás de la 11 del plan** (imprimir con IPP, suspender, la batería,
+  el brillo, HWP) pide ACPICA (los métodos de AML) o mDNS e IPP: queda
+  para la 11 b. Y de la 10 b, el navegador, ICU, curl, IPv6 y la libstdc++
+  para musl siguen allí (el plan los pone en la 10 b: no se empiezan sin
+  dejar cerrado lo de antes).
+- **Con KVM** (lo encontró otra sesión con el disco de la etapa 10: con KVM
+  se paraba siempre tras HOLACAS con un doble fallo; sin KVM, no). La
+  causa: STAR decía 0x10 para el anillo 3, sin el RPL 3; `sysret` pone en
+  SS ese + 8, y en los AMD tal cual: SS quedaba 0x18 (RPL 0) en el anillo
+  3, y el `iretq` de vuelta de la primera interrupción que lo guardaba (el
+  fallo de página de MEMORIA en su primera escritura) daba #GP(0x18); el
+  #GP se atendía como del núcleo, fallaba otra vez, y así hasta desbordar
+  la pila (lo enseñaron un punto de parada de gdb en `e13` y la pila del
+  hilo). El TCG de QEMU no lo mira; los Intel ponen el RPL 3 solos (en
+  VirtualBox con VT-x de Intel no pasaba). Ahora STAR lleva 0x13, como
+  Linux. Y la batería tiene vueltas **con KVM** (si hay /dev/kvm): `-cpu
+  host` con 4 procesadores, el de QEMU por omisión con uno, y por UEFI.
+  De paso: con «sinred» no se ponía ni «lo», y un `connect` a 127.0.0.1
+  esperaba para siempre; ahora «sinred» deja «lo» y el hilo «red».
+- **El cuadro «¿Guardar los cambios?»** de Pluma, Cuentas y Pintura (el
+  código de Hispa-Pentium, que se compila igual aquí): lo alto del cuadro
+  se calculaba con el alto de la letra y de los controles (U y H) antes de
+  que `nuevo_cuadro` los pusiera (los argumentos se calculan antes), así
+  que, si era el primer cuadro, con 0: los botones tapaban la pregunta.
