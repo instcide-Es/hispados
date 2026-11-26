@@ -1524,7 +1524,7 @@ if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
     } > "$R9/V6.PRB"
     PRB9=$R9/V6.PRB red9 "$T/e10c.txt" e1000e 2 "$l10b"
     v=$(serie "$T/e10c.txt")
-    if grep -qE "^Red: [a-z0-9]+: IPv6 fec0::[0-9a-f:]+/64 \(SLAAC\), de enlace fe80::[0-9a-f:]+, router fe80::[0-9a-f:]+" <<< "$v" \
+    if grep -qE "^    IPv6: fec0::[0-9a-f:]+/64 \(SLAAC\), de enlace fe80::[0-9a-f:]+, router fe80::[0-9a-f:]+(, DNS [0-9a-f:]+)?; [1-9][0-9]* anuncios del router" <<< "$v" \
        && grep -q "^MCURL: http://\[fec0::2\]:$PH6/a.bin: 200, 1048576 octetos; sha256 = $SHA9 (http, HTTP/1.1)$" <<< "$v" \
        && grep -q "^CURL6:200:1048576:fec0::2$" <<< "$v" \
        && { [ -z "$PD9" ] || { grep -q "^MRED6: todo bien (5 pruebas)$" <<< "$v" && grep -q "^  anfitrion6.prueba es fec0::2 (AAAA)$" <<< "$v" \
@@ -1532,8 +1532,8 @@ if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
        && ! grep -q "^Programa .*: acaba con el código [0-9]*$" <<< "$v" \
        && grep -q "^Después de la red: 0 sockets (.*0 objetos$" <<< "$v" \
        && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"; then
-      ok "etapa 10 c, IPv6 por la red de QEMU (e1000e, 2 procesadores): $(grep -m1 -oE 'IPv6 fec0::[0-9a-f:]+/64 \(SLAAC\)' <<< "$v"), el router y el DNS del anuncio; MCURL y CURL a [fec0::2] (sha256 bien)$( [ -n "$PD9" ] && echo '; el AAAA del DNS de prueba, 3 pings de ICMPv6 y HTTP por TCP sobre IPv6 (MRED6)'); sin sockets al acabar"
-    else ko "etapa 10 c, IPv6 por la red no hace lo que debe: $(grep -E '^Red: .*IPv6|^MRED6|^  [a-z0-9]*6.prueba|^  ping de ICMPv6|^  HTTP por|^MCURL|^CURL6|^curl:|^Programa|MAL|parado|^Después de la red' <<< "$v" | cut -c1-140 | paste -sd '|' | cut -c1-1500)"; fi
+      ok "etapa 10 c, IPv6 por la red de QEMU (e1000e, 2 procesadores): $(grep -m1 -oE 'IPv6: fec0::[0-9a-f:]+/64 \(SLAAC\)' <<< "$v"), el router y el DNS del anuncio; MCURL y CURL a [fec0::2] (sha256 bien)$( [ -n "$PD9" ] && echo '; el AAAA del DNS de prueba, 3 pings de ICMPv6 y HTTP por TCP sobre IPv6 (MRED6)'); sin sockets al acabar"
+    else ko "etapa 10 c, IPv6 por la red no hace lo que debe: $(grep -E '^    IPv6|^MRED6|^  [a-z0-9]*6.prueba|^  ping de ICMPv6|^  HTTP por|^MCURL|^CURL6|^curl:|^Programa|MAL|parado|^Después de la red' <<< "$v" | cut -c1-140 | paste -sd '|' | cut -c1-1500)"; fi
   else ko "etapa 10 c, sin el servidor de HTTP por IPv6 (::1) en el anfitrión: $(head -2 "$R9/srv_http6.txt" 2> /dev/null | paste -sd ' ')"; fi
   # la zona: la hora local con cambio de horario, y el CMOS en UTC o en hora local
   v=$(serie "$T/e9b.txt"); w=$(serie "$T/e9a.txt")

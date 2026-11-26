@@ -1768,6 +1768,25 @@ módulo Red64
                 escribir("/", bits_de(f.máscara))
             fin
             escribir("; ", f.rx_paq, " tramas recibidas y ", f.tx_paq, " enviadas, ", f.interrupciones, " interrupciones\n")
+            ; [etapa 10 c] lo de IPv6
+            si f.ip6_ll <> 0 entonces
+                escribir("    IPv6: ")
+                si f.ip6_gl <> 0 entonces
+                    escribe_ip6(dir_de(f.ip6_gl))
+                    escribir("/64 (SLAAC), ")
+                fin
+                escribir("de enlace ")
+                escribe_ip6(dir_de(f.ip6_ll))
+                si f.puerta6 <> 0 entonces
+                    escribir(", router ")
+                    escribe_ip6(dir_de(f.puerta6))
+                fin
+                si f.dns6 <> 0 entonces
+                    escribir(", DNS ")
+                    escribe_ip6(dir_de(f.dns6))
+                fin
+                escribir("; ", f.ra_veces, " anuncios del router, ", f.rs_veces, " pedidos\n")
+            fin
             i := i + 1
         fin
     fin
