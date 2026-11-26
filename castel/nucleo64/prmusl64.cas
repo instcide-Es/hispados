@@ -99,15 +99,17 @@ módulo PrMusl64
         si busca_archivo("MCXX") >= 0 entonces corre("MCXX", 0) fin            ; [etapa 10] C++ (la libstdc++ con musl)
         si busca_archivo("MCXXD") >= 0 entonces corre("MCXXD", 0) fin          ; [etapa 10 c] C++ dinámico (libstdc++.so.6)
         si busca_archivo("MTEXTO") >= 0 entonces corre("MTEXTO", 0) fin        ; [etapa 10] HarfBuzz y FreeType
+        ; [etapa 10 b] ICU y libcurl; [etapa 10 c] otra vez antes del sonido: los
+        ; cortes de MSONIDO después de MCURL eran las conexiones de MCURL que se
+        ; soltaban (TIME_WAIT) mientras sonaba, un aviso de vaciar la TLB por
+        ; cada página de sus búferes (la cuarentena de Monton64 lo arregla)
+        si busca_archivo("MICU") >= 0 entonces corre("MICU", 0) fin            ; ICU (con icudt77l.dat)
+        si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
         si busca_archivo("MSONIDO") >= 0 entonces
             corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)
             si hay_hda entonces escribir("  el sonido: ", hda_octetos, " octetos al anillo, ", hda_sin_datos, " veces sin datos, ", hda_lpib_atrás, " veces LPIB hacia atrás\n") fin
         fin
         si busca_archivo("LUA") >= 0 y busca_archivo("PRUEBA.LUA") >= 0 entonces corre("LUA /PRUEBA.LUA uno dos", 0) fin
-        ; [etapa 10 b] después del sonido (que lo de MCURL, 16 descargas a la vez y su
-        ; servidor, no le quite el procesador a MSONIDO mientras suena)
-        si busca_archivo("MICU") >= 0 entonces corre("MICU", 0) fin            ; ICU (con icudt77l.dat)
-        si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
         ; (los que quedasen sueltos acaban solos)
         t0 := ahora_ns()
         mientras (vivos > 0 o en_tabla > 0) y ahora_ns() - t0 < 3000000000 hacer duerme_ms(10) fin
