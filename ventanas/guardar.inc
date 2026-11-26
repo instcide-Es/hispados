@@ -21,27 +21,26 @@
 ;                   -> CF=1 si no se ha guardado (el de antes, como estaba)
 ;    gua_escribir   ESI=ruta EDX=datos ECX=octetos: todo de una vez -> CF=1
 ;                   si no se puede (o no cabe entero)
-;    gua_abrir_bak  (solo VENTANAS.COM) ESI=ruta que no está: abre su .BAK
+;    gua_abrir_bak  ESI=ruta que no está: abre su .BAK (para leer)
+;    gua_ext        ESI=ruta EDI=búfer (GUA_RUTA, 132) EAX=extensión ('BAK')
+;                   EDX=la de reserva (si ya tiene esa): la ruta con EAX
+;    gua_atrib      ESI=ruta -> CF=0 y CL=atributos si está; CF=1 si no
 ;
-;  Lo usan VENTANAS.COM (el Bloc y CENTRO.INI; con dos_renombrar) y los
-;  módulos a través de hvplib.inc (definen GUA_MODULO: las llamadas a DOS
-;  van por HV, y el cambio de nombre por rm_interrup). Solo una vez a la
-;  vez en cada programa (las rutas, en gua_ruta, gua_tmp y gua_bak).
+;  Está en VENTANAS.COM (el Bloc de notas y CENTRO.INI) y los módulos llegan
+;  a gua_crear, gua_cerrar, gua_escribir, gua_ext y gua_atrib por la
+;  interfaz (api.inc, 0.9.31; hvl_escribir de hvplib.inc es gua_escribir):
+;  así no hay una copia en cada .HVP. Las rutas van en gua_ruta, gua_tmp y
+;  gua_bak, una sola vez a la vez: entre gua_crear y gua_cerrar no se cede
+;  el turno a otra tarea.
 ; =============================================================================
 
-%ifdef GUA_MODULO
-%macro GUADOS 1
-        HV %1
-%endmacro
-%else
 %macro GUADOS 1
         call %1
 %endmacro
-%endif
 
 GUA_RUTA    equ 132                 ; 127 letras, el punto, la extensión y el 0
 
-; (interna) ESI=ruta EDI=búfer (GUA_RUTA) EAX=extensión ('$$$') EDX=la de
+; ESI=ruta EDI=búfer (GUA_RUTA) EAX=extensión ('$$$') EDX=la de
 ; reserva, por si la ruta ya tiene esa: la misma ruta con la extensión EAX
 gua_ext:
         pushad
@@ -93,32 +92,6 @@ gua_ext:
 
 ; (interna) ESI=nombre de antes EDI=el nuevo -> CF=1 si no se puede
 gua_renombra:
-%ifdef GUA_MODULO
-        pushad
-        push edi
-        mov edi, [hv_api + HV_dos_buf * 4]
-        mov ecx, GUA_RUTA
-        rep movsb
-        pop esi
-        mov edi, [hv_api + HV_dos_buf * 4]
-        add edi, GUA_RUTA
-        mov ecx, GUA_RUTA
-        rep movsb
-        mov edi, gua_rl
-        mov ecx, RL_TAM / 4
-        xor eax, eax
-        rep stosd
-        mov dword [gua_rl+RL_EAX], 0x5600
-        mov eax, [hv_api + HV_dos_buf * 4]
-        mov [gua_rl+RL_EDX], eax
-        add eax, GUA_RUTA
-        mov [gua_rl+RL_EDI], eax
-        mov byte [gua_rl+RL_INT], 0x21
-        mov esi, gua_rl
-        HV rm_interrup
-        popad
-        ret
-%else
         pushad                      ; los dos nombres, en el búfer de paso
         push edi
         mov edi, dos_buf
@@ -137,7 +110,6 @@ gua_renombra:
         mov dword [rmcs+0x00], 0    ; (que no se quede para los demás)
         popad
         ret
-%endif
 
 gua_crear:
         push ecx
@@ -199,36 +171,6 @@ gua_crear:
 
 ; ESI=ruta -> CF=0 y CL=sus atributos (INT 21h, 4300h) si está; CF=1 si no
 gua_atrib:
-%ifdef GUA_MODULO
-        pushad
-        mov edi, [hv_api + HV_dos_buf * 4]
-        mov ecx, GUA_RUTA
-.c:
-        lodsb
-        stosb
-        test al, al
-        jz .c1
-        dec ecx
-        jnz .c
-        mov byte [edi], 0
-.c1:
-        mov edi, gua_rl
-        mov ecx, RL_TAM / 4
-        xor eax, eax
-        rep stosd
-        mov dword [gua_rl+RL_EAX], 0x4300
-        mov eax, [hv_api + HV_dos_buf * 4]
-        mov [gua_rl+RL_EDX], eax
-        mov byte [gua_rl+RL_INT], 0x21
-        mov esi, gua_rl
-        HV rm_interrup
-        popad
-        jc .x
-        mov cl, [gua_rl+RL_ECX]
-        clc
-.x:
-        ret
-%else
         push eax
         mov eax, 0x4300
         call dos_ruta
@@ -238,7 +180,6 @@ gua_atrib:
         clc
 .x:
         ret
-%endif
 
 gua_cerrar:
         pushad
@@ -301,7 +242,6 @@ gua_escribir:
         pop eax
         ret
 
-%ifndef GUA_MODULO
 ; ESI=ruta (que no está): abre para leer su .BAK, lo que queda si se fue la
 ; luz entre los dos cambios de nombre -> EAX=manejador; CF=1 si tampoco está
 gua_abrir_bak:
@@ -327,4 +267,3 @@ gua_abrir_bak:
         pop edi
         pop esi
         ret
-%endif

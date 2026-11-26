@@ -2349,6 +2349,16 @@ Añadida para la imagen de fondo del escritorio ([FONDO]; 98 entradas: la
 |---|---|
 | `esc_imagen` (EAX=0: lo que hay puesto → EAX=forma, ESI=ruta, ECX=estado, EDX=número de cambio; EAX=1, ESI=ruta, EDX=forma: la pone → CF=1 y EAX=el error; EAX=2, EDI=búfer: la carpeta de VENTANAS.COM) | la imagen de fondo del escritorio: la usan Configuración (apartado Escritorio y al guardar VENTANAS.INI) y Mirador («Poner como fondo de escritorio»). Los registros, en «La imagen de fondo del escritorio» |
 
+Añadidas en la 0.9.31 para guardar sin vaciar el archivo de antes (103
+entradas; `ventanas/guardar.inc`, en la parte alta: una sola copia, en vez
+de una en cada .HVP):
+
+| Entrada | Para qué |
+|---|---|
+| `gua_crear` (ESI=ruta → EAX=manejador; CF=1 si no, o si es de solo lectura), `gua_cerrar` (EBX=manejador, AL=1 si algo falló al escribir → CF=1 si no se ha guardado) | escribir a trozos: todo va a un temporal (`.$$$`); al cerrar, si está entero, el de antes pasa a `.BAK`, el temporal toma su nombre y la `.BAK` se borra; si no, el de antes queda como estaba (Cuentas) |
+| `gua_escribir` (ESI=ruta, EDX=datos, ECX=octetos → CF=1 si no) | lo mismo, de una vez: es `hvl_escribir` |
+| `gua_ext` (ESI=ruta, EDI=búfer de 132, EAX=extensión, EDX=la de reserva), `gua_atrib` (ESI=ruta → CF=0 y CL=atributos si está) | para quien hace su propio guardado seguro (Publicaciones y Presentaciones) |
+
 Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80, 82, 84, 85 u 86) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.

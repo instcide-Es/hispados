@@ -703,6 +703,7 @@ nuevo_gancho:
 ctx_gris_prog:                      ; lo que puede ir en gris en sus menús, y cuándo
         CTX_GRIS_ED
         dw 0
+%define HVL_REEMPLAZAR              ; («Guardar como»: ¿reemplazarlo?)
 %include "hvplib.inc"
 
         section .bss

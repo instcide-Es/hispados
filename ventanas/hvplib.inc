@@ -21,8 +21,9 @@
 ;    hvl_escribir   ESI=ruta EDX=datos ECX=octetos -> CF=1 si no se puede (o no cabe entero);
 ;                   primero en un temporal: si falla, el archivo de antes queda
 ;                   como estaba (guardar.inc)
-;    gua_crear, gua_cerrar   lo mismo, para quien escribe a trozos (guardar.inc)
-;    hvl_reemplazar ESI=ruta que se va a escribir («Guardar como») EDX=la del
+;                   (HV gua_crear y HV gua_cerrar: lo mismo, a trozos)
+;    hvl_reemplazar (solo con %define HVL_REEMPLAZAR antes del %include)
+;                   ESI=ruta que se va a escribir («Guardar como») EDX=la del
 ;                   documento (0: ninguna) EBP=dueña EDI=título -> CF=1 si ya
 ;                   hay otro archivo con ese nombre y no se quiere reemplazar
 ;                   («Ya existe... ¿Quiere reemplazarlo?», Sí / No)
@@ -188,9 +189,9 @@ hvl_leer:
         pop ebx
         ret
 
-; (sin vaciar el de antes: guardar.inc)
+; (sin vaciar el de antes: guardar.inc, en VENTANAS.COM)
 hvl_escribir:
-        jmp gua_escribir
+        HVJ gua_escribir
 
 hvl_clave:
         push eax
@@ -221,6 +222,7 @@ hvl_clave:
         pop eax
         ret
 
+%ifdef HVL_REEMPLAZAR
 hvl_reemplazar:
         pushad
         test edx, edx               ; ¿es el mismo del documento? Eso es guardar
@@ -290,13 +292,7 @@ hvl_reemplazar:
 hvl_t_existe db "Ya hay un archivo con ese nombre:", 10, 0
 hvl_t_reempl db 10, "¿Quiere reemplazarlo? (lo que tiene se perderá)", 0
 
-%define GUA_MODULO
-%include "guardar.inc"
         section .bss
 hvl_txt     resb 200
-gua_ruta    resb GUA_RUTA
-gua_tmp     resb GUA_RUTA
-gua_bak     resb GUA_RUTA
-            alignb 4
-gua_rl      resb RL_TAM
         section .text
+%endif

@@ -4495,7 +4495,7 @@ guarda_escribe:
         pushad
         mov byte [tecleando], 0
         mov esi, nombre             ; de solo lectura (o una carpeta): no se
-        call gua_atrib              ; toca (hvplib.inc, guardar.inc)
+        HV gua_atrib              ; toca (guardar.inc)
         jc .nuevo
         test cl, 0x11
         jnz .mal
@@ -4504,24 +4504,24 @@ guarda_escribe:
         mov edi, nom_seg
         mov eax, 'TMP'
         mov edx, 'TM1'
-        call gua_ext
+        HV gua_ext
         mov esi, nom_seg
         mov edi, firma
         call lam_guarda
         jc .mal_tmp
         mov esi, nombre             ; el de antes, a .BAK (si es la primera
-        mov edi, gua_bak            ; vez, no hay de antes)
+        mov edi, nom_bak            ; vez, no hay de antes)
         mov eax, 'BAK'
         mov edx, 'BK1'
-        call gua_ext
+        HV gua_ext
         xor ebx, ebx
         mov esi, nombre
-        call gua_atrib
+        HV gua_atrib
         jc .ren
-        mov esi, gua_bak
+        mov esi, nom_bak
         HV dos_borrar
         mov esi, nombre
-        mov edi, gua_bak
+        mov edi, nom_bak
         call renombra
         setnc bl                    ; BL=1: el de antes está en la .BAK
 .ren:
@@ -4531,7 +4531,7 @@ guarda_escribe:
         jc .mal_ren
         test bl, bl
         jz .bien
-        mov esi, gua_bak
+        mov esi, nom_bak
         HV dos_borrar
 .bien:
         mov byte [modif], 0
@@ -4542,7 +4542,7 @@ guarda_escribe:
 .mal_ren:
         test bl, bl                 ; el de antes, otra vez a su nombre
         jz .mr
-        mov esi, gua_bak
+        mov esi, nom_bak
         mov edi, nombre
         call renombra
 .mr:
@@ -6724,7 +6724,8 @@ titulo      resb 112
 nombre      resb 96
 nom_tmp     resb 96
 nom_exp     resb 100
-nom_seg     resb GUA_RUTA           ; el temporal en el que se guarda
+nom_seg     resb 132                ; el temporal en el que se guarda (GUA_RUTA)
+nom_bak     resb 132                ; [0.9.31] y el de antes, en .BAK
 nom_ant     resb 96                 ; (OFICINA2) el nombre de antes de «Guardar como»
 num_txt     resb 12
 t_vista_b   resb 12

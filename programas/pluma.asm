@@ -5653,6 +5653,7 @@ pl_letra:
 %define CTX_PUENTE
 %include "contexto.inc"
 %include "ortografia.inc"
+%define HVL_REEMPLAZAR              ; («Guardar como»: ¿reemplazarlo?)
 %include "hvplib.inc"
 
 FBUF_TAM    equ 3 * MAX_TXT + 24

@@ -3651,6 +3651,7 @@ simbolo:
 %include "barra.inc"
 %define CTX_PUENTE
 %include "contexto.inc"
+%define HVL_REEMPLAZAR              ; («Guardar como»: ¿reemplazarlo?)
 %include "hvplib.inc"
 
 ; =============================================================================

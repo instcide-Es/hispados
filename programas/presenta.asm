@@ -2306,6 +2306,7 @@ ctx_gris_prog:                      ; lo que puede ir en gris en sus menús, y c
         dw O_DIA_BAJA
         dd cg_pag_ultima
         dw 0
+%define HVL_REEMPLAZAR              ; («Guardar como»: ¿reemplazarlo?)
 %include "hvplib.inc"
 
         section .bss

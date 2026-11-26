@@ -46,7 +46,7 @@ TROZO       equ 16384               ; lo que se lee de una vez
 ; antes queda entero (guardar.inc)
 esc_abre:
         push eax
-        call gua_crear
+        HV gua_crear
         jc .x
         mov [esc_h], eax
         mov dword [esc_n], 0
@@ -137,7 +137,7 @@ esc_cierra:
         call esc_vuelca
         mov ebx, [esc_h]
         mov al, [esc_mal]
-        call gua_cerrar             ; (CF=1 si no se ha guardado)
+        HV gua_cerrar              ; (CF=1 si no se ha guardado)
         pop ebx
         pop eax
         ret
