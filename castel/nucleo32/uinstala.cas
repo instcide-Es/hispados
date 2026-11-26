@@ -129,6 +129,7 @@ módulo Instala
     variable mis_args: arreglo [200] de byte
     variable hereda_sinacpi: bool
     variable sin_8042: bool
+    variable hereda_registro: bool              ; (0.8.12b) «registro»: lo instalado deja C:\ARRANQUE.TXT
 
     ; ---- la FAT32 que se escribe ----
     variable por_cluster: nat32                 ; sectores por cluster
@@ -1436,6 +1437,7 @@ módulo Instala
         cfg_más(orden)
         cfg_más(" /HISPA/NUCLEO.BIN ")
         cfg_más(args)
+        si hereda_registro entonces cfg_más(" registro") fin
         cfg_más(sdhci_op)
         cfg_más("\n")
     fin
@@ -1761,6 +1763,7 @@ módulo Instala
         mis_args[79] := 0
         hereda_sinacpi := buscar(mis_args, "sinacpi") <> nulo
         sin_8042 := buscar(mis_args, "sin8042") <> nulo
+        hereda_registro := buscar(mis_args, "registro") <> nulo
         si hereda_sinacpi entonces registra("instalar: «sinacpi» en la línea del cargador: lo instalado arranca sin ACPI (la segunda entrada, con ACPI)\n") fin
         si sin_8042 entonces registra("instalar: el equipo no tiene 8042: la entrada de emergencia, con el USB (el teclado y el ratón)\n") fin
         bienvenida()

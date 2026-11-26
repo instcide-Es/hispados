@@ -67,6 +67,9 @@
 # ACPI» de ese equipo, las de su \SDHCI.TXT), una entrada más, tras las de
 # prueba: arrancar lo instalado en el eMMC sin ACPI desde la memoria (GRUB
 # busca \HISPA\NUCLEO.BIN en los discos), sin cambiar su menú.
+# Con FIRMWARE_DIR=carpeta, lo de esa carpeta (el firmware de las tarjetas
+# Wi-Fi, que no es libre: no está en el repositorio) va a X:\FIRMWARE, y
+# INSTALAR lo copia a C:\FIRMWARE (como \SDHCI.TXT y \SDIO.TXT de X:).
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc); (UEFI) y grub-efi-amd64-bin
 # y grub-efi-ia32-bin (grub-mkimage).
@@ -124,6 +127,8 @@ if [ -n "${TERMO:-}" ]; then
   bash $AQUI/termo/prepara_memoria.sh $W/termo
 fi
 cp $W/f/* $W/m/
+# (0.8.12b) el firmware de las tarjetas Wi-Fi, a X:\FIRMWARE
+if [ -n "${FIRMWARE_DIR:-}" ]; then mkdir -p $W/m/FIRMWARE; cp "$FIRMWARE_DIR"/* $W/m/FIRMWARE/; fi
 # (RTL8723BS) la memoria de prueba del Wi-Fi por SDIO: RED.LOG y el Wi-Fi primero
 [ -n "${PRUEBA_WIFI_SDIO:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
 [ -n "${TERMO:-}" ] && cp -r $W/termo $W/m/TERMO

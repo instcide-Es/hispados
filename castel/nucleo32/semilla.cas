@@ -42,7 +42,9 @@ módulo Semilla
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
-    variable args_instalar: arreglo [24] de byte          ; (0.8.12b) lo que se le pasa a INSTALAR.BIN
+    variable args_instalar: arreglo [200] de byte         ; (0.8.12b) lo que se le pasa a INSTALAR.BIN
+    variable p_args: puntero a byte
+    variable k_args: nat32
     variable largo: nat32
     variable palabra1: arreglo [40] de byte
 
@@ -1308,7 +1310,20 @@ módulo Semilla
             ; instalado no puede dejar el USB, que es su teclado)
             args_instalar[0] := 0
             si buscar(línea_del_cargador(), "sinacpi") <> nulo entonces concatenar(args_instalar, "sinacpi ") fin
-            si buscar(línea_del_cargador(), "sin8042") <> nulo o meter_puerto(0x64) = 0xFF entonces concatenar(args_instalar, "sin8042") fin
+            si buscar(línea_del_cargador(), "registro") <> nulo entonces concatenar(args_instalar, "registro ") fin
+            si buscar(línea_del_cargador(), "sin8042") <> nulo o meter_puerto(0x64) = 0xFF entonces concatenar(args_instalar, "sin8042 ") fin
+            ; y «sdhci=...» (las controladoras SD/eMMC de «modo ACPI» dadas a mano:
+            ; sin \SDHCI.TXT, lo instalado las lleva en su línea)
+            p_args := buscar(línea_del_cargador(), "sdhci=")
+            si p_args <> nulo entonces
+                k_args := longitud(args_instalar)
+                mientras k_args < 120 y p_args[0] > ' ' hacer
+                    args_instalar[k_args] := p_args[0]
+                    k_args := k_args + 1
+                    p_args := p_args + 1
+                fin
+                args_instalar[k_args] := 0
+            fin
             si args_instalar[0] = 0 entonces lanza("INSTALAR.BIN", nulo) sino lanza("INSTALAR.BIN", dirección(args_instalar[0])) fin
         sino si buscar(línea_del_cargador(), "escritorio") <> nulo entonces
             apunta0("arranque: paso: el escritorio\n")      ; (TERMO)

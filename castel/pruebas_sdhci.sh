@@ -231,8 +231,18 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi$" $X/cfgi.txt; then
     ok "INSTALAR: el menú instalado lleva también «Hispa-Pentium SIN ACPI» (con el USB y « sdhci=...»), y la de emergencia sigue sin el USB (hay 8042)"
   else ko "INSTALAR no pone la entrada «SIN ACPI» en el menú instalado:"; grep -n "menuentry\|NUCLEO.BIN" $X/cfgi.txt | sed 's/^/        /' | head -12; fi
+  # (0.8.12b) y \SDHCI.TXT, \SDIO.TXT y X:\FIRMWARE, de la memoria USB (X:): el
+  # cargador no los trae (antes, sin módulo, lo instalado en el eMMC del Acer
+  # se quedaba sin « sdhci=...» y sin ACPI no veía su disco)
+  INST3=${INST%,$K/SDHCI.TXT}
+  rm -f $X/usb3.img; truncate -s 16M $X/usb3.img; mkfs.fat -F 16 -n MEMORIA $X/usb3.img > /dev/null
+  cp $K/SDHCI.TXT $X/sdhci3.txt; printf 'equipo=12378086 11001AF4\r\nsdio=prueba\r\n' > $X/sdio3.txt
+  head -c 32108 /dev/urandom > $X/fw3.bin; printf 'licencia de prueba\r\n' > $X/lic3.txt
+  mcopy -i $X/usb3.img $X/sdhci3.txt ::SDHCI.TXT; mcopy -i $X/usb3.img $X/sdio3.txt ::SDIO.TXT
+  mmd -i $X/usb3.img ::FIRMWARE; mcopy -i $X/usb3.img $X/fw3.bin ::FIRMWARE/rtl8723bs_nic.bin; mcopy -i $X/usb3.img $X/lic3.txt ::FIRMWARE/LICENCE.rtlwifi_firmware.txt
+  U3="-device qemu-xhci,id=u -drive id=mu,file=$X/usb3.img,format=raw,if=none -device usb-storage,bus=u.0,drive=mu"
   I=$X/inst3.img; rm -f $I; truncate -s 512M $I
-  CAPTURAS=$X ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS=$INST ARRANQUE="instalar unidad=M sinacpi sin8042" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 1" \
+  CAPTURAS=$X ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS=$INST3 QEMU_MAS="$U3" ARRANQUE="instalar unidad=M sinacpi sin8042" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" \
     ":tecla ret" ":texto t1" ":tecla ret" ":texto t2" ":tecla ret" ":pausa 6" ":texto t3" ":tecla ret" > $X/inst3.sal 2>&1
   S=$X/inst3.sal
   dd if=$I of=$X/vol3.img bs=512 skip=2048 conv=sparse status=none
@@ -244,6 +254,24 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
     && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinred sinacpi$" $X/cfg3.txt && ! grep -q "sinusb" $X/cfg3.txt && fsck.fat -n $X/vol3.img > /dev/null 2>&1; then
     ok "INSTALAR con «sinacpi sin8042» (la memoria del Acer One 10): lo instalado arranca sin ACPI (la segunda, «CON ACPI»), y la de emergencia, con el USB (el teclado)"
   else ko "INSTALAR no hereda «sinacpi» o «sin8042»:"; grep -n "menuentry\|NUCLEO.BIN" $X/cfg3.txt | sed 's/^/        /' | head -14; grep "^instalar:" $S | sed 's/^/        /' | head -6; fi
+  if cmp -s <(mcopy -n -i $X/vol3.img ::SDHCI.TXT - 2> /dev/null) $X/sdhci3.txt && cmp -s <(mcopy -n -i $X/vol3.img ::SDIO.TXT - 2> /dev/null) $X/sdio3.txt \
+    && cmp -s <(mcopy -n -i $X/vol3.img ::FIRMWARE/RTL872~1.BIN - 2> /dev/null) $X/fw3.bin && mdir -i $X/vol3.img ::FIRMWARE 2> /dev/null | grep -q "^LICENC~1 TXT" \
+    && grep -q '^instalar: X:.SDHCI.TXT (lo aprendido en este equipo), también$' $S && grep -q '^instalar: X:.FIRMWARE.RTL872~1.BIN (32108 octetos), a .FIRMWARE$' $S; then
+    ok "INSTALAR: \\SDHCI.TXT y \\SDIO.TXT de la memoria USB (X:, sin venir como módulos) van a lo instalado (y su « sdhci=...» al GRUB.CFG), y X:\\FIRMWARE, a C:\\FIRMWARE"
+  else ko "INSTALAR no se lleva lo de la memoria USB (X:):"; mdir -i $X/vol3.img :: 2>&1 | sed 's/^/        /' | head -12; mdir -i $X/vol3.img ::FIRMWARE 2>&1 | sed 's/^/        /' | head -6; grep "^instalar:" $S | sed 's/^/        /' | head -8; fi
+  # sin \SDHCI.TXT en ningún sitio: lo que diga la línea del cargador (« sdhci=...»,
+  # como la entrada Instalar de la memoria del Acer One 10)
+  mdel -i $X/usb3.img ::SDHCI.TXT
+  I=$X/inst4.img; rm -f $I; truncate -s 512M $I
+  CAPTURAS=$X ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS=$INST3 QEMU_MAS="$U3" ARRANQUE="instalar unidad=M sinacpi registro sdhci=$basei" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 3" \
+    ":tecla ret" ":texto u1" ":tecla ret" ":texto u2" ":tecla ret" ":pausa 6" ":texto u3" ":tecla ret" > $X/inst4.sal 2>&1
+  S=$X/inst4.sal
+  dd if=$I of=$X/vol4.img bs=512 skip=2048 conv=sparse status=none
+  rm -f $X/cfg4.txt; mcopy -n -i $X/vol4.img ::HISPA/GRUB.CFG $X/cfg4.txt > /dev/null 2>&1
+  if grep -q "Hispa-Pentium está instalado" $X/u3.txt && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura sinacpi registro sdhci=$basei$" $X/cfg4.txt \
+    && grep -q "^instalar: las controladoras SD/eMMC de la línea del cargador, en el GRUB.CFG: sdhci=$basei$" $S; then
+    ok "INSTALAR sin \\SDHCI.TXT y con « sdhci=$basei» en su línea: lo instalado la lleva en la suya (y arranca sin ACPI; con «registro», heredado, deja C:\\ARRANQUE.TXT)"
+  else ko "INSTALAR no pasa « sdhci=...» de su línea a lo instalado:"; grep -n "NUCLEO.BIN" $X/cfg4.txt | sed 's/^/        /' | head -6; grep "^instalar:" $S | sed 's/^/        /' | head -6; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba INSTALAR en la tarjeta SD)"
 fi
