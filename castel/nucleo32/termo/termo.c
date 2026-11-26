@@ -4600,9 +4600,16 @@ static void lanza_envio(void)
 	envio_cartel = 1;
 	if (!hay_red_ya()) {
 		char t[800];
+		u32 ip, e = sc(97, (u32)&ip, 0, 0);
 
-		snprintf(t, sizeof t, "NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez; "
-			 "o súbalo al FTP: los archivos siguen en %s.", carpeta);
+		/* (TERMO 1.2.1) con enlace y pidiendo la IP (RED_BUSCANDO), no «no hay
+		 * cable»: el ASUS GL553VD, con el cable puesto y la luz verde */
+		if (e == 3)
+			snprintf(t, sizeof t, "NO ENVIADO: sin red todavía: hay cable (o Wi-Fi o el móvil), pero aún no hay dirección IP (se está pidiendo por DHCP). Espere unos segundos y pulse E otra vez; "
+				 "si no llega, mire el router (o desenchufe y enchufe el cable). O súbalo al FTP: los archivos siguen en %s.", carpeta);
+		else
+			snprintf(t, sizeof t, "NO ENVIADO: sin red (%s). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez; "
+				 "o súbalo al FTP: los archivos siguen en %s.", e == 2 ? "no hay cable ni Wi-Fi conectado: la tarjeta no tiene enlace" : "no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP", carpeta);
 		envio_acaba(t);
 		return;
 	}

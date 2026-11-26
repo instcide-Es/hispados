@@ -297,6 +297,14 @@ VERSION_0811 = '0.8.11'
 # marcha RED.BIN con el escritorio también en esas tabletas, e INSTALAR lleva
 # \SDIO.TXT a la raíz. (La 0.8.12 junta termo-fuerte, informe-disp, usb-movil,
 # bluetooth y wifi-sdio: docs/PENTIUM.md, «La 0.8.12».)
+# (TERMO 1.2.1, 26/11/2026, rama termo-121) el paquete termo 1.2.1 (termo/
+# paquete.sh), sin cambiar la base («base >= 0.8.12»): el ritmo de la carga
+# (el .LOG y el .CSV, de una vez por segundo tras la pantalla y la parada de
+# seguridad), el envío con el motivo de cada servidor, «Carga: LIGERA/FUERTE»
+# en grande y las lecturas de RAPL perdidas en INFORME.TXT. La carga «de
+# fondo» (Tareas.de_fondo, la 224 con EBX = 9) es del núcleo de esta rama: va
+# en la memoria del Termómetro y en la próxima base; con la 0.8.12, TERMO.BIN
+# sigue como antes (por turnos)
 # (BLUETOOTH, 25/11/2026, rama bluetooth) el Bluetooth: en el núcleo, el
 # transporte por USB (usbbt.cas: las llamadas 240 a 248), los teclados y
 # ratones Bluetooth en usbhid.cas, el sello y los secretos de BT.BIN y el

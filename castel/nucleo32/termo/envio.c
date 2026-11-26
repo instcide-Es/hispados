@@ -537,6 +537,10 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 	if (!hay_red()) {
 		u32 ip, e = sc(SC_ESTADO_RED, (u32)&ip, 0, 0);
 
+		if (e == 3) {	/* (TERMO 1.2.1) con enlace, pidiendo la IP: no «no hay cable» */
+			di("NO ENVIADO: sin red todavía: hay cable (o Wi-Fi o el móvil), pero aún no hay dirección IP (se está pidiendo por DHCP). Espere unos segundos y pulse E otra vez; si no llega, mire el router (o desenchufe y enchufe el cable). O súbalo al FTP: los archivos siguen en %s.", carpeta);
+			return 2;
+		}
 		di("NO ENVIADO: sin red (%s). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez; o súbalo al FTP: los archivos siguen en %s.",
 		   ES_ERROR_RED(e) ? texto_red(e) : "no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP", carpeta);
 		return 2;
