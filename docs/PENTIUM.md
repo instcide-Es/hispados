@@ -4651,6 +4651,135 @@ reenviar puertos y `scp`/`sftp`; llaves RSA y ECDSA (solo ssh-ed25519); la
 sistema instalado, el escritorio lanza `SSHD /ARRANQUE` y `TAILSCALE /ARRANQUE`,
 que solo se quedan si se dejaron encendidos).
 
+## 14 quinquies bis. La consola remota «Dejar entrar a Claude» (rama pentium-remota)
+
+*26/11/2026.* Lo que teníamos en Hispa-DOS 386/486 (CONSOLA, [CONSOLA.md](CONSOLA.md):
+entrar desde el VPS por el router en los portátiles del taller, con un código
+que solo se ve en la pantalla) y faltaba en Pentium (Carlos: «te conectabas a
+los portátiles en Hispa-486 y no la has pasado a Pentium»). En Pentium va
+**cifrada**: es el servidor SSH de SSHD.BIN (curve25519, ssh-ed25519,
+chacha20-poly1305: sección 14 quinquies) con otra forma de entrar.
+
+**Para Carlos, en 4 pasos:**
+
+1. Menú Inicio › Sistema › **«Dejar entrar a Claude»** (o su icono del tapiz).
+   Si el usuario no es administrador, pide el nombre y la contraseña de uno.
+2. La ventana enseña un **código de 6 cifras** grande, lo que le queda (60 s),
+   la IP del equipo, la de Tailscale si la hay, el puerto (2323) y la huella
+   de la llave del equipo.
+3. Se le pasa el código a Claude (vale para **una** conexión; si caduca, sale
+   otro solo). Cuando entra, la ventana dice «CONECTADO: claude desde ...» y
+   enseña el botón **«Echar»** (o la tecla E).
+4. Al acabar, **Cerrar** (o Esc): el puerto deja de escuchar y ya no entra
+   nadie.
+
+### Por qué SSH y no el protocolo de CONSOLA
+
+CONSOLA (386/486) va en claro por TCP: el código y todo lo de dentro (órdenes,
+registros, las claves del Wi-Fi si se miran) se ven por el camino. Pentium ya
+tenía un SSH escrito y probado, así que la consola remota **es** SSH: el
+código de la pantalla es la contraseña de un solo uso, y el cliente es OpenSSH
+(con `tools/remota_pentium.py`). Se mantiene lo que valía de CONSOLA: el
+puerto **2323** (el mismo reenvío del router: `charlie-box.ddns.net:2323`), el
+código de 6 cifras solo en la pantalla, un solo uso, la caducidad, los tres
+intentos con la pausa que crece y que sin código no entra nadie. El cliente
+sabe también hablar con la CONSOLA de 386/486 (`consola486`).
+
+### Cómo es por dentro (`SSHD /REMOTA`, `nucleo32/ssh/remota.c`)
+
+- **Solo con la ventana abierta.** `SSHD /REMOTA` (lo que lanza el acceso,
+  `\HISPA\MENU\REMOTA.MNU`) abre la ventana y escucha en el 2323
+  (`/PUERTO=n` para otro); al cerrarla, el programa acaba y RED.BIN cierra su
+  escucha (`tcp_acabó`). No arranca sola ni deja nada encendido (no toca
+  SSHD.INI: el servidor SSH normal sigue como esté). Desde la Consola del
+  escritorio se abre aparte (un terminal del núcleo por programa). Sin
+  escritorio no se abre: lo que escribe el dueño de un terminal va a su tubo y
+  el código no se vería.
+- **El código.** 6 cifras (100000 a 999999) del azar de `h_azar` (el pozo del
+  núcleo, la llamada 210, mezclado con BLAKE2b), sin sesgo (se descarta lo que
+  no cabe en un múltiplo de 900.000) y nunca el anterior. Vale **60 s**
+  (`/CADUCA=s`) para **una** conexión: al entrar se gasta, y al salir sale
+  otro. Se compara entero (sin pararse en la primera cifra distinta); cada
+  fallo espera 2 s; al **tercer fallo** con un código, otro y una **pausa** sin
+  aceptar a nadie de 30 s (y el doble cada vez que se quema otro sin que entre
+  nadie, hasta 16 min). El código **solo** está en la ventana: ni en el puerto
+  serie, ni en REMOTA.LOG, ni en el disco. En SSH es el método «password» (el
+  nombre da igual; se apunta): ni llaves ni las contraseñas de los usuarios.
+- **Solo un administrador.** Con usuarios, la abre un administrador; si no lo
+  es quien la abre, la ventana pide el nombre y la contraseña de uno (la
+  comprueba el núcleo, la llamada 202: Argon2id). El intérprete de dentro es
+  de ese administrador (la 202 con 1, antes de cada ORDENES), y para tocar
+  `C:\HISPA` hace falta ADMIN, que pregunta en la pantalla del equipo.
+- **Dentro**, por la misma conexión (canales uno detrás de otro: con
+  ControlMaster, un código vale para toda la visita): la Consola (`ssh -t`),
+  órdenes sueltas (`ORDENES /C`) y **copiar archivos**: `remota:leer RUTA`
+  manda el archivo tal cual y `remota:escribir RUTA` lo escribe con lo que
+  llegue hasta el EOF (en sshd.c, sin el intérprete; los permisos, los del
+  administrador).
+- **El registro**: `C:\HISPA\REMOTA.LOG` (la regla de permisos.cas, del núcleo
+  de la base siguiente; con la base 0.8.12, que no la tiene, va a
+  `C:\HISPA\SSH\REMOTA.LOG`): cuándo se abre y se cierra, quién entra (el
+  nombre, la IP y el cliente), lo que hace, cuánto está, los códigos malos, los
+  caducados y los echados. Las cuatro últimas cosas se ven en la ventana.
+- **El cortafuegos** (RED.BIN 0.8.12.1, `rcorta.cas`): el 2323 entra desde
+  todas partes si ninguna regla de CORTAFUE.INI habla de él (y no se
+  pregunta); una regla suya («tcp 2323 nadie», «... red») manda.
+
+### El cliente: `tools/remota_pentium.py` (el VPS)
+
+```
+remota_pentium.py abrir charlie-box.ddns.net 123456 --nombre toshiba   (o la IP 100.x de Tailscale)
+remota_pentium.py orden "ver"
+remota_pentium.py registros                (WIFI.LOG, RED.LOG, ARRANQUE.TXT, SDHCI.TXT, SDIO.TXT, BT.LOG, REMOTA.LOG)
+remota_pentium.py leer '\HISPA\WIFI.LOG' wifi.log
+remota_pentium.py escribir prueba.bin '\DOCUMENT\PRUEBA.BIN'
+remota_pentium.py consola                  (la Consola entera)
+remota_pentium.py cerrar
+remota_pentium.py consola486 IP CODIGO "ver" "mem"     (la CONSOLA de Hispa-DOS 386/486, en claro)
+```
+
+`abrir` hace la conexión maestra de OpenSSH (el código, por SSH_ASKPASS, nunca
+en la línea de órdenes) y enseña la huella del equipo: tiene que ser la de la
+ventana. Las llaves de los equipos, en `~/.hispa_remota/conocidos`, por
+`--nombre` (detrás de un mismo router puede haber varios portátiles con el
+mismo 2323).
+
+### Sin abrir puertos: por Tailscale (la biblioteca, el HP Mini 2)
+
+Hispa-Pentium ya tiene Tailscale (paquete `tailscal`, sección 14 quinquies). En
+la biblioteca no hace falta tocar el router:
+
+1. En el HP Mini: Configuración › «Red y Tailscale...» › **Conectar**. La
+   primera vez sale una dirección de alta: Carlos la abre en otro equipo con
+   su cuenta de Tailscale y lo aprueba (como sus MacBook).
+2. Cuando diga «Conectado», el equipo tiene su IP **100.x** (y sale también en
+   la ventana de «Dejar entrar a Claude»).
+3. El VPS está en la misma red de Tailscale de Carlos: `remota_pentium.py
+   abrir 100.x.y.z CODIGO --nombre hpmini2`. Por Tailscale va todo por los
+   relevos DERP (cifrado dos veces), sin reenvíos en el router; las reglas de
+   la red (ACL) tienen que dejar el puerto 2323 hasta ese equipo (las de
+   fábrica de Tailscale lo dejan todo entre los equipos de una cuenta).
+4. Queda conectado en los arranques siguientes (TS.INI); la consola remota,
+   no: hay que abrir la ventana cada vez.
+
+### Las pruebas
+
+`castel/pruebas.sh`, parte 58 (`SOLO=remota`, `pruebas_remota.sh`): en el
+escritorio, con el cliente de verdad por QEMU (`hostfwd` al 2323), el código
+leído de las capturas de la ventana (`ssh/pruebas/codigo_ppm.py`): sin la
+ventana, el puerto cerrado; uno malo no entra, el bueno sí; una orden, un
+registro, llevar y traer 70 KB al azar, «registros» y un archivo que no está;
+uno por conexión; caducado a los 60 s; «Echar»; tres malos, la pausa y el
+siguiente; Esc cierra el puerto; REMOTA.LOG, y ningún código fuera de la
+ventana.
+
+### Los paquetes
+
+`ssh` 0.9 (SSHD.BIN con la consola remota y `\HISPA\MENU\REMOTA.MNU`, pide
+`red >= 0.8.12.1`) y `red` 0.8.12.1 (el cortafuegos con el 2323). Los dos son
+del sistema: llegan con «Actualizar todo». La regla de REMOTA.LOG en
+`\HISPA` (permisos.cas) va en el núcleo y saldrá con la base siguiente.
+
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
 
 *20/11/2026.* El núcleo y sus programas se pueden compilar **dentro de

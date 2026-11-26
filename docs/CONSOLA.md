@@ -50,6 +50,11 @@ A:\>SALIR
 Hasta luego.
 ```
 
+En **Hispa-Pentium** la consola remota es «Dejar entrar a Claude» (SSHD
+/REMOTA, cifrada por SSH, con el mismo puerto 2323 y el mismo código de un solo
+uso): [PENTIUM.md](PENTIUM.md), sección 14 quinquies bis. El cliente del VPS,
+`tools/remota_pentium.py`, habla con las dos (`consola486` para esta).
+
 ## Uso
 
 ```

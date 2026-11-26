@@ -29,8 +29,15 @@
  * las de los demás). La contraseña de SSHD /CLAVE de antes vale solo para un
  * administrador que aún no tiene la suya (la migración). Encender, apagar,
  * el puerto y /CLAVE, solo un administrador.
+ *
+ * (REMOTA) SSHD /REMOTA: la consola remota «Dejar entrar a Claude»
+ * (remota.c): solo mientras su ventana está abierta, en el puerto 2323, con
+ * un código de 6 cifras de un solo uso que se ve en la pantalla (la
+ * «contraseña»); dentro, el intérprete y copiar archivos (remota:leer y
+ * remota:escribir). docs/PENTIUM.md, «La consola remota».
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
 #include "ssh.h"
+#include "remota.h"
 #include "cripto.h"
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
@@ -39,13 +46,12 @@
 #define VENTANA 65536		/* lo que se deja mandar sin avisar */
 #define MAX_TROZO 16384
 
-static struct ssh S;
+struct ssh S;
 static char carpeta[48];
 static u32 puerto = 22;
 static u8 m[SSH_CABE];
 static u32 term_hecho;		/* el terminal del núcleo (uno por programa: el de este) */
 
-static int con_usuarios(void);		/* (USUARIOS) */
 
 static void ruta_de(char *d, const char *nombre)
 {
@@ -98,7 +104,7 @@ static void lee_puerto(void)
 }
 
 /* la llave del equipo: 32 octetos de semilla en LLAVE.SSH (se hace la primera vez) */
-static int llave_equipo(int hacer)
+int llave_equipo(int hacer)
 {
 	char r[80];
 	u8 sem[32];
@@ -121,7 +127,7 @@ static int llave_equipo(int hacer)
 	return 0;
 }
 
-static void huella_equipo(char *t)
+void huella_equipo(char *t)
 {
 	u8 blob[51];
 
@@ -162,7 +168,7 @@ static int comprueba_clave(const u8 *c, u32 n)
 	return k;
 }
 
-static int lee_secreto(char *d, int cabe)
+int lee_secreto(char *d, int cabe)
 {
 	int n = 0;
 
@@ -303,11 +309,13 @@ static int envia_fallo(void)
 	char metodos[40];
 
 	metodos[0] = 0;
-	if (con_usuarios())
+	if (remota)
+		formatear(metodos, sizeof metodos, "password");		/* (REMOTA) el código */
+	else if (con_usuarios())
 		formatear(metodos, sizeof metodos, "publickey,password");	/* (USUARIOS) */
 	else if (hay_autorizadas())
 		formatear(metodos, sizeof metodos, "publickey");
-	if (!con_usuarios() && hay_clave())
+	if (!remota && !con_usuarios() && hay_clave())
 		formatear(metodos + strlen(metodos), 20, "%spassword", metodos[0] ? "," : "");
 	sb_inicia(&b, m, sizeof m);
 	sb_u8(&b, SSH_USERAUTH_FAILURE);
@@ -316,31 +324,15 @@ static int envia_fallo(void)
 	return ssh_envia(&S, m, b.n);
 }
 
-/* ---- (USUARIOS) los usuarios del sistema (cuentas.cas; Ficha_usuario y
- * Pedido_usuario de usuario.cas: la misma forma) ---- */
-struct ficha_u {
-	u32 id;
-	u8 admin, entra_solo, con_clave, es_yo;
-	u32 imagen;
-	char nombre[24];
-	char carpeta[12];
-	u8 en_sesion, resto[15];
-};
-struct pedido_u {
-	u32 orden, id, admin, entra_solo, imagen, n_clave, n_vieja;
-	char nombre[24];
-	u8 clave[128];
-	u8 vieja[128];
-};
-
-static int con_usuarios(void)
+/* ---- (USUARIOS) los usuarios del sistema: las fichas, en remota.h ---- */
+int con_usuarios(void)
 {
 	u32 n = sc(SC_USUARIOS, 0, 0, 0);
 
 	return !ES_ERROR(n) && n > 0;
 }
 
-static int soy_administrador(void)
+int soy_administrador(void)
 {
 	return !con_usuarios() || sc(SC_USUARIOS, 3, 0, 0) == 1;
 }
@@ -366,7 +358,7 @@ static void a_437(const char *u, char *d, int cabe)
 }
 
 /* la ficha del usuario «u» (en UTF-8): 1 si lo hay */
-static int busca_usuario(const char *u, struct ficha_u *f)
+int busca_usuario(const char *u, struct ficha_u *f)
 {
 	char n[24];
 	u32 i;
@@ -380,7 +372,7 @@ static int busca_usuario(const char *u, struct ficha_u *f)
 
 /* el núcleo: ¿es esa su contraseña? (a = 0), o el de una llave ya
  * comprobada (a = 1). Si vale, el intérprete que se lance será suyo */
-static int entra_usuario(const struct ficha_u *f, u32 a, const u8 *c, u32 nc)
+int entra_usuario(const struct ficha_u *f, u32 a, const u8 *c, u32 nc)
 {
 	static struct pedido_u p;
 	u32 r;
@@ -434,21 +426,28 @@ static int usuario_vale(const char *u)
 	return h_es_ascii_igual(u, mio);
 }
 
+static char quien[64];		/* (REMOTA) el nombre con el que ha entrado */
+
 static int autentica(void)
 {
 	const u8 *pl;
 	u32 n;
 	int intentos = 0, r;
-	u32 limite = h_tics() + 120 * h_hz;
+	u32 limite = h_tics() + (remota ? 45 : 120) * h_hz;
 	struct sbuf b;
 
+	quien[0] = 0;
 	/* SERVICE_REQUEST «ssh-userauth» */
 	for (;;) {
-		r = ssh_lee(&S, &pl, &n, 50);
+		r = ssh_lee(&S, &pl, &n, remota ? 10 : 50);
 		if (r < 0)
 			return -1;
 		if ((int)(limite - h_tics()) <= 0)
 			return -1;
+		if (remota && remota_vigila()) {
+			ssh_corta(&S, 11, "el dueño del equipo ha cerrado la puerta");
+			return -1;
+		}
 		if (r == 0)
 			continue;
 		if (*pl == SSH_SERVICE_REQUEST) {
@@ -475,11 +474,15 @@ static int autentica(void)
 		u32 ns, nm, na, nb, nf;
 		char usuario[64];
 		struct ficha_u fu;
-		r = ssh_lee(&S, &pl, &n, 50);
+		r = ssh_lee(&S, &pl, &n, remota ? 10 : 50);
 		if (r < 0)
 			return -1;
 		if ((int)(limite - h_tics()) <= 0) {
 			ssh_corta(&S, 2, "demasiado tiempo sin entrar");
+			return -1;
+		}
+		if (remota && remota_vigila()) {
+			ssh_corta(&S, 11, "el dueño del equipo ha cerrado la puerta");
 			return -1;
 		}
 		if (r == 0 || *pl != SSH_USERAUTH_REQUEST)
@@ -493,6 +496,30 @@ static int autentica(void)
 			continue;
 		}
 		if (sl_cad_es(met, nm, "none")) {
+			envia_fallo();
+			continue;
+		}
+		if (remota) {
+			/* (REMOTA) el nombre da igual: entra quien tenga el código de la
+			 * pantalla (la «contraseña»); ni llaves ni contraseñas de nadie */
+			const u8 *c;
+			u32 nc;
+			int bien;
+			if (!sl_cad_es(met, nm, "password")) {
+				envia_fallo();
+				continue;
+			}
+			sl_u8(&l);
+			c = sl_cad(&l, &nc);
+			bien = l.mal ? 0 : remota_codigo(usuario, c, nc);
+			if (bien > 0) {
+				h_copia(quien, usuario, sizeof quien);
+				goto dentro;
+			}
+			/* (remota_codigo ya ha esperado 2 s; con el tercer fallo con un
+			 * código, o sin código vigente —en la pausa—, fuera) */
+			if (bien < 0 || ++intentos >= 3)
+				goto fuera;
 			envia_fallo();
 			continue;
 		}
@@ -746,11 +773,45 @@ static int lanza_ordenes(const char *args)
 
 	for (i = 0; i < 3; i++) {
 		formatear(r, sizeof r, sitios[i], h_sistema);
+		if (remota)
+			remota_lanza();		/* (REMOTA) del administrador que la abrió */
 		t = sc(SC_LANZAR, (u32)r, (u32)args, 0);
 		if (!ES_ERROR(t))
 			return t;
 	}
 	return -1;
+}
+
+/* (REMOTA) copiar archivos por el canal, sin el intérprete: «remota:leer
+ * RUTA» manda el archivo tal cual (como «cat»); «remota:escribir RUTA» lo
+ * escribe con lo que llegue hasta el EOF. La ruta llega en UTF-8 */
+#define ARCH_NADA 0
+#define ARCH_LEER 1
+#define ARCH_ESCRIBIR 2
+
+static int envia_estado(u32 suyo, u32 codigo)
+{
+	struct sbuf b;
+
+	sb_inicia(&b, m, sizeof m);
+	sb_u8(&b, SSH_CHANNEL_REQUEST);
+	sb_u32(&b, suyo);
+	sb_texto(&b, "exit-status");
+	sb_u8(&b, 0);
+	sb_u32(&b, codigo);
+	return ssh_envia(&S, m, b.n);
+}
+
+static int envia_error(u32 suyo, const char *t)
+{
+	struct sbuf b;
+
+	sb_inicia(&b, m, sizeof m);
+	sb_u8(&b, SSH_CHANNEL_EXTENDED_DATA);
+	sb_u32(&b, suyo);
+	sb_u32(&b, 1);
+	sb_texto(&b, t);
+	return ssh_envia(&S, m, b.n);
 }
 
 static int sesion(void)
@@ -762,6 +823,10 @@ static int sesion(void)
 	u32 ultimo_ini = h_tics();
 	struct sbuf b;
 	static char args[1100];
+	int arch = ARCH_NADA;		/* (REMOTA) copiar un archivo */
+	u32 fa = 0, n_arch = 0;		/* su archivo abierto y lo que se lleva */
+	int con_fa = 0;			/* (el número 0 es un archivo como otro: aparte) */
+	int arch_mal = 0;
 
 	t_ini = t_n = esc_n = utf_falta = 0;
 	con_pty = 0;
@@ -769,16 +834,31 @@ static int sesion(void)
 	while (sc(SC_TERMINAL, 1, (u32)sal, sizeof sal) > 0) ;
 	for (;;) {
 		int algo = 0;
-		if (h_tics() - ultimo_ini > 2 * h_hz) {
+		if (!remota && h_tics() - ultimo_ini > 2 * h_hz) {
 			ultimo_ini = h_tics();
 			if (!encendido()) {
 				ssh_corta(&S, 11, "el servidor SSH se ha apagado");
 				return -1;
 			}
 		}
-		r = ssh_lee(&S, &pl, &n, tarea >= 0 ? 1 : 20);
+		if (remota && remota_vigila()) {
+			/* (REMOTA) «Echar», o se cierra la ventana */
+			ssh_corta(&S, 11, "el dueño del equipo ha cerrado la sesión");
+			h_apunta("echado por el dueño del equipo");
+			if (con_fa)
+				sc(SC_CERRAR, fa, 0, 0);
+			return 1;
+		}
+		/* (REMOTA) un canal acabado (los dos han mandado CLOSE): se puede abrir otro */
+		if (remota && !abierto && cerrando) {
+			cerrando = acabado = 0;
+			tarea = -1;
+		}
+		r = ssh_lee(&S, &pl, &n, (tarea >= 0 || arch == ARCH_LEER) ? 1 : (remota ? 5 : 20));
 		if (r < 0) {
 			h_apunta("sesión acabada: %s", S.error);
+			if (con_fa)
+				sc(SC_CERRAR, fa, 0, 0);
 			return -1;
 		}
 		if (r > 0) {
@@ -791,7 +871,7 @@ static int sesion(void)
 				u32 nt, su = 0;
 				tipo = sl_cad(&l, &nt);
 				su = sl_u32(&l);
-				if (!abierto && sl_cad_es(tipo, nt, "session")) {
+				if (!abierto && !cerrando && sl_cad_es(tipo, nt, "session")) {
 					suyo = su;
 					ventana_suya = sl_u32(&l);
 					max_suyo = sl_u32(&l);
@@ -800,6 +880,11 @@ static int sesion(void)
 					if (max_suyo < 256)
 						max_suyo = 256;
 					abierto = 1;
+					mi_ventana = VENTANA;
+					con_pty = 0;
+					t_ini = t_n = esc_n = utf_falta = 0;
+					arch = ARCH_NADA;
+					arch_mal = 0;
 					sb_inicia(&b, m, sizeof m);
 					sb_u8(&b, SSH_CHANNEL_OPEN_CONFIRMATION);
 					sb_u32(&b, suyo);
@@ -831,7 +916,7 @@ static int sesion(void)
 					con_pty = 1;
 				if (sl_cad_es(q, nq, "pty-req") || sl_cad_es(q, nq, "window-change") || sl_cad_es(q, nq, "env")) {
 					bien = !sl_cad_es(q, nq, "env");
-				} else if ((sl_cad_es(q, nq, "shell") || sl_cad_es(q, nq, "exec")) && tarea < 0) {
+				} else if ((sl_cad_es(q, nq, "shell") || sl_cad_es(q, nq, "exec")) && tarea < 0 && arch == ARCH_NADA && abierto && !cerrando) {
 					args[0] = 0;
 					if (sl_cad_es(q, nq, "exec")) {
 						const u8 *o;
@@ -841,8 +926,44 @@ static int sesion(void)
 						for (i = 0; i < no && i < 1000; i++)
 							args[3 + i] = o[i] >= 128 ? '?' : o[i];
 						args[3 + i] = 0;
+						/* (REMOTA) copiar archivos: remota:leer RUTA, remota:escribir RUTA */
+						if (remota && (h_empieza(args + 3, "remota:leer ") || h_empieza(args + 3, "remota:escribir "))) {
+							static char u8r[1004];
+							char ruta[300], t[340];
+							int leer = h_empieza(args + 3, "remota:leer ");
+							memcpy(u8r, o, no < 1000 ? no : 1000);
+							u8r[no < 1000 ? no : 1000] = 0;
+							a_437(u8r + (leer ? 12 : 16), ruta, sizeof ruta);
+							fa = sc(SC_ABRIR, (u32)ruta, leer ? 0 : 2, 0);
+							formatear(t, sizeof t, "%s %s", leer ? "lee" : "escribe", ruta);
+							remota_hace(t);
+							h_apunta("%s", t);
+							n_arch = 0;
+							con_fa = !ES_ERROR(fa);
+							if (!con_fa) {
+								fa = 0;
+								formatear(t, sizeof t, "remota: no se puede %s %s\n", leer ? "leer" : "escribir", ruta);
+								bien = 1;
+								if (quiere && envia_canal(SSH_CHANNEL_SUCCESS, suyo) < 0)
+									return -1;
+								quiere = 0;
+								envia_error(suyo, t);
+								envia_estado(suyo, 1);
+								envia_canal(SSH_CHANNEL_EOF, suyo);
+								envia_canal(SSH_CHANNEL_CLOSE, suyo);
+								cerrando = 1;
+							} else {
+								arch = leer ? ARCH_LEER : ARCH_ESCRIBIR;
+								bien = 1;
+							}
+							goto contesta;
+						}
 						h_apunta("orden: %s", args + 3);
-					}
+						if (remota)
+							remota_hace(args + 3);
+					} else if (remota)
+						remota_hace("(la consola)");
+					while (sc(SC_TERMINAL, 1, (u32)sal, sizeof sal) > 0) ;
 					tarea = lanza_ordenes(args);
 					bien = tarea >= 0;
 					if (!bien)
@@ -851,6 +972,7 @@ static int sesion(void)
 					sc(SC_TERMINAL, 3, 0, 0);
 					bien = 1;
 				}
+contesta:
 				if (quiere && envia_canal(bien ? SSH_CHANNEL_SUCCESS : SSH_CHANNEL_FAILURE, suyo) < 0)
 					return -1;
 				break;
@@ -861,7 +983,13 @@ static int sesion(void)
 				sl_u32(&l);
 				d = sl_cad(&l, &nd);
 				if (!l.mal) {
-					teclea(d, nd);
+					if (arch == ARCH_ESCRIBIR) {
+						/* (REMOTA) lo que llega, al archivo */
+						if (con_fa && !arch_mal && nd && sc(SC_ESCRIBIR_ARCHIVO, fa, (u32)d, nd) != nd)
+							arch_mal = 1;
+						n_arch += nd;
+					} else if (arch == ARCH_NADA)
+						teclea(d, nd);
 					mi_ventana -= nd < mi_ventana ? nd : mi_ventana;
 					if (mi_ventana < VENTANA / 2) {
 						sb_inicia(&b, m, sizeof m);
@@ -880,12 +1008,54 @@ static int sesion(void)
 				ventana_suya += sl_u32(&l);
 				break;
 			case SSH_CHANNEL_EOF:
+				if (arch == ARCH_ESCRIBIR) {
+					/* (REMOTA) ya está todo: se cierra el archivo y se dice cómo ha ido */
+					char t[80];
+					if (con_fa)
+						sc(SC_CERRAR, fa, 0, 0);
+					fa = 0, con_fa = 0;
+					arch = ARCH_NADA;
+					h_apunta("escritos %u octetos%s", n_arch, arch_mal ? " (con un error)" : "");
+					if (arch_mal) {
+						formatear(t, sizeof t, "remota: error al escribir (¿lleno, o de solo lectura?)\n");
+						envia_error(suyo, t);
+					}
+					envia_estado(suyo, arch_mal ? 1 : 0);
+					envia_canal(SSH_CHANNEL_EOF, suyo);
+					envia_canal(SSH_CHANNEL_CLOSE, suyo);
+					cerrando = 1;
+				}
 				break;
 			case SSH_CHANNEL_CLOSE:
 				if (!cerrando)
 					envia_canal(SSH_CHANNEL_CLOSE, suyo);
 				h_apunta("sesión cerrada");
-				return 0;
+				if (!remota)
+					return 0;
+				/* (REMOTA) el canal se acaba, la conexión no: puede venir otro
+				 * (ssh -S, con ControlMaster: un código para varias cosas) */
+				if (con_fa)
+					sc(SC_CERRAR, fa, 0, 0);
+				fa = 0, con_fa = 0;
+				arch = ARCH_NADA;
+				if (tarea >= 0 && sc(SC_ESPERAR, tarea, 1, 0) == SIGUE) {
+					/* el intérprete sigue: Ctrl+C y SALIR (y, si no, que siga hasta el final) */
+					u32 hasta = h_tics() + 3 * h_hz;
+					const char *salir = "\nsalir\n";
+					sc(SC_TERMINAL, 3, 0, 0);
+					for (; *salir; salir++)
+						tecla(*salir);
+					while ((int)(hasta - h_tics()) > 0 && sc(SC_ESPERAR, tarea, 1, 0) == SIGUE) {
+						da_teclas();
+						while (sc(SC_TERMINAL, 1, (u32)sal, sizeof sal) > 0) ;
+						h_dormir(2);
+					}
+				}
+				while (sc(SC_TERMINAL, 1, (u32)sal, sizeof sal) > 0) ;
+				abierto = 0;
+				cerrando = 1;	/* (y en la vuelta siguiente, todo a cero) */
+				t_ini = t_n = 0;
+				break;
 			case SSH_GLOBAL_REQUEST: {
 				const u8 *q;
 				u32 nq;
@@ -901,6 +1071,36 @@ static int sesion(void)
 			}
 		}
 		da_teclas();
+		/* (REMOTA) un archivo que se lee: a trozos, lo que deje la ventana del otro */
+		if (arch == ARCH_LEER && !cerrando) {
+			u32 cabe = ventana_suya < max_suyo ? ventana_suya : max_suyo, k;
+			if (cabe > sizeof sal)
+				cabe = sizeof sal;
+			if (cabe >= 1024) {
+				k = sc(SC_LEER, fa, (u32)sal, cabe - 64);
+				if (!ES_ERROR(k) && k > 0) {
+					sb_inicia(&b, m, sizeof m);
+					sb_u8(&b, SSH_CHANNEL_DATA);
+					sb_u32(&b, suyo);
+					sb_cad(&b, sal, k);
+					if (ssh_envia(&S, m, b.n) < 0)
+						return -1;
+					ventana_suya -= k;
+					n_arch += k;
+					continue;
+				}
+				sc(SC_CERRAR, fa, 0, 0);
+				fa = 0, con_fa = 0;
+				arch = ARCH_NADA;
+				h_apunta("leídos %u octetos", n_arch);
+				if (ES_ERROR(k))
+					envia_error(suyo, "remota: error al leer\n");
+				envia_estado(suyo, ES_ERROR(k) ? 1 : 0);
+				envia_canal(SSH_CHANNEL_EOF, suyo);
+				envia_canal(SSH_CHANNEL_CLOSE, suyo);
+				cerrando = 1;
+			}
+		}
 		/* lo que ha escrito el intérprete */
 		if (tarea >= 0 && !cerrando) {
 			u32 cabe = ventana_suya < max_suyo ? ventana_suya : max_suyo, k;
@@ -925,13 +1125,7 @@ static int sesion(void)
 					acabado = 1;
 					continue;	/* (una vuelta más, por lo que quede en el tubo) */
 				}
-				sb_inicia(&b, m, sizeof m);
-				sb_u8(&b, SSH_CHANNEL_REQUEST);
-				sb_u32(&b, suyo);
-				sb_texto(&b, "exit-status");
-				sb_u8(&b, 0);
-				sb_u32(&b, 0);
-				ssh_envia(&S, m, b.n);
+				envia_estado(suyo, 0);
 				envia_canal(SSH_CHANNEL_EOF, suyo);
 				envia_canal(SSH_CHANNEL_CLOSE, suyo);
 				cerrando = 1;
@@ -942,22 +1136,28 @@ static int sesion(void)
 	}
 }
 
-static void atiende(u32 c, u32 ip)
+int atiende(u32 c, u32 ip, u32 pu)
 {
 	char t[16];
+	int dentro = 0;
 
 	h_ip_a_texto(ip, t);
-	h_apunta("llega una conexión de %s", t);
+	h_apunta("llega una conexión de %s:%u", t, pu);
 	ssh_prepara(&S, 1, c);
 	if (ssh_empieza(&S) < 0) {
 		h_apunta("no se ha podido empezar: %s", S.error);
 	} else if (autentica() < 0) {
 		h_apunta("no ha entrado: %s", S.error[0] ? S.error : "sin autenticar");
-	} else
+	} else {
+		dentro = 1;
+		if (remota)
+			remota_entra(quien);
 		sesion();
+	}
 	h_cerrar_red(c);
 	crypto_wipe(S.k_ent, sizeof S.k_ent);
 	crypto_wipe(S.k_sal, sizeof S.k_sal);
+	return dentro;
 }
 
 static int servicio(void)
@@ -991,7 +1191,7 @@ static int servicio(void)
 	for (;;) {
 		c = h_aceptar(l, 2 * h_hz, &ip, &pu);
 		if (!ES_ERROR(c))
-			atiende(c, ip);
+			atiende(c, ip, pu);
 		else if (c != TIEMPO) {
 			h_apunta("al esperar conexiones: %s", h_texto_error_red(c));
 			h_dormir(2 * h_hz);
@@ -1047,6 +1247,8 @@ static void ayuda(void)
 		  "  SSHD /APAGAR     lo apaga\n"
 		  "  SSHD /CLAVE      pone la contraseña para entrar\n"
 		  "  SSHD /PUERTO=n   el puerto (22 si no se dice)\n"
+		  "  SSHD /REMOTA     «Dejar entrar a Claude»: la consola remota, con un código\n"
+		  "                   de un solo uso en la pantalla, mientras está abierta\n"
 		  "Las llaves públicas que pueden entrar sin contraseña, en \\HISPA\\SSH\\AUTORIZA.TXT.\n");
 }
 
@@ -1060,6 +1262,9 @@ int principal(void)
 	h_carpeta(carpeta);
 	if (h_empieza(a, "/SERVICIO"))
 		return servicio();
+	/* (REMOTA) «Dejar entrar a Claude»: la consola remota (remota.c) */
+	if (h_empieza(a, "/REMOTA"))
+		return remota_principal(a + 7);
 	/* (al arrancar el escritorio: solo si se dejó encendido) */
 	if (h_empieza(a, "/ARRANQUE"))
 		return encendido() ? servicio() : 0;

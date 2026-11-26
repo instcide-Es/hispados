@@ -402,6 +402,13 @@
 # (y, para corre32, gcc y ld con elf_i386; para la parte 16, grub-mkrescue,
 # xorriso y python3-cryptography). El disquete de
 # Hispa-8086 se monta solo (make en h8086) si no está hecho.
+#  58. (REMOTA, SOLO=remota) La consola remota «Dejar entrar a Claude» (SSHD
+#      /REMOTA, nucleo32/ssh/remota.c; pruebas_remota.sh) con el cliente
+#      tools/remota_pentium.py, por QEMU: sin la ventana, el puerto cerrado;
+#      el código (leído de la captura) malo no entra y el bueno sí; dentro,
+#      una orden, leer un registro, llevar y traer un archivo y «registros»;
+#      uno por conexión; caduca a los 60 s; «Echar»; tres malos, otro código y
+#      la pausa; Esc la cierra; y REMOTA.LOG (sin ningún código en él).
 #  43. (AGENDA, SOLO=agenda) La Agenda (AGENDA.BIN; pruebas_agenda.sh): las
 #      repeticiones frente a python-dateutil, el cambio de hora, un .ICS de
 #      Google de ida y vuelta, los cumpleaños de una vCard, los festivos (la
@@ -439,6 +446,7 @@
 #   SOLO=zip ./pruebas.sh         la primera y la 31 (Comprimidos: ZIP y UNZIP; pruebas_zipvisor.sh)
 #   SOLO=mirador ./pruebas.sh     la primera y la 32 (el Mirador y la imagen de tapiz; pruebas_zipvisor.sh)
 #   SOLO=cortes ./pruebas.sh      la primera y la 37 ((CORTES) los cortes de la red; pruebas_cortes.sh)
+#   SOLO=remota ./pruebas.sh      la primera y la 58 (REMOTA: «Dejar entrar a Claude», la consola remota; pruebas_remota.sh)
 #   SOLO=usuarios ./pruebas.sh    la primera y la 38 (USUARIOS: los usuarios, la serie del catálogo, el azar; pruebas_usuarios.sh)
 #   SOLO=panel ./pruebas.sh       la primera y la 34 ((PANEL) el Panel de control y la hora por Internet; pruebas_panel.sh)
 #   SOLO=bloc ./pruebas.sh        la primera y la 35 (BLOC: el Bloc de notas 1.0)
@@ -512,6 +520,7 @@ miracap() {    # lo que se prueba, la captura y sus comprobaciones
 . $AQUI/pruebas32.sh               # la parte 15 (CASTEL32), como la función parte15
 . $AQUI/pruebas_zipvisor.sh        # (ZIP) (MIRADOR) las partes 31 y 32, como parte_zip y parte_mirador
 . $AQUI/pruebas_usuarios.sh        # (USUARIOS) la parte 38, como parte_usuarios
+. $AQUI/pruebas_remota.sh          # (REMOTA) la parte 58, como parte_remota
 . $AQUI/pruebas_panel.sh           # (PANEL) la parte 34, como parte_panel
 . $AQUI/pruebas_reproductor.sh     # (REPRODUCTOR) la parte 36, como parte_reproductor
 . $AQUI/pruebas_juegos.sh          # (JUEGOS2) la parte 39, como parte_juegos
@@ -556,7 +565,7 @@ if grep -q "^    público constante VERSIÓN_TEXTO = \"$VERSION_BASE\"$" $AQUI/n
 else ko "VERSIÓN_TEXTO de usuario.cas no es la $VERSION_BASE de la base de hpq.py"; fi
 # SOLO=caliente, paquetes, red o acpi: la primera parte y solo esa de la 0.8;
 # SOLO=08, la primera y todas las de la 0.8 (como SOLO=32, que las lleva también)
-case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil|bt|rtl) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
+case "${SOLO:-}" in caliente|paquetes|red|acpi|tls|cd|pantalla|navegador|dispositivos|informe|ssh|lectores|win32|rueda|menu|programas|protege|escudo|wifi|intel|accesorios|sonido|pdf|zip|mirador|usuarios|remota|panel|bloc|reproductor|win32juegos|juegos|pluma|oficina|correo|agenda|cuentas|pintura|cortes|iconos|uefi|termo|compat|touchpad|punteros|i2chid|sdhci|movil|bt|rtl) SOLO08=$SOLO; SOLO=08 ;; *) SOLO08= ;; esac   # (TERMO) (UEFI) (COMPAT) (TOUCHPAD) (PUNTEROS) (I2CHID) (INTELWIFI) (SDHCI)
 parte08() { case "${SOLO:-}" in ""|32) return 0 ;; 08) [ -z "$SOLO08" ] || [ "$SOLO08" = $1 ] ;; *) return 1 ;; esac; }
 
 if [ "${SOLO:-}" = errores ]; then
@@ -6144,6 +6153,8 @@ if parte08 zip; then parte_zip; else echo "  (SOLO=${SOLO08:-$SOLO}: sin Comprim
 if parte08 mirador; then parte_mirador; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Mirador)"; fi
 # ------------------------- 38. (USUARIOS) los usuarios, la serie del catálogo y el azar
 if parte08 usuarios; then parte_usuarios; else echo "  (SOLO=${SOLO08:-$SOLO}: sin los usuarios)"; fi
+# ------------------------- 58. (REMOTA) la consola remota «Dejar entrar a Claude»
+if parte08 remota; then parte_remota; else echo "  (SOLO=${SOLO08:-$SOLO}: sin la consola remota)"; fi
 # ------------- 34. (PANEL) el Panel de control y la hora por Internet (pruebas_panel.sh)
 if parte08 panel; then parte_panel; else echo "  (SOLO=${SOLO08:-$SOLO}: sin el Panel de control)"; fi
 # ------------------------- 36. (REPRODUCTOR) el Reproductor (pruebas_reproductor.sh)

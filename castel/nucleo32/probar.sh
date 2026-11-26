@@ -89,6 +89,9 @@ case " ${QEMU_MAS:-} " in *" -nic "*|*" -netdev "*) ;; *) INITRD+=(-nic none) ;;
 qemu-system-i386 -kernel "$BIN" "${INITRD[@]}" -display none -monitor unix:$T/mon,server,nowait \
   -serial file:$T/sal -device isa-debug-exit,iobase=0xf4,iosize=0x04 -no-reboot -rtc base=${RELOJ:-localtime} -m ${MEMORIA:-32} > /dev/null 2>&1 &
 QPID=$!
+# (REMOTA) con SERIE_VIVA=archivo, lo que va diciendo el puerto serie, ya
+# (un enlace: para un cliente de la prueba que lo lee mientras corre)
+[ -n "${SERIE_VIVA:-}" ] && ln -sf $T/sal "$SERIE_VIVA"
 mon() { printf '%s\n' "$1" | socat - UNIX-CONNECT:$T/mon > /dev/null 2>&1; sleep "${2:-0.08}"; }
 # las teclas de cada letra en el teclado español, como las llama «sendkey»
 # (alt_r es Alt Gr; los acentos son teclas muertas: primero el acento)

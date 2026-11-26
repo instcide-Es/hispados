@@ -260,6 +260,7 @@ módulo Permisos
         regla("SSH\\ID_ED.PUB", B_SSH, falso)
         regla("SSH\\CONOCIDO.TXT", B_SSH, falso)
         regla("SSH\\", B_SSH ob B_SSHD, falso)
+        regla("REMOTA.LOG", B_SSHD, falso)                 ; (REMOTA) quién entra por la consola remota (SSHD /REMOTA) y qué hace
         regla("SSHD.SEM", B_SSHD, cierto)                  ; (las semillas del azar de cada uno)
         regla("SSH.SEM", B_SSH, cierto)
         regla("WG.SEM", B_WG, cierto)

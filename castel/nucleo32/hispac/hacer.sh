@@ -4,7 +4,7 @@
 # Hace, en CARPETA, los programas en C del anillo 3 de Hispa-Pentium que
 # hablan SSH, WireGuard y Tailscale (docs/PENTIUM.md, «SSH» y «Tailscale»):
 #   SSH.BIN        el cliente SSH (ssh/sshc.c)
-#   SSHD.BIN       el servidor SSH (ssh/sshd.c)
+#   SSHD.BIN       el servidor SSH (ssh/sshd.c) y la consola remota (REMOTA: ssh/remota.c)
 #   WG.BIN         un túnel WireGuard, como wg-quick (wg/wgmain.c)
 #   TAILSCAL.BIN   el cliente de Tailscale (tailscale/ts.c, con wg/wg.c; la orden TAILSCALE)
 #   ARGON2.BIN     (USUARIOS) el que resume las contraseñas de los usuarios (hispac/argon2.c)
@@ -26,7 +26,7 @@ HC=$N/hispac
 CF="-m32 -std=gnu11 -march=i586 -O2 -ffreestanding -fno-pic -fno-stack-protector -fno-asynchronous-unwind-tables
     -fno-builtin -fno-tree-loop-distribute-patterns -ffunction-sections -fdata-sections -Wall -Wno-unused
     -I$HC -Iterceros/monocypher -I$N/ssh -I$N/wg -I$N/tailscale"
-CABECERAS="$HC/hispa.h $HC/cripto.h $N/ssh/ssh.h $N/ssh/vt.h $N/wg/wg.h"
+CABECERAS="$HC/hispa.h $HC/cripto.h $N/ssh/ssh.h $N/ssh/remota.h $N/ssh/vt.h $N/wg/wg.h"
 [ -f $N/tailscale/ts.h ] && CABECERAS="$CABECERAS $N/tailscale/ts.h"
 # objeto(fuente, objeto, opciones de más): solo si ha cambiado (o alguna cabecera)
 objeto() {
@@ -48,7 +48,7 @@ objeto $HC/cripto.c $O/cripto.o
 # (TERMO) el terminal de la ventana de SSH.BIN (ssh/vt.c), con la letra de 8x16 del escritorio
 python3 -I $N/juegos/datos386.py $O/datos386.h $O/letra.h
 objeto $N/ssh/vt.c $O/vt.o -I$O
-for f in ssh/ssh ssh/sshd ssh/sshc wg/wg wg/wgmain; do
+for f in ssh/ssh ssh/sshd ssh/remota ssh/sshc wg/wg wg/wgmain; do
   objeto $N/$f.c $O/$(basename $f).o -fexec-charset=CP437
 done
 objeto $HC/argon2.c $O/argon2.o -fexec-charset=CP437       # (USUARIOS)
@@ -62,7 +62,7 @@ enlaza() {
   ld -m elf_i386 --no-warn-rwx-segments -z noexecstack --gc-sections -T $HC/pentium.ld -o $O/$nombre.elf $COMUN "$@" "$LIBGCC"
   objcopy -O binary $O/$nombre.elf "$SAL/$nombre.BIN"
 }
-enlaza SSHD $O/ssh.o $O/sshd.o
+enlaza SSHD $O/ssh.o $O/sshd.o $O/remota.o
 enlaza SSH $O/ssh.o $O/sshc.o $O/vt.o
 enlaza WG $O/wg.o $O/wgmain.o
 enlaza ARGON2 $O/argon2.o                                   # (USUARIOS)

@@ -348,14 +348,19 @@ SISTEMA = [
     # (0.8.10) la RTL8111/8168 (rrtl.cas) y RED.LOG con Registro=SI
     # (0.8.11) RED.BIN: WIFI.BIN otra vez en el mismo arranque, con «/OTRA» (WIFI.LOG sigue)
     # (0.8.12) (MÓVIL) el móvil por USB (rmovil.cas: RNDIS y CDC-NCM; con una base de antes, sin él)
-    ('red', VERSION_0812, 'La red: el servicio de red (RED.BIN; el cable, el Wi-Fi y el móvil por USB), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    # (REMOTA, 26/11/2026) 0.8.12.1: el cortafuegos deja entrar al puerto 2323 (la
+    # consola remota «Dejar entrar a Claude», que solo escucha con su ventana abierta)
+    ('red', '0.8.12.1', 'La red: el servicio de red (RED.BIN; el cable, el Wi-Fi y el móvil por USB), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
         ('TLS.BIN', r'\HISPA\TLS.BIN'), ('HTTPS.BIN', r'\HISPA\HTTPS.BIN')]),
     # (0.8.9) SSH con el terminal nuevo en su ventana (ssh/vt.c: xterm-256color, el tamaño con window-change; el del Termómetro)
-    ('ssh', VERSION_089, 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda)', 'base >= ' + VERSION_087 + ', red >= 0.8.4', [
-        ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN')]),
+    # (REMOTA, 26/11/2026) 0.9: «Dejar entrar a Claude», la consola remota (SSHD /REMOTA,
+    # ssh/remota.c), con su acceso en el menú Inicio y en el tapiz (REMOTA.MNU); pide
+    # la red 0.8.12.1 (el cortafuegos deja el 2323)
+    ('ssh', '0.9', 'SSH: entrar en otros equipos (SSH) y en este desde otros (SSHD, con los usuarios del equipo; apagado hasta que se encienda) y «Dejar entrar a Claude» (la consola remota, con un código de un solo uso)', 'base >= ' + VERSION_087 + ', red >= 0.8.12.1', [
+        ('SSH.BIN', r'\HISPA\SSH.BIN'), ('SSHD.BIN', r'\HISPA\SSHD.BIN'), ('REMOTA.MNU', r'\HISPA\MENU\REMOTA.MNU')]),
     ('tailscal', '0.8.9', 'Tailscale y WireGuard: la red privada de sus equipos, cada uno con su nombre y su IP 100.x', 'base >= 0.8.4, red >= 0.8.4, tls >= 0.8.1', [
         ('TAILSCAL.BIN', r'\HISPA\TAILSCAL.BIN'), ('WG.BIN', r'\HISPA\WG.BIN')]),
     # (WIFI) el Wi-Fi (castel/nucleo32/wifi/, docs/PENTIUM.md «El Wi-Fi»); el microcódigo, con su licencia

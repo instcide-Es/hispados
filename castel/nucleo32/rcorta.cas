@@ -39,6 +39,14 @@ módulo Rcorta
     constante MAX_PENDIENTES = 4
     constante MAX_BLOQUEADOS = 24
 
+    ; (REMOTA) el puerto de la consola remota «Dejar entrar a Claude» (SSHD
+    ; /REMOTA, ssh/remota.c): solo escucha mientras su ventana está abierta y
+    ; cada conexión pide un código de un solo uso que solo se ve en la
+    ; pantalla; si ninguna regla habla de él, entra desde todas partes (el
+    ; router lo reenvía desde Internet). Una regla suya («tcp 2323 nadie»,
+    ; «... red»...) manda sobre esto
+    constante PUERTO_REMOTA = 2323
+
     ; de dónde
     constante D_NADIE = 0
     constante D_TODOS = 1
@@ -248,12 +256,16 @@ módulo Rcorta
     ; la red local; túnel: de la de Tailscale)
     público función deja_tcp(ip: nat32, puerto: nat32, local: bool, túnel: bool): bool
         variable i: nat32
+        variable con_regla: bool
         si no activo entonces devolver cierto fin
+        con_regla := falso
         para i desde 0 hasta MAX_REGLAS - 1 hacer
             si i < n_reglas y reglas[i].puerto = puerto entonces
+                con_regla := cierto
                 si de_la_red(reglas[i].de, ip, local, túnel, reglas[i].ip, reglas[i].máscara) entonces devolver cierto fin
             fin
         fin
+        si puerto = PUERTO_REMOTA y no con_regla entonces devolver cierto fin     ; (REMOTA)
         apunta_bloqueado(6, ip, puerto)
         devolver falso
     fin
@@ -271,6 +283,7 @@ módulo Rcorta
     público función escucha_nueva(puerto: nat32, dueño: nat32)
         variable i: nat32
         si no activo o no avisar entonces devolver fin
+        si puerto = PUERTO_REMOTA entonces devolver fin     ; (REMOTA) la consola remota: no se pregunta
         para i desde 0 hasta MAX_REGLAS - 1 hacer
             si i < n_reglas y reglas[i].puerto = puerto entonces devolver fin
         fin

@@ -152,6 +152,12 @@ for n in CALC.MNU RELOJ.MNU CARACTER.MNU CALC.ICP RELOJ.ICP CARACT.ICP; do
 "
   printf '%s=HISPA\\MENU\r\n' $n >> $W/i/CARPETAS.TXT
 done
+# (REMOTA) el acceso de «Dejar entrar a Claude» (SSHD /REMOTA: la consola
+# remota, ssh/remota.c), del paquete «ssh», en el menú Inicio y en el tapiz
+cp $AQUI/ssh/REMOTA.MNU $W/i/
+INSTALA="$INSTALA  module /INSTALA/REMOTA.MNU REMOTA.MNU
+"
+printf 'REMOTA.MNU=HISPA\\MENU\r\n' >> $W/i/CARPETAS.TXT
 # (PINTURA32, 0.8.8) Pintura 2, del sistema (el paquete «pintura» 2.0): solo
 # en el sistema instalado (como la oficina): PINTURA.BIN y su PINTURA.TXT a
 # \HISPA; su acceso (tipo=Multimedia, sin icono en el escritorio) y su icono
