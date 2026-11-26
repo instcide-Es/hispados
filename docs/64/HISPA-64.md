@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). El navegador, en la 10 b | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). Quedan IPv6, la libstdc++ compilada para musl (y C++ dinámico) y el navegador mismo | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -438,7 +438,9 @@ del sistema con musl, con un puente: `cxx.sh`), **FreeType y HarfBuzz**
 (compilados con musl, la misma letra que en Linux), **TCP de hoy** (escala
 de ventana, lo desordenado guardado, SACK) y los límites de un proceso (512
 hilos, 256 descriptores). Queda (la «10 b», sección 16): ICU, curl, IPv6, la
-libstdc++ compilada para musl y el navegador mismo.
+libstdc++ compilada para musl y el navegador mismo. De la 10 b, la base
+(sección 19): **curl** con BearSSL (la orden CURL y libcurl) e **ICU** (con
+los datos de aquí, filtrados), y readlink para que ICU sepa la zona.
 
 - C++ completo (libc++ y libunwind, o libstdc++), FreeType, HarfBuzz, ICU, curl,
   y Ladybird (o WPE WebKit) con su ventana sobre el compositor.
@@ -3253,4 +3255,253 @@ nuevo:
 - Probar ACPICA en el taller: la batería y el EC del Toshiba y el HP Mini
   (las mismas tablas que ya pasan por el simulador de Hispa-DOS), el brillo
   y el botón de los portátiles.
-- De la 10 b y la 11, lo que sigue allí.
+- De la 10 b y la 11, lo que sigue allí (de la 10 b, curl e ICU, hechos:
+  sección 19).
+
+## 19. La etapa 10 b, la base hecha (25/11/2026): curl con BearSSL e ICU
+
+### Las decisiones
+
+- **Por qué la 10 b y no la 12**: el plan pone el navegador (la 10) antes
+  de instalar y mantener (la 12), y la 11 y la 11 b se adelantaron porque
+  pedían cosas del núcleo que la 10 b no necesitaba (el planificador, la
+  INTx, ACPICA). De la 10 b, lo de abajo de todo, lo que cualquier
+  navegador (Ladybird o WPE WebKit) pide antes de dibujar una página:
+  **bajar por HTTP y HTTPS** (curl) y **el texto de hoy** (ICU). El
+  navegador mismo, IPv6 y la libstdc++ compilada para musl, después (abajo).
+- **curl 8.14.1, la última con BearSSL** (la 8.15 lo quitó), y no otra
+  biblioteca de TLS: BearSSL ya está en `terceros/` (DESCARGA, TLS.BIN,
+  HSPTLS.DLL), es MIT, pequeña y sin hilos ni estado global. Las fuentes,
+  sin cambiar nada; la configuración, la que saca **su configure** para
+  `x86_64-linux-musl` con la musl de Hispa-64 (`lib/curl_config.h`, con las
+  opciones en `terceros/curl/LEEME.txt`: HTTP/1.1, HTTPS, FTP, FILE y
+  WebSocket; IPv6 pedido; el resolutor de nombres en su hilo), y luego **un
+  gcc por archivo** (`hazcurl.sh`, como FreeType): sin autotools en las
+  pruebas. Lo que curl pide de BearSSL además del perfil de TLS.BIN
+  (`br_ssl_client_init_full`: todas las suites de cliente, 3DES, CBC, CCM,
+  el intercambio por RSA, las de AES-NI y SSE2 que elige al arrancar) va
+  aparte, en `terceros/bearssl/src64` (43 archivos del mismo
+  bearssl-0.6.tar.gz): el Makefile, hazred.sh y los de Hispa-Pentium siguen
+  compilando `src/` solo.
+- **Las autoridades**: la orden CURL lleva dentro las de siempre
+  (`w32/tls/raices`, las mismas que DESCARGA y TLS.BIN) con `CURL_CA_EMBED`;
+  con `--cacert`, las de ese archivo. La de libcurl por omisión es
+  `/etc/ssl/certs/ca-certificates.crt`, que aún no hay (cada programa le da
+  la suya: `CURLOPT_CAINFO`). BearSSL no comprueba un certificado por su IP
+  (curl lo dice: «host verification of IP address is not supported»): por
+  su nombre, con DNS o con `--resolve`.
+- **ICU 77.1** (la de marzo de 2025, Unicode 16), lo que piden Ladybird y
+  WebKit para el texto: `source/common`, `source/i18n` y `stubdata` sin
+  cambiar nada, compilados con `cxx.sh` (la libstdc++ con musl) un archivo
+  cada vez en `build/icu-obj/libicu.a` (unos 5 minutos la primera vez).
+  **Los datos, filtrados** con la herramienta de ICU
+  (`ICU_DATA_FILTER_FILE`, `terceros/icu/filtro.json`) desde sus fuentes
+  (icu4c-77_1-data.zip): los idiomas de aquí (español, catalán, gallego,
+  euskera) y el inglés; sin transliteración, sin los diccionarios de cortar
+  el tailandés o el chino, sin RBNF ni los nombres de los caracteres; de
+  las conversiones, solo windows-1252 (UTF-8, UTF-16 y Latin-1 van dentro
+  de ICU): **4 MB** (`icudt77l.dat`) en vez de 31. Van aparte, no dentro
+  del programa: ICU los abre de `ICU_DATA` o de la carpeta que se le diga
+  (MICU, la suya). Hechos en el PC de Albinyana (las herramientas de ICU
+  para el anfitrión); cómo rehacerlos, en `terceros/icu/LEEME.txt`.
+- **La zona de ICU**: ICU no entiende la TZ de POSIX que da Hispa-64
+  (`CET-1CEST,M3.5.0,M10.5.0/3`) y busca el nombre con `realpath` de
+  `/etc/localtime`, como en Linux. Hispa-64 no tiene enlaces simbólicos:
+  **`readlink` y `readlinkat`** (eran ENOSYS) dan, de `/etc/localtime`,
+  `/usr/share/zoneinfo/<zona>` (Europe/Madrid, Atlantic/Canary...: el
+  nombre de la IANA de la `zona=` de la línea de órdenes, `Hora64.zona_iana`),
+  ese archivo se abre también (el mismo TZif) y sus carpetas, `/etc`, `/dev`
+  y `/proc` «están» (EINVAL: no son enlaces, que es lo que pide el
+  `realpath` de musl para seguir); lo que existe da EINVAL y lo que no,
+  ENOENT. Sin eso, ICU se quedaba con «CET».
+- **Comprobar con lo de fuera**: MICU, compilado igual, corre también en
+  Linux (es un programa estático de Linux: pruebas.sh lo corre antes) y sus
+  líneas de resultados tienen que salir **iguales** en Hispa-64, como
+  MTEXTO. Lo que espera cada prueba está escrito a mano y mirado (el orden
+  de la RAE, «1234» sin el punto con NumberFormatter, «juliol del 2026» en
+  catalán, el punycode de «ñandú»).
+- **Un fallo de fondo que sacó curl: dos hilos se llevaban el mismo
+  descriptor.** Con MCURL contra Internet quedaban a veces un socket o un
+  texto al acabar y una vez falló un nombre («Could not resolve hostname»).
+  Con un programa de prueba (hilos que abren y cierran a la vez) el núcleo
+  **se paraba** con un fallo de página en `copia_mem`, leyendo de un bloque
+  del montón ya suelto. La causa: `fd_libre` (y `fd_nuevo` de Red64)
+  buscaban el primer descriptor libre **sin cerrojo** y la clase se ponía
+  después; dos hilos veían libre el mismo, el segundo pisaba al primero (lo
+  del primero se perdía: el socket o el texto que quedaban) y, al cerrar uno,
+  el otro leía de lo cerrado. curl lo hace siempre: su resolutor de nombres
+  va en un hilo (musl abre allí `/etc/resolv.conf` y el socket del DNS)
+  mientras el principal abre los suyos. Ahora **se apartan** con el cerrojo
+  del proceso (`Procesos.aparta_fd`: la clase `F_APARTADO`, que no vale para
+  nada más: EBADF), quien lo pide lo **llena** con el objeto antes que la
+  clase (`llena_fd`) o lo **devuelve** si falla (`devuelve_fd`); `close`, con
+  el cerrojo (dos hilos no cierran dos veces lo mismo); `dup2` sobre uno
+  apartado da EBUSY (como Linux); fork no hereda los apartados. MHILOS lo
+  prueba en cada arranque (8 hilos que abren y cierran 800 sockets,
+  eventfd, tuberías y `/etc/hosts`, ninguno repetido; con 6.000, el núcleo
+  de antes se paraba con 2 y con 4 procesadores). Lo que no se arregla aquí:
+  cerrar un descriptor mientras otro hilo está **dentro** de una llamada con
+  él (un `read` a medias) aún suelta el objeto debajo; Linux le pone una
+  referencia durante la llamada (`fget`/`fput`), y eso queda para después
+  (abajo).
+- Hispa-64 **0.11.2** (uname: «etapa 10 b (curl e ICU)»).
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `terceros/curl/` | curl 8.14.1 (lib, src, include, con `lib/curl_config.h` de su configure) |
+| `terceros/icu/` | ICU 77.1 (common, i18n, stubdata) y `data/icudt77l.dat`, filtrado con `filtro.json` |
+| `terceros/bearssl/src64/` | lo de BearSSL 0.6 que pide curl y no está en `src/` |
+| `programas/hazcurl.sh` | BearSSL entero en `build/bearssl64-obj`, libcurl en `build/curl-obj`, CURL (con las autoridades dentro) y MCURL |
+| `programas/red/mcurl.c` | MCURL: las pruebas de libcurl por 127.0.0.1, con un servidor de HTTP/1.1 dentro; y `MCURL [-c CA] [-r NOMBRE:PUERTO:IP] DIRECCIÓN...`, bajar a la vez con su sha256 |
+| `programas/cxx/micu.cpp` | MICU: las pruebas de ICU |
+| `programas/cxx/hazcxx.sh` | `libicu.a`, MICU e `icudt77l.dat` |
+| `sistema.cas`, `hora64.cas`, `red64.cas` | readlink y readlinkat; `zona_iana`, `ruta_zona`; `/usr/share/zoneinfo/<zona>` |
+| `prmusl64.cas` | MICU y MCURL con los de musl, en cada arranque |
+| `procesos.cas`, `sistema.cas`, `red64.cas` | los descriptores apartados con cerrojo (`aparta_fd`, `llena_fd`, `devuelve_fd`, `F_APARTADO`); `close` con cerrojo; `dup2` y EBUSY |
+| `programas/musl/mhilos.c` | 8 hilos que abren y cierran descriptores a la vez |
+
+Lo que dicen (q35, 2 procesadores, con TCG):
+
+```
+MICU: ICU 77.1 (Unicode 16.0), con musl y la libstdc++ (cxx.sh)
+  a la española: Ávila avión chico cosa llama luz nube nuez Nuño ñu zapato
+  a la tradicional: Ávila avión cosa chico luz llama nube nuez Nuño ñu zapato
+  letras: 4 grafemas en 15 unidades de UTF-16 (una bandera, una familia con ZWJ, e + tilde y ñ)
+  palabras: Qué|tal|El|navegador|de|Hispa|64|corta|3,5|palabras
+  líneas: Un /texto /largo, /con /«comillas» /y /guiones-/de-/unión, /que /se /parte /(bien).
+  números: 1.234.567,891; 1.234 (NumberFormat), 1234 y 12.345 (NumberFormatter); 98.765,50 €; 1.234,50 €; en inglés, 1,234,567.891
+  la fecha: miércoles, 25 de noviembre de 2026, 20:30; en catalán, 15 de juliol del 2026; en gallego, 15 de xullo de 2026
+MICU: la zona del sistema: Europe/Madrid (readlink de /etc/localtime: /usr/share/zoneinfo/Europe/Madrid)
+  IDNA: ñandú.Español.es -> xn--and-6ma2c.xn--espaol-zwa.es -> ñandú.español.es
+  los idiomas: catalán, euskera
+MICU: todo bien (28 pruebas)
+MCURL: libcurl libcurl/8.14.1 BearSSL, con la interfaz «multi», por 127.0.0.1
+  GET de 1 MB y cinco más por la misma conexión (0 nuevas)
+  el plazo de 300 ms: vence a los 305 ms
+  «localhost»: por 127.0.0.1
+  curl_multi: 16 de 16 bien a la vez (3081400 octetos, la mitad a trozos), en 5795 ms y 7 vueltas de curl_multi_poll
+MCURL: todo bien (20 pruebas)
+```
+
+MCURL prueba: GET de 1 MB comprobado octeto a octeto y cinco más por la
+misma conexión (keep-alive), a trozos, tres redirecciones y
+`CURLOPT_MAXREDIRS`, 404 (y con `FAILONERROR`), POST de 40.000 octetos
+devuelto, sin `Content-Length` hasta que se cierra, el plazo de 300 ms,
+conexión rechazada, «localhost» (con IPv6 pedido y sin IPv6 en el núcleo:
+por IPv4), 16 a la vez con `curl_multi` (8 conexiones como mucho, la mitad
+a trozos), `curl_url` (la ruta sin `..`, una relativa) y `curl_easy_escape`
+con UTF-8. MICU: NFC, NFD y NFKC; ß → SS, la i turca, la sigma final,
+foldCase y los títulos; ordenar a la española, a la tradicional (ch y ll
+aparte) y sin tildes; los grafemas, las palabras y dónde se puede cortar la
+línea (UAX 14); los números y los euros; leer «3,25»; la hora de Madrid en
+invierno y en verano, la fecha en español, catalán y gallego, la semana
+desde el lunes; los plurales; IDNA (UTS 46) de ida y vuelta; BiDi;
+las escrituras; windows-1252; las expresiones regulares de ICU
+(`\p{L}`); el nombre de los idiomas.
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **132 pruebas** (eran 131). **Dos vueltas
+seguidas, 132 bien y 0 mal cada una**, con el servidor cargado por otras
+sesiones (carga de 5 a 6 en 4 procesadores), y `SOLO=castel64` dos vueltas
+seguidas después (CASTEL64 y ENSAMB64 sacan el núcleo igual: abajo). Antes
+de esas, cinco vueltas con mal, todos de lo nuevo y arreglados: lo que
+esperaban las pruebas (la memoria libre con 128 MB, de 110 MB a 100: los
+programas de la unidad son ya 18,5 MB; el «=N» de RED.PRB; ORDENES, que dice
+«etapa 10 b»), el euro y la Á de MICU por el puerto serie (la consola los
+pasa a la página 437: ahora `\u{20AC}`), `sfence` (ensambla.py no la tiene),
+MHILOS con 150 vueltas (99 s con 8 procesadores), el plazo de 20 s de MCURL
+(16 a la vez llegaron a 25 s con el servidor cargado) y el sonido con cortes
+dos veces de cuatro cuando MCURL iba justo antes (ahora va después de
+MSONIDO, como en la 11 b). Lo nuevo:
+
+- **MICU y MCURL en cada arranque con musl** (multiboot con 1, 4 y 8
+  procesadores, «pc» y q35, 128 MB, UEFI con 1 y 4, y con KVM): MICU, 28
+  pruebas, sus líneas iguales a las de Linux y la zona Europe/Madrid (de 630
+  a 960 ms); MCURL, 20 pruebas: las 16 a la vez, 1,9 s con 1 procesador, 12,6
+  con 4 y 18,3 con 8 (TCG: el mutex que espera al tic, abajo).
+- **La red** (e1000e, 2 procesadores, IP fija y el DNS de prueba): MCURL
+  baja cinco a la vez (HTTP, a trozos, 5 redirecciones, HTTPS con la
+  autoridad de prueba y `-r`) con el sha256 del anfitrión (2,4 y 2,8 s); la
+  orden CURL con `-L` (5 redirecciones), con `--cacert` y `--resolve`
+  (`ssl_verify_result` 0), sin la autoridad de prueba (código 60), `-f`
+  con un 404 (22), por su nombre con el DNS de prueba (por 10.0.2.2) y uno
+  que no existe (6); ni un socket ni un objeto al acabar.
+- **MHILOS**: 8 hilos que abren y cierran 800 descriptores a la vez,
+  ninguno repetido, en cada arranque con musl (el núcleo de antes se paraba,
+  o daba 362 repetidos: lo arreglado).
+- Lo de las etapas 0 a 11 b, igual (la unidad en memoria lleva 45 archivos;
+  uname 0.11.2).
+
+`SOLO=castel64` (con CASTEL64 y ENSAMB64 el núcleo sale igual, octeto a
+octeto): dos vueltas seguidas, **80 bien y 0 mal** cada una (dentro,
+`nucleo64/pruebas.sh` con CASTEL64 y ENSAMB64: 133 bien y 0 mal).
+
+El PC de Albinyana sirvió para hacer los datos de ICU (sus herramientas para
+el anfitrión) y para buscar el fallo de los descriptores (varias QEMU a la
+vez); `nucleo64/pruebas.sh` entero allí aún no vale: le faltan el GRUB de
+x86_64-efi y su NASM saca otro trampolín (no es de Hispa-64).
+
+Las imágenes de la carpeta del taller
+(`Pruebas/Pendientes/VirtualBox/Hispa-64-etapa-10b/`): el disco (`.vdi` e
+`.img`) y el CD, con LEEME.TXT: qué probar desde el intérprete (CURL, MCURL
+con direcciones de verdad, MCURL y MICU solos).
+
+Además, a mano, contra Internet de verdad (la red de usuario de QEMU sale
+por el servidor): `CURL https://hispados.es/` (200, 88.935 octetos, el
+certificado de verdad comprobado con las autoridades de dentro), `CURL -L
+http://hispados.es/` (que redirige a HTTPS) y `MCURL https://hispados.es/
+https://www.google.es/ https://curl.se/` dos veces seguidas (las tres a la
+vez en 1,4 s; el sha256 de hispados.es y curl.se, el mismo que en el
+anfitrión; ni un socket ni un objeto al acabar).
+
+### Lo que queda (y más adelante)
+
+- **IPv6** (lo siguiente de la red): ND y SLAAC (la de QEMU anuncia
+  fec0::/64 y su DNS en fec0::3), ICMPv6 (el eco, los errores), y
+  AF_INET6 para UDP y TCP. Hoy las direcciones son `nat32` en todo Ip64,
+  Tcp64 y Red64: la forma es un tipo de 128 bits (dos `nat64`) en los
+  sockets y las conexiones, con las de IPv4 como `::ffff:a.b.c.d`, para un
+  solo camino; `getaddrinfo` de musl pide AAAA solo si hay una dirección
+  IPv6 que no sea de enlace. curl ya va con IPv6 pedido (sin él en el
+  núcleo, `socket(AF_INET6)` da EAFNOSUPPORT y curl sigue por IPv4).
+- **La libstdc++ compilada para musl** y **C++ dinámico**: un
+  `x86_64-linux-musl-g++` de verdad (GCC 13.3 con binutils del sistema, al
+  estilo de musl-cross-make; gmp, mpfr y mpc solo para compilarlo), hecho
+  una vez en el PC de Albinyana y guardado en `build/` (con las sumas de los
+  archivos de GCC en un guion `hazgcc.sh`): quita el puente de `cxx.sh` y
+  hace las pruebas independientes del GCC del anfitrión (el PC tiene GCC
+  15 y el servidor, 13: la libstdc++ del sistema no es la misma);
+  `libstdc++.so` con ld-musl para los programas grandes.
+- **El navegador**: Ladybird (BSD-2) primero sin ventana (su
+  `headless-browser` dibuja en un mapa de bits: se compara con un
+  pantallazo), luego su ventana sobre el compositor. Pide además
+  libjpeg-turbo, libpng, libwebp, woff2, simdutf, fast_float y Skia (o el
+  pintor propio de antes); el JavaScript, su LibJS. WPE WebKit pediría glib,
+  libsoup y EGL: más lejos.
+- **curl**: `/etc/ssl/certs/ca-certificates.crt` para libcurl (hoy cada
+  programa da las suyas, o `CURLOPT_CAINFO_BLOB`), HTTP/2 (nghttp2, MIT),
+  `Content-Encoding` con zlib y brotli (están miniz y brotli en
+  `terceros/`), los nombres con eñe (IDN) por ICU, y la lista de sufijos
+  públicos (las cookies).
+- **ICU**: una carpeta de datos fija (`/usr/share/icu/77.1/`), más idiomas
+  si el navegador los pide (los datos enteros son 31 MB) y los diccionarios
+  de cortar el chino, el japonés y el tailandés.
+- **El mutex que se pasa a otro procesador espera al tic** (lo vio la
+  prueba nueva de MHILOS): 8 hilos que abren y cierran a la vez sockets o
+  tuberías, con 1 procesador, 1,2 ms cada uno; con 4 procesadores (TCG),
+  17 ms (`socket` 21 s y `pipe` 20 s las 1.200; `eventfd`, 2 s; `getpid`,
+  de 19 a 250 ms). Es lo de la sección 17: el que se despierta en otro
+  procesador desde un hilo del núcleo no corre hasta su tic siguiente. Con
+  muchos hilos (el navegador) se notará: despertarlo con el aviso entre
+  procesadores (como al volver al anillo 3), y que el cerrojo de la red no
+  sea uno solo para todo.
+- **El núcleo**: una referencia al objeto mientras dura cada llamada con un
+  descriptor (para que cerrarlo desde otro hilo no lo suelte debajo:
+  `fget`/`fput` de Linux); `readlink` de `/proc/self/exe` (el Proceso solo
+  guarda el nombre corto, no la ruta).
+- De la 11 b, sin tocar: suspender (S3), los P-states sin HWP (`_PSS`), los
+  GPE y la SCI por ACPICA, `_SRS`, imprimir (IPP) y la mezcla y el volumen
+  del sonido (sección 18).
