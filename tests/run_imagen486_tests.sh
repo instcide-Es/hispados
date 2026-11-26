@@ -298,6 +298,11 @@ python3 -I tools/paquete.py $T/p486 $T/www/h486.paq > /dev/null || ko "paquete.p
 { printf '[0.9.99]\ncpu=386\nnota=Paquete de Hispa-386\npaquete=http://10.0.2.2:%s/h386.paq\n\n' "$PORT"
   printf '[0.9.98]\ngama=486\ncpu=386\nedicion=Hispa-486\nnota=Paquete de Hispa-486\npaquete=http://10.0.2.2:%s/h486.paq\n' "$PORT"
 } > $T/www/versiones.txt
+# [FIRMA] (0.9.31) la lista, firmada con la clave DE PRUEBA, y en el disco el
+# ACTUALIZAR que la lleva (build/ACTPRUEB.COM; el de la imagen solo cree la de
+# verdad)
+python3 tools/firma_versiones.py firma $T/www/versiones.txt --clave tests/firma/clave_prueba.key > /dev/null || ko "no se ha podido firmar la lista"
+mcopy -o -i $T/hdd.img@@$OFF build/ACTPRUEB.COM ::HISPADOS/ACTUALIZ.COM || ko "no se ha podido poner ACTPRUEB.COM"
 python3 -m http.server --bind 127.0.0.1 --directory $T/www $PORT > $T/http.log 2>&1 &
 HTTP_PID=$!
 sleep 1

@@ -284,10 +284,12 @@ c_normal_sinred() {
   c_normal 590000 " (sin tarjeta de red)"
   nocheck "controlador de paquetes en INT"
 }
+# (0.9.31: HSPRATON crece 32 octetos con el arreglo de 17h; con HSPRED
+# quedan 574.976: el límite de abajo, 574.500)
 c_normal_red() {
   c_normal 590000 " (con tarjeta de red: HSPRED no se carga al arrancar)"
   n=$(grep -a 'bytes libres' $T/log.txt | sed -n 2p | tr -cd '0-9')
-  if [ -n "$n" ] && [ "$n" -ge 575000 ] && [ "$n" -lt 590000 ]; then ok "con HSPRED cargado a mano: $n bytes libres"; else ko "con HSPRED cargado a mano: $n bytes libres (se esperaban de 575000 a 590000)"; fi
+  if [ -n "$n" ] && [ "$n" -ge 574500 ] && [ "$n" -lt 590000 ]; then ok "con HSPRED cargado a mano: $n bytes libres"; else ko "con HSPRED cargado a mano: $n bytes libres (se esperaban de 574500 a 590000)"; fi
   check "Tarjeta Intel PRO/1000 (e1000)"
   check "controlador de paquetes en INT 60h"
   check "  HSPRED  "
