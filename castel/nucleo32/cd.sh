@@ -23,6 +23,7 @@
 # Lleva también, en \PAQUETES, los paquetes del sistema con su catálogo (con
 # CLAVE_PRIVADA, firmado: CATALOGO.FIR), por si se quieren copiar a otro sitio.
 # Con GUARDA_PAQ=carpeta, deja ahí también los paquetes (para las pruebas).
+# Con PAQ_TODOS=carpeta, en \PAQUETES va esa carpeta (la de una publicación).
 # (UEFI) Desde la 0.8.9 arranca también por UEFI (x64 y, si está su GRUB,
 # ia32): grub-mkrescue pone, junto al El Torito de la BIOS, otro para EFI (una
 # imagen FAT con \EFI\BOOT\BOOTX64.EFI y BOOTIA32.EFI) y la tabla de la
@@ -56,6 +57,10 @@ cp -r $W/w32/WIN32 $W/w32/HISPA32 $W/m/
 mkdir $W/m/PAQUETES
 cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT $W/m/PAQUETES/
 [ -n "${GUARDA_PAQ:-}" ] && { mkdir -p "$GUARDA_PAQ"; cp $W/paq/*.HPQ $W/paq/CATALOGO.TXT "$GUARDA_PAQ"/; }
+# (0.8.13) con PAQ_TODOS=carpeta, \PAQUETES lleva lo de esa carpeta en lugar
+# de los del sistema: el CD de una publicación, con todos los paquetes
+# publicados y su catálogo (firmado: CATALOGO.FIR, si lo trae)
+if [ -n "${PAQ_TODOS:-}" ]; then rm -f $W/m/PAQUETES/*; cp "$PAQ_TODOS"/*.HPQ "$PAQ_TODOS"/CATALOGO.* $W/m/PAQUETES/; fi
 [ -n "$CLAVE" ] && python3 -I $AQUI/../../tools/hpq.py firma $W/m/PAQUETES "$CLAVE" > /dev/null
 mkdir -p $W/m/boot/grub
 { cat <<'G'
