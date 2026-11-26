@@ -877,6 +877,8 @@ termo_ram_img() {	# copia de la memoria con estas palabras de más en la línea 
   if [ -n "$2" ]; then sed "s/ termo\$/ termo $2/" $Y/ram-grub.cfg > $Y/ram-grub2.cfg; else cp $Y/ram-grub.cfg $Y/ram-grub2.cfg; fi
   mcopy -o -i $1@@1M $Y/ram-grub2.cfg ::boot/grub/grub.cfg
 }
+tq_ram_empieza() { grep -a -q 'termo: suceso: EMPIEZA la prueba de la memoria RAM' $1; }
+tq_ram_cancelada() { grep -a -q 'termo: suceso: memoria RAM: Cancelada' $1; }
 termo_ram() {
   local T=$AQUI/nucleo32/termo B=$Y/anf R kvm="-cpu Haswell" seg
   mkdir -p $B
@@ -907,7 +909,10 @@ termo_ram() {
   else ko "(RAM) 3 GB: ${seg:-?} s; $(mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | head -n 6 | tr '\n' ' ')"; fi
   # c. el equipo se apaga a mitad de la prueba: al volver, lo dice
   R=$Y/ram3.img; termo_ram_img $R "ramrapida"
-  TQ_MEM=3G termo_qemu $R ram3 55 "$kvm -smp 2 -M q35"	# (con 3 GB tarda más de 1 min: a los 55 s está a medias)
+  # (0.8.12) no a los 55 s fijos: el PC de Albinyana, cargado, a los 55 s aún no
+  # la había empezado; se apaga 8 s después de que empiece (con 3 GB, la rápida
+  # tarda más de 20 s: a medias)
+  TQ_HASTA=tq_ram_empieza TQ_TOPE=240 TQ_MARGEN=8 TQ_MEM=3G termo_qemu $R ram3 55 "$kvm -smp 2 -M q35"
   mcopy -o -i $R@@1M $Y/ram-grub.cfg ::boot/grub/grub.cfg
   termo_qemu $R ram3b 55 "$kvm -smp 2"
   mira "(RAM) apagado a mitad de la prueba: al volver, «la prueba de la memoria RAM NO llegó a acabar» y dónde se quedó" \
@@ -920,7 +925,8 @@ termo_ram() {
   else ko "(RAM) un procesador: $(mtype -i $R@@1M ::TERMO/RAM.TXT 2> /dev/null | grep calor)"; fi
   # (Intro antes: si sale el aviso de que la vez anterior no se cerró, el primer Esc solo lo cerraría)
   R=$Y/ram5.img; termo_ram_img $R ""
-  termo_qemu $R ram5 70 "$kvm -smp 2" "44:sendkey ret" "46:sendkey m" "48:sendkey c" "50:sendkey esc"
+  # (0.8.12) hasta que se cancele (con el anfitrión cargado, a los 70 s aún no)
+  TQ_HASTA=tq_ram_cancelada TQ_TOPE=200 termo_qemu $R ram5 70 "$kvm -smp 2" "44:sendkey ret" "46:sendkey m" "48:sendkey c" "50:sendkey esc"
   mira "(RAM) Esc la para; «Calentar» espera a que acabe" "termo: suceso: Calentar: espere a que acabe la prueba de la memoria RAM" "termo: suceso: memoria RAM: Cancelada (Esc)"
   ! grep -q 'termo: calentar ' $S || ko "(RAM) se ha puesto a calentar con la prueba de la RAM en marcha"
 }
