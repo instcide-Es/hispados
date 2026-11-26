@@ -42,6 +42,7 @@
 
 BMAX        equ 12288               ; tope de cada archivo leído
 OMAX        equ 20480               ; tope del archivo nuevo
+CFG_LEE     equ 4095                ; lo que lee el núcleo de CONFIG.SYS (CFG_MAX - 1)
 NVMAX       equ 32                  ; líneas nuevas como mucho
 
 start:
@@ -138,6 +139,12 @@ start:
 .cnm:
         call collect
         call make_cfg
+        mov ax, [o_ptr]             ; [0.9.31] el núcleo lee de CONFIG.SYS
+        sub ax, obuf                ; 4.095 octetos (CFG_MAX - 1): lo de
+        cmp ax, CFG_LEE             ; detrás se perdería sin avisar
+        jbe .cfgcabe
+        mov byte [o_lleno], 1
+.cfgcabe:
         call apply
         jc fail
 .nocfg:

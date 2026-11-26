@@ -1,10 +1,10 @@
 REM CONFIG.SYS de Hispa-DOS (disquete de arranque)
 REM
-REM Al arrancar sale un menú: 1 arrancar sin instalar (a los 10 s, solo) y
-REM 2 instalar en el disco duro; con la 1, el de las configuraciones. Se
-REM elige con las flechas o con el número; sin tocar nada, a los 5 segundos
-REM arranca «Normal». (F5 = arranque limpio, F8 = elegir línea a línea.)
-REM La elegida queda en la variable CONFIG, que mira AUTOEXEC.BAT.
+REM Menú: 1 arrancar sin instalar (solo, a los 10 s), 2 instalar en el disco
+REM duro; luego, la configuración (a los 5 s, «Normal»). F5 = arranque
+REM limpio, F8 = línea a línea. La elegida queda en la variable CONFIG.
+REM Más en docs/HSPEMM.md, docs/HSPSB.md y docs/USB.md. Ojo: el núcleo lee
+REM los primeros 4 KB de este archivo.
 [menu]
 REM [SOLO-MEDIO: de aquí a la otra marca, el primer menú; INSTALAR lo
 REM quita al copiar este archivo al disco duro
@@ -20,56 +20,36 @@ MENUITEM=JUEGOSSE,Juegos sin EMS (más memoria libre; para los que no piden EMS)
 MENUDEFAULT=NORMAL,5
 
 [common]
-REM Memoria extendida (XMS). El núcleo de Hispa-DOS va en la memoria alta
-REM (HMA) en las dos configuraciones: unos 33 KB más de memoria convencional.
+REM Memoria extendida (XMS); el núcleo va en la memoria alta (HMA).
 DEVICE=A:\HISPADOS\HSPXMS.SYS
 
 [normal]
-REM ---- Normal: el procesador en modo real. Todo el hardware funciona
-REM (CD en SATA, sonido HD Audio, Windows en modo 386 mejorado). ----
+REM ---- Normal: modo real; funciona todo (CD en SATA, HD Audio, Windows
+REM en modo 386 mejorado). ----
 DOS=HIGH
-REM Lectores de CD/DVD (IDE y SATA):
 DEVICE=A:\HISPADOS\HSPCD.SYS
-REM USB propio (memorias, teclado, ratón y mandos de juego USB, también detrás
-REM de concentradores).
-REM Así, sin opciones, es seguro: si la BIOS está usando el USB (teclado USB,
-REM arranque por USB) no lo toca y todo sigue como estaba; salvo en los
-REM equipos sin ratón PS/2 (un MacBook, por ejemplo), donde lo lleva él solo
-REM para dar el ratón o el panel táctil.
+REM USB propio (memorias, teclado, ratón, mandos). Sin opciones no toca el
+REM USB que use la BIOS, salvo sin ratón PS/2 (MacBook), donde lo lleva él.
 DEVICE=A:\HISPADOS\HSPUSB.SYS
-REM Para quitarle el USB a la BIOS añada /F (el teclado y el ratón USB pasan a
-REM HSPUSB) y /INFO para ver en pantalla qué ha encontrado:
+REM /F le quita el USB a la BIOS; /INFO dice lo que encuentra:
 REM DEVICE=A:\HISPADOS\HSPUSB.SYS /F /INFO
 
 [juegos]
-REM ---- Juegos: como un PC de los 90 preparado para jugar. HSPEMM da memoria
-REM expandida (EMS), VCPI (DOS/4GW: Doom, Duke Nukem 3D...) y memoria
-REM superior (UMB), donde se cargan los controladores para dejar libre la
-REM memoria convencional. El procesador va en modo V86: no funciona el CD
-REM en SATA (AHCI), y Windows en modo 386 mejorado no arranca (use
-REM «Normal»). HSPUSB sí funciona. En los equipos sin Sound Blaster (HD
-REM Audio o AC'97), HSPSND /SB (en AUTOEXEC.BAT) da a los juegos una Sound
-REM Blaster 16 con AdLib emulada. ----
+REM ---- Juegos: EMS, VCPI (DOS/4GW) y memoria superior para los
+REM controladores. Modo V86: sin CD en SATA ni Windows 386 mejorado (use
+REM «Normal»). Sin Sound Blaster, HSPSND /SB (AUTOEXEC.BAT) la emula. ----
 DEVICE=A:\HISPADOS\HSPEMM.SYS
 DOS=HIGH,UMB
 DEVICEHIGH=A:\HISPADOS\HSPCD.SYS
 DEVICEHIGH=A:\HISPADOS\HSPUSB.SYS
-REM Para los mandos de juego USB, HSPUSB tiene que llevar el USB: añada /F a
-REM la línea de arriba (ver las notas de la configuración «Normal»).
-REM HSPEMM usa como memoria superior, además de lo libre en C000-DFFF, la
-REM zona del vídeo monocromo (B000-B7FF: una VGA en color no la usa) y lo
-REM que la BIOS deja libre en E000-EFFF. Si un juego que busca una pantalla
-REM monocromo se cuelga, añada X=B000-B7FF a la línea de HSPEMM. Para probar
-REM más zonas: I=E000-EFFF (si después algo falla al arrancar, quítelo; F5
-REM arranca en limpio).
+REM Mandos de juego USB: añada /F a HSPUSB. Si un juego que busca pantalla
+REM monocromo se cuelga, añada X=B000-B7FF a HSPEMM (más zonas: I=E000-EFFF;
+REM si luego falla el arranque, quítelo; F5 arranca en limpio).
 
 [juegosse]
-REM ---- Juegos sin EMS: lo mismo que «Juegos», pero HSPEMM sin el marco de
-REM página de la memoria expandida (NOEMS). Esos 64 KB pasan a ser memoria
-REM superior, y ahí caben el controlador de sonido y los demás: en un equipo
-REM con HD Audio o AC'97, unos 56 KB más de memoria convencional. Sigue
-REM habiendo VCPI (DOS/4GW: Doom, Duke Nukem 3D...) y la Sound Blaster
-REM emulada; lo que no hay es EMS: los juegos que la piden, con «Juegos». ----
+REM ---- Juegos sin EMS: como «Juegos», pero HSPEMM sin marco EMS (NOEMS):
+REM esos 64 KB son memoria superior (con HD Audio o AC'97, unos 56 KB más de
+REM convencional). Siguen VCPI y la Sound Blaster emulada. ----
 DEVICE=A:\HISPADOS\HSPEMM.SYS NOEMS
 DOS=HIGH,UMB
 DEVICEHIGH=A:\HISPADOS\HSPCD.SYS
@@ -77,8 +57,7 @@ DEVICEHIGH=A:\HISPADOS\HSPUSB.SYS
 
 [prueba]
 REM ---- Prueba del equipo y del sonido: sin controladores de sonido ni
-REM residentes, para que DIAGNOSTICO y AUDICION vean el equipo como lo deja
-REM la BIOS. Guarda un informe en \INFORMES\EQUIPOnn de esta unidad. ----
+REM residentes (informe en \INFORMES\EQUIPOnn). ----
 DOS=HIGH
 
 REM [SOLO-MEDIO

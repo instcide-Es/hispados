@@ -74,6 +74,19 @@ def dos(txt):
     """Texto del proyecto (UTF-8, LF) a texto de DOS (página 437, CR+LF)."""
     return txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437')
 
+# El núcleo solo lee los primeros 4.095 octetos de CONFIG.SYS (CFG_MAX en
+# kernel/kernel.asm) y lo de detrás se pierde sin avisar: en la 0.9.31, con la
+# 4.ª opción del menú, el de las imágenes llegó a 4.437 y se quedaba sin
+# LASTDRIVE=Z, FILES y BUFFERS (lo vio run_letras_tests.sh). El de las
+# imágenes, como mucho 3.584: lo demás, para WINCONF y para el usuario.
+CFG_IMAGEN_MAX = 3584
+
+def mira_config(datos, origen):
+    if len(datos) > CFG_IMAGEN_MAX:
+        sys.exit('mkusb: %s ocupa %d octetos en la imagen (como mucho %d: el núcleo '
+                 'solo lee 4.095 y hay que dejar sitio a WINCONF); acorte sus REM'
+                 % (origen, len(datos), CFG_IMAGEN_MAX))
+
 def autoexec486(txt, letra):
     """[HISPA-486] El AUTOEXEC.BAT de Hispa-486: el de Hispa-386 y, en el
     arranque normal, la red puesta sola (el cable si lo hay y, si no, el
@@ -206,6 +219,8 @@ def main(edicion='386'):
             txt = autoexec486(txt, 'C')
         txt = sin_letra(f, txt)
         dst = os.path.join(dusb, f)
+        if f == 'CONFIG.SYS':
+            mira_config(dos(txt), 'usb/CONFIG.SYS')
         with open(dst, 'wb') as o:
             o.write(dos(txt))
         cp(dst, f)
@@ -369,8 +384,10 @@ def mkfloppy():
     for f in ('CONFIG.SYS', 'AUTOEXEC.BAT'):
         txt = open(os.path.join('floppy', f), encoding='utf-8').read()
         dst = os.path.join(B, 'floppy', f)
+        if f == 'CONFIG.SYS':
+            mira_config(dos(txt), 'floppy/CONFIG.SYS')
         with open(dst, 'wb') as o:
-            o.write(txt.replace('\r\n', '\n').replace('\n', '\r\n').encode('cp437'))
+            o.write(dos(txt))
         run('mcopy', '-o', '-i', out, dst, '::' + f)
     print(out)
     mkoficina()
