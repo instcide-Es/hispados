@@ -23,6 +23,16 @@ static bool bcma_core_wait_value(struct bcma_device *core, u16 reg, u32 mask,
 		udelay(10);
 	} while (!time_after_eq(jiffies, deadline));
 
+	/* (HISPA, HPMINI-RADIO) el RESET_ST (0x0804) que no baja a 0 antes de
+	 * poner el núcleo en reset: Linux (bcma) da el mismo aviso en estos
+	 * equipos y sigue igual (el reset lo corta). Sale en el HP Mini 2 con
+	 * la radio apagada por la patilla W_DISABLE# y luego va bien: un aviso,
+	 * no un error */
+	if (reg == BCMA_RESET_ST) {
+		bcma_warn(core->bus, "aviso (inocuo, como en Linux): el núcleo %03X tenía operaciones a medias al ponerlo en reset (RESET_ST 0x0804 = %08X tras %d ms); se pone en reset igual\n",
+			  core->id.id, val, timeout * 1000 / HZ);
+		return false;
+	}
 	bcma_warn(core->bus, "Timeout waiting for register 0x%04X!\n", reg);
 
 	return false;
