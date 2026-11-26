@@ -3968,6 +3968,10 @@ Windows y WSL). No se empieza todavía.
   que antes decía «Salir del escritorio»: deja el intérprete). Y `ayuda` de
   ORDENES dice dónde guardar (`/tmp`, o, para que quede, con «escritura en
   los discos», la partición de pruebas del disco, `/sata0p2` en VirtualBox).
+- **prctl** (157, antes ENOSYS): PR_SET_NAME y PR_GET_NAME (el nombre de
+  cada hilo: `pthread_setname_np` y `pthread_getname_np` de musl, que
+  Ladybird usa para sus hilos), PR_SET_PDEATHSIG, PR_SET_DUMPABLE y
+  PR_SET_NO_NEW_PRIVS (aceptados); MIPC lo mira.
 - Hispa-64 **0.11.4** (uname: «etapa 10 d (AF_UNIX y memfd)»).
 
 ### Qué hace
@@ -4003,7 +4007,7 @@ MUNIX: todo bien (77 pruebas)
 MIPC: dos procesos que se hablan como los de Ladybird (C++23, 14.3.0)
   posix_spawn con el socket en el 3 y SOCKET_TAKEOVER; mensajes de LibIPC con SCM_RIGHTS, desde un hilo que manda y un bucle con poll
   dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en 36 ms
-MIPC: todo bien (8 pruebas)
+MIPC: todo bien (9 pruebas)
 ```
 
 MIPC hace lo que hace Ladybird al arrancar WebContent: un socketpair de
@@ -4019,7 +4023,7 @@ primero mira en su memoria (la misma).
 
 ### Cómo se ha probado
 
-- MUNIX y MIPC, en Linux (las mismas 77 y 8) y en Hispa-64 en cada arranque
+- MUNIX y MIPC, en Linux (las mismas 77 y 9) y en Hispa-64 en cada arranque
   con musl (`nucleo64/pruebas.sh`, etapa 7: por multiboot y por UEFI, con 1
   y 4 procesadores y -cpu max); después, ni un socket de Unix (`mal` si
   queda alguno), ni memoria compartida, ni memoria ni montón perdidos.

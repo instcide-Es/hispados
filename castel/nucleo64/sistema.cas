@@ -135,6 +135,49 @@ módulo Sistema
         devolver ent64(fd)
     fin
 
+    ; [etapa 10 d] prctl: PR_SET_NAME y PR_GET_NAME (el nombre del hilo, 16
+    ; octetos con el 0: pthread_setname_np y getname), PR_SET_PDEATHSIG y
+    ; PR_GET_PDEATHSIG (se acepta; 0), PR_GET_DUMPABLE (1) y PR_SET_DUMPABLE,
+    ; PR_SET_NO_NEW_PRIVS (se acepta); lo demás, EINVAL
+    función prctl_(p: puntero a Proceso, h: puntero a Hilo, op: nat64, a2: nat64): ent64
+        variable t: arreglo [16] de byte
+        variable i: nat32
+        variable r: ent64
+        variable cero: nat32
+        según nat16(op yb 0xFFFF)
+            caso 15:
+                si op > 0xFFFF entonces devolver EINVAL fin
+                i := 0
+                mientras i < 16 hacer
+                    t[i] := 0
+                    i := i + 1
+                fin
+                r := texto_de(p, dirección(t[0]), a2, 16)
+                si r = -14 entonces devolver EFAULT fin
+                t[15] := 0
+                i := 0
+                mientras i < 16 hacer
+                    h.comm[i] := t[i]
+                    i := i + 1
+                fin
+                devolver 0
+            caso 16:
+                si op > 0xFFFF entonces devolver EINVAL fin
+                si no copia_a(p, a2, nat64(dirección(h.comm[0])), 16) entonces devolver EFAULT fin
+                devolver 0
+            caso 1, 4, 38:
+                si op > 0xFFFF entonces devolver EINVAL fin
+                devolver 0
+            caso 2:
+                cero := 0
+                si no copia_a(p, a2, nat64(dirección(cero)), 4) entonces devolver EFAULT fin
+                devolver 0
+            caso 3: devolver 1
+            si no: devolver EINVAL
+        fin
+        devolver EINVAL
+    fin
+
     ; [etapa 10 c] ¿la llamada n usa el descriptor de su primer argumento?
     ; (Procesos.toma_fd: mientras dura, cerrarlo no suelta lo suyo)
     función con_fd(n: nat64): bool
@@ -2038,6 +2081,7 @@ módulo Sistema
             caso 55:
                 si es_unix(p, a1) entonces r := getsockopt_unix(p, a1, a2, a3, a4, a5) sino r := getsockopt_(p, a1, a2, a3, a4, a5) fin
             caso 319: r := memfd_(p, a1, a2)                      ; [etapa 10 d] memfd_create
+            caso 157: r := prctl_(p, h, a1, a2)                    ; [etapa 10 d] prctl (lo que piden musl y Ladybird)
             caso 284: r := evento_(p, a1, 0)
             caso 290: r := evento_(p, a1, a2)
             caso 283: r := tempo_(p, a1, a2)

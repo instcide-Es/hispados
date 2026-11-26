@@ -316,7 +316,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MUNIX: todo bien (77 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
     && grep -q "^  /tmp: 100 KB escritos, leídos y borrados$" <<< "$v" && grep -q "^  /tmp: FAT16 «TMP», 31,9 MB en 8179 cúmulos de 4 KB, .*; de leer y escribir$" <<< "$v" \
-    && grep -q "^MIPC: todo bien (8 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MIPC: todo bien (9 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en " <<< "$v" \
     && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MCXX: C++17 con la libstdc++ y musl (cxx.sh, dinámico: ld-musl, libstdc++.so.6 y libgcc_s.so.1)$" <<< "$v" && grep -q "^Programa «MCXXD»: acaba con el código 0, como debe" <<< "$v" \

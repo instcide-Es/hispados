@@ -42,6 +42,7 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <sys/eventfd.h>
+#include <pthread.h>
 
 extern char **environ;
 
@@ -97,6 +98,8 @@ struct Mensaje {
 };
 
 enum : uint32_t { PON_MAPAS = 1, PINTA = 2, PINTADO = 3, ADIÓS = 4, LISTO = 5 };
+
+static std::atomic<bool> nombre_bien{ false };
 
 // ---- IPC::TransportSocket: manda desde su hilo; recibe en el bucle ----
 class Transporte {
@@ -155,6 +158,10 @@ private:
 	}
 	void manda_cola()
 	{
+		// (como Ladybird: el hilo con su nombre, pthread_setname_np: prctl PR_SET_NAME)
+		char nom[16] = "";
+		pthread_setname_np(pthread_self(), "IPC:Transporte");
+		if (pthread_getname_np(pthread_self(), nom, sizeof nom) == 0 && std::strcmp(nom, "IPC:Transporte") == 0) nombre_bien = true;
 		std::unique_lock<std::mutex> g(m_);
 		for (;;) {
 			c_.wait(g, [this] { return fin_ || !cola_.empty(); });
@@ -349,6 +356,7 @@ int main(int argc, char **argv)
 	}
 	auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 	MIRA(listo == 1, "el segundo dice su pid (getpid = el de posix_spawn)");
+	MIRA(nombre_bien, "el hilo que manda, con su nombre (pthread_setname_np y pthread_getname_np)");
 	MIRA(pintados == CUADROS && bien_suma == CUADROS, "60 cuadros pintados por el segundo, con la misma suma en la memoria del primero");
 	int st = 0;
 	MIRA(waitpid(h, &st, 0) == h && WIFEXITED(st) && WEXITSTATUS(st) == 0, "el segundo acaba con 0 (SOCKET_TAKEOVER, SO_PEERCRED, sus mapas)");

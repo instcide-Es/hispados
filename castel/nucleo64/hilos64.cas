@@ -102,6 +102,7 @@ módulo Hilos64
         interrumpible: nat64        ; la Espera de la que le saca una señal (o 0)
         t_usuario, t_sistema: nat64 ; [etapa 11] el tiempo de procesador, en el programa y en el núcleo (ns, de 10 en 10 ms: el tic)
         s_info: arreglo [64] de nat64           ; de cada pendiente suya: el código (abajo) y quién (arriba)
+        comm: arreglo [16] de byte              ; [etapa 10 d] su nombre (prctl PR_SET_NAME: pthread_setname_np)
     fin
 
     público tipo Espera = estructura
