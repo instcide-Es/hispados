@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 y 17).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 20: la 10 c, la última, con IPv6 y el compilador cruzado).
 
 ---
 
@@ -267,10 +267,11 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). Quedan IPv6, la libstdc++ compilada para musl (y C++ dinámico) y el navegador mismo | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). Queda el navegador mismo: lo que pide, en la sección 20 | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
+| 14 | (futura) Driver de NVIDIA, de Turing en adelante, con `open-gpu-kernel-modules` y el firmware GSP; la RTX 3060 del PC de Albinyana de banco de pruebas (sección 20) | sin empezar | — |
 
 Cada etapa acaba con: sus pruebas automáticas en QEMU (`castel/nucleo64/pruebas.sh`,
 que llama `pruebas64.sh`), una imagen USB en
@@ -3505,3 +3506,346 @@ anfitrión; ni un socket ni un objeto al acabar).
 - De la 11 b, sin tocar: suspender (S3), los P-states sin HWP (`_PSS`), los
   GPE y la SCI por ACPICA, `_SRS`, imprimir (IPP) y la mezcla y el volumen
   del sonido (sección 18).
+
+## 20. La etapa 10 c, hecha (26/11/2026): lo de fondo del núcleo, el compilador cruzado, IPv6 y la auditoría
+
+### Las decisiones
+
+- **Por qué la 10 c**: lo que la 10 b dejó para antes del navegador (sección
+  19, «Lo que queda»): dos fallos de fondo del núcleo que con muchos hilos
+  (el navegador) se iban a notar, el compilador de C++ propio (Ladybird pide
+  GCC 14 o más, y las pruebas no pueden depender del GCC del anfitrión),
+  IPv6 y, del camino, lo de la auditoría del PC de Albinyana (Claude 1) y lo
+  que pidió Carlos del intérprete. Ladybird mismo, todavía no: abajo, lo que
+  pide.
+- **Una referencia al objeto mientras dura cada llamada** (`fget`/`fput` de
+  Linux). Cada llamada que usa un descriptor en su primer argumento (read,
+  write, recv, accept, ioctl, fstat, las `*at` con su carpeta...: `con_fd`
+  en `sistema.cas`; y cada uno que miran poll, select y epoll) lo **toma**
+  (`Procesos.toma_fd`: con el cerrojo de los descriptores, una cuenta de
+  usos por número y su **generación**) y lo **deja** al acabar
+  (`deja_fd`). `close` (y `dup2` encima) **vacía el número en el acto**,
+  como Linux (`quita_fd`): si alguna llamada lo estaba usando, lo suyo pasa
+  a la lista de **aplazados** del proceso (hasta 32 a la vez; si no cabe,
+  `close` cede el procesador y vuelve a probar) y lo suelta la última que
+  acaba. Antes, un `close` desde otro hilo a mitad de un `read` soltaba el
+  objeto debajo. Primero se hizo de otra forma (el número «cerrado» y sin
+  dar hasta que acabase la llamada) y no valía: `dup2` sobre él daba EBUSY y
+  **musl repite `dup2` mientras dé EBUSY**: el programa se quedaba dando
+  vueltas (lo vio la prueba nueva de MHILOS).
+- **«El mutex que espera al tic» no era el mutex: era la TLB.** Midiendo (la
+  espera de cada despertar, cuántos avisos de vaciar la TLB y lo que
+  costaban) salió la causa de fondo: **cada página de un bloque grande del
+  montón** (los de 64 KB o más: el búfer de un socket de UDP, una tubería, los
+  de TCP, de 256 KB) **mandaba al liberarse su propio aviso a todos los
+  procesadores y esperaba a que vaciasen su TLB**: cerrar un socket de UDP
+  eran 17 avisos con su espera; con 4 procesadores y TCG, unos 3 ms cada uno.
+  Ahora (`Monton64`) las páginas se quitan de aquí y sus físicas van a una
+  **cuarentena** (hasta 2.048, 8 MB) que se devuelve de una vez, de 256 en
+  256 con **un solo aviso** (la TLB entera, también lo global) cuando se
+  llena o cuando alguien mide la memoria (`vacía_cuarentena`). Es seguro
+  porque la zona de los bloques grandes no se reutiliza: una entrada vieja en
+  la TLB de otro procesador solo puede llevar a una física que aún está en
+  cuarentena, nunca a la de otro; y lo de la cuarentena sigue contando como
+  del montón (las cuentas de «la memoria, la de antes» no cambian). Los de
+  más de 512 KB, sin cuarentena, con un aviso por cada 64 páginas.
+- Y dos más, del planificador, que también ayudan: **el mutex espera un poco
+  sin dormir** (hasta 50 µs) si quien lo tiene está corriendo en otro
+  procesador (como el «optimistic spinning» de Linux: dormirse y despertarse
+  cuesta más que eso), y **uno de la misma prioridad que se despierta pasa
+  por delante** del que corre en su procesador si este lleva ya 100 µs de su
+  turno (con el aviso entre procesadores, `V_PLAN`; antes, solo si era de
+  más prioridad, y si no esperaba al fin del turno del otro, hasta 20 ms).
+- **Los cortes del sonido después de MCURL** (sección 19): la misma causa.
+  MCURL deja sus conexiones en TIME_WAIT (2 s) y el hilo «red» las suelta
+  mientras suena MSONIDO: 16 conexiones con sus búferes de 256 KB eran
+  cientos de avisos de vaciar la TLB, cada uno con las interrupciones
+  quitadas en un procesador mientras espera a los demás. Con la cuarentena
+  son unos pocos (lo de cómo se ha probado, abajo).
+- **El compilador cruzado, `x86_64-hispa64-linux-musl`** (con los nombres
+  cortos `x86_64-hispa64-musl-gcc` y `-g++`; «hispa64-musl» a secas no lo
+  admite el `config.sub` de GCC: el sistema tiene que ser `linux-musl` para
+  que GCC use lo de musl). `programas/cxx/hazgcc.sh`, al estilo de
+  musl-cross-make: **binutils 2.44, GCC 14.3.0** (C y C++; el 14 y no el
+  13.3 que decía el plan porque Ladybird pide GCC 14 o más) y **musl 1.2.6**
+  de `terceros/musl` (con sus parches) compilada con ese mismo GCC en su
+  raíz; gmp 6.3.0, mpfr 4.2.2 y mpc 1.3.1 solo para compilarlo (y m4 1.4.19,
+  que el PC no tiene). Los tar de GNU, con su SHA-256 en el guion (las
+  firmas, comprobadas con `gnu-keyring.gpg`). Los programas del anfitrión
+  van **estáticos** (corren en cualquier Linux x86-64: se hizo en el PC de
+  Albinyana, con glibc 2.43, y se usa en el servidor, con la 2.39) y la
+  carpeta se puede mover (todo relativo a ella). Con 12 hilos, unos 25
+  minutos; deja `build/cruzado/` (253 MB) y `build/cruzado.tar.xz` (61 MB;
+  `build/` no va a git: se rehace con `HILOS=12 hazgcc.sh` o se copia el tar).
+- **`cxx.sh` ya no usa el GCC del anfitrión**: llama al cruzado
+  (`-static` por omisión; `-dinamico` para enlazar con `libstdc++.so.6` y
+  `libgcc_s.so.1`); sin él, dice cómo hacerlo (con `HISPA64_PUENTE=1`, lo de
+  antes: el g++ del sistema y `puente.c`). La libstdc++ es la de GCC
+  compilada para musl (el modelo de locale «generic»): sin puente para
+  `newlocale` ni `strerror_r`. HarfBuzz, ICU, MCXX, MTEXTO y MICU, con él
+  (lo compilado con otro compilador se rehace solo: `.compilador`).
+- **C++ dinámico**: **MCXXD** (la misma prueba que MCXX) con
+  `libstdc++.so.6` y `libgcc_s.so.1` en la unidad en memoria (`/lib`), por
+  ld-musl.
+- **IPv6, con un solo camino para las dos.** En vez de pasar a 128 bits
+  todas las direcciones de Ip64, Tcp64 y Red64 (y las colas de los
+  datagramas), cada dirección de IPv6 se guarda **una vez en una tabla**
+  (`Redcom64.ficha_de`: 1.024, las de las interfaces fijas y las demás se
+  reciclan, la más vieja, si ningún socket la usa y lleva un minuto sin
+  verse) y los sockets, TCP y UDP llevan **su ficha**, un número de 32 bits
+  del 240.0.0.0/8, la «clase E» que IPv4 no usa en ninguna red. Así, todo lo
+  que ya sabía de direcciones (buscar la conexión, el puerto, la suma de la
+  cabecera falsa, que ahora mira si es una ficha) vale para las dos sin
+  tocarlo: `ip_envía` y `udp_envía` ven que «a» es una ficha y salen por
+  IPv6; `entra_ip6` da a `entra_udp` y a TCP las fichas de quien manda y a
+  quién. Las de IPv4, en un socket de IPv6, como **`::ffff:a.b.c.d`** solo
+  en la frontera con el programa (`lee_dir`, `da_dir`).
+- **Lo de IPv6**: la dirección **de enlace** (fe80:: y el identificador de la
+  MAC, EUI-64) en cuanto hay enlace; **RS** (tres, de 4 en 4 s) y, con el
+  **anuncio del router**, la dirección de **SLAAC** (su prefijo de /64 con la
+  marca A), el router (si su vida no es 0), el MTU y el **DNS** (RDNSS, RFC
+  8106: va a `/etc/resolv.conf` si la interfaz no tiene uno de IPv4); los
+  **vecinos** (ND: NS a la dirección solicitada, NA con la MAC, el paquete
+  que espera, tres intentos); **ICMPv6** (el eco, contestar a los ping, los
+  «ping sockets» de `IPPROTO_ICMPV6`, «puerto inalcanzable» a UDP y lo que
+  llega inalcanzable, a TCP y al UDP conectado); las cabeceras de extensión
+  de salto a salto y de destino, saltadas. **AF_INET6** en los sockets:
+  TCP, UDP y el ping; `IPV6_V6ONLY` (sin él, uno en `[::]` recibe también a
+  los de IPv4, como Linux), `IPV6_UNICAST_HOPS`, `SO_DOMAIN`. Las e1000
+  reciben ya toda la multidifusión (MPE: la de IPv6); las Realtek, virtio y
+  las de USB ya lo hacían. «sinipv6» en la línea de órdenes lo apaga. Sin
+  trozos, sin DAD (se da por buena la dirección), sin las direcciones
+  temporales (RFC 8981) ni DHCPv6: abajo.
+- **De la auditoría** (`auditorias/mejoras`, Claude 1): su parche, revisado
+  y aplicado tal cual (H1, TCP según el RFC 5961: el límite de abajo de la
+  ventana también con SYN o FIN, el RST solo justo en `rcv_nxt`, y un
+  «challenge ACK» ante un SYN o un RST dentro de la ventana; H2, `sendmsg`
+  sin dar la vuelta al sumar los trozos ni copiar más de lo reservado; H5,
+  los LED de HID; H6, `wMaxPacketSize` 0; H7, `clone` con un TLS no
+  canónico, EPERM; H8, el RIP de la señal en `al_volver_`; H9, el `mmap` de
+  `/dev/fb0`), con sus pruebas nuevas en la batería (H2 en MRED6, H7 en
+  MHILOS). Y de su sección 2: **la tabla de arreglos** (un `iretq` de vuelta
+  al programa que falla en el anillo 0, ya con el GS del programa, cierra el
+  programa con SIGSEGV en vez de parar el núcleo: Excep64 pone el GS del
+  núcleo y sigue en `Entradas.E64_arreglo`; `prueba=salida` le pone a
+  MBUCLE un RIP no canónico justo antes del `iretq`, y la prueba va con
+  KVM: con TCG, QEMU deja pasar ese `iretq` y el fallo llega ya en el anillo
+  3, por el camino de siempre; las copias hacia el programa ya
+  van por el mapa directo, con el mutex de la memoria, y no pueden fallar; el
+  `sysret` no canónico ya se mira antes); **el DNS** (el de musl: el id de
+  cada pregunta, de `getrandom`, no de la hora, y la respuesta solo con su id
+  **y su pregunta**, RFC 5452: `terceros/musl/parches-hispa/`) y **los
+  puertos de salida, cada vez al azar** (RFC 6056; antes, seguidos desde uno
+  al azar). TCP ya empezaba cada conexión con un número al azar entero
+  (`azar32`, ChaCha20): más que lo que pide el RFC 6528.
+- **ORDENES, en español** (lo pidió Carlos: «en una demostración no es
+  español»): los nombres de Hispa-8086 y Hispa-386 (`listar`, `mostrar`,
+  `eco` y `escribir`, `donde`, `creardir`, `borrardir`, `borrar`, `copiar`,
+  `mover` y `renombrar`, `limpiar`, `ver`, `ayuda`, `salir`), en mayúsculas
+  o minúsculas; los de siempre en inglés valen también, y `ayuda` los dice
+  al final. Y **DEMO**, el programa de Castel de la captura de hispados.es
+  (`programas/demo.cas`: saluda, 6 por 7, la fecha y la hora de Madrid con
+  el cambio de horario de la UE, unos euros).
+- Hispa-64 **0.11.3** (uname: «etapa 10 c (IPv6 y C++)»).
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `procesos.cas`, `sistema.cas` | `toma_fd`, `deja_fd`, `quita_fd`, los aplazados; `con_fd`; poll y epoll con cada descriptor tomado; `salida_mala`; `prueba=salida` |
+| `monton64.cas` | la cuarentena de los bloques grandes (`vacía_cuarentena`) |
+| `sinc64.cas`, `hilos64.cas`, `porcpu64.cas` | el mutex que espera un poco si el dueño corre; pasar por delante al despertar (`turno_tsc`, 100 µs) |
+| `entradas.cas`, `excep64.cas` | la tabla de arreglos (`E64_iret1`, `E64_iret2`, `E64_arreglo`) |
+| `redcom64.cas` | las fichas de IPv6 (`ficha_de`, `dir_de`, `es_ficha`, `escribe_ip6`); IPv6 en Ifz; `dom` y `v6solo` en Sock |
+| `ip64.cas` | IPv6, ICMPv6, ND, SLAAC, RS y RA, RDNSS; los puertos al azar |
+| `red64.cas`, `tcp64.cas` | AF_INET6, `sockaddr_in6`, ::ffff:, IPV6_V6ONLY, el ping de ICMPv6; la MSS con IPv6; el DNS de IPv6 en resolv.conf |
+| `intel64.cas` | MPE (la multidifusión) |
+| `programas/cxx/hazgcc.sh`, `cxx.sh`, `hazcxx.sh` | el compilador cruzado y su uso; MCXXD |
+| `programas/red/mred6.c` | MRED6: IPv6 por ::1 (sin tarjeta) y, con `red NOMBRE PUERTO`, con la red |
+| `programas/red/servidores.py` | `http6` (en ::1) y el AAAA de los `*6.prueba` |
+| `programas/ordenes.c`, `programas/demo.cas` | las órdenes en español; DEMO |
+| `terceros/musl/parches-hispa/` | el id del DNS y la pregunta |
+
+Lo que dicen (q35, 2 procesadores, con KVM):
+
+```
+MRED6: IPv6 por ::1, sin tarjeta
+  inet_pton, inet_ntop y getaddrinfo de «::1»
+  TCP por [::1]:55558: connect, accept, getpeername, 200 KB de ida y vuelta en 272 ms
+  los dos a la vez: uno de IPv6 en [::] recibe a 127.0.0.1 como ::ffff:127.0.0.1
+  IPV6_V6ONLY: el de IPv4, rechazado
+  UDP por [::1] y a ::ffff:127.0.0.1; el puerto inalcanzable (ICMPv6): ECONNREFUSED
+  ping de ICMPv6 a ::1: contesta
+  los errores: EAFNOSUPPORT, ENETUNREACH; sendmsg con trozos que dan la vuelta, rechazado
+MRED6: todo bien (25 pruebas)
+/> MBUCLE                         (con prueba=salida)
+MBUCLE: doy vueltas sin llamar al sistema (Ctrl+C me para)
+El programa MBUCLE (proceso 2) ha querido volver con unos registros que no valen (CS, SS o RIP de su marco): se cierra (SIGSEGV).
+(MBUCLE se ha cerrado por la señal 11, SIGSEGV: una dirección que no es suya)
+/> DEMO
+Hola, soy un programa de Castel, el lenguaje en español de Hispa-DOS.
+6 por 7 son 42.
+Hoy es jueves, 26 de noviembre de 2026, y en Madrid son las 09:14 (horario de invierno).
+```
+
+### Cómo se ha probado
+
+`castel/nucleo64/pruebas.sh`: **134 pruebas** (eran 132). **Dos vueltas
+seguidas, 134 bien y 0 mal cada una** (66 y 67 minutos), con el servidor cargado por
+otras sesiones. Antes, dos vueltas a medias, con lo que faltaba y arreglado:
+la memoria libre con 128 MB (la unidad en memoria lleva 3,5 MB más:
+desde 90 MB), la expresión de la tabla de arreglos, que con TCG el `iretq`
+no falla (ahora con KVM), el `ud2` (ensambla.py no la tiene: en octetos) y
+la línea del anuncio del router, mezclada con lo de otro procesador (ahora en
+el resumen de la red). Y `CASTEL64` y `ENSAMB64` sacan el núcleo igual,
+octeto a octeto (comprobado a mano: el ensamblador de CASTEL64, igual al de
+ccastel.py, y lo de ENSAMB64, igual a lo de NASM). Lo nuevo:
+
+- **MHILOS** (en cada arranque con musl): los 8 hilos que abren y cierran 800
+  descriptores, con TCG en el servidor, de 105 a 144 ms con 1 procesador, 1,8
+  s con 4 y de 1,9 a 2,5 s con 8 (la 10 b medía 17 ms por cada uno con 4:
+  unos 21 s); **con KVM y 4 procesadores, de 770 ms a 41** (el núcleo de
+  antes y el de ahora, el mismo MHILOS). En el PC de Albinyana (TCG, sin
+  carga): con 4, de 7,5 s a 4,4; con 8, de 29 s a 12-14. Lo que costaba: de
+  518 avisos de vaciar la TLB (1,5 s de espera) a 133 (0,25 s), y el
+  despertar (de media 1,5 ms con TCG, 0,12 con KVM). Y cerrar una tubería
+  mientras otro hilo lee de ella: EBADF para las llamadas nuevas, `dup2`
+  encima vale enseguida (como Linux), el `read` de antes acaba con lo que se
+  escribe después y, al acabar, la tubería se suelta (EPIPE). Y `clone` con un
+  TLS no canónico: EPERM (auditoría H7).
+- **El sonido después de MCURL**, otra vez en su orden: con el núcleo de
+  antes, en el PC (TCG, seis a la vez), la segunda ráfaga salía cortada 3
+  veces de 3 (609 a 627 ms en vez de 500, un corte); con el de ahora, 0 de 3
+  (492 a 504 ms); en la batería, sin cortes.
+- **MCXX y MCXXD** (el compilador cruzado; estático y dinámico): 35 pruebas
+  cada uno, en cada arranque con musl; MICU, MTEXTO y MCURL, compilados con él,
+  igual que antes (MICU y MTEXTO, las mismas líneas que en Linux).
+- **MRED6**, 25 pruebas por ::1 en cada arranque con musl; y **IPv6 por la
+  red de QEMU** (e1000e, 2 procesadores, IP fija y el DNS de prueba): la
+  dirección de SLAAC (`fec0::5054:ff:fe12:3456/64`), el router (`fe80::2`;
+  la red de usuario de QEMU no manda RDNSS), el AAAA de `anfitrion6.prueba`
+  (fec0::2), tres pings de ICMPv6, un GET por TCP sobre IPv6 (1 MB en unos
+  370 ms) y MCURL y CURL a `http://[fec0::2]:PUERTO/` con el sha256 del
+  anfitrión; ni un socket al acabar.
+- **ORDENES** con las órdenes en español (y DIR y echo, en inglés), `ayuda`
+  y **DEMO** (6 por 7 y la hora de Madrid, la del anfitrión entre antes y
+  después); y la **tabla de arreglos** con KVM (`prueba=salida`).
+- Lo de las etapas 0 a 11 b y la 10 b, igual (la unidad en memoria lleva 50
+  archivos; uname 0.11.3). curl_multi (16 a la vez, TCG): 2,7 s con 1
+  procesador, 14,6 con 4 y 23,4 con 8 (como en la 10 b: lo de TCG, abajo).
+
+El PC de Albinyana hizo el compilador cruzado (12 hilos, unos 25 minutos; y
+otra vez la musl, con el parche del DNS), las medidas de MHILOS con 1, 4 y 8
+procesadores y la prueba del sonido (los núcleos de antes y de ahora a la
+vez). `nucleo64/pruebas.sh` entero allí sigue sin valer del todo: no tiene
+KVM para carlos; el GRUB de x86_64-efi ya lo tiene y su NASM 3.01 se
+sustituye por un 2.16.01 compilado en `/mnt/castelpc/h64/herr/nasm`.
+
+Las imágenes de la carpeta del taller
+(`Pruebas/Pendientes/VirtualBox/Hispa-64-etapa-10c/`): el disco (`.vdi` e
+`.img`) y el CD, arrancados antes en QEMU (el disco por UEFI y el CD por la
+BIOS: 0.11.3, la dirección de SLAAC, MRED6 y MCXX bien), con LEEME.TXT: cómo
+crear la máquina en VirtualBox y qué probar (ayuda, DEMO, MCXX y MCXXD,
+CURL por HTTPS, MRED6, IPv6 con la red, MHILOS).
+
+### El navegador: lo que pide Ladybird sin ventana (el siguiente paso)
+
+El primer paso del navegador, según el plan (sección 19), es **Ladybird sin
+ventana**: su `headless-browser` (LibWeb y LibJS, sin Qt: el «chrome» de
+Ladybird es aparte y en modo headless no se usa) carga una página y saca
+**un PNG** (`--screenshot`) o **el texto** (`--dump-text`, `--dump-layout`),
+que se comparan con lo que saca el mismo programa en Linux, como MICU y
+MTEXTO. No cabía hoy; lo que hace falta, por orden:
+
+1. **Lo del núcleo** (lo que Ladybird da por hecho de un POSIX de hoy):
+   - **AF_UNIX** (`socketpair` y los de ruta), con **SCM_RIGHTS** (pasar
+     descriptores): Ladybird es de varios procesos (WebContent,
+     RequestServer, ImageDecoder) que se hablan por sockets de Unix y se
+     pasan descriptores; hoy `socketpair` da EOPNOTSUPP. Es lo más grande.
+   - **memoria compartida por descriptor**: `memfd_create` (o
+     `shm_open` sobre `/dev/shm`, que ya hay) con `ftruncate` y `mmap
+     MAP_SHARED` de verdad (Core::AnonymousBuffer: los mapas de bits que se
+     pasan los procesos).
+   - `readlink("/proc/self/exe")` (para encontrar los demás programas y sus
+     recursos), `posix_spawn` con sus acciones de descriptores (ya va con
+     clone y CLONE_VFORK), `pthread_setname_np`, `sched_getaffinity` con el
+     número de verdad, `getrusage`, `timerfd`/`eventfd` (ya están).
+   - Muchos hilos (cada proceso tiene los suyos): lo de esta etapa (el mutex,
+     el despertar y la TLB) es lo que hacía falta para eso.
+2. **El compilador**: GCC 14.3 con C++23 (`build/cruzado`, de esta etapa);
+   CMake y Ninja en el anfitrión (para compilar: no van a Hispa-64), con un
+   archivo de «toolchain» de CMake para `x86_64-hispa64-linux-musl`, en el
+   PC de Albinyana (son varias horas de compilar con 12 hilos).
+3. **Las bibliotecas de terceros** (todas con licencia compatible con la
+   GPL-2.0; en `terceros/`, compiladas con el cruzado): **Skia** (BSD-3: lo
+   que dibuja; la parte de la CPU, sin GPU ni Vulkan), libjpeg-turbo
+   (BSD/IJG), libpng (libpng), libwebp (BSD-3), woff2 (MIT), simdutf
+   (MIT/Apache-2.0), fast_float (MIT), SQLite (dominio público: las
+   cookies y la caché), libxml2 (MIT), fontconfig (MIT, o buscar las letras
+   a mano); **OpenSSL 3** (Apache-2.0: compatible con la GPL-3, **no** con
+   la GPL-2.0 sola; Hispa es «GPL-2.0 o posterior», así que el conjunto
+   puede ir como GPL-3, pero hay que decidirlo; si no, curl con BearSSL y
+   la capa de Ladybird que usa OpenSSL para su LibCrypto hecha sobre
+   BearSSL o monocypher). **Ya están**: FreeType y HarfBuzz (etapa 10), ICU
+   (10 b), curl (10 b), zlib/brotli (miniz y brotli en `terceros/`).
+   Sin ffmpeg (el vídeo y el audio de las páginas, más adelante), sin
+   libavif ni libjxl al principio.
+4. **Ladybird mismo** (BSD-2), la última versión fija que compile con GCC
+   14: AK, LibCore (con el bucle de sucesos sobre `poll`), LibIPC, LibGfx
+   (con Skia), LibJS, LibWeb, LibWebView y `headless-browser`; RequestServer
+   (las descargas, con curl). Lo que no sea de Linux de verdad y Hispa-64 no
+   tenga, con `#ifdef` en una capa propia (`Platform/Hispa64`), no
+   cambiando Ladybird por dentro.
+5. **La prueba**: `headless-browser --dump-text` de unas páginas de prueba
+   (HTML, CSS, JavaScript, una imagen, una letra web), servidas por
+   `servidores.py`, con el texto igual que en Linux; y `--screenshot`
+   comparado con el de Linux (los mismos píxeles, o casi: el suavizado).
+
+Después, su ventana sobre el compositor de la etapa 8 (con LibWebView y una
+capa propia en vez de Qt) y el ratón y el teclado.
+
+### La etapa futura: el driver de NVIDIA (Turing en adelante)
+
+Para los equipos con una gráfica de NVIDIA de 2018 en adelante (Turing: las
+RTX 20 y GTX 16; Ampere, Ada...): un driver de verdad (el modo de la
+pantalla, el cursor y, más adelante, la aceleración) a partir de
+**`open-gpu-kernel-modules`** de NVIDIA (el módulo de núcleo abierto, con
+licencia doble MIT/GPL-2.0: la MIT nos vale), que hace casi todo hablando
+con el **GSP** (el procesador que lleva la propia tarjeta) y su **firmware**
+(`gsp_*.bin`, de `linux-firmware`, redistribuible tal cual). Lo nuestro
+sería la capa del sistema que ese código pide (la memoria, el PCI, las
+interrupciones MSI-X, los temporizadores, los cerrojos: su «os-interface»),
+en un módulo propio, y cargar el firmware. **El banco de pruebas: la RTX
+3060 (Ampere, GA106) del PC de Albinyana**, arrancando Hispa-64 desde una
+memoria USB en ese mismo PC (con UEFI; el GOP de la tarjeta ya da la
+pantalla mientras tanto). Pide antes: el cargador de módulos del núcleo (o
+compilarlo dentro), y arrancar desde USB en ese PC (hoy se usa con
+Windows y WSL). No se empieza todavía.
+
+### Lo que queda (y más adelante)
+
+- **El navegador**: lo de arriba (AF_UNIX con SCM_RIGHTS y `memfd_create`
+  primero; Skia y las demás bibliotecas; Ladybird sin ventana).
+- **IPv6**: los trozos (la cabecera de fragmentación: hoy se tiran), DAD (la
+  detección de duplicados antes de usar la dirección), las direcciones
+  temporales (RFC 8981), DHCPv6, MLD (para los conmutadores que filtran la
+  multidifusión), las vidas de las direcciones y del router (hoy, para
+  siempre), el MTU de la ruta (ICMPv6 «paquete demasiado grande»), y
+  `::1 localhost` en `/etc/hosts` (no se ha puesto aún: los que piden
+  «localhost» seguirían yendo por IPv4, pero cambiaría lo que eligen curl y
+  musl); IFCONFIG, sin las de IPv6 (las dice el núcleo al tenerlas).
+- **El núcleo**: `dup2` sobre un descriptor que otro hilo está **abriendo**
+  da EBUSY (como Linux; musl lo repite); los aplazados, 32 por proceso; de
+  la auditoría, **H3, H4 y H11 a H13** (los que piden cerrojos nuevos: hay
+  que hacerlos con calma y con su prueba de carrera, como MHILOS para los
+  descriptores), y la tabla de arreglos también para las copias si algún
+  día dejan de ir por el mapa directo.
+- **Con TCG** (QEMU sin KVM) y 4 u 8 procesadores, abrir y cerrar a la vez
+  sigue costando (los avisos entre procesadores son lentos en TCG: lo que
+  queda de MHILOS es eso; con KVM, 41 ms).
+- El compilador cruzado: hacer también así lo de C (hoy, el gcc del
+  anfitrión con las cabeceras de musl: `musl-gcc`), y que pruebas.sh lo
+  rehaga solo si falta (hoy lo dice y no compila los de C++).
+- De la 11 b, sin tocar: suspender (S3), los P-states sin HWP, los GPE y la
+  SCI, `_SRS`, IPP y la mezcla del sonido.
+- La etapa 14 (NVIDIA): sin empezar.
