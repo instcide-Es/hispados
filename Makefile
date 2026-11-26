@@ -489,7 +489,11 @@ ath_obj = $(patsubst wifi/linux/ath/%.c,$(1)/ath_%.o,$(ATH_SA)) \
           $(patsubst wifi/linux/ath/ath9k/%.c,$(1)/ath9k_%.o,$(ATH_S9)) $(1)/radio_ath9k.o
 WIFI_LINUX = $(wildcard wifi/linux/brcmsmac/*.c wifi/linux/brcmsmac/phy/*.c wifi/linux/brcmutil/*.c \
              wifi/linux/bcma/*.c) wifi/linux/cordic.c
-WIFI_PROPIO = wifi/compat/base.c $(filter-out wifi/nucleo/radio_ath9k.c,$(wildcard wifi/nucleo/*.c))
+# (las Intel y la Realtek por SDIO, iwl*, radio_iwl*, sdio.c y radio_rtl*, son
+# solo de WIFI.BIN de Hispa-Pentium: castel/nucleo32/wifi/hacer.sh)
+WIFI_SOLO_PENTIUM = wifi/nucleo/iwl_fw.c wifi/nucleo/radio_iwl.c wifi/nucleo/radio_iwl_pc.c \
+                    wifi/nucleo/sdio.c wifi/nucleo/radio_rtl.c wifi/nucleo/radio_rtl_pc.c
+WIFI_PROPIO = wifi/compat/base.c $(filter-out wifi/nucleo/radio_ath9k.c $(WIFI_SOLO_PENTIUM),$(wildcard wifi/nucleo/*.c))
 WIFI_DEP = $(wildcard tests/wifi/*.h wifi/compat/*.h wifi/nucleo/*.h wifi/linux/brcmsmac/*.h wifi/linux/brcmsmac/phy/*.h \
            wifi/linux/bcma/*.h wifi/linux/include/linux/bcma/*.h)
 WIFI_OL = $(patsubst %.c,$(B)/wifi/%.o,$(notdir $(WIFI_LINUX)))
