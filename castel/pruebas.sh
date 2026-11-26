@@ -5854,7 +5854,7 @@ if grep -q "Se conecta sola" $S; then ko "con WIFI.INI cambiado se conecta sola"
 # 3. con la e1000 (el cable) y el Wi-Fi: Automático (el cable), Wi-Fi y Cable (RED.INI)
 cp $Wf/e.img $Wf/c.img
 MEMORIA=64 ESCRIBE=1 DISCO=$Wf/c.img ARRANQUE=ordenes MODULOS= QEMU_MAS="-nic user,model=e1000" $AQUI/nucleo32/probar.sh "" ipconfig ":pausa 8" "redwifi /estado" \
-  "redwifi /usar wifi" ":pausa 4" "ipconfig" "ping -n 2 192.168.77.1" ":pausa 3" "redwifi /usar auto" ":pausa 4" "ipconfig" "redwifi /usar cable" ":pausa 3" "redwifi /estado" ":pausa 3" > $Wf/cable.sal 2>&1
+  "redwifi /usar wifi" ":pausa 4" "ipconfig" "ping -n 2 192.168.77.1" ":pausa 3" "redwifi /usar auto" ":pausa 4" "ipconfig" "redwifi /usar cable" ":pausa 3" "redwifi /estado" ":hasta 30 1 WIFI.BIN ya no está" ":pausa 1" > $Wf/cable.sal 2>&1
 tr -d '\r' < $Wf/cable.sal > $Wf/cable.txt
 S=$Wf/cable.txt
 mira "con cable y Wi-Fi, en Automático: la red va por el cable (el Wi-Fi conecta, pero no se usa)" "red: DHCP: IP 10\.0\.2\.15" \
