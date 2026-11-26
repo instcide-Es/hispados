@@ -835,7 +835,7 @@ módulo Red64
         variable iov: arreglo [2] de nat64
         variable s: puntero a Sock
         variable err, r, total: ent64
-        variable i, todo: nat64
+        variable i, todo, cabe: nat64
         variable k: puntero a byte
         variable ip, pt, fam: nat32
         s := de_fd(p, fd, err)
@@ -848,16 +848,27 @@ módulo Red64
             i := 0
             mientras i < mh[3] hacer
                 si no copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16) entonces devolver EFAULT fin
+                ; (auditoría H2) sin dar la vuelta: cada trozo y la suma, como mucho MTU
+                si iov[1] > MTU o todo + iov[1] > MTU entonces devolver EMSGSIZE fin
                 todo := todo + iov[1]
                 i := i + 1
             fin
-            si todo > MTU entonces devolver EMSGSIZE fin
             k := reserva(todo + 1)
             si k = nulo entonces devolver ENOMEM fin
+            cabe := todo
             todo := 0
             i := 0
             mientras i < mh[3] hacer
-                copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16)
+                si no copia_de(p, nat64(dirección(iov[0])), mh[2] + i * 16, 16) entonces
+                    libera(k)
+                    devolver EFAULT
+                fin
+                ; (auditoría H2) el iov se lee otra vez del programa: otro hilo ha
+                ; podido agrandarlo; nunca más de lo reservado
+                si iov[1] > cabe - todo entonces
+                    libera(k)
+                    devolver EMSGSIZE
+                fin
                 si iov[1] > 0 entonces
                     si no copia_de(p, nat64(k) + todo, iov[0], iov[1]) entonces
                         libera(k)

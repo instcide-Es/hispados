@@ -1410,6 +1410,10 @@ módulo Procesos
         si no hay_señal(p, h) entonces devolver fin
         enciende()
         antes_de_volver(m, falso, 0)
+        ; (auditoría H8) como a la vuelta de syscall (Sistema): el manejador de
+        ; una señal no canónico haría fallar el iretq de E64_salida en el anillo
+        ; 0, ya con el GS del programa
+        si l64(m + 120) >= TOPE entonces sal(0, SIGSEGV) fin
         apaga()
     fin
 
@@ -2515,6 +2519,9 @@ módulo Procesos
         variable x: nat32
         variable bien: bool
         yo_ := actual()
+        ; (auditoría H7) un TLS no canónico: el wrmsr de FS_BASE de arranca_clon
+        ; daría #GP en el anillo 0 y pararía el sistema (arch_prctl ya lo mira)
+        si marcas_ yb 0x80000 <> 0 y tls >= nat64(0x8000) << 32 entonces devolver -1 fin
         a := puntero(nat64(reserva(tamaño(Arranque))))
         si a = nulo entonces devolver -12 fin
         a.fpu_bloque := nuevo_fpu(fpu)

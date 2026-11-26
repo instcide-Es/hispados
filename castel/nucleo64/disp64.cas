@@ -817,7 +817,8 @@ módulo Disp64
             devolver r
         fin
         si clase <> F_FB entonces devolver ENODEV fin
-        si desp + l > fb_l * 2 entonces devolver EINVAL fin
+        ; (auditoría H9) sin dar la vuelta: desp cerca de 2^64 pasaba la cuenta
+        si desp >= fb_l * 2 o l > fb_l * 2 - desp entonces devolver EINVAL fin
         cierra_mutex(dirección(fb_mutex))
         si dueño <> 0 y dueño <> p.id entonces
             abre_mutex(dirección(fb_mutex))

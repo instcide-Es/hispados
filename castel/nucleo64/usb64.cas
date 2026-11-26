@@ -246,7 +246,9 @@ módulo Usb64
                 a.interfaces[interfaz].largo_informe := m16(p + d + 7)
             sino si k = 5 y m8(p + d) >= 7 y vale y a.n_ext < MAX_EXT entonces
                 clase := m8(p + d + 3) yb 3
-                si clase = 2 o clase = 3 entonces
+                ; (auditoría H6) un extremo con wMaxPacketSize 0 no vale: xhci64 y
+                ; usbred64 dividen entre él (#DE en el núcleo)
+                si (clase = 2 o clase = 3) y m16(p + d + 4) yb 0x7FF <> 0 entonces
                     n := a.n_ext
                     a.ext[n].número := m8(p + d + 2)
                     a.ext[n].clase := clase

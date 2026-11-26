@@ -953,7 +953,9 @@ módulo Tcp64
         ; ---- lo demás: ¿está dentro de la ventana? ----
         dentro := 1
         si lon = 0 entonces
-            si antes(seq, s.rcv_nxt) y f yb (F_SYN ob F_FIN) = 0 entonces dentro := 0 fin
+            ; (auditoría H1) el límite de abajo también con SYN o FIN: si no,
+            ; vale cualquier seq de media vuelta (antes() es con signo)
+            si antes(seq, s.rcv_nxt) entonces dentro := 0 fin
         sino
             si antes_o_igual(seq + lon, s.rcv_nxt) entonces dentro := 0 fin
         fin
@@ -964,6 +966,13 @@ módulo Tcp64
             devolver
         fin
         si f yb F_RST <> 0 entonces
+            ; (auditoría H1, RFC 5961 §3) con SYN a la vez, fuera; dentro de la
+            ; ventana pero no justo en rcv_nxt, un «challenge ACK» y no se corta
+            si f yb F_SYN <> 0 entonces devolver fin
+            si dentro <> 0 y seq <> s.rcv_nxt entonces
+                si s.estado <> T_SYN_RECIBIDO entonces manda_ack(s) fin
+                devolver
+            fin
             si dentro <> 0 entonces
                 tcp_rst_rx := tcp_rst_rx + 1
                 si s.estado = T_SYN_RECIBIDO entonces
@@ -979,10 +988,10 @@ módulo Tcp64
             devolver
         fin
         si f yb F_SYN <> 0 y s.estado <> T_SYN_RECIBIDO entonces
-            ; (un SYN dentro de una conexión: se corta)
-            manda_rst_de(s)
-            acaba(s, ECONNRESET)
-            suelta_si(s)
+            ; (auditoría H1, RFC 5961 §4) un SYN dentro de una conexión hecha: un
+            ; «challenge ACK», sin cortar (si el otro de verdad ha vuelto a
+            ; empezar, contestará al ACK con un RST justo en rcv_nxt)
+            manda_ack(s)
             devolver
         fin
         si f yb F_ACK = 0 entonces devolver fin

@@ -501,7 +501,9 @@ módulo Hidesc64
                 d.tec_largo := (infs[k].bits_ent + 7) >> 3
             fin
             ; los LED
-            si no d.leds y infs[k].led_b <> NO entonces
+            ; (auditoría H5) el informe de los LED se escribe en de_control (2048
+            ; octetos): como mucho 64, y los bits de los LED dentro de él
+            si no d.leds y infs[k].led_b <> NO y infs[k].bits_sal <= 512 y infs[k].led_b + infs[k].led_n <= infs[k].bits_sal entonces
                 d.leds := cierto
                 d.leds_id := infs[k].id
                 d.leds_bit := infs[k].led_b
