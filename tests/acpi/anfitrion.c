@@ -17,6 +17,8 @@
  * -m DIR VALOR pone ese octeto en la memoria física (las variables de la BIOS:
  * la GNVS). Con -i2chid, al acabar, los dispositivos HID sobre I2C (acpi/pentium/i2chid.c,
  * lo que ACPI.BIN le manda al núcleo de Hispa-Pentium): una línea «I2CHID n: ...».
+ * (HPRADIO) Con -hpradio, al acabar, lo de ACPI.BIN con el Wi-Fi de los HP
+ * (acpi/pentium/hpradio.c: la WMI de HP, consulta 1Bh); -hpradiover, solo leer.
  * Escribe el registro (lo que en el equipo es BATERIA.LOG) y, por cada
  * lectura, una línea «APM n: ...» con lo que contestaría INT 15h AX=530Ah.
  * Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior. */
@@ -27,6 +29,7 @@
 #include "../../acpi/pentium/pentium.h"
 
 int tarea_quieta(void);
+void hp_radio(int solo_ver);	/* (HPRADIO) acpi/pentium/hpradio.c */
 
 int sim_charla;
 
@@ -171,7 +174,7 @@ static u32 pet[4];
 
 void entrada_c(long *pila)
 {
-	int argc = pila[0], i, lecturas = 3, ntab = 0, con_i2chid = 0, npoke = 0;
+	int argc = pila[0], i, lecturas = 3, ntab = 0, con_i2chid = 0, npoke = 0, con_hp = -1;
 	u32 poke_d[32], poke_v[32];
 	char **argv = (char **)(pila + 1);
 	u8 *xsdt, *rsdp, *fadt = 0;
@@ -191,6 +194,10 @@ void entrada_c(long *pila)
 			i += 2;
 		} else if (!strcmp(argv[i], "-i2chid"))
 			con_i2chid = 1;
+		else if (!strcmp(argv[i], "-hpradio"))
+			con_hp = 0;		/* (HPRADIO) */
+		else if (!strcmp(argv[i], "-hpradiover"))
+			con_hp = 1;
 		else if (!strcmp(argv[i], "-n") && i + 1 < argc)
 			lecturas = strtoul(argv[++i], 0, 10);
 		else if (!strcmp(argv[i], "-o") && i + 1 < argc)
@@ -323,6 +330,16 @@ void entrada_c(long *pila)
 			   "registro=%X gpio=%d/%X ss=%u/%u/%u fm=%u/%u/%u origen=%u\n", k + 1, f[k].ruta, f[k].hid, f[k].cid, f[k].sta,
 			   f[k].esclavo, f[k].velocidad, f[k].diez, f[k].fuente, f[k].adr, f[k].pci, f[k].registro,
 			   (int)f[k].gpio_pin, f[k].gpio_modo, f[k].ss[0], f[k].ss[1], f[k].ss[2], f[k].fm[0], f[k].fm[1], f[k].fm[2], f[k].origen);
+	}
+	if (con_hp >= 0) {
+		/* (HPRADIO) lo de ACPI.BIN con el Wi-Fi de los HP, contra su AML */
+		int k;
+
+		for (k = 0; k < 2000 && !tarea_quieta(); k++)
+			if (nucleo_llamada(LL_PASO, 0) < 0)
+				break;
+		hp_radio(con_hp);
+		vuelca_registro();
 	}
 	pet[0] = (u32)&es;
 	pet[1] = sizeof es;

@@ -46,6 +46,8 @@ int brcm_busca(void);
 int brcm_monta(struct radio **r);
 int brcm_enciende(void);
 void brcm_cuentas(d32 *bien, d32 *mal, int *vel);
+int brcm_radio_apagada(void);			/* (HPRADIO) */
+void brcm_mira_patilla(const char *cuando);	/* (HPRADIO) */
 int ath_busca(void);
 int ath_monta(struct radio **r);
 int ath_enciende(void);
@@ -64,9 +66,12 @@ struct conductor {
 	int (*enciende)(void);
 	void (*cuentas)(d32 *bien, d32 *mal, int *vel);
 	void (*resumen)(void);
+	int (*apagada)(void);	/* (HPRADIO) 1: la radio, apagada por la patilla W_DISABLE# (la tecla del Wi-Fi) */
+	void (*patilla)(const char *cuando);	/* (HPRADIO) lo que dicen la patilla y las GPIO, a WIFI.LOG */
 };
 static const struct conductor conductores[] = {
-	{ "Broadcom BCM43224/43225/4313 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL },
+	{ "Broadcom BCM43224/43225/4313 (brcmsmac)", brcm_busca, brcm_monta, brcm_enciende, brcm_cuentas, NULL,
+	  brcm_radio_apagada, brcm_mira_patilla },
 	{ "Atheros AR9285/AR9280/AR9287 (ath9k)", ath_busca, ath_monta, ath_enciende, ath_cuentas, ath_resumen },
 	{ "Intel Wireless-AC 7265/3165 (como iwlwifi/MVM; con su firmware en X:\\FIRMWARE, \\FIRMWARE o \\HISPA\\FIRMWARE)", iwl_busca, iwl_monta, iwl_enciende, iwl_cuentas, iwl_resumen },
 	/* (RTL8723BS) la última: no está en el PCI (va por SDIO, la tercera
@@ -125,6 +130,18 @@ static int diag_hecho;			/* los diagnósticos ya escritos (un bit por causa) */
 #define DIAG_SIN_REDES 2
 #define DIAG_NO_CONECTA 4
 static void diagnostico(int causa, const char *que);
+/* (HPRADIO) la radio apagada por la patilla W_DISABLE# de la tarjeta (en los
+ * HP, la tecla del Wi-Fi o la BIOS): el controlador ya está montado; se mira
+ * la patilla cada segundo (como Linux, rfkill_poll) y, al encenderse, se
+ * enciende la radio sin volver a cargar nada */
+static int rf_espera;			/* esperando a que la patilla diga «encendida» */
+static u32 rf_desde, rf_mirada;		/* el tic en que empezó a esperar; el de la última mirada */
+static u32 rf_dicho;			/* los segundos de espera ya apuntados (cada minuto) */
+static int hp_leido;			/* RADIOHP.TXT (de ACPI.BIN) ya copiado a WIFI.LOG */
+static u32 hp_mirado;			/* el tic en que se buscó la última vez */
+#ifdef CHIP_SIMULADO
+extern int tsim_rfd;			/* (HPRADIO) tests/wifi/tarjeta_sim.c */
+#endif
 
 /* ============================================================== el tiempo */
 u32 hl_pentium_tics(void) { return sc(SC_TICS, 0, 0, 0); }
@@ -1520,6 +1537,7 @@ static int carga_fw_rtl(void)
 	return -1;
 }
 
+static int arranca_fin(void);
 static int arranca(void)
 {
 	u32 r, t, u, pk;
@@ -1553,6 +1571,18 @@ static int arranca(void)
 	sim_renovar_grupo_cada = 9000;
 	ap_sim = sim_radio();
 	tarjeta_sim_monta(ap_sim);
+	{
+		/* (HPRADIO) \WIFISIM.TXT «RFKILL=n»: la tarjeta de mentira, con la
+		 * patilla W_DISABLE# activa durante las n primeras miradas */
+		char t[64];
+		int n = hl_lee_texto("\\WIFISIM.TXT", t, sizeof t);
+		if (n > 7 && !memcmp(t, "RFKILL=", 7)) {
+			tsim_rfd = 0;
+			for (n = 7; t[n] >= '0' && t[n] <= '9'; n++)
+				tsim_rfd = tsim_rfd * 10 + t[n] - '0';
+			hl_log(2, "NÚCLEO DE PRUEBAS: la patilla W_DISABLE# de la tarjeta, activa (radio APAGADA) las %d primeras miradas\n", tsim_rfd);
+		}
+	}
 #endif
 #ifdef RTL_SIMULADO
 	hl_log(2, "NÚCLEO DE PRUEBAS: Realtek RTL8723BS por SDIO simulada, red «HispaPrueba» en el canal 6\n");
@@ -1607,10 +1637,32 @@ static int arranca(void)
 	hl_log(2, "PASO 2 de 3 hecho: controlador montado (montón: %u KB). Sigue el 3: encender la radio\n", u >> 10);
 	vuelca_registro();
 	e = cond->enciende();
+	if (e == -10 && cond->apagada) {
+		/* (HPRADIO) apagada por la patilla: el controlador se queda
+		 * montado, esperando a la tecla (o a que ACPI.BIN la encienda) */
+		hl_log(0, "PASO 3 de 3: la radio está apagada por la patilla W_DISABLE# de la tarjeta (%d)\n", e);
+		hl_log(2, "Lo que se intenta: (1) en los HP, ACPI.BIN pide a la BIOS que encienda el Wi-Fi (WMI de HP, consulta 1Bh, como hp-wmi de Linux; "
+			  "lo que haya contestado sale aquí debajo, «HP:»); (2) se mira la patilla cada segundo: al pulsar la tecla del Wi-Fi "
+			  "(o mover el interruptor), la radio se enciende sola, sin reiniciar\n");
+		hl_log(2, "(En los HP: con un cable de red enchufado y «LAN/WLAN Switching» en la BIOS, la BIOS apaga el Wi-Fi mientras haya cable)\n");
+		rf_espera = 1;
+		rf_desde = rf_mirada = hl_pentium_tics();
+		rf_dicho = 0;
+		return -2;
+	}
 	if (e < 0) {
 		hl_log(0, "PASO 3 de 3: la radio no se enciende (%d)\n", e);
 		return -1;
 	}
+	return arranca_fin();
+}
+
+/* (HPRADIO) lo que queda al encenderse la radio (también cuando se enciende
+ * después, al soltarla la patilla) */
+static int arranca_fin(void)
+{
+	u32 t, u, pk;
+
 	if (la_radio->nombre)
 		snprintf(nombre_tarjeta, sizeof nombre_tarjeta, "%s", la_radio->nombre);
 #ifdef CHIP_SIMULADO
@@ -1628,6 +1680,85 @@ static int arranca(void)
 		return -1;
 	hl_log(2, "PASO 3 de 3 hecho: radio en marcha (montón: %u KB, pico %u KB de %u)\n", u >> 10, pk >> 10, t >> 10);
 	return 0;
+}
+
+/* (HPRADIO) lo que ha hecho ACPI.BIN con el Wi-Fi de los HP (la WMI de la
+ * BIOS, consulta 1Bh): RADIOHP.TXT, a WIFI.LOG (una vez; ACPI.BIN lo borra
+ * al empezar cada arranque y lo escribe al poco) */
+static void mira_hp(void)
+{
+	static char t[1600];
+	char *a, *b;
+	int n;
+
+	if (hp_leido)
+		return;
+	n = lee_archivo("RADIOHP.TXT", t, sizeof t - 1);
+	if (n <= 0)
+		return;
+	hp_leido = 1;
+	t[n] = 0;
+	for (a = t; *a; a = b) {
+		for (b = a; *b && *b != '\n'; b++)
+			;
+		if (*b)
+			*b++ = 0;
+		n = strlen(a);
+		if (n && a[n - 1] == '\r')
+			a[n - 1] = 0;
+		if (*a)
+			hl_log(2, "HP: %s\n", a);
+	}
+}
+
+/* (HPRADIO) cada segundo, con la radio apagada por la patilla: ¿se ha
+ * encendido? Si sí, se enciende la radio y se busca (como al arrancar) */
+static void mira_patilla(void)
+{
+	u32 ahora = hl_pentium_tics(), s;
+	int a, e;
+
+	if (!rf_espera || listo || ahora - rf_mirada < hz)
+		return;
+	rf_mirada = ahora;
+	mira_hp();
+	s = (ahora - rf_desde) / (hz ? hz : 100);
+	a = cond->apagada();
+	if (a > 0) {
+		if (s >= rf_dicho + 60) {
+			rf_dicho = s - s % 60;
+			hl_log(2, "La patilla W_DISABLE# sigue diciendo APAGADA (%u s esperando): pulse la tecla del Wi-Fi\n", s);
+			vuelca_registro();
+		}
+		return;
+	}
+	if (a < 0) {
+		rf_espera = 0;
+		return;
+	}
+	hl_log(2, "La patilla W_DISABLE# dice ahora ENCENDIDA (a los %u s): se enciende la radio\n", s);
+	cond->patilla("al soltarse");
+	cada_linea = 1;
+	e = cond->enciende();
+	if (e == -10) {
+		hl_log(1, "la radio vuelve a estar apagada al encenderla: se sigue esperando\n");
+		cada_linea = 0;
+		return;
+	}
+	rf_espera = 0;
+	if (e < 0 || arranca_fin() < 0) {
+		hl_log(0, "PASO 3 de 3: la radio no se enciende (%d) (después de soltarse la patilla)\n", e);
+		diag_hecho &= ~DIAG_ARRANQUE;
+		diagnostico(DIAG_ARRANQUE, "la patilla se ha soltado, pero la radio no se ha podido encender");
+	} else {
+		avisa("Radio encendida.");
+		w80211_barrer();
+		if (con_red)
+			ponerse_en_red();
+		hl_log(2, "El Wi-Fi, en marcha después de encenderse la radio (a los %u s de esperar)\n", s);
+	}
+	cada_linea = 0;
+	vuelca_registro();
 }
 
 static void para(void)
@@ -1696,7 +1827,15 @@ int servicio_wifi(void)
 	hl_log(2, "Memoria para la tarjeta: %u KB en %08X (se ve en %08X)\n", dma_tam >> 10, dma_f, (u32)dma_v);
 	lee_recordadas();
 	vuelca_registro();
-	if (arranca() < 0) {
+	if ((r = arranca()) == (u32)-2) {
+		/* (HPRADIO) la radio, apagada por la patilla: se espera */
+		mira_hp();
+		avisa("La radio del Wi-Fi está apagada: pulse la tecla del Wi-Fi del equipo (la de la antena).");
+		diagnostico(DIAG_ARRANQUE, "la tarjeta está, pero su radio está APAGADA por la patilla W_DISABLE# (la tecla o el interruptor del Wi-Fi, o la BIOS); se espera a que se encienda");
+		listo = 0;
+		dilo();
+		vuelca_registro();
+	} else if ((int)r < 0) {
 		hl_log(0, "El Wi-Fi no se ha podido poner en marcha. Mande el archivo %sWIFI.LOG para arreglarlo.\n", carpeta);
 		if (aparato != 0xFFFFFFFF || hay_sdio)
 			diagnostico(DIAG_ARRANQUE, "la tarjeta está, pero no se ha podido poner en marcha");
@@ -1739,6 +1878,14 @@ int servicio_wifi(void)
 				cada_linea = 0;
 				vuelca_registro();
 			}
+		}
+
+		mira_patilla();		/* (HPRADIO) */
+		/* (HPRADIO) lo de ACPI.BIN con la BIOS de HP llega al poco de
+		 * arrancar: se busca cada segundo, el primer medio minuto */
+		if (!hp_leido && hl_pentium_tics() - hp_mirado >= hz && hl_pentium_tics() - diag_t0 < 30 * hz) {
+			hp_mirado = hl_pentium_tics();
+			mira_hp();
 		}
 
 		if (sim_ausente && (int)(hl_pentium_tics() - sim_vuelve) >= 0) {

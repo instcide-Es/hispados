@@ -550,12 +550,47 @@ Qué mirar primero si falla, por orden:
 | «no hay ninguna tarjeta Wi-Fi Broadcom» y la lista de `PCI ...` | la tarjeta es otra (apuntar su `fabricante:modelo`) o está apagada en la BIOS |
 | «la BIOS no ha dado a la tarjeta una dirección de memoria» | BAR0 vacío o por encima de 4 GB |
 | se queda tras «Tarjeta Wi-Fi: ...» | no se leen los núcleos (ventana del BAR0): lo primero que puede ser distinto del modelo |
-| «la radio está APAGADA por el interruptor» | el botón del Wi-Fi del equipo |
+| «la radio está APAGADA por el interruptor» | el botón del Wi-Fi del equipo (la patilla W_DISABLE#: ver «La radio apagada por la tecla del Wi-Fi») |
 | `EXCEPCIÓN n ... EIP xxxxxxxx` | fallo nuestro: con el EIP y `build/wifi/nucleo.elf` se saca la línea |
 | enciende pero `WIFI REDES` no ve nada | la radio no recibe: PHY, antenas (SPROM), canal |
 | ve redes pero «no contesta a la autenticación» | no emite, o emite mal (potencia, velocidad de gestión) |
 | asocia pero «el acuerdo de claves no termina» | la contraseña, o las tramas de datos (cifrado, acuses) |
 | conecta pero `CONFRED` no consigue dirección | la clave de grupo o la recepción de difusión |
+
+### La radio apagada por la tecla del Wi-Fi (HP Mini 5103 n.º 2, BCM4313) — Hispa-Pentium
+
+brcmsmac sabe que la radio está apagada «por hardware» por el bit RFD
+(1 << 16) del registro `phydebug` (158h) del núcleo 802.11
+(`brcms_c_check_radio_disabled`): es la patilla RF_DISABLE del chip, que en
+una tarjeta Mini PCI Express es la W_DISABLE# (patilla 20) del conector. No
+hay nada más que leer (ni boardflags ni GPIO de la SPROM deciden eso); la
+tarjeta la recibe del equipo. En los HP de 2008-2012 la mueve la BIOS (el
+SMM): la tecla del Wi-Fi (F12 en el 5103) cambia el estado y lo guarda para
+el arranque siguiente; Windows y Linux (`hp-wmi`) se lo piden a la BIOS por
+la WMI de HP (\_SB.WMID, método WMAA, GUID 5FB7F034-2C63-45E9-BE91-3D44E2C707E4;
+en el 5103, la consulta 1Bh: leer = la tabla de las radios en WLDA, escribir
+= SMI EA75h). La luz de la tecla la enciende la tarjeta por una de sus GPIO
+(la que dice la SPROM, ledbh0-3 = 3): por eso el HP Mini n.º 1 conectaba
+con la luz en rojo.
+
+Lo que hace Hispa-Pentium (rama hpmini-radio):
+
+- **ACPI.BIN** (`acpi/pentium/hpradio.c`), una vez al arrancar: si el equipo
+  tiene la WMI de HP, lee la tabla de las radios (1Bh) y, si el Wi-Fi está
+  apagado «por programa» (sin el 02h), le pide a la BIOS que lo encienda
+  (como `rfkill unblock` con `hp-wmi`). Lo apunta en ACPI.TXT y en
+  RADIOHP.TXT, que WIFI.BIN copia a WIFI.LOG («HP: ...»). `sinhpradio`: no
+  hace nada; `hpradiosolover`: solo lee.
+- **WIFI.BIN**: con la radio apagada (-ERFKILL de `brcms_ops_start`) ya no se
+  rinde: deja el controlador montado, dice en la ventana que se pulse la
+  tecla, mira la patilla cada segundo (como `rfkill_poll` de Linux) y, al
+  soltarse, enciende la radio y busca, sin reiniciar. Apunta el bit RFD y las
+  GPIO del chip (entrada, salida, salidas activas) al fallar y al soltarse.
+  Con la radio en marcha, enciende la luz (como `brcms_led_register`).
+- Pruebas: `castel/pruebas.sh`, parte wifi, 4 quinquies (QEMU, la BCM4313 de
+  mentira con `WIFISIM.TXT` «RFKILL=n» y la WMI de mentira
+  `tests/acpi/hpwmi-qemu.asl`) y 4 sexies (`build/acpi_sim -hpradio` con el
+  AML de verdad del HP Mini, `tests/acpi/hp-mini-5103/`).
 
 ### MacBook Air 2012 (A1466), BCM43224 de Apple (106B:00E9)
 

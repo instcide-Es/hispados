@@ -87,6 +87,9 @@ int tsim_4313 = 1;
 #else
 int tsim_4313;
 #endif
+/* (HPRADIO) las miradas al bit RFD de phydebug que aún dirán «radio apagada
+ * por la patilla W_DISABLE#» (la tecla del Wi-Fi de los HP); 0: encendida */
+int tsim_rfd;
 #define canal_radio tsim_canal
 static struct radio *ap;	/* el punto de acceso de mentira (sim.c) */
 u32 tsim_tx, tsim_rx, tsim_tx_malas, tsim_accesos;
@@ -298,6 +301,12 @@ static u32 plano_lee(u32 dir, int tam)
 			return 0;
 		case 0x180:				/* TSF: el reloj */
 			return hl_jiffies() * 1000;
+		case 0x158:				/* (HPRADIO) phydebug: el bit RFD (1 << 16) es la patilla W_DISABLE# */
+			if (tsim_rfd > 0) {
+				tsim_rfd--;
+				return le(r_d11, off, tam) | (1u << 16);
+			}
+			break;
 		}
 		return le(r_d11, off, tam);
 	}

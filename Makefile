@@ -639,7 +639,7 @@ ACPI = $(B)/HSPACPI.COM $(B)/HSPACPI.BIN
 # debajo (tests/acpi/: las tablas ACPI volcadas del Toshiba NB250 y del HP
 # Mini 5103 y un controlador embebido simulado): tests/run_acpi_tests.sh
 ACPI_SIMF = $(ACPI_BASEF) -DANFITRION -O1 -g -Itests/acpi
-ACPI_SS = tests/acpi/maquina_sim.c tests/acpi/anfitrion.c acpi/pentium/i2chid.c
+ACPI_SS = tests/acpi/maquina_sim.c tests/acpi/anfitrion.c acpi/pentium/i2chid.c acpi/pentium/hpradio.c
 $(foreach f,$(ACPI_SA),$(eval $(call ACPI_REGLA,$(f),$(B)/acpisim,$$(ACPI_SIMF) -w)))
 $(foreach f,$(ACPI_SP) $(ACPI_SS),$(eval $(call ACPI_REGLA,$(f),$(B)/acpisim,$$(ACPI_SIMF) -Wall -Wno-unused)))
 $(B)/acpisim/tarea.o: acpi/nucleo/tarea.asm | $(B)/acpisim
