@@ -4912,6 +4912,43 @@ Los paquetes: base **0.8.12**, red **0.8.12**, wifi **0.8.12**, termo **1.2**,
 equipo **0.9.6**, el nuevo **bluetoot 0.1** (`base >= 0.8.12`); lo demás, tal
 cual lo publicado.
 
+**Las pruebas de la 0.8.12** (25 y 26/11, el código en 864338cc; después,
+solo pruebas). En el PC de Albinyana (ya con KVM, `tools/pruebas_castel_pc.sh
+-j 12`, en dos tandas, y otra vez las que fallaban con -j 6, 4 y 2) y en el
+VPS (una a una, con `nice`, de noche): las 54 partes, **5202 bien, 0 mal**:
+`16` 139/0, `06` 171/0, `07` 102/0, `castel32` 67/0, `castel64` 72/0,
+`caliente` 79/0, `paquetes` 108/0, `red` 78/0, `acpi` 78/0, `tls` 72/0, `cd`
+77/0, `pantalla` 98/0, `dispositivos` 104/0, `informe` 76/0, `ssh` 72/0,
+`lectores` 79/0, `win32` 90/0, `rueda` 71/0, `menu` 95/0, `programas` 92/0,
+`protege` 76/0, `wifi` 107/0, `accesorios` 81/0, `sonido` 109/0, `pluma`
+79/0, `cuentas` 85/0, `pintura` 73/0, `pdf` 77/0, `navegador` 100/0, `zip`
+118/0, `mirador` 75/0, `usuarios` 109/0, `panel` 108/0, `bloc` 119/0,
+`reproductor` 111/0, `win32juegos` 118/0, `juegos` 98/0, `oficina` 101/0,
+`correo` 193/0, `agenda` 91/0, `cortes` 88/0, `iconos` 95/0, `compat` 89/0,
+`touchpad` 113/0, `punteros` 136/0, `i2chid` 96/0, `sdhci` 84/0, `intel`
+63/0, `termo` 167/0, `movil` 89/0, `bt` 77/0, `rtl` 69/0, `escudo` 100/0 y
+`uefi` 88/0. En el VPS: `informe`, `dispositivos` y `compat` (el PHP del PC
+no tiene mbstring: `mb_check_encoding` da 500), `pluma`, `cuentas` y
+`navegador` (sin qpdf, poppler ni ImageMagick en el PC), `sdhci` y `uefi`
+(sin los GRUB EFI ni el OVMF de 32 bits en el PC: allí la `sdhci` da 82/0,
+sin las dos del arranque por UEFI) y `termo` (en el PC, con la KVM dentro de
+WSL, dos de la prueba de la RAM —los otros procesadores y Esc— fallan una
+vez sí y otra también: 159/2; en el VPS, 167/0). La **32** no acaba en las
+dos horas del guion (lleva todas las de la 0.8) y sigue con los 12 fallos
+del explorador de la 0.8.8 (ninguno nuevo; la cifra de los programas de la
+memoria USB, 41, estaba vieja: son 45).
+
+Lo arreglado en las pruebas por el camino: la `sdhci` miraba el arranque
+por UEFI de lo instalado sin el « sdhci=...» que INSTALAR pone desde la 0.8.10
+(los 2 fallos «INSTALAR no deja bien el arranque por UEFI», también en la
+principal: `EFI\BOOT` no estaba vacío, el `mdir` se cortaba); la `06` y la
+`32`, 45 módulos (con BT.BIN); `pantalla` y `rueda`, el Administrador de
+dispositivos desplegado con «*» (desde `informe-disp` se abre recogido); y
+esperas que con la máquina cargada no llegaban: `ssh` (QEMU abre el puerto
+después de compilar la semilla, más de 2 min: 120 s no daban, ya en la
+0.8.11), WireGuard y Tailscale, el UHCI de la `06`, el escritorio y «Usar:
+Cable» del `wifi`, y la 8d y la RAM del `termo`.
+
 **La carga fuerte** (rama `termo-fuerte`, marcas «(TERMO-FUERTE)» en el
 núcleo y «(TERMO 1.2)» en el Termómetro; sobre la 0.8.11). Para ver si una
 fuente o un cargador frenan a un portátil (el MSI GT80 Titan, que se congela
