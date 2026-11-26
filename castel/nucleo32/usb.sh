@@ -219,6 +219,8 @@ G
     # (TERMO) y por UEFI, también primero
     if [ -n "${TERMO:-}" ]; then
       menu_efi "Termometro (UEFI): medir la temperatura (la pantalla a su medida)" ESCRIT8.BIN "escritorio $N amedida termo" "$M2" auto
+      # (TERMO 1.2.1) la carga fuerte ya puesta, sin acordarse de la tecla F
+      menu_efi "Termometro con carga FUERTE (UEFI; SSE2: para llegar a PL1/PL2)" ESCRIT8.BIN "escritorio $N amedida termo cargafuerte" "$M2" auto
       menu_efi "Termometro (UEFI, 1024 x 600)" ESCRIT6.BIN "escritorio $N termo" "$M2" "1024x600x32,1024x600,auto"
       menu_efi "Termometro (UEFI, 800 x 600)" ESCRIT8.BIN "escritorio $N termo" "$M2" "800x600x32,800x600,auto"
       menu_efi "Termometro SIN ACPI (UEFI)" ESCRIT8.BIN "escritorio $N sinacpi termo" "$M2" auto
@@ -303,6 +305,7 @@ G
   # BIOS) y solo si no, «auto»; la de la pantalla (EDID), en la segunda
   if [ -n "${TERMO:-}" ]; then
     entrada "Termometro: medir la temperatura (1920 x 1080, 1366 x 768 o 1024 x 768)" ESCRIT8.BIN "escritorio $N termo" "1920x1080x32,1920x1080x24,1366x768x32,1366x768x24,1024x768x32,1024x768x24,auto"
+    entrada "Termometro con carga FUERTE (SSE2: para llegar a PL1/PL2)" ESCRIT8.BIN "escritorio $N termo cargafuerte" "1920x1080x32,1920x1080x24,1366x768x32,1366x768x24,1024x768x32,1024x768x24,auto"
     entrada "Termometro (la medida que diga la pantalla; si no la dice, 640 x 480)" ESCRIT8.BIN "escritorio $N amedida termo" "auto"
     entrada "Termometro (1024 x 600)" ESCRIT6.BIN "escritorio $N termo"
     entrada "Termometro (800 x 600)" ESCRIT8.BIN "escritorio $N termo"

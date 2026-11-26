@@ -148,8 +148,8 @@ static void motivo_llano(char *d, int cabe, const char *por_que)
 		snprintf(d, (size_t)cabe, "sin red (%s). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez.", texto_red(fallo_red));
 	else if (fallo_red == NO_RESUELVE)
 		snprintf(d, (size_t)cabe, "no se encuentra el servidor (el DNS no da su dirección: ¿hay salida a Internet?). Compruébelo y pulse E otra vez.");
-	else if (fallo_red == TLS_CERTIFICADO)
-		snprintf(d, (size_t)cabe, "el certificado del servidor no vale (%s). Avise a Carlos.", por_que);
+	else if (fallo_red == TLS_CERTIFICADO)	/* (1.2.1: por_que ya lo dice: «el certificado del servidor no vale (...)») */
+		snprintf(d, (size_t)cabe, "%s. Avise a Carlos.", por_que);
 	else if (fallo_red == TLS_SIN_HORA)
 		snprintf(d, (size_t)cabe, "el reloj del equipo no está en hora y sin ella no se pueden comprobar los certificados. Póngalo en hora (Panel de control) y pulse E otra vez.");
 	else if (fallo_red == SIN_TLS)
@@ -413,7 +413,9 @@ static int manda(const struct url *u, const char *lote, const char *nombre, cons
 			return !strncmp(resp + 9, "500", 3) ? 2 : 1;
 		}
 		snprintf(por_que, (size_t)cabe, "respuesta rara del servidor: %.60s", resp);
-		return 2;
+		/* (TERMO 1.2.1) un 403, 429, 413, 415 o 400 sin «ERROR ...» (el de
+		 * nginx, delante): tampoco se repite */
+		return fallo_http == 403 || fallo_http == 429 || fallo_http == 413 || fallo_http == 415 || fallo_http == 400 ? 1 : 2;
 	}
 }
 
@@ -472,6 +474,32 @@ static int extension_vale(const char *n)
 	const char *p = busca_en(n, ".");
 
 	return p && (!strcmp(p, ".CSV") || !strcmp(p, ".LOG") || !strcmp(p, ".TXT") || !strcmp(p, ".BMP"));
+}
+
+/* (TERMO 1.2.1) lo que ha pasado con cada servidor */
+static char motivo_sv[2][300];
+static u32 fallo_sv[2];
+static int http_sv[2], muerto[2];
+
+/* «en hispados.es: ...; en actualiza.hispados.es: ...» (los probados), y
+ * fallo_red/fallo_http, los del primero que haya fallado por algo que no sea
+ * el certificado (lo que dice qué hacer) */
+static void junta_motivos(char *d, int cabe, const struct url *us)
+{
+	int k, m = 0, cual = -1;
+
+	for (k = 0; k < 2; k++)
+		if (motivo_sv[k][0]) {
+			m += snprintf(d + m, (size_t)(cabe > m ? cabe - m : 0), "%sen %s: %s", m ? "; " : "", us[k].host, motivo_sv[k]);
+			if (cual < 0 || (fallo_sv[cual] == TLS_CERTIFICADO && fallo_sv[k] != TLS_CERTIFICADO))
+				cual = k;
+		}
+	if (cual >= 0) {
+		fallo_red = fallo_sv[cual];
+		fallo_http = http_sv[cual];
+	}
+	if (m >= cabe)
+		d[cabe - 1] = 0;
 }
 
 int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
@@ -588,23 +616,50 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 			continue;
 		}
 		{
-			int vez = 0, probados = 1;
+			/* (TERMO 1.2.1) cada servidor, con su motivo: el ASUS GL553VD
+			 * (26/11/2026) dijo «el certificado es de otro sitio, no de
+			 * actualiza.hispados.es» y no lo que había pasado con
+			 * hispados.es, el primero. Un servidor «muerto» (el certificado,
+			 * la hora, sin TLS.BIN: con él no hay manera) no se vuelve a
+			 * probar; si el otro falla por otra cosa (no contesta, se corta),
+			 * se vuelve al primero: hasta 4 intentos con cada uno */
+			int vez = 0, intentos[2] = { 0, 0 };
 
-			for (i = 0; i < 4 * n_servidores && r == 2; i++, vez++) {
+			for (i = 0; i < 4 * n_servidores && r == 2; i++) {
 				static const u32 espera[4] = { 0, 2, 5, 10 };
 
+				if (muerto[sv] || (n_servidores > 1 && intentos[sv] >= 4)) {
+					if (n_servidores > 1 && !muerto[1 - sv] && intentos[1 - sv] < 4)
+						sv = 1 - sv, vez = 0;
+					else
+						break;
+				}
 				if (vez % 4)
 					sc(SC_DORMIR, espera[vez % 4] * jg_hz, 0, 0);
 				di("Enviando... (archivo %d de %d: %s, %u octetos, a %s)%s%s", k + 1, nn, nombres[k], n, us[sv].host, vez ? ", otra vez: antes, " : "", vez ? por_que : "");
 				r = manda(&us[sv], lote, nombres[k], b, n, por_que, sizeof por_que);
-				/* (cuatro veces mal, o con este no hay manera: el otro servidor) */
-				if ((r == 3 || (r == 2 && vez % 4 == 3)) && n_servidores > 1 && probados < 2) {
-					sv = 1 - sv;
-					probados++;
-					vez = -1;
-					r = 2;
+				intentos[sv]++;
+				vez++;
+				if (r != 0) {
+					snprintf(motivo_sv[sv], sizeof motivo_sv[0], "%s", por_que);
+					fallo_sv[sv] = fallo_red;
+					http_sv[sv] = fallo_http;
 				}
+				if (r == 3) {
+					if (fallo_red == TLS_CERTIFICADO || fallo_red == TLS_SIN_HORA || fallo_red == SIN_TLS)
+						muerto[sv] = 1;
+					r = 2;
+					if (n_servidores > 1 && !muerto[1 - sv] && intentos[1 - sv] < 4)
+						sv = 1 - sv, vez = 0;
+					else if (muerto[sv])
+						r = 3;
+				} else if (r == 2 && n_servidores > 1 && vez % 2 == 0 && !muerto[1 - sv] && intentos[1 - sv] < 4)
+					sv = 1 - sv, vez = 0;	/* (dos veces mal: el otro, y luego otra vez este) */
 			}
+			if (r == 2 && n_servidores > 1 && (muerto[0] || intentos[0] >= 4) && (muerto[1] || intentos[1] >= 4))
+				r = 3;
+			if (r >= 2 && n_servidores > 1)	/* (lo que dice un servidor que contesta, tal cual) */
+				junta_motivos(por_que, sizeof por_que, us);
 			if (r == 3) {
 				/* (con ningún servidor: lo demás tampoco va a ir) */
 				free(b);
@@ -621,7 +676,7 @@ int envio_principal(const char *carpeta_termo, char unidad, int en_consola)
 		} else {
 			malos++;
 			di("%s: no se ha podido enviar: %s.", nombres[k], por_que);
-			if (r == 1 && (busca_en(por_que, "testigo") || fallo_http == 429))
+			if (r == 1 && (busca_en(por_que, "testigo") || fallo_http == 429 || fallo_http == 403))
 				break;	/* (sin testigo, lo demás tampoco va a ir) */
 			if (r == 2 && !hay_red()) {
 				di("NO ENVIADO: se ha ido la red a mitad (enviados %d de %d). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez (solo irá lo que falta); o súbalo al FTP: los archivos siguen en %s.",
