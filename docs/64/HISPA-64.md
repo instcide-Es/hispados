@@ -4043,7 +4043,20 @@ primero mira en su memoria (la misma).
 - El cuelgue de VirtualBox: 290 arranques sin él (arriba); las imágenes, por
   UEFI desde el .vdi y por la BIOS desde el CD, con 4 procesadores: todo en
   orden y el escritorio.
-- La batería: abajo (las cifras, al acabar).
+- **La batería** (`castel/nucleo64/pruebas.sh`): **136 pruebas** (eran
+  134: `prueba=vigilante` y `hpet32`). La primera vuelta, 131 bien y 5 mal,
+  con dos causas, las dos arregladas: **ensambla.py y NASM sacaban el núcleo
+  distinto** (un `je` de pruebas5 a 127 octetos justos: NASM lo deja largo y
+  ensambla.py, que en otra pasada lo vuelve a corto, corto; los dos núcleos
+  valen, pero la prueba pide que sean iguales octeto a octeto: se ha probado
+  a hacer ensambla.py más como NASM —que un salto largo no vuelva a corto, o
+  que lo que aún no se sabe sea largo— y cada forma arregla uno y estropea
+  otro, así que el bucle de pruebas5 va a su función, `añade_arg`; queda
+  apuntado abajo), y **el título de Pluma** que dice VENTANAS al verla
+  (puede ser ya «Documento1 - Pluma»: depende de quién llegue antes; las
+  cuatro de la etapa 8 caían por eso). La segunda, 135 bien y 1 mal: la
+  red por USB, con el CMOS a 2 s del reloj en vez de 1 como mucho (el
+  servidor cargado; en la vuelta de antes, bien). La tercera: abajo.
 
 ### Lo que queda (y más adelante)
 
@@ -4064,3 +4077,7 @@ primero mira en su memoria (la misma).
   hijo de un vfork siga con su copia de las regiones (ya con el mutex del
   padre).
 - **VirtualBox**: lo que diga el vigilante en el equipo de Carlos.
+- **ensambla.py frente a NASM**: en los saltos al borde (127 octetos), NASM
+  no siempre se queda con el más corto que vale; ensambla.py sí. Hacer que
+  elija igual que NASM en todos los casos pide copiar su forma de pasar por
+  el archivo (hoy, cuando salga, se mueve el código: `añade_arg`).
