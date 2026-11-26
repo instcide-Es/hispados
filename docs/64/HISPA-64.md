@@ -3952,7 +3952,11 @@ Windows y WSL). No se empieza todavía.
   padre, cuyo espacio tiene prestado: los demás hilos del padre siguen, y
   un munmap suyo a la vez que el hijo leía o escribía podía dejarle un marco
   ya soltado; es lo de `posix_spawn`, que Ladybird hace con muchos hilos en
-  marcha). H3 ya lo arregló la 10 c (`toma_fd`); H12, abajo.
+  marcha). Y **H12** en parte: el aviso de vaciar la TLB de un espacio
+  solo espera a los procesadores a los que se ha mandado (antes, uno que
+  ponía ese espacio después de mirarlos también se esperaba, sin aviso que
+  contestar: 2 s y el sistema se paraba; ese ya ve al ponerlo que su TLB no
+  está al día y la vacía). H3 ya lo arregló la 10 c (`toma_fd`).
 - **`/tmp`, de escribir siempre** (lo pidió Carlos: `curl -o` en la «/» daba
   «Read-only file system»): un disco en memoria (Discos64, la clase
   `D_MEM`, «tmp»: 32 MB de sectores de 512) con su FAT16 hecha al arrancar
@@ -3988,6 +3992,7 @@ Windows y WSL). No se empieza todavía.
 | `disp64.cas` | `memfd_crea`, `sellos_shm`, los sellos en ftruncate y mmap |
 | `futex64.cas` | H11 |
 | `hilos64.cas`, `excep64.cas`, `porcpu64.cas` | el vigilante, despertar con límite |
+| `smp64.cas` | H12: solo se espera a los avisados |
 | `reloj64.cas` | el HPET de 32 bits; `hpet32` |
 | `prsmp64.cas` | `prueba=vigilante` |
 | `discos64.cas`, `prdisc64.cas` | el disco en memoria de `/tmp` (`crea_tmp`, `mem_es`) |
@@ -4052,7 +4057,9 @@ primero mira en su memoria (la misma).
   SCM_PIDFD (no los pide Ladybird); read y write de un memfd (solo mmap).
 - **`/tmp`**: devolver las páginas de lo que se borra (hoy se quedan hasta
   apagar: FAT no dice qué cúmulos quedan libres al disco de abajo).
-- **De la auditoría**: H12 (un hilo que migra a mitad de un aviso de
-  vaciar la TLB); y de H13, que el hijo de un vfork siga con su copia de las
-  regiones (ya con el mutex del padre).
+- **De la auditoría**: de H12, el resto (un hilo que migra a mitad de un
+  aviso: con el orden de `activa_espacio` y tlb_gen no debería quedar nada
+  viejo, pero falta la prueba de carrera que lo provoque); de H13, que el
+  hijo de un vfork siga con su copia de las regiones (ya con el mutex del
+  padre).
 - **VirtualBox**: lo que diga el vigilante en el equipo de Carlos.
