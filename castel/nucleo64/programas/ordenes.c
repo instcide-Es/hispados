@@ -4,20 +4,24 @@
  *
  * Lee una línea de la consola (la edita el núcleo: Tty64) con el indicador de
  * la carpeta actual («/sata0p1> ») y hace la orden:
- *   dir, ls [RUTA...]          lo que hay (con los tamaños y las carpetas)
- *   cd [RUTA]                  cambia de carpeta (sin nada, dice cuál es)
- *   pwd                        la carpeta actual
- *   type, cat ARCHIVO...       enseña lo que tienen
- *   mkdir, md CARPETA...       crea carpetas
- *   rmdir, rd CARPETA...       borra carpetas vacías
- *   rm, del, borra ARCHIVO...  borra archivos
- *   cp, copy DE A              copia un archivo (A puede ser una carpeta)
- *   mv, ren, move DE A         cambia el nombre o mueve (a otro volumen: copia y borra)
- *   echo TEXTO                 lo escribe
- *   cls                        borra la pantalla
- *   ver                        la versión
- *   ayuda                      esto
- *   salir, exit [CÓDIGO]       se acaba
+ *   listar [RUTA...]                lo que hay (con los tamaños y las carpetas)
+ *   cd [RUTA]                       cambia de carpeta (sin nada, dice cuál es)
+ *   donde                           la carpeta actual
+ *   mostrar ARCHIVO...              enseña lo que tienen
+ *   creardir CARPETA...             crea carpetas
+ *   borrardir CARPETA...            borra carpetas vacías
+ *   borrar ARCHIVO...               borra archivos
+ *   copiar DE A                     copia un archivo (A puede ser una carpeta)
+ *   mover, renombrar DE A           cambia el nombre o mueve (a otro volumen: copia y borra)
+ *   eco, escribir TEXTO             lo escribe
+ *   limpiar                         borra la pantalla
+ *   ver                             la versión
+ *   ayuda                           esto
+ *   salir [CÓDIGO]                  se acaba
+ * [10 c] Los nombres, en español, como en Hispa-8086 y Hispa-386 (y en
+ * mayúsculas o minúsculas); los de siempre en inglés (dir, ls, type, cat,
+ * echo, pwd, mkdir, md, rmdir, rd, rm, del, cp, copy, mv, ren, move, cls,
+ * clear, help, exit) valen también, y «ayuda» los dice al final.
  * y cualquier otra palabra es un programa: por su ruta («/sata0p1/boot/prog/HOLA»)
  * o por su nombre, buscado en la carpeta actual y en «/» (la unidad en
  * memoria), con sus argumentos (fork, execve y wait4); si acaba con un
@@ -90,6 +94,9 @@ static void di_miles(u64 v, int ancho)
 static void al_error(const char *s) { sis(S_WRITE, 2, s, largo(s)); }
 
 static int igual(const char *a, const char *b) { while (*a && *a == *b) { a++; b++; } return *a == *b; }
+/* (los nombres de las órdenes, sin mirar mayúsculas: LISTAR, Listar, listar) */
+static int minúscula(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+static int igual_nombre(const char *a, const char *b) { while (*a && minúscula(*a) == *b) { a++; b++; } return !*a && !*b; }
 static void copia(char *d, const char *s, u64 máx) { u64 i = 0; while (s[i] && i + 1 < máx) { d[i] = s[i]; i++; } d[i] = 0; }
 static void junta(char *d, const char *a, const char *b, u64 máx)
 {
@@ -194,7 +201,7 @@ static void lista(const char *ruta, int varias)
 	i64 fd, n, i;
 	u64 archivos = 0, carpetas = 0, total = 0;
 	if (sis(S_STAT_, ruta, &st, 0) < 0) {
-		falla("dir", ruta, sis(S_STAT_, ruta, &st, 0));
+		falla("listar", ruta, sis(S_STAT_, ruta, &st, 0));
 		return;
 	}
 	if ((st.modo & 0xF000) != 0x4000) {
@@ -202,7 +209,7 @@ static void lista(const char *ruta, int varias)
 		return;
 	}
 	fd = sis(S_OPEN, ruta, 0x10000, 0);           /* O_DIRECTORY */
-	if (fd < 0) { falla("dir", ruta, fd); return; }
+	if (fd < 0) { falla("listar", ruta, fd); return; }
 	if (varias) { di(ruta); di(":\n"); }
 	while ((n = sis(S_GETDENTS64_, fd, buf, sizeof buf)) > 0) {
 		for (i = 0; i < n; ) {
@@ -224,7 +231,7 @@ static void lista(const char *ruta, int varias)
 			if (rec == 0) break;
 		}
 	}
-	if (n < 0) falla("dir", ruta, n);
+	if (n < 0) falla("listar", ruta, n);
 	sis(S_CLOSE, fd, 0, 0);
 	di("  "); di_n(archivos); di(archivos == 1 ? " archivo (" : " archivos ("); di_miles(total, 0);
 	di(total == 1 ? " octeto); " : " octetos); "); di_n(carpetas); di(carpetas == 1 ? " carpeta\n" : " carpetas\n");
@@ -235,9 +242,9 @@ static void enseña(const char *r)
 	char buf[8192];
 	i64 fd, n;
 	fd = sis(S_OPEN, r, 0, 0);
-	if (fd < 0) { falla("type", r, fd); return; }
+	if (fd < 0) { falla("mostrar", r, fd); return; }
 	while ((n = sis(S_READ, fd, buf, sizeof buf)) > 0) di_trozo(buf, (u64)n);
-	if (n < 0) falla("type", r, n);
+	if (n < 0) falla("mostrar", r, n);
 	sis(S_CLOSE, fd, 0, 0);
 }
 
@@ -273,13 +280,13 @@ static void mueve(const char *de, const char *a)
 	r = sis(S_RENAME_, de, dest, 0);
 	if (r == -EXDEV_ && es_archivo(de)) {
 		/* a otro volumen: se copia y se borra */
-		if (copia_archivo("mv", de, dest) == 0) {
+		if (copia_archivo("mover", de, dest) == 0) {
 			r = sis(S_UNLINK_, de, 0, 0);
-			if (r < 0) falla("mv", de, r);
+			if (r < 0) falla("mover", de, r);
 		}
 		return;
 	}
-	if (r < 0) falla("mv", de, r);
+	if (r < 0) falla("mover", de, r);
 }
 
 /* ---- arrancar un programa ---- */
@@ -367,25 +374,29 @@ static void arranca(int n, char **pal, const char *a, int añade, const char *de
 static void ayuda(void)
 {
 	di("Las \xc3\xb3rdenes de ORDENES:\n"
-	   "  dir, ls [RUTA...]          lo que hay en una carpeta (con los tama\xc3\xb1os)\n"
+	   "  listar [RUTA...]           lo que hay en una carpeta (con los tama\xc3\xb1os)\n"
 	   "  cd [RUTA]                  cambia de carpeta (sin nada: dice en cu\xc3\xa1l est\xc3\xa1)\n"
-	   "  pwd                        la carpeta actual\n"
-	   "  type, cat ARCHIVO...       ense\xc3\xb1" "a lo que tienen\n"
-	   "  mkdir, md CARPETA...       crea carpetas\n"
-	   "  rmdir, rd CARPETA...       borra carpetas vac\xc3\xad" "as\n"
-	   "  rm, del, borra ARCHIVO...  borra archivos\n"
-	   "  cp, copy DE A              copia un archivo (A puede ser una carpeta)\n"
-	   "  mv, ren, move DE A         cambia el nombre o mueve\n"
-	   "  echo TEXTO                 lo escribe\n"
-	   "  cls                        borra la pantalla\n"
+	   "  donde                      la carpeta actual\n"
+	   "  mostrar ARCHIVO...         ense\xc3\xb1" "a lo que tienen\n"
+	   "  creardir CARPETA...        crea carpetas\n"
+	   "  borrardir CARPETA...       borra carpetas vac\xc3\xad" "as\n"
+	   "  borrar ARCHIVO...          borra archivos\n"
+	   "  copiar DE A                copia un archivo (A puede ser una carpeta)\n"
+	   "  mover, renombrar DE A      cambia el nombre o mueve\n"
+	   "  eco, escribir TEXTO        lo escribe\n"
+	   "  limpiar                    borra la pantalla\n"
 	   "  ver                        la versi\xc3\xb3n\n"
 	   "  ayuda                      esto\n"
-	   "  salir, exit [C\xc3\x93" "DIGO]       se acaba (en Hispa-64, se apaga el equipo)\n"
+	   "  salir [C\xc3\x93" "DIGO]             se acaba (en Hispa-64, se apaga el equipo)\n"
 	   "Cualquier otra palabra es un programa (por su ruta, o por su nombre: en la\n"
 	   "carpeta actual y en \xc2\xab/\xc2\xbb), con sus argumentos. \xc2\xab> ARCHIVO\xc2\xbb y \xc2\xab>> ARCHIVO\xc2\xbb\n"
 	   "llevan lo que se escribe a un archivo; \xc2\xab< ARCHIVO\xc2\xbb, lo que se lee. Ctrl+C\n"
 	   "cierra el programa que corre; con las flechas se edita la l\xc3\xad" "nea y se\n"
-	   "vuelve a las de antes.\n");
+	   "vuelve a las de antes. Las \xc3\xb3rdenes valen en may\xc3\xba" "sculas o min\xc3\xba" "sculas.\n"
+	   "Tambi\xc3\xa9n se entienden con los nombres de otros sistemas: dir y ls (listar),\n"
+	   "pwd (donde), type y cat (mostrar), mkdir y md (creardir), rmdir y rd\n"
+	   "(borrardir), rm y del (borrar), cp y copy (copiar), mv, ren y move (mover),\n"
+	   "echo (eco), cls y clear (limpiar), help (ayuda) y exit (salir).\n");
 }
 
 static void ver(void)
@@ -398,10 +409,16 @@ static void ver(void)
 	di("\nCopyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n");
 }
 
-static int es(const char *p, const char *a, const char *b, const char *c)
+/* ¿es p la orden de alguno de esos nombres? (hasta seis: el de español, primero) */
+static int es(const char *p, const char *a, const char *b, const char *c, const char *d, const char *e, const char *f)
 {
-	return igual(p, a) || (b && igual(p, b)) || (c && igual(p, c));
+	return igual_nombre(p, a) || (b && igual_nombre(p, b)) || (c && igual_nombre(p, c)) || (d && igual_nombre(p, d))
+	       || (e && igual_nombre(p, e)) || (f && igual_nombre(p, f));
 }
+#define ES_LISTAR(p)    es(p, "listar", "dir", "ls", 0, 0, 0)
+#define ES_MOSTRAR(p)   es(p, "mostrar", "type", "cat", 0, 0, 0)
+#define ES_ECO(p)       es(p, "eco", "escribir", "echo", 0, 0, 0)
+#define ES_DONDE(p)     es(p, "donde", "d\xc3\xb3nde", "pwd", 0, 0, 0)
 
 /* parte la línea en palabras (con las comillas) y saca las redirecciones */
 static int parte(char *l, char **pal, char **a, int *añade, char **de)
@@ -449,51 +466,51 @@ static void haz(char *l)
 	if (n < 0) { vacía(); al_error("Falta el nombre del archivo despu\xc3\xa9s de \xc2\xab>\xc2\xbb o de \xc2\xab<\xc2\xbb.\n"); return; }
 	if (n == 0) return;
 	/* las de dentro, con «> archivo» */
-	if (a && (es(pal[0], "dir", "ls", 0) || es(pal[0], "type", "cat", 0) || es(pal[0], "echo", "pwd", "ver") || es(pal[0], "ayuda", "cd", 0))) {
+	if (a && (ES_LISTAR(pal[0]) || ES_MOSTRAR(pal[0]) || ES_ECO(pal[0]) || ES_DONDE(pal[0]) || es(pal[0], "ver", "versi\xc3\xb3n", "ayuda", "help", "cd", 0))) {
 		fd = sis(S_OPEN, a, añade ? 0x441 : 0x241, 0644);
 		if (fd < 0) { falla(pal[0], a, fd); return; }
 		vacía();
 		salida = (int)fd;
 	}
-	if (es(pal[0], "dir", "ls", 0)) {
+	if (ES_LISTAR(pal[0])) {
 		if (n == 1) lista(".", 0);
 		for (i = 1; i < n; i++) lista(pal[i], n > 2);
-	} else if (es(pal[0], "cd", "chdir", 0)) {
+	} else if (es(pal[0], "cd", "chdir", 0, 0, 0, 0)) {
 		if (n == 1) { if (sis(S_GETCWD_, t, sizeof t, 0) > 0) { di(t); di("\n"); } }
 		else if ((r = sis(S_CHDIR_, pal[1], 0, 0)) < 0) falla("cd", pal[1], r);
-	} else if (es(pal[0], "pwd", 0, 0)) {
+	} else if (ES_DONDE(pal[0])) {
 		if (sis(S_GETCWD_, t, sizeof t, 0) > 0) { di(t); di("\n"); }
-	} else if (es(pal[0], "type", "cat", 0)) {
-		if (n == 1) { vacía(); al_error("type: falta el archivo\n"); }
+	} else if (ES_MOSTRAR(pal[0])) {
+		if (n == 1) { vacía(); al_error("mostrar: falta el archivo\n"); }
 		for (i = 1; i < n; i++) enseña(pal[i]);
-	} else if (es(pal[0], "mkdir", "md", 0)) {
-		if (n == 1) { vacía(); al_error("mkdir: falta la carpeta\n"); }
-		for (i = 1; i < n; i++) if ((r = sis(S_MKDIR_, pal[i], 0755, 0)) < 0) falla("mkdir", pal[i], r);
-	} else if (es(pal[0], "rmdir", "rd", 0)) {
-		if (n == 1) { vacía(); al_error("rmdir: falta la carpeta\n"); }
-		for (i = 1; i < n; i++) if ((r = sis(S_RMDIR_, pal[i], 0, 0)) < 0) falla("rmdir", pal[i], r);
-	} else if (es(pal[0], "rm", "del", "borra")) {
-		if (n == 1) { vacía(); al_error("rm: falta el archivo\n"); }
+	} else if (es(pal[0], "creardir", "mkdir", "md", 0, 0, 0)) {
+		if (n == 1) { vacía(); al_error("creardir: falta la carpeta\n"); }
+		for (i = 1; i < n; i++) if ((r = sis(S_MKDIR_, pal[i], 0755, 0)) < 0) falla("creardir", pal[i], r);
+	} else if (es(pal[0], "borrardir", "rmdir", "rd", 0, 0, 0)) {
+		if (n == 1) { vacía(); al_error("borrardir: falta la carpeta\n"); }
+		for (i = 1; i < n; i++) if ((r = sis(S_RMDIR_, pal[i], 0, 0)) < 0) falla("borrardir", pal[i], r);
+	} else if (es(pal[0], "borrar", "borra", "rm", "del", 0, 0)) {
+		if (n == 1) { vacía(); al_error("borrar: falta el archivo\n"); }
 		for (i = 1; i < n; i++) {
-			if (es_carpeta(pal[i])) { vacía(); al_error("rm: \xc2\xab"); al_error(pal[i]); al_error("\xc2\xbb es una carpeta: se borra con rmdir (o rd)\n"); continue; }
-			if ((r = sis(S_UNLINK_, pal[i], 0, 0)) < 0) falla("rm", pal[i], r);
+			if (es_carpeta(pal[i])) { vacía(); al_error("borrar: \xc2\xab"); al_error(pal[i]); al_error("\xc2\xbb es una carpeta: se borra con borrardir\n"); continue; }
+			if ((r = sis(S_UNLINK_, pal[i], 0, 0)) < 0) falla("borrar", pal[i], r);
 		}
-	} else if (es(pal[0], "cp", "copy", 0)) {
-		if (n != 3) { vacía(); al_error("cp: se usa as\xc3\xad: cp DE A\n"); }
-		else copia_archivo("cp", pal[1], pal[2]);
-	} else if (es(pal[0], "mv", "ren", "move")) {
-		if (n != 3) { vacía(); al_error("mv: se usa as\xc3\xad: mv DE A\n"); }
+	} else if (es(pal[0], "copiar", "cp", "copy", 0, 0, 0)) {
+		if (n != 3) { vacía(); al_error("copiar: se usa as\xc3\xad: copiar DE A\n"); }
+		else copia_archivo("copiar", pal[1], pal[2]);
+	} else if (es(pal[0], "mover", "renombrar", "mv", "ren", "move", 0)) {
+		if (n != 3) { vacía(); al_error("mover: se usa as\xc3\xad: mover DE A\n"); }
 		else mueve(pal[1], pal[2]);
-	} else if (es(pal[0], "echo", 0, 0)) {
+	} else if (ES_ECO(pal[0])) {
 		for (i = 1; i < n; i++) { if (i > 1) di(" "); di(pal[i]); }
 		di("\n");
-	} else if (es(pal[0], "cls", "clear", 0)) {
+	} else if (es(pal[0], "limpiar", "cls", "clear", 0, 0, 0)) {
 		di("\x1b[2J\x1b[H");
-	} else if (es(pal[0], "ver", 0, 0)) {
+	} else if (es(pal[0], "ver", "versi\xc3\xb3n", "version", 0, 0, 0)) {
 		ver();
-	} else if (es(pal[0], "ayuda", "help", "?")) {
+	} else if (es(pal[0], "ayuda", "help", "?", 0, 0, 0)) {
 		ayuda();
-	} else if (es(pal[0], "salir", "exit", 0)) {
+	} else if (es(pal[0], "salir", "exit", 0, 0, 0, 0)) {
 		r = 0;
 		if (n > 1) for (i = 0; pal[1][i] >= '0' && pal[1][i] <= '9'; i++) r = r * 10 + pal[1][i] - '0';
 		vacía();

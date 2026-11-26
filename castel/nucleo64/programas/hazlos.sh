@@ -31,6 +31,9 @@ fi
 python3 -I "$C/ccastel.py" "$AQUI/holacas.cas" -o "$S/holacas.asm" -I "$C/biblioteca64/linux" -I "$C/biblioteca" > /dev/null
 nasm -f bin "$S/holacas.asm" -o "$S/HOLACAS"
 rm -f "$S/holacas.asm"
+python3 -I "$C/ccastel.py" "$AQUI/demo.cas" -o "$S/demo.asm" -I "$C/biblioteca64/linux" -I "$C/biblioteca" > /dev/null
+nasm -f bin "$S/demo.asm" -o "$S/DEMO"
+rm -f "$S/demo.asm"
 cp "$AQUI/saludo.txt" "$S/SALUDO.TXT"
 # [etapa 7] los de musl (si no se quieren: SIN_MUSL=1)
 MUSL=""
@@ -42,4 +45,4 @@ ACPICA=""
 if command -v gcc > /dev/null && command -v ld > /dev/null && [ "${SIN_ACPICA:-0}" != 1 ]; then
   "$(dirname "$C")/acpi/hispa64/hacer.sh" "$S/ACPICA64.BIN" && ACPICA=" ACPICA64.BIN"
 fi
-echo "hechos:$HECHOS HOLACAS SALUDO.TXT$MUSL$ACPICA"
+echo "hechos:$HECHOS HOLACAS DEMO SALUDO.TXT$MUSL$ACPICA"

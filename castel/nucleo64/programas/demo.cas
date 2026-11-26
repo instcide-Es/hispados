@@ -1,0 +1,98 @@
+; demo.cas - Hispa-64: un programa de Castel para la captura de hispados.es
+; («modelo linux64», como holacas.cas): saluda, hace una cuenta, dice la
+; fecha y la hora de Madrid (con el cambio de horario de la UE) y unas
+; cuentas con euros (en céntimos).
+; Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+módulo Demo
+
+    modelo linux64
+
+    importar Linux
+
+    variable días: arreglo [7] de puntero a byte = ("domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado")
+    variable meses: arreglo [12] de puntero a byte = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+    variable ahora: arreglo [2] de nat64
+
+    ; los días desde el 1/1/1970 de una fecha (año, mes, día)
+    función días_de(a: nat64, m: nat64, d: nat64): nat64
+        variable era, ae, dda, dde, mm: nat64
+        si m <= 2 entonces a := a - 1 fin
+        era := a div 400
+        ae := a - era * 400
+        si m > 2 entonces mm := m - 3 sino mm := m + 9 fin
+        dda := (153 * mm + 2) div 5 + d - 1
+        dde := ae * 365 + ae div 4 - ae div 100 + dda
+        devolver era * 146097 + dde - 719468
+    fin
+
+    ; el día de la semana (0 = domingo) de un día desde 1970 (que fue jueves)
+    función semana(n: nat64): nat64
+        devolver (n + 4) mod 7
+    fin
+
+    ; el último domingo de un mes de 31 días, a la 1 de la madrugada (UTC), en segundos
+    función último_domingo(a: nat64, m: nat64): nat64
+        variable n: nat64
+        n := días_de(a, m, 31)
+        n := n - semana(n)
+        devolver n * 86400 + 3600
+    fin
+
+    función dos_cifras(n: nat64)
+        si n < 10 entonces escribir("0") fin
+        escribir(n)
+    fin
+
+    ; céntimos como euros: 360 -> «3,60 €»
+    función euros(c: nat64)
+        escribir(c div 100, ",")
+        dos_cifras(c mod 100)
+        escribir(" \xE2\x82\xAC")
+    fin
+
+    función principal(): byte
+        variable s, n, z, era, dde, ae, a, dda, mp, d, m, hora, local: nat64
+        variable verano: bool
+        escribir("Hola, soy un programa de Castel, el lenguaje en español de Hispa-DOS.\n")
+        escribir("6 por 7 son ", 6 * 7, ".\n")
+        sistema(228, 0, nat64(dirección(ahora)), 0)
+        s := ahora[0]
+        ; la fecha UTC, para saber el año y si es horario de verano
+        z := s div 86400 + 719468
+        era := z div 146097
+        dde := z - era * 146097
+        ae := (dde - dde div 1460 + dde div 36524 - dde div 146096) div 365
+        a := ae + era * 400
+        verano := s >= último_domingo(a, 3) y s < último_domingo(a, 10)
+        si verano entonces local := s + 7200 sino local := s + 3600 fin
+        ; la fecha y la hora de Madrid
+        n := local div 86400
+        z := n + 719468
+        era := z div 146097
+        dde := z - era * 146097
+        ae := (dde - dde div 1460 + dde div 36524 - dde div 146096) div 365
+        a := ae + era * 400
+        dda := dde - (365 * ae + ae div 4 - ae div 100)
+        mp := (5 * dda + 2) div 153
+        d := dda - (153 * mp + 2) div 5 + 1
+        si mp < 10 entonces m := mp + 3 sino m := mp - 9 fin
+        si m <= 2 entonces a := a + 1 fin
+        hora := local mod 86400
+        escribir("Hoy es ", días[semana(n)], ", ", d, " de ", meses[m - 1], " de ", a, ", y en Madrid son las ")
+        dos_cifras(hora div 3600)
+        escribir(":")
+        dos_cifras((hora mod 3600) div 60)
+        si verano entonces escribir(" (horario de verano).\n") sino escribir(" (horario de invierno).\n") fin
+        escribir("Tres cafés a ")
+        euros(120)
+        escribir(" son ")
+        euros(3 * 120)
+        escribir("; con un bocadillo de ")
+        euros(450)
+        escribir(", ")
+        euros(3 * 120 + 450)
+        escribir(".\n")
+        devolver 0
+    fin
+
+fin Demo.
