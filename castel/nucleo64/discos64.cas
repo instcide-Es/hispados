@@ -37,6 +37,8 @@ módulo Discos64
     público constante D_SATA = 2
     público constante D_PARTE = 3
     público constante D_USB = 4                ; [etapa 6] las memorias USB (Usbalm64)
+    público constante D_MEM = 5                ; [etapa 10 d] el disco en memoria de /tmp
+    constante MEM_SECTORES = 65536             ; 32 MB (sus páginas, solo las que se escriben)
     público constante BLOQUE = 4096
     constante NADA = 0xFFFFFFFF
     constante CUBOS = 4096
@@ -50,6 +52,10 @@ módulo Discos64
     variable dk_escribe: arreglo [MAX_DISCOS] de bool
     variable dk_tabla: arreglo [MAX_DISCOS] de nat32                 ; (los de abajo) 0 ninguna, 1 MBR, 2 GPT, 3 un volumen sin tabla
     público variable dk_errores: nat64
+    ; [etapa 10 d] el disco en memoria (/tmp): sus páginas (0: aún sin escribir, ceros)
+    variable mem_págs: nat64
+    variable mem_cerrojo: nat64
+    público variable mem_usadas: nat64
     público variable gpt_copia: nat32           ; cuántas GPT se han leído de la copia del final
 
     ; ---- la caché ----
@@ -188,6 +194,7 @@ módulo Discos64
         si dk_clase[d] = D_NVME entonces devolver nvme_modelo(dk_índice[d]) fin
         si dk_clase[d] = D_SATA entonces devolver sata_modelo(dk_índice[d]) fin
         si dk_clase[d] = D_USB entonces devolver usb_modelo(dk_índice[d]) fin
+        si dk_clase[d] = D_MEM entonces devolver "en memoria, para /tmp" fin
         devolver ""
     fin
 
@@ -210,9 +217,128 @@ módulo Discos64
         bien := falso
         si dk_clase[d] = D_NVME entonces bien := nvme_es(dk_índice[d], lba, n, fís, escribe)
         sino si dk_clase[d] = D_SATA entonces bien := sata_es(dk_índice[d], lba, n, fís, escribe)
-        sino si dk_clase[d] = D_USB entonces bien := usb_es(dk_índice[d], lba, n, fís, escribe) fin
+        sino si dk_clase[d] = D_USB entonces bien := usb_es(dk_índice[d], lba, n, fís, escribe)
+        sino si dk_clase[d] = D_MEM entonces bien := mem_es(lba, n, virt(fís), escribe) fin
         si no bien entonces dk_errores := dk_errores + 1 fin
         devolver bien
+    fin
+
+    ; ---- [etapa 10 d] el disco en memoria (/tmp) ----
+    ; n sectores (de 512) desde lba, de o a k (del núcleo); las páginas que
+    ; no se han escrito nunca se leen como ceros (y no gastan memoria)
+    función mem_es(lba: nat64, n: nat64, k: nat64, escribe: bool): bool
+        variable pos, fin_, pág, dentro, trozo, f, b: nat64
+        variable pp: puntero a nat64
+        pos := lba * 512
+        fin_ := (lba + n) * 512
+        mientras pos < fin_ hacer
+            pág := pos >> 12
+            dentro := pos yb 4095
+            trozo := 4096 - dentro
+            si trozo > fin_ - pos entonces trozo := fin_ - pos fin
+            pp := puntero(mem_págs + pág * 8)
+            f := valor(pp)
+            si escribe entonces
+                si f = 0 entonces
+                    f := pide()
+                    si f = 0 entonces devolver falso fin
+                    ceros(virt(f), 4096)
+                    b := toma(dirección(mem_cerrojo))
+                    si valor(pp) = 0 entonces
+                        valor(pp) := f
+                        mem_usadas := mem_usadas + 1
+                    sino
+                        devuelve(f)
+                        f := valor(pp)
+                    fin
+                    suelta(dirección(mem_cerrojo), b)
+                fin
+                copia_oct(virt(f) + dentro, k, trozo)
+            sino si f = 0 entonces
+                ceros(k, trozo)
+            sino
+                copia_oct(k, virt(f) + dentro, trozo)
+            fin
+            k := k + trozo
+            pos := pos + trozo
+        fin
+        devolver cierto
+    fin
+
+    función pon16(k: nat64, v: nat32)
+        variable p: puntero a byte
+        p := puntero(k)
+        p[0] := byte(v yb 0xFF)
+        p[1] := byte(v >> 8)
+    fin
+
+    ; el disco de /tmp, con su FAT16 hecha (32 MB: 8.179 cúmulos de 4 KB;
+    ; 512 entradas en la raíz); el disco, o NADA
+    función crea_tmp(): nat32
+        variable d: nat32
+        variable k: arreglo [512] de byte
+        variable i: nat32
+        variable fat_sect, raíz_sect, res: nat32
+        variable t: puntero a byte
+        mem_págs := nat64(reserva(MEM_SECTORES div 8 * 8))
+        si mem_págs = 0 entonces devolver NADA fin
+        ceros(mem_págs, MEM_SECTORES div 8 * 8)
+        d := nuevo_disco(D_MEM, 0, 512, MEM_SECTORES)
+        si d = NADA entonces devolver NADA fin
+        pon_nombre(d, "tmp", 0, 0)
+        dk_tipo[d] := "en memoria"
+        ; el sector de arranque (BPB de FAT16), sin tabla: un volumen entero
+        res := 8
+        fat_sect := 32
+        raíz_sect := 32
+        ceros(nat64(dirección(k[0])), 512)
+        k[0] := 0xEB
+        k[1] := 0x3C
+        k[2] := 0x90
+        t := "HISPA64 "
+        i := 0
+        mientras i < 8 hacer
+            k[3 + i] := t[i]
+            i := i + 1
+        fin
+        pon16(nat64(dirección(k[11])), 512)            ; octetos por sector
+        k[13] := 8                                      ; sectores por cúmulo (4 KB)
+        pon16(nat64(dirección(k[14])), res)            ; reservados
+        k[16] := 2                                      ; dos FAT
+        pon16(nat64(dirección(k[17])), 512)            ; entradas de la raíz
+        pon16(nat64(dirección(k[19])), 0)              ; (más de 65535: en los 32 bits)
+        k[21] := 0xF8
+        pon16(nat64(dirección(k[22])), fat_sect)
+        pon16(nat64(dirección(k[24])), 32)
+        pon16(nat64(dirección(k[26])), 64)
+        pon16(nat64(dirección(k[32])), MEM_SECTORES yb 0xFFFF)
+        pon16(nat64(dirección(k[34])), MEM_SECTORES >> 16)
+        k[36] := 0x80
+        k[38] := 0x29
+        k[39] := 0x64
+        k[40] := 0x10
+        k[41] := 0x26
+        k[42] := 0x20
+        t := "TMP        FAT16   "
+        i := 0
+        mientras i < 19 hacer
+            k[43 + i] := t[i]
+            i := i + 1
+        fin
+        k[510] := 0x55
+        k[511] := 0xAA
+        si no mem_es(0, 1, nat64(dirección(k[0])), cierto) entonces devolver NADA fin
+        ; las dos FAT: los dos primeros, ocupados (F8 FF FF FF)
+        ceros(nat64(dirección(k[0])), 512)
+        k[0] := 0xF8
+        k[1] := 0xFF
+        k[2] := 0xFF
+        k[3] := 0xFF
+        si no mem_es(nat64(res), 1, nat64(dirección(k[0])), cierto) entonces devolver NADA fin
+        si no mem_es(nat64(res + fat_sect), 1, nat64(dirección(k[0])), cierto) entonces devolver NADA fin
+        ; (la raíz y los datos: ceros, sin escribir)
+        dk_escribe[d] := cierto
+        devolver d
     fin
 
     ; [para las pruebas y para leer de un tirón] sectores de cualquier disco
@@ -693,8 +819,8 @@ módulo Discos64
     ; ---- todo ----
     ; los discos de los drivers, la caché y las particiones; «escribir»: que se
     ; pueda escribir en todos
-    público función prepara_bloques(escribir_: bool): bool
-        variable i, d, n_abajo, bloques: nat32
+    público función prepara_bloques(escribir_: bool, con_tmp: bool): bool
+        variable i, d, n_abajo, bloques, tmp: nat32
         variable m: nat64
         i := 0
         mientras i < nv_n_discos hacer
@@ -725,6 +851,9 @@ módulo Discos64
             fin
             i := i + 1
         fin
+        ; [etapa 10 d] el disco en memoria de /tmp (de escribir siempre)
+        tmp := NADA
+        si con_tmp entonces tmp := crea_tmp() fin
         n_abajo := n_dk
         ; la caché: 1/16 de la memoria libre, de 256 bloques (1 MB) a 16384 (64 MB)
         m := libres div 16
@@ -736,7 +865,7 @@ módulo Discos64
         fin
         i := 0
         mientras i < n_abajo hacer
-            dk_escribe[i] := escribir_
+            dk_escribe[i] := escribir_ o i = tmp
             lee_tabla(i)
             i := i + 1
         fin

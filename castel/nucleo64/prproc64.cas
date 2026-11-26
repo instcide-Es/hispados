@@ -20,7 +20,7 @@
 ; =============================================================================
 módulo PrProc64
 
-    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Discos64
 
     público variable fallos_proc: nat32
 
@@ -61,7 +61,8 @@ módulo PrProc64
     ; las tablas del núcleo (que se quedan)
     función memoria_ahora(): nat64
         vacía_cuarentena()                      ; ([etapa 10 c] lo del montón que espera, devuelto)
-        devolver libres + páginas + nat64(tablas)
+        ; ([etapa 10 d] y lo guardado en /tmp, el disco en memoria: es suyo)
+        devolver libres + páginas + nat64(tablas) + mem_usadas
     fin
 
     función lista_cpus(m: nat64)

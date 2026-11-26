@@ -397,9 +397,10 @@ static void ayuda(void)
 	   "pwd (donde), type y cat (mostrar), mkdir y md (creardir), rmdir y rd\n"
 	   "(borrardir), rm y del (borrar), cp y copy (copiar), mv, ren y move (mover),\n"
 	   "echo (eco), cls y clear (limpiar), help (ayuda) y exit (salir).\n"
-	   "D\xc3\xb3nde guardar: \xc2\xab/\xc2\xbb es de solo leer (la unidad en memoria). Arranque con\n"
-	   "\xc2\xab" "escritura en los discos\xc2\xbb (en el men\xc3\xba del arranque) y guarde en la partici\xc3\xb3n\n"
-	   "de pruebas del disco: en VirtualBox, con el .vdi, \xc2\xab" "cd /sata0p2\xc2\xbb (\xc2\xab" "listar /\xc2\xbb\n"
+	   "D\xc3\xb3nde guardar: \xc2\xab/\xc2\xbb es de solo leer (la unidad en memoria). En \xc2\xab/tmp\xc2\xbb se\n"
+	   "puede siempre (32 MB en memoria: se pierde al apagar). Para que quede, arranque\n"
+	   "con \xc2\xab" "escritura en los discos\xc2\xbb (en el men\xc3\xba del arranque) y guarde en la\n"
+	   "partici\xc3\xb3n de pruebas: en VirtualBox, con el .vdi, \xc2\xab" "cd /sata0p2\xc2\xbb (\xc2\xab" "listar /\xc2\xbb\n"
 	   "dice los discos que hay).\n");
 }
 

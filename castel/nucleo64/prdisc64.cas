@@ -173,7 +173,7 @@ módulo PrDisc64
         n := 0
         d := 0
         mientras d < n_dk hacer
-            si no es_parte(d) entonces
+            si no es_parte(d) y clase_dk(d) <> D_MEM entonces
                 si cb_lee(d, 0, a, 4096) y es_directo(d, 0, 4096 div sector_dk(d), f, falso) entonces
                     si mira_igual(a, virt(f), 4096) entonces n := n + 1 sino mal("por la caché no se lee lo mismo que a pelo") fin
                 sino

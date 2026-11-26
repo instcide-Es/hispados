@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo PrMusl64
 
-    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redcom64, Hda64, Unix64
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redcom64, Hda64, Unix64, Discos64
 
     público variable fallos7: nat32
 
@@ -39,7 +39,8 @@ módulo PrMusl64
 
     función memoria_ahora(): nat64
         vacía_cuarentena()                      ; ([etapa 10 c] lo del montón que espera, devuelto)
-        devolver libres + páginas + nat64(tablas)
+        ; ([etapa 10 d] y lo guardado en /tmp, el disco en memoria: es suyo)
+        devolver libres + páginas + nat64(tablas) + mem_usadas
     fin
 
     ; arranca la línea, espera a que acabe y mira su código

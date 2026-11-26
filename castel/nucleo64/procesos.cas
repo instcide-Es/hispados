@@ -3084,6 +3084,12 @@ módulo Procesos
         azar_estado := tsc()
         ; [etapa 7] los registros de empezar (fxsave o xsave), la tabla de copiar al escribir
         plantilla := (nat64(reserva(tam_fpu + 64)) + 63) yb (nob nat64(63))
+        ; [etapa 10 d] a cero antes de xsave, como en nuevo_fpu: xsave no
+        ; escribe los octetos 528 a 575 de la cabecera, y lo que traía el
+        ; bloque del montón pasaba a cada programa nuevo (copia_mem) y su
+        ; xrstor daba #GP: con «sinpruebas» y xsave (KVM con -cpu host), el
+        ; primer programa (ORDENES) paraba el núcleo en pon_fpu
+        ceros_mem(plantilla, tam_fpu)
         guarda_fpu(plantilla)
         mxcsr_máscara := nat32(l32(plantilla + 28))
         si mxcsr_máscara = 0 entonces mxcsr_máscara := 0xFFBF fin

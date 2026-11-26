@@ -313,7 +313,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED6: todo bien (25 pruebas)$" <<< "$v" && grep -q "^Programa «MRED6»: acaba con el código 0, como debe" <<< "$v" \
-    && grep -q "^MUNIX: todo bien (74 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MUNIX: todo bien (77 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
     && grep -q "^MIPC: todo bien (8 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en " <<< "$v" \
@@ -677,7 +677,7 @@ if [ $c = 85 ] && hay $S "^NVMe: 00:0[0-9A-F].0 1B36:0010, «QEMU NVMe Ctrl» (s
    && hay $S "^    sata0p5: 32,0 MB, desde el sector 184320, exFAT o NTFS$" && hay $S "^    sata0p6: 32,0 MB, desde el sector 251904, FAT16$" \
    && hay $S "^    sata0p7: 8,0 MB, desde el sector 319488, FAT16$" && hay $S "^    sata0p8: 16,0 MB, desde el sector 337920, exFAT o NTFS$" \
    && hay $S "^  nvme1: «QEMU NVMe Ctrl», 16,0 MB (32768 sectores de 512 octetos), sin tabla de particiones; se puede escribir$" \
-   && hay $S "^Archivos (el VFS): 9 montajes$" && hay $S "^  /nvme0p1: FAT32 «ESP», .*; de leer y escribir$" \
+   && hay $S "^Archivos (el VFS): 10 montajes$" && hay $S "^  /nvme0p1: FAT32 «ESP», .*; de leer y escribir$" \
    && hay $S "^  /nvme0p2: FAT32 «DATOS», 69,8 MB en 143076 cúmulos de 512 octetos, " && hay $S "^  /sata0p1: FAT32 «SATAFAT», 83,3 MB en 85332 cúmulos de 1 KB" \
    && hay $S "^  /sata0p5: exFAT «EXFATPRB», 31,9 MB en 8168 cúmulos de 4 KB, 31,1 MB libres; de leer y escribir$" \
    && hay $S "^  /sata0p2: FAT12 «FAT12PRB», 3,9 MB en 4081 cúmulos de 1 KB, .* libres; de leer y escribir$" \

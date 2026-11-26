@@ -524,7 +524,7 @@ módulo Hispa64
         prepara_ahci(tiene("sinmsi"))
         si no tiene("sinusb") entonces prepara_usb(tiene("sinmsix"), tiene("sinmsi")) fin
         si no tiene("sinsonido") entonces prepara_hda() fin            ; [etapa 11] el sonido (HD Audio)
-        si no prepara_bloques(tiene("escribir")) entonces escribir("  sin memoria para la caché de bloques\n") fin
+        si no prepara_bloques(tiene("escribir"), no tiene("sintmp")) entonces escribir("  sin memoria para la caché de bloques\n") fin
         escribir("  la caché de bloques: ", cb_n, " bloques de 4 KB (")
         tamaño_legible(nat64(cb_n) * 4096)
         escribir("), con escritura diferida (a los 5 s, o al vaciar)\n")

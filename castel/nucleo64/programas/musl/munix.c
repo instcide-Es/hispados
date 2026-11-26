@@ -486,6 +486,20 @@ static void carreras(void)
 	printf("  carreras: 40 rondas de futex con plazo contra FUTEX_WAKE y 30 procesos que acaban con sus hilos saliendo a la vez\n");
 }
 
+/* [etapa 10 d] /tmp, de escribir (en Hispa-64, el disco en memoria) */
+static void tmp(void)
+{
+	static char b[100000], c[100000];
+	int fd, i, ok = 0;
+	for (i = 0; i < (int)sizeof b; i++) b[i] = (char)(i * 7 + 3);
+	fd = open("/tmp/munix.dat", O_CREAT | O_TRUNC | O_RDWR, 0644);
+	if (fd >= 0 && write(fd, b, sizeof b) == (ssize_t)sizeof b && lseek(fd, 0, SEEK_SET) == 0
+	    && read(fd, c, sizeof c) == (ssize_t)sizeof c && memcmp(b, c, sizeof b) == 0) ok = 1;
+	if (fd >= 0) close(fd);
+	MIRA(ok && unlink("/tmp/munix.dat") == 0, "/tmp: escribir 100 KB, leerlos y borrarlos");
+	printf("  /tmp: 100 KB escritos, leídos y borrados\n");
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -498,5 +512,6 @@ int main(void)
 	pasar();
 	hilos();
 	carreras();
+	tmp();
 	return acaba("MUNIX");
 }
