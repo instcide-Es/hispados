@@ -52,4 +52,9 @@ void po_nueva_prueba(void);
 /* (TERMO 1.1.1) para comparar las pruebas: los vatios del paquete en la
  * carga (media y máximo, mW; -1 sin RAPL) y el % de la carga frenado (-1) */
 void po_cifras(int *mw_media, int *mw_max, int *pct_frenado);
+/* (TERMO 1.2.1) las lecturas de RAPL de la carga: cuántas (-1 sin RAPL),
+ * cuántas tarde (más de 3 s), cuántas perdidas (tan tarde que el contador
+ * de 32 bits ha podido dar la vuelta: no se cuentan), la más lenta (ms) y
+ * cada cuánto da la vuelta el del paquete a la potencia más alta (s) */
+void po_lecturas(int *n, int *tarde, int *perdidas, int *peor_ms, int *vuelta_s);
 #endif

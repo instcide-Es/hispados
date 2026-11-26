@@ -13,6 +13,13 @@
 # (1.2, 25/11/2026, rama termo-fuerte: la carga fuerte, SSE2, que pide el SSE
 # del núcleo de la base 0.8.12 —con una de antes, la ligera de siempre—; la
 # alimentación con todas las lecturas; «Enviar a Carlos» que dice cómo ha ido)
+# (1.2.1, 26/11/2026, rama termo-121: el ASUS GL553VD de verdad con la 1.2 —el
+# contador de 4 en 4 s, las lecturas cada 2 a 6 s, «el certificado no vale»—:
+# lo del .LOG y el .CSV, de una vez al final de cada segundo, después de la
+# pantalla y de la parada de seguridad; la carga, de fondo (con el núcleo de
+# esta rama; con la 0.8.12, por turnos, como antes); el ritmo y las lecturas
+# de RAPL perdidas, en INFORME.TXT; «Carga: LIGERA/FUERTE» en grande; el envío
+# con el motivo de cada servidor. Sigue pidiendo la base 0.8.12)
 set -e
 AQUI=$(dirname "$(readlink -f "$0")")
 RAIZ=$(readlink -f "$AQUI/../../..")
@@ -24,7 +31,7 @@ bash $AQUI/hacer.sh $W/TERMO.BIN
 iconv -f UTF-8 -t CP437 $AQUI/AYUDA.txt | sed 's/$/\r/' > $W/TERMO.TXT
 python3 -I $RAIZ/tools/hpicono.py $AQUI/termo32.png $W/TERMO.ICP
 printf 'nombre=Termómetro\r\nprograma=\\HISPA\\TERMO.BIN\r\nargumentos=\r\nicono=\\HISPA\\MENU\\TERMO.ICP\r\nescritorio=no\r\ntipo=Herramientas\r\n' | iconv -f UTF-8 -t CP437 > $W/TERMO.MNU
-python3 -I "$HPQ" crea "$SAL/TERMO.HPQ" --nombre termo --version 1.2 \
+python3 -I "$HPQ" crea "$SAL/TERMO.HPQ" --nombre termo --version 1.2.1 \
   --descripcion "Termómetro: la temperatura del procesador y de las zonas de la BIOS, la prueba de esfuerzo y si hay que limpiar el ventilador" \
   --necesita "base >= 0.8.12" --tipo herramientas \
   $W/TERMO.BIN='\HISPA\TERMO.BIN' $W/TERMO.TXT='\HISPA\TERMO.TXT' $W/TERMO.MNU='\HISPA\MENU\TERMO.MNU' $W/TERMO.ICP='\HISPA\MENU\TERMO.ICP' > /dev/null

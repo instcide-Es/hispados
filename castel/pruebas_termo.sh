@@ -282,7 +282,7 @@ termo_anfitrion() {
   if ! gcc -O1 -Wall -Wextra -I$T $T/pruebas/potencia_prueba.c $T/potencia.c -o $B/potencia 2> $B/gccpo.txt; then
     ko "potencia.c no compila en el anfitrión: $(head -n 2 $B/gccpo.txt)"
   elif $B/potencia > $B/potencia.txt; then
-    ok "potencia.c con MSR de mentira ($(grep -c '^bien' $B/potencia.txt) cosas): el MSI GT80 frenado por PL1 a 30 W con el cargador («la fuente o el ajuste del fabricante»), PROCHOT de la placa con el procesador fresco («apunta a la alimentación»), pegado al PL1 (normal), el PL1 bajo el TDP; la vuelta de 32 bits de RAPL, las marcas de registro puestas a 0, los C-states; el Atom (µJ), el AMD Zen y las máquinas virtuales («no lo tiene»)"
+    ok "potencia.c con MSR de mentira ($(grep -c '^bien' $B/potencia.txt) cosas): el MSI GT80 frenado por PL1 a 30 W con el cargador («la fuente o el ajuste del fabricante»), PROCHOT de la placa con el procesador fresco («apunta a la alimentación»), pegado al PL1 (normal), el PL1 bajo el TDP; la vuelta de 32 bits de RAPL (1.2.1: y la lectura tan tarde que ha podido dar la vuelta, perdida y dicha), las marcas de registro puestas a 0, los C-states; el Atom (µJ), el AMD Zen y las máquinas virtuales («no lo tiene»)"
   else ko "potencia.c: $(grep '^mal' $B/potencia.txt | head -n 3 | tr '\n' ' ')"; fi
   # el terminal de SSH.BIN
   python3 -I $AQUI/nucleo32/juegos/datos386.py $B/datos386.h $B/letra.h
@@ -491,6 +491,8 @@ termo_varias
 termo_fuerte
 # 8d. (TERMO 1.2) la alimentación con todas las lecturas, y Calentar que espera a ACPI
 termo_alimentacion
+# 8e. (TERMO 1.2.1) el ritmo de la carga, con KVM y -smp 4 (la fuerte y la ligera)
+termo_ritmo
 # 9. (TERMO) guardar de verdad (los Intel nuevos que no guardaban nada):
 # (a) sin la carpeta TERMO (borrada entera antes de arrancar) y la máquina
 # matada a mitad de la carga: el .LOG y el .CSV quedan, hasta ese momento, y
@@ -659,8 +661,43 @@ termo_enviar() {
     "termo: envío: resultado: NO ENVIADO: el servidor dice que por hoy ya se ha mandado bastante (64 MB o 400 archivos). Pulse E mañana."
   if [ "$(grep -c 'termo: envío: Enviando... (archivo' $S)" -le 2 ]; then ok "(1.2) con el 429, un solo archivo intentado: $(grep -c 'termo: envío: Enviando... (archivo' $S)"
   else ko "(1.2) con el 429 sigue intentando: $(grep -c 'termo: envío: Enviando... (archivo' $S) veces"; fi
-  kill $PID_PHP $PID_TLS 2> /dev/null; wait $PID_PHP $PID_TLS 2> /dev/null
+  # (1.2.1) una cadena como la de Let's Encrypt de hoy para hispados.es
+  # (ECDSA: la hoja <- YE1 <- Root YE cruzada por X2 <- X2 cruzada por X1),
+  # con Root YE de ancla: el ASUS GL553VD dijo «el certificado del servidor no
+  # vale» (26/11/2026). Y si fallan los dos servidores, el motivo de CADA uno
+  # (antes, solo el del último), sin «no vale (... no vale (...))»
+  local PID_LE PL
+  TLS_CADENA=le python3 -I $AQUI/nucleo32/termo/pruebas/tls_delante.py $E/tle $PPH > $E/tle.err 2>&1 &
+  PID_LE=$!
+  for _ in $(seq 100); do [ -s $E/tle/puerto ] && break; sleep 0.2; done
+  PL=$(cat $E/tle/puerto 2> /dev/null)
+  if [ -n "$PL" ]; then
+    rm -f $E/datos/cuotas/*   # (el tope del día de la prueba del 429, fuera)
+    cp $E/termo.img $E/le.img
+    mdel -i $E/le.img@@1M ::TERMO/ENVIO.HEC > /dev/null 2>&1
+    mcopy -o -i $E/le.img@@1M $E/tle/RAIZ.CER ::RAICES/PRUEBA.CER
+    mtype -i $E/le.img@@1M ::TERMO/ENVIO.INI | tr -d '\r' | grep -v '^servidor=' | sed "1i servidor=https://10.0.2.2:$PL/termo/subir.php" | sed 's/$/\r/' > $E/ENVIOLE.INI
+    mcopy -o -i $E/le.img@@1M $E/ENVIOLE.INI ::TERMO/ENVIO.INI
+    TQ_RED="-nic user,model=e1000" TQ_HASTA=tq_envio_acabado termo_qemu $E/le.img e5 110 "$cpu" "50:sendkey e"
+    mira "(1.2.1) «Enviar a Carlos» con una cadena como la de Let's Encrypt de hoy (ECDSA P-256 <- YE1 P-384 <- Root YE cruzada <- X2 cruzada <- X1 RSA; el ancla, Root YE): la cadena se comprueba y ENVIADO" \
+      "tls: 10.0.2.2: TLS 1.2, ECDHE-ECDSA, .*la cadena comprobada" "termo: envío: resultado: ENVIADO: [0-9]* archivos a 10.0.2.2"
+    if grep -q 'conexión TLS: TLSv1.2' $E/tle/tls.txt; then ok "(1.2.1) el HTTPS de prueba con la cadena de LE: $(grep -c 'conexión TLS' $E/tle/tls.txt) conexiones TLS 1.2"
+    else ko "(1.2.1) el HTTPS con la cadena de LE: $(tail -n 2 $E/tle/tls.txt 2> /dev/null | tr '\n' ' ')"; fi
+    # los dos mal: el primero con un certificado de una raíz que no se conoce
+    # (la de LE sin su ancla), el segundo que rechaza la conexión
+    cp $E/termo.img $E/dos.img
+    mdel -i $E/dos.img@@1M ::TERMO/ENVIO.HEC > /dev/null 2>&1
+    mtype -i $E/dos.img@@1M ::TERMO/ENVIO.INI | tr -d '\r' | grep -v '^servidor=' | sed "1i servidor=https://10.0.2.2:$PL/termo/subir.php\nservidor=https://10.0.2.2:$PC/termo/subir.php" | sed 's/$/\r/' > $E/ENVIODOS.INI
+    mcopy -o -i $E/dos.img@@1M $E/ENVIODOS.INI ::TERMO/ENVIO.INI
+    TQ_RED="-nic user,model=e1000" TQ_HASTA=tq_envio_acabado termo_qemu $E/dos.img e6 110 "$cpu" "50:sendkey e"
+    mira "(1.2.1) los dos servidores mal: el motivo de cada uno (el certificado de una raíz desconocida en el primero; el segundo rechaza la conexión), no solo el del último" \
+      "termo: envío: resultado: NO ENVIADO: .*en 10.0.2.2: el certificado del servidor no vale (el certificado de 10.0.2.2 no lo firma ninguna autoridad conocida); en 10.0.2.2: el servidor rechaza la conexión"
+    if grep -a -q 'no vale (el certificado del servidor no vale' $S; then ko "(1.2.1) el motivo, repetido: $(grep -a 'resultado: NO ENVIADO' $S | head -n 1)"
+    else ok "(1.2.1) el motivo, sin repetir «el certificado del servidor no vale (... no vale (...))»"; fi
+  else ko "(1.2.1) el HTTPS de prueba con la cadena de LE no arranca: $(tail -n 2 $E/tle.err | tr '\n' ' ')"; fi
+  kill $PID_PHP $PID_TLS $PID_LE 2> /dev/null; wait $PID_PHP $PID_TLS $PID_LE 2> /dev/null
 }
+tq_envio_acabado() { grep -a -q 'termo: env[^:]*: resultado: ' $1; }   # (el .sal, en CP437)
 
 # (TERMO 1.2) 8c. La carga fuerte (SSE2): con «cargafuerte» en la línea del
 # cargador empieza en fuerte; F la cambia (ligera y otra vez fuerte); con 4
@@ -696,6 +733,69 @@ termo_fuerte() {
   else ko "(1.2) sin las vueltas de la carga fuerte: «$v» «$n» «$seg»"; fi
 }
 tq_informe() { grep -a -q 'termo: suceso: informe para el técnico' $1; }
+
+# (TERMO 1.2.1) 8e. El ritmo de la carga, con KVM y -smp 4 (el ASUS GL553VD,
+# 26/11/2026: con la 1.2 el contador iba de 4 en 4 s y las líneas DATOS cada
+# 2 a 6 s): con la fuerte y con la ligera, cada segundo llega (la pantalla y
+# la parada de seguridad) en 1,5 s como mucho, cada lectura de 2 s en 3 s,
+# la carga es de fondo y aun así hace sus vueltas; el INFORME.TXT lo dice.
+# Margen por si el anfitrión va cargado: como mucho 2 segundos de más de
+# 1,5 s y el peor de 2,5 s (lo de la 1.2 eran decenas, de 4 s); la segunda
+# Esc acaba el enfriamiento (y sale el INFORME.TXT). La tercera,
+# «lenta»: la fuerte con la memoria USB a 40 órdenes por segundo (25 ms cada
+# una, como la del ASUS; throttling de QEMU): con la 1.2, segundos de hasta
+# 6 s y líneas DATOS a 1 y 3 s; ahora, lo mismo que con la memoria rápida
+termo_ritmo() {
+  local R=$Y/ritmo.img I=$Y/ritmo.txt c l sn sp st pn pp pt ln lp lt fo
+  if [ ! -w /dev/kvm ]; then echo "  (sin KVM: sin el ritmo de la carga con -smp 4)"; return; fi
+  if mtype -i $Y/termo.img@@1M ::boot/grub/grub.cfg | grep -q 'menuentry "Termometro con carga FUERTE.*' && mtype -i $Y/termo.img@@1M ::boot/grub/grub.cfg | grep -q 'escritorio .* termo cargafuerte'; then
+    ok "(1.2.1) el menú de arranque de la memoria: «Termometro con carga FUERTE» (cargafuerte en la línea del cargador), por la BIOS y por UEFI"
+  else ko "(1.2.1) sin «Termometro con carga FUERTE» en el menú de arranque"; fi
+  for c in fuerte ligera lenta; do
+    termo_ram_img $R "$([ $c != ligera ] && echo cargafuerte)"
+    for f in $(mdir -b -i $R@@1M ::TERMO 2> /dev/null | grep -E '\.(LOG|CSV|TXT|EST)$'); do mdel -i $R@@1M "$f" > /dev/null 2>&1; done
+    TQ_USB_OPC=$([ $c = lenta ] && echo ",throttling.iops-total=40") TQ_HASTA=tq_informe TQ_TOPE=320 termo_qemu $R tr$c 125 "-enable-kvm -cpu host -smp 4" "44:sendkey 1" "46:sendkey c" "112:sendkey esc" "118:sendkey esc"
+    l=$(grep -a 'termo: ritmo de la carga: ' $S | head -n 1)
+    sn=$(echo "$l" | sed -n 's/.*segundos \([0-9]*\), el más lento \([0-9]*\) ms, \([0-9]*\) de más.*/\1 \2 \3/p')
+    pn=$(echo "$l" | sed -n 's/.*pantalla \([0-9]*\), la más lenta \([0-9]*\) ms, \([0-9]*\) de más.*/\1 \2 \3/p')
+    ln=$(echo "$l" | sed -n 's/.*lecturas \([0-9]*\), la más lenta \([0-9]*\) ms, \([0-9]*\) de más.*/\1 \2 \3/p')
+    fo=$(echo "$l" | sed -n 's/.*de fondo \([0-9-]*\);.*/\1/p')
+    read -r sn sp st <<< "$sn"; read -r pn pp pt <<< "$pn"; read -r ln lp lt <<< "$ln"
+    if [ -n "$sn" ] && [ "$sn" -ge 55 ] && [ "$sp" -le 2500 ] && [ "$st" -le 2 ] && [ "$pn" -ge 55 ] && [ "$pp" -le 2500 ] && [ "$pt" -le 2 ] \
+       && [ "$ln" -ge 27 ] && [ "$lp" -le 4000 ] && [ "$lt" -le 1 ] && [ "$fo" = 1 ]; then
+      ok "(1.2.1) con la $c, KVM y -smp 4: cada segundo (la pantalla y la parada de seguridad) $sn veces, el más lento $sp ms ($st de más de 1,5 s); pintada $pn veces, la más lenta $pp ms; las lecturas de 2 s, $ln, la más lenta $lp ms; la carga, de fondo"
+    else ko "(1.2.1) el ritmo con la $c: «$l»"; fi
+    termo_dobles $R > /dev/null
+    l=$(grep -a ' DATOS fase=carga' $Y/dobles.log | sed -n 's/.*seg=\([0-9]*\).*/\1/p' | awk 'NR > 1 { d = $1 - a; if (d > m) m = d } { a = $1; n++ } END { print n + 0, m + 0 }')
+    if [ "${l%% *}" -ge 25 ] && [ "${l#* }" -le 3 ]; then ok "(1.2.1) con la $c, el .LOG: ${l%% *} líneas DATOS de la carga, la mayor distancia entre dos, ${l#* } s"
+    else ko "(1.2.1) con la $c, las líneas DATOS de la carga (cuántas, la mayor distancia): $l"; fi
+    if [ $c = lenta ]; then
+      l=$(echo "$(grep -a 'termo: ritmo de la carga: ' $S | head -n 1)" | sed -n 's/.*escribir \([0-9]*\) tandas, \([0-9]*\) lentas, la peor \([0-9]*\) ms.*/\1 tandas, \2 lentas (de 0,5 s o más), la peor de \3 ms/p')
+      if [ -n "$l" ]; then ok "(1.2.1) con la memoria lenta, lo de escribir en ella (una tanda por segundo; tras una lenta, espera): $l"
+      else ko "(1.2.1) con la memoria lenta, sin lo de escribir: $(grep -a 'termo: ritmo de la carga' $S | head -n 1)"; fi
+    elif [ $c = fuerte ]; then
+      mira "(1.2.1) con la fuerte: en pantalla, en grande, «Carga: FUERTE»; la hija, de fondo, y aun así hace la carga fuerte" \
+        "termo: en pantalla: «Carga: FUERTE (pulse F para la ligera)»" "termo: carga: de fondo (solo corre cuando no hay otra tarea lista)" \
+        "termo: carga parada (fuerte: [1-9][0-9]* vueltas de [0-9]* multiplicaciones y sumas de dobles; los registros bien)"
+    else
+      mira "(1.2.1) con la ligera: en pantalla, en grande, «Carga: LIGERA (pulse F para la fuerte)»; la hija, de fondo" \
+        "termo: en pantalla: «Carga: LIGERA (pulse F para la fuerte)»" "termo: carga: de fondo (solo corre cuando no hay otra tarea lista)"
+    fi
+    mtype -i $R@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' > $I
+    if grep -q '^Ritmo durante la carga: la pantalla, cada [01],[0-9]* s de media .*; la parada de seguridad (se mira cada segundo), cada [01],[0-9]* s .*la carga, de fondo' $I \
+       && grep -q '^Lecturas de la potencia (RAPL) en la carga: sin RAPL' $I; then
+      ok "(1.2.1) INFORME.TXT con la $c: «Ritmo durante la carga: ...» y lo de las lecturas de RAPL (QEMU no tiene RAPL)"
+    else ko "(1.2.1) INFORME.TXT con la $c, el ritmo: $(grep -a '^Ritmo\|^Lecturas de la potencia' $I | head -n 2 | tr '\n' ' ')"; fi
+  done
+  # la red con la carga fuerte: el cable se «enchufa» (set_link) a mitad de
+  # la carga y RED.BIN tiene la IP por DHCP antes de acabar (el ASUS, con la
+  # 1.2: «pidiendo la IP» durante la carga)
+  termo_ram_img $R cargafuerte
+  TQ_RED="-netdev user,id=n0 -device e1000,netdev=n0,id=t0" termo_qemu $R trred 100 "-enable-kvm -cpu host -smp 4" "1:set_link t0 off" "44:sendkey 1" "46:sendkey c" "62:set_link t0 on" "96:sendkey esc"
+  if awk '/termo: suceso: EMPIEZA la prueba de esfuerzo/ { e = NR } /red: DHCP: IP / { if (e) d = NR } /termo: fin de la carga/ { if (!f) f = NR } END { exit !(e && d && (!f || d < f)) }' $S; then
+    ok "(1.2.1) con la carga fuerte (KVM, -smp 4), el cable enchufado a mitad: RED.BIN tiene la IP por DHCP antes de acabar la carga"
+  else ko "(1.2.1) la red con la carga fuerte: $(grep -a 'red: enlace\|red: DHCP\|EMPIEZA la prueba\|fin de la carga' $S | head -n 5 | tr '\n' ' ')"; fi
+}
 
 # (TERMO 1.2) 8d. La alimentación (el ASUS GL553VD, 25/11/2026: «no se sabe si
 # estaba enchufado» en la primera, porque ACPI aún no había leído la batería;

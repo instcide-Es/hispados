@@ -70,6 +70,10 @@ Con Linux:
   lo da, como el de la gráfica en el GL553VD).
   Un portátil de la época de Windows 7 arranca así sin tocar nada más (no hace
   falta quitar el «Secure Boot»: esos equipos no lo tienen o lo traen apagado).
+  Para la prueba con la carga FUERTE (la que llega a los vatios del
+  procesador: para ver si el cargador o la fuente frenan), elija en el menú
+  «Termometro con carga FUERTE»; en la pantalla, encima de los botones, pone
+  en grande «Carga: FUERTE» (o «Carga: LIGERA»; la tecla F la cambia).
   Si se queda colgado al arrancar, apáguelo (botón 5 s) y elija en el menú
   «Termometro SIN ACPI» (mide el procesador, pero no las zonas ni la batería).
   Si la pantalla sale rara (o muy grande), elija «Termometro (la medida que

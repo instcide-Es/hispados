@@ -29,7 +29,10 @@ el cargador o la fuente frenan al equipo: compare una prueba enchufado y otra
 con la batería, las dos con la misma carga. La fuerte calienta más deprisa;
 la parada de seguridad (el límite menos 10 °C, o 95 °C, también de las
 gráficas) es la misma. Necesita Hispa-Pentium 0.8.12 y un procesador con
-SSE2; con «cargafuerte» en la línea del cargador, empieza ya en fuerte.
+SSE2; con «cargafuerte» en la línea del cargador, empieza ya en fuerte
+(en la memoria del Termómetro, la línea «Termometro con carga FUERTE» del
+menú de arranque). Antes de Calentar, encima de los botones, dice en
+grande cuál está puesta: «Carga: LIGERA» o «Carga: FUERTE».
 
 La alimentación de cada prueba (enchufado o con la batería) se decide con
 todas las lecturas de la carga, no con la primera; si se ha enchufado o

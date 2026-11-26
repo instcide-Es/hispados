@@ -611,6 +611,111 @@ static int escribe(const char *ruta, const void *b, u32 n, int crear)
 	return r;
 }
 
+/* (TERMO 1.2.1) Lo que se añade al .LOG y al .CSV no se escribe en el
+ * momento: se junta aquí y va a la memoria USB al final de cada segundo,
+ * después de leer los sensores, mirar la parada de seguridad y pintar la
+ * pantalla (pulso). El ASUS GL553VD (26/11/2026, Termómetro 1.2): cada línea
+ * era abrir, añadir y cerrar (con SYNCHRONIZE CACHE) y la memoria tardaba
+ * de 25 a 50 ms por orden: «leer y apuntar» llegó a 8 s, el contador de la
+ * pantalla iba de 4 en 4 s y las líneas DATOS salían cada 2 a 6 s. Ahora,
+ * una escritura por archivo y segundo; si una tanda tarda (más de 0,5 s),
+ * la siguiente espera 4 veces lo que tardó (10 s como mucho), y la pantalla
+ * y la parada de seguridad siguen cada segundo. Lo que se pierde si se va la
+ * luz: lo del último segundo (o de esa espera). */
+#define DIF_LOG 49152
+#define DIF_CSV 16384
+static char dif_log[DIF_LOG], dif_csv[DIF_CSV];
+static u32 dif_log_n, dif_csv_n, dif_no_antes, dif_tandas, dif_lentas, dif_peor_ms;
+static void no_se_guarda(const char *ruta, const char *por_que);
+static const char *motivo_error(u32 e);
+
+static void vuelca_diferido(int ya)
+{
+	u32 t0 = jg_tics(), d;
+
+	if (!dif_log_n && !dif_csv_n)
+		return;
+	if (!ya && dif_no_antes && (int)(t0 - dif_no_antes) < 0 && dif_log_n < DIF_LOG / 2 && dif_csv_n < DIF_CSV / 2)
+		return;
+	if (dif_log_n && ruta_log[0] && !log_malo) {
+		if (!escribe(ruta_log, dif_log, dif_log_n, 0) && !escribe(ruta_log, dif_log, dif_log_n, 1)) {
+			log_malo = 1;
+			no_se_guarda(ruta_log, motivo_error(ult_error));
+		}
+	}
+	dif_log_n = 0;
+	if (dif_csv_n && ruta_csv[0] && !csv_malo) {
+		if (!escribe(ruta_csv, dif_csv, dif_csv_n, 0)) {
+			csv_malo = 1;
+			snprintf(aviso_archivo, sizeof aviso_archivo, "Se ha dejado de poder escribir %s: %s.", ruta_csv, motivo_error(ult_error));
+			no_se_guarda(ruta_csv, motivo_error(ult_error));
+		}
+	}
+	dif_csv_n = 0;
+	d = jg_tics() - t0;
+	dif_tandas++;
+	if (d * 1000 / jg_hz > dif_peor_ms)
+		dif_peor_ms = d * 1000 / jg_hz;
+	if (d * 1000 / jg_hz >= 500) {
+		dif_lentas++;
+		dif_no_antes = jg_tics() + (d * 4 < 10 * jg_hz ? d * 4 : 10 * jg_hz);
+	} else
+		dif_no_antes = 0;
+}
+
+static void diferido(char *buf, u32 *n, u32 cabe, const void *b, u32 k)
+{
+	if (*n + k > cabe)
+		vuelca_diferido(1);
+	if (k > cabe)
+		k = cabe;
+	memcpy(buf + *n, b, k);
+	*n += k;
+}
+
+/* (TERMO 1.2.1) el ritmo de la carga: cada cuánto llega cada segundo (la
+ * pantalla y la parada de seguridad: mira_carga va en cada uno), cada
+ * cuánto cada lectura de 2 s (las zonas, la potencia, el .CSV) y cada
+ * cuánto se pinta. Para el INFORME.TXT y el puerto serie (las pruebas) */
+struct ritmo { u32 n, tarde, peor, suma, ult; };
+static struct ritmo ri_seg, ri_lee, ri_pin;
+static int ri_de_fondo = -1;	/* la carga, de fondo (el núcleo de la 1.2.1): 1; 0 no; -1 no se sabe */
+static void ritmo_cuenta(struct ritmo *r, u32 ahora, u32 tarde_tics)
+{
+	if (r->ult) {
+		u32 d = ahora - r->ult;
+
+		r->n++;
+		r->suma += d;
+		if (d > r->peor)
+			r->peor = d;
+		if (d > tarde_tics)
+			r->tarde++;
+	}
+	r->ult = ahora;
+}
+static void ritmo_empieza(void)
+{
+	memset(&ri_seg, 0, sizeof ri_seg);
+	memset(&ri_lee, 0, sizeof ri_lee);
+	memset(&ri_pin, 0, sizeof ri_pin);
+}
+/* «cada 1,00 s de media (la más lenta, 1,02 s; ninguna de más de 1,5 s)» */
+static void ritmo_texto(char *d, int cabe, const struct ritmo *r, const char *tope)
+{
+	u32 med = r->n ? r->suma * 100 / r->n / jg_hz : 0, pe = r->peor * 100 / jg_hz;
+
+	if (!r->n) {
+		snprintf(d, (size_t)cabe, "sin medir");
+		return;
+	}
+	if (r->tarde)
+		snprintf(d, (size_t)cabe, "cada %u,%02u s de media (la más lenta, %u,%02u s; %u de más de %s)", med / 100, med % 100, pe / 100, pe % 100, r->tarde, tope);
+	else
+		snprintf(d, (size_t)cabe, "cada %u,%02u s de media (la más lenta, %u,%02u s; ninguna de más de %s)", med / 100, med % 100, pe / 100, pe % 100, tope);
+}
+static void pinta(void);
+
 static int escribe_de_verdad(const char *ruta, const void *b, u32 n, int crear)
 {
 	u32 m = sc(SC_ABRIR, (u32)ruta, crear ? PARA_CREAR : PARA_ESCRIBIR, 0), r, c;
@@ -895,7 +1000,7 @@ static void csv_cabecera(void)
 	if (csv_listo) {
 		/* (TERMO) han llegado sensores nuevos (los núcleos de la carga): otra
 		 * línea de cabecera, con las columnas de ahora */
-		escribe(ruta_csv, b, (u32)m, 0);
+		diferido(dif_csv, &dif_csv_n, DIF_CSV, b, (u32)m);	/* (1.2.1: en su sitio, tras lo ya juntado) */
 		return;
 	}
 	if (!escribe(ruta_csv, b, (u32)m, 1)) {
@@ -932,20 +1037,17 @@ static void csv_linea(void)
 		m += snprintf(b + m, sizeof b - (size_t)m, "%u;%s\r\n", en.pct, en.ca == 1 ? "si" : en.ca == 0 ? "no" : "");
 	else
 		m += snprintf(b + m, sizeof b - (size_t)m, ";\r\n");
-	if (!escribe(ruta_csv, b, (u32)m, 0)) {
-		csv_malo = 1;
-		snprintf(aviso_archivo, sizeof aviso_archivo, "Se ha dejado de poder escribir %s: %s.", ruta_csv, motivo_error(ult_error));
-		no_se_guarda(ruta_csv, motivo_error(ult_error));
-	}
+	diferido(dif_csv, &dif_csv_n, DIF_CSV, b, (u32)m);	/* (1.2.1: a la memoria USB, al final del segundo) */
 }
 
 /* ---------------------------------------------------------------- el registro de sucesos (.LOG)
  * X:\TERMO\MMDDHHMM.LOG: todo lo que pasa, para saber, si el equipo se apaga
  * de golpe (el corte térmico de la placa), qué hacía y a qué temperatura.
- * Cada línea se escribe abriendo, añadiendo y cerrando el archivo: la FAT
- * del núcleo escribe en el momento (fat.cas: nada se queda en la memoria) y
- * al cerrar queda el tamaño en la carpeta; si se va la luz, como mucho se
- * pierde la línea que se estaba escribiendo. Las líneas:
+ * Lo de cada segundo se escribe de una vez (1.2.1: vuelca_diferido, antes
+ * cada línea) abriendo, añadiendo y cerrando el archivo: la FAT del núcleo
+ * escribe en el momento (fat.cas: nada se queda en la memoria) y al cerrar
+ * queda el tamaño en la carpeta; si se va la luz, como mucho se pierde lo
+ * del último segundo. Las líneas:
  *   hh:mm:ss ARRANQUE ...   lo del arranque (X:\ARRANQUE.TXT del núcleo)
  *   hh:mm:ss SUCESO ...     lo que pasa (la prueba, los estados, avisos)
  *   hh:mm:ss DATOS fase=... max=...; sensor=...; ...   cada 2 s
@@ -964,10 +1066,7 @@ static void log_escribe(const char *clase, const char *texto)
 	n = snprintf(b, sizeof b, "%02u:%02u:%02u %s %s\r\n", h, mi, se, clase, l);
 	if (n > (int)sizeof b - 1)
 		n = (int)sizeof b - 1;
-	if (!escribe(ruta_log, b, (u32)n, 0) && !escribe(ruta_log, b, (u32)n, 1)) {
-		log_malo = 1;
-		no_se_guarda(ruta_log, motivo_error(ult_error));
-	}
+	diferido(dif_log, &dif_log_n, DIF_LOG, b, (u32)n);	/* (1.2.1: a la memoria USB, al final del segundo) */
 }
 
 static void suceso_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -1625,6 +1724,7 @@ struct hecha {
 	int b_ini, b_len;	/* su sección del INFORME.TXT, en archivo[] (-1 ninguna, -2 no cabía) */
 	/* (Calentar) para la tabla que las compara */
 	int t_ini, t_max, mw, mw_max, mhz, pct_fr, seg, bat_ini, bat_fin, bat_mw, seguridad, esc;
+	char ritmo[700];	/* (TERMO 1.2.1, Calentar) cada cuánto la pantalla, la parada de seguridad y las lecturas */
 };
 static struct hecha HE[MAX_HECHAS];
 static int nhechas, hechas_total, he_cal = -1, he_mide = -1, he_ram = -1, he_vista = -1, ver_cuadro, discos_en_lista;
@@ -2006,6 +2106,8 @@ static void empieza(void)
 	fase = F_CARGA;
 	t_fase = jg_tics();
 	carga_vueltas = carga_rota = 0;
+	ritmo_empieza();	/* (TERMO 1.2.1) */
+	dif_tandas = dif_lentas = dif_peor_ms = 0;
 	t_ini = mas_caliente();
 	pico = t_ini;
 	por_seguridad = por_esc = 0;
@@ -2141,6 +2243,32 @@ static void para_carga(int seguridad, int esc)
 	seg_carga = (int)((jg_tics() - t_fase) / jg_hz);
 	if (he_cal >= 0 && he_cal < nhechas)
 		decide_alimentacion(&HE[he_cal]);
+	/* (TERMO 1.2.1) el ritmo de la carga: al puerto serie y a su ficha */
+	{
+		char r1[160], r2[160], r3[160], rp[260];
+		int ln, lt, lp, lpe, lv;
+
+		po_lecturas(&ln, &lt, &lp, &lpe, &lv);
+		serie("termo: ritmo de la carga: segundos %u, el más lento %u ms, %u de más de 1,5 s; pantalla %u, la más lenta %u ms, %u de más de 1,5 s; "
+		      "lecturas %u, la más lenta %u ms, %u de más de 3 s; rapl %d, %d tarde, %d perdidas, la más lenta %d ms, vuelta %d s; de fondo %d; escribir %u tandas, %u lentas, la peor %u ms\n",
+		      ri_seg.n, ri_seg.peor * 1000 / jg_hz, ri_seg.tarde, ri_pin.n, ri_pin.peor * 1000 / jg_hz, ri_pin.tarde, ri_lee.n, ri_lee.peor * 1000 / jg_hz, ri_lee.tarde,
+		      ln, lt, lp, lpe, lv, ri_de_fondo, dif_tandas, dif_lentas, dif_peor_ms);
+		ritmo_texto(r1, sizeof r1, &ri_pin, "1,5 s");
+		ritmo_texto(r2, sizeof r2, &ri_seg, "1,5 s");
+		ritmo_texto(r3, sizeof r3, &ri_lee, "3 s");
+		if (ln < 0)
+			snprintf(rp, sizeof rp, "sin RAPL (este procesador no dice sus vatios)");
+		else if (!lp)
+			snprintf(rp, sizeof rp, "%d, %d tarde (más de 3 s; la más lenta, %d,%d s): NINGUNA PERDIDA (el contador del paquete, de 32 bits, da la vuelta en unos %d min a la potencia más alta)",
+				 ln, lt, lpe / 1000, lpe % 1000 / 100, lv / 60);
+		else
+			snprintf(rp, sizeof rp, "%d, %d tarde; OJO: %d PERDIDAS (tan tarde que el contador de 32 bits ha podido dar la vuelta, cada unos %d s: esos ratos no cuentan en los vatios)", ln, lt, lp, lv);
+		if (he_cal >= 0 && he_cal < nhechas)
+			snprintf(HE[he_cal].ritmo, sizeof HE[he_cal].ritmo,
+				 "Ritmo durante la carga: la pantalla, %s; la parada de seguridad (se mira cada segundo), %s; las lecturas de 2 s, %s; la carga, %s.\r\n"
+				 "Lecturas de la potencia (RAPL) en la carga: %s.\r\n",
+				 r1, r2, r3, ri_de_fondo == 1 ? "de fondo (solo cuando nadie más necesita el procesador)" : "por turnos con el Termómetro (núcleo de antes de la 1.2.1)", rp);
+	}
 	por_seguridad = seguridad;
 	por_esc = esc;
 	{
@@ -2641,6 +2769,8 @@ static int bloque_calentar(char *t, int cabe, const struct hecha *h, const char 
 	else
 		IN("Carga usada: ligera, x87 (la coma flotante de siempre, raíz y seno, en cada procesador): en un procesador de hoy no llega a los vatios que deja la BIOS (PL1), "
 		   "así que no dice si la fuente o el cargador darían para el máximo%s.\r\n", fuerte_puede ? " (para eso, la fuerte: tecla F)" : "");
+	if (h->ritmo[0])
+		IN("%s", h->ritmo);	/* (TERMO 1.2.1) */
 	if (ap_cache_apagada)
 		IN("OJO: %d de los demás procesadores llegaron con la caché apagada (CR0.CD a 1, como los dejó la BIOS)%s.\r\n", ap_cache_apagada,
 		   h->fuerte ? "; la carga fuerte la enciende" : "; con la ligera se quedan así (como hasta la 1.1.1) y cargan mucho menos de lo que podrían");
@@ -2897,6 +3027,7 @@ static void escribe_informe(void)
 	int n = 0, i, hay_ram = 0, hay_rend = 0;
 #define IN(...) (n += snprintf(t + n, sizeof t - (size_t)n, __VA_ARGS__), n = n < (int)sizeof t ? n : (int)sizeof t - 1)
 
+	vuelca_diferido(1);	/* (TERMO 1.2.1) el .LOG y el .CSV, al día */
 	if (!carpeta[0] || csv_malo)
 		return;
 	fecha_hora(&a, &me, &d, &h, &mi, &se);
@@ -3658,6 +3789,7 @@ static void mira_espera_acpi(void)
 	jg_cambio = 1;
 }
 
+
 static void pulso(void)
 {
 	static u32 proximo, lento_dicho;
@@ -3679,7 +3811,8 @@ static void pulso(void)
 	smi0 = lee_smi();
 	uso_n_ini = uso_lee(&uso_ini);
 	cuenta_s++;
-	bmp_trozo();		/* (la pantalla que se está guardando: 32 K por segundo) */
+	if (fase == F_CARGA)
+		ritmo_cuenta(&ri_seg, ahora, jg_hz * 3 / 2);
 	lee_todo();
 	if (espera_acpi) {	/* (TERMO 1.2) */
 		lee_zonas();
@@ -3688,6 +3821,9 @@ static void pulso(void)
 	t_lee = jg_tics() - t0;
 	if (cuenta_s % 2 == 0) {
 		u32 tz = jg_tics();
+
+		if (fase == F_CARGA)
+			ritmo_cuenta(&ri_lee, tz, jg_hz * 3);
 
 		lee_zonas();
 		t_zon = jg_tics() - tz;
@@ -3742,14 +3878,22 @@ static void pulso(void)
 	}
 	mira_carga();
 	prueba_segundo();
-	jg_cambio = 1;
+	/* (TERMO 1.2.1) la pantalla, ya (antes de escribir en la memoria USB:
+	 * lo que tarde eso no la retrasa); luego lo juntado del .LOG y del .CSV
+	 * y, sin la carga en marcha, el trozo de la pantalla que se guarda */
 	motivo_pinta = 1;
+	pinta();
+	jg_subir();
+	jg_cambio = 0;
+	vuelca_diferido(0);
+	if (fase != F_CARGA)
+		bmp_trozo();	/* (32 K por segundo; con la carga, espera: son muchas órdenes a la memoria) */
 	ahora = jg_tics() - t0;
 	/* (TERMO) un parón: cuánto, en qué parte, los SMI y quién ha tenido el
 	 * procesador; los 5 primeros enteros, y luego uno de cada 10 */
 	if (ahora * 1000 / jg_hz >= 900) {
 		static struct uso_tabla u2;
-		char quien[160], usb[120], sm[120];
+		char quien[160], usb[200], sm[120];
 		int n2 = uso_lee(&u2), ms = (int)(ahora * 1000 / jg_hz), ms_tsc = (int)ms_de_tsc(rdtsc() - x0);
 		u32 es = (tics_escribe - esc0) * 1000 / jg_hz, smi = lee_smi() - smi0;
 
@@ -3762,6 +3906,14 @@ static void pulso(void)
 		if (n2 >= 0 && uso_n_ini >= 0 && u2.usb_ordenes != uso_ini.usb_ordenes)
 			snprintf(usb, sizeof usb, "; la memoria USB: %u órdenes, %u de más de 0,5 s%s%s", u2.usb_ordenes - uso_ini.usb_ordenes, u2.usb_lentas - uso_ini.usb_lentas,
 				 u2.usb_reinicios != uso_ini.usb_reinicios ? ", con reinicios" : "", u2.usb_peor != uso_ini.usb_peor ? " (la más lenta, nueva)" : "");
+		/* (TERMO 1.2.1) el rato sin nadie que correr (la tarea ociosa): si
+		 * es mucho, se esperaba a algo (la memoria USB, un cerrojo), no al
+		 * procesador */
+		if (n2 >= 0 && uso_n_ini >= 0 && u2.ociosa - uso_ini.ociosa >= jg_hz / 10) {
+			u32 oc = (u2.ociosa - uso_ini.ociosa) * 10 / jg_hz, k = (u32)strlen(usb);
+
+			snprintf(usb + k, sizeof usb - k, "; el procesador, sin nadie que correr: %u,%u s", oc / 10, oc % 10);
+		}
 		if (smi_hay == 1)
 			snprintf(sm, sizeof sm, "%u SMI del firmware", smi);
 		else
@@ -4104,6 +4256,8 @@ static void pinta(void)
 	int W = LZ.an, H = LZ.al, y, k, fila = 30, cn, ca, cmi, cma, cli, ce, ance, lineas;
 	char a[200], g[24], h[24], g2[24], g3[24];
 
+	if (fase == F_CARGA)
+		ritmo_cuenta(&ri_pin, jg_tics(), jg_hz * 3 / 2);
 	nbot = 0;
 	cuadros_pintados++;
 	if (!motivo_pinta)
@@ -4276,10 +4430,26 @@ static void pinta(void)
 	/* abajo: la prueba */
 	{
 		int yb = H - 60, ym = yb - 30, xb = 10, gal;
+		/* (TERMO 1.2.1) antes de Calentar, qué carga está puesta, en grande
+		 * (el ASUS GL553VD, 26/11/2026: se probó con la ligera creyendo que
+		 * era la fuerte) */
+		int rotulo = fuerte_puede && fase != F_CARGA && fase != F_ENFRIA && !midiendo && !ram_activa();
 
-		gal = ym - y - 6;
+		gal = ym - y - 6 - (rotulo ? 44 : 0);
 		if (gal > 60)
 			pinta_grafica(10, y, W - 20, gal);
+		if (rotulo) {
+			static int dicho = -1;
+			const char *tr = carga_fuerte ? "Carga: FUERTE (pulse F para la ligera)" : "Carga: LIGERA (pulse F para la fuerte)";
+			int an = ancho_texto(tr, 2) + 24, yr = ym - 42;
+
+			lz_rect(&LZ, 10, yr, an < W - 20 ? an : W - 20, 36, carga_fuerte ? C_CALIENTE : C_TEMPLADO);
+			lz_negrita(&LZ, 22, yr + 4, tr, C_TINTA, 2);
+			if (dicho != carga_fuerte) {
+				dicho = carga_fuerte;
+				serie("termo: en pantalla: «%s»\n", tr);
+			}
+		}
 		/* la franja de la prueba */
 		if (fase == F_CARGA) {
 			int seg = (int)((jg_tics() - t_fase) / jg_hz);
@@ -4432,9 +4602,16 @@ static void lanza_envio(void)
 	envio_cartel = 1;
 	if (!hay_red_ya()) {
 		char t[800];
+		u32 ip, e = sc(97, (u32)&ip, 0, 0);
 
-		snprintf(t, sizeof t, "NO ENVIADO: sin red (no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez; "
-			 "o súbalo al FTP: los archivos siguen en %s.", carpeta);
+		/* (TERMO 1.2.1) con enlace y pidiendo la IP (RED_BUSCANDO), no «no hay
+		 * cable»: el ASUS GL553VD, con el cable puesto y la luz verde */
+		if (e == 3)
+			snprintf(t, sizeof t, "NO ENVIADO: sin red todavía: hay cable (o Wi-Fi o el móvil), pero aún no hay dirección IP (se está pidiendo por DHCP). Espere unos segundos y pulse E otra vez; "
+				 "si no llega, mire el router (o desenchufe y enchufe el cable). O súbalo al FTP: los archivos siguen en %s.", carpeta);
+		else
+			snprintf(t, sizeof t, "NO ENVIADO: sin red (%s). Enchufe el cable de red, conecte el Wi-Fi o el móvil por USB (enchúfelo y active el Anclaje de USB: en Android, Ajustes › Conexión y compartir › Anclaje de USB) y pulse E otra vez; "
+				 "o súbalo al FTP: los archivos siguen en %s.", e == 2 ? "no hay cable ni Wi-Fi conectado: la tarjeta no tiene enlace" : "no hay cable ni Wi-Fi conectado, o todavía no hay dirección IP", carpeta);
 		envio_acaba(t);
 		return;
 	}
@@ -4442,6 +4619,7 @@ static void lanza_envio(void)
 	snprintf(r, sizeof r, "%s\\ENVIO.EST", carpeta);
 	escribe(r, "Empezando a enviar...", 21, 1);
 	suceso_log("Enviar a Carlos: se manda %s", carpeta);
+	vuelca_diferido(1);	/* (TERMO 1.2.1) que vaya el .LOG al día */
 	x = sc(SC_LANZAR_SUELTO, (u32)"\\TERMO.BIN", (u32)"/ENVIAR /VENTANA", 0);
 	if (ES_ERROR(x))
 		x = sc(SC_LANZAR_SUELTO, (u32)"\\HISPA\\TERMO.BIN", (u32)"/ENVIAR /VENTANA", 0);
@@ -4477,7 +4655,10 @@ static void mira_envio(void)
 	if (strcmp(t, aviso_envio + 8)) {
 		snprintf(aviso_envio, sizeof aviso_envio, "Envío: %s", t);
 		serie("termo: envío dice: %s\n", t);
-		if (!strncmp(t, "ENVIADO", 7) || !strncmp(t, "NO ENVIADO", 10) || busca(t, "Hecho") || busca(t, "Enviados ") || busca(t, "No hay ") || busca(t, "no está preparada") || busca(t, "no vale")) {
+		if (!strncmp(t, "ENVIADO", 7) || !strncmp(t, "NO ENVIADO", 10) || busca(t, "Hecho") || busca(t, "Enviados ") || busca(t, "No hay ") || busca(t, "no está preparada") || busca(t, "de ENVIO.INI no vale")) {
+			/* (1.2.1: «de ENVIO.INI no vale», no «no vale» a secas: la línea de
+			 * un archivo, «... no se ha podido enviar: ... no vale (...)», no es
+			 * el final) */
 			enviando = 0;
 			envio_acaba(t);
 		}
@@ -4930,6 +5111,7 @@ static int al_cerrar(void)
 	sc(SC_CARGA, 1, 0, 0);
 	carga_on = 0;
 	log_escribe("CIERRE", "el Termometro se ha cerrado bien");
+	vuelca_diferido(1);	/* (TERMO 1.2.1) */
 	return 1;
 }
 
@@ -4981,6 +5163,13 @@ int principal(void)
 		for (p = p ? p + 7 : "1000"; *p >= '0' && *p <= '9'; p++)
 			s = s * 10 + *p - '0';
 
+		/* (TERMO 1.2.1) de fondo: solo corre cuando no hay otra tarea lista
+		 * (el Termómetro, la memoria USB, la red, el escritorio, antes); con
+		 * un núcleo de antes, por turnos como hasta ahora */
+		if (sc(SC_CARGA, 9, 0, 0) == 0x200)
+			serie("termo: carga: de fondo (solo corre cuando no hay otra tarea lista)\n");
+		else
+			serie("termo: carga: el núcleo no sabe de tareas de fondo (de antes de la 1.2.1): comparte el procesador por turnos\n");
 		return arg_aqui("/FUERTE") ? carga_hija_fuerte(s > 0 ? s : 1000) : carga_hija(s > 0 ? s : 1000);
 	}
 	/* (TERMO) dónde va todo, y «Enviar a Carlos» (TERMO /ENVIAR: desde la
@@ -5057,6 +5246,7 @@ int principal(void)
 		u32 r = sc(SC_CARGA, 8, 0, 0);
 
 		sse_nucleo = ES_ERROR(r) || !(r & 0x100) ? 0 : (int)(r & 0xFF) | 0x100;
+		ri_de_fondo = !ES_ERROR(r) && (r & 0x200) ? 1 : 0;	/* (TERMO 1.2.1) */
 		fuerte_puede = (sse_nucleo & 0x104) == 0x104;
 		carga_fuerte = fuerte_puede && (ram_linea("cargafuerte") || arg_aqui("/FUERTE"));
 		serie("termo: coma flotante del núcleo: %s; la carga, por omisión: %s\n",

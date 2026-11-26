@@ -622,6 +622,14 @@ static void prepara_rapl(void)
 }
 
 static u64 tsc_ult;
+/* (TERMO 1.2.1) las lecturas de la carga: cuántas, cuántas tarde (más de
+ * 3 s después de la anterior), la más lenta y cuántas perdidas: los
+ * contadores de RAPL son de 32 bits y, si entre dos lecturas pasa más de lo
+ * que tardan en dar la vuelta a la potencia más alta que puede haber (PL2, o
+ * el doble de la más alta vista, 30 W como poco), la resta ya no dice cuánto
+ * se ha gastado: ese rato no se cuenta y se dice */
+static int lec_n, lec_tarde, lec_perdidas;
+static u32 lec_peor_ms, lec_vuelta_ms;
 
 void po_empieza(const struct po_lector *l, int intel, int amd, int fam, int modelo)
 {
@@ -643,6 +651,8 @@ void po_empieza(const struct po_lector *l, int intel, int amd, int fam, int mode
 	ca_carga = -1;
 	ca_visto[0] = ca_visto[1] = 0;
 	tsc_ult = 0;
+	lec_n = lec_tarde = lec_perdidas = 0;
+	lec_peor_ms = lec_vuelta_ms = 0;
 	L = *l;
 	p_intel = intel, p_amd = amd, p_fam = fam, p_modelo = modelo;
 	empezado = 1;
@@ -694,9 +704,40 @@ void po_mide(int fase, uint64_t tsc, uint64_t tsc_hz, int cargador, int t_cpu, i
 	}
 	dtsc = tsc - tsc_ult;
 	tsc_ult = tsc;
-	dus = dtsc * 1000000u / tsc_hz;
+	dus = dtsc / tsc_hz * 1000000u + dtsc % tsc_hz * 1000000u / tsc_hz;	/* (1.2.1: sin desbordar con un rato muy largo) */
 	if (!dus)
 		return;
+	/* (TERMO 1.2.1) ¿ha podido dar la vuelta algún contador? */
+	if (rapl && D[D_PAQ].hay > 0) {
+		u64 p_mw = pl2_mw, vuelta_ms;
+
+		if (p_mw < 2u * D[D_PAQ].mw_max[PO_CARGA])
+			p_mw = 2u * D[D_PAQ].mw_max[PO_CARGA];
+		if (p_mw < 30000)
+			p_mw = 30000;
+		vuelta_ms = a_uj(D_PAQ, 0xFFFFFFFFu) / p_mw;	/* (µJ / mW = ms) */
+		lec_vuelta_ms = (u32)vuelta_ms;
+		if (fase == PO_CARGA) {
+			lec_n++;
+			if (dus > 3000000u)
+				lec_tarde++;
+			if (dus / 1000 > lec_peor_ms)
+				lec_peor_ms = (u32)(dus / 1000);
+		}
+		if (dus / 1000 >= vuelta_ms) {
+			if (fase == PO_CARGA)
+				lec_perdidas++;
+			dice("termo: potencia: AVISO: %u ms entre dos lecturas de RAPL (los contadores de 32 bits dan la vuelta en unos %u ms a %u W): ese rato no se cuenta\n",
+			     (u32)(dus / 1000), (u32)vuelta_ms, (u32)(p_mw / 1000));
+			for (d = 0; d < ND; d++)
+				if (D[d].hay > 0 && lee(D[d].msr, &lo, &hi))
+					D[d].ultimo = lo;
+			if (perf613 > 0 && lee(0x613, &lo, &hi))
+				perf613_ult = lo;
+			mira_cestados(fase, 0);
+			return;
+		}
+	}
 	us_fase[fase] += dus;
 	tsc_fase[fase] += dtsc;
 	n_fase[fase]++;
@@ -1056,10 +1097,21 @@ int po_veredicto(char *d, int cabe)
  * escrita): lo contado por fases, a 0, para que la siguiente (otra vez
  * Calentar, enchufado o con la batería) tenga lo suyo y no lo mezcle con lo
  * de la anterior. Lo del equipo (límites, unidades, qué MSR hay) se queda */
+void po_lecturas(int *n, int *tarde, int *perdidas, int *peor_ms, int *vuelta_s)
+{
+	*n = rapl && D[D_PAQ].hay > 0 ? lec_n : -1;
+	*tarde = lec_tarde;
+	*perdidas = lec_perdidas;
+	*peor_ms = (int)lec_peor_ms;
+	*vuelta_s = (int)(lec_vuelta_ms / 1000);
+}
+
 void po_nueva_prueba(void)
 {
 	int k, i;
 
+	lec_n = lec_tarde = lec_perdidas = 0;
+	lec_peor_ms = 0;
 	for (k = 0; k < ND; k++) {
 		memset(D[k].uj, 0, sizeof D[k].uj);
 		memset(D[k].us, 0, sizeof D[k].us);

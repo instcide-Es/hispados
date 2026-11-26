@@ -11237,6 +11237,102 @@ y seno) dejó el ASUS GL553VD (i5-7300HQ, PL1 45 W) en 17,2 W.
   parada de seguridad salta igual a los 63-69 s. Los vatios, en el ASUS y en
   el MSI de verdad (POTENCIA, RAPL).
 
+**El ritmo de la carga y el envío (1.2.1, 26/11/2026, rama `termo-121`,
+marca «(TERMO 1.2.1)»).** En el ASUS GL553VD de verdad, con la 1.2 sobre la
+0.8.12 (y con la ligera: Carlos no había pulsado F), el contador de la
+pantalla iba de 4 en 4 s, las líneas DATOS salían cada 2 a 6 s («Ratos de
+2 s: 102 en carga» en 5 min, 201 en 10 min con la fuerte) y el núcleo llegó a
+parar la carga porque el Termómetro no preguntaba en 6 s. El .LOG lo decía:
+«leer y apuntar ha tardado 8100 ms: ... escribir en la memoria 7600 ms ...
+303 órdenes» (25 ms por orden; con la 1.1, el mismo ASUS y la misma memoria,
+de 1,6 a 5 ms). Cada línea del .LOG y del .CSV era abrir, añadir y cerrar
+(con SYNCHRONIZE CACHE), y en el mismo segundo que la pantalla y la parada de
+seguridad, después de ellas no: delante. En QEMU con la memoria rápida no se
+ve; con la memoria USB a 40 órdenes por segundo (`throttling.iops-total=40`,
+25 ms cada una, como la del ASUS), KVM, `-smp 4` y la fuerte, la 1.2 da
+segundos de hasta 6,0 s y líneas DATOS a 1, 2 y 3 s. Por qué cada orden es
+más lenta en el ASUS con la 0.8.12 que con la 0.8.11 no se ha podido ver en
+QEMU: lo único nuevo del arranque es el Bluetooth (BT.BIN, el Intel 8087:0A2A
+en el mismo xHCI); el AVISO de cada parón dice ahora también cuánto ha
+estado el procesador sin nadie (para la próxima medida en el ASUS).
+
+- *Lo del .LOG y el .CSV, de una vez*: `log_escribe` y `csv_linea` lo juntan
+  en la memoria (48 K y 16 K) y `vuelca_diferido` lo escribe al final de
+  cada segundo, después de leer los sensores, mirar la parada de seguridad y
+  pintar la pantalla (que ahora se pinta dentro del segundo, antes de
+  escribir). Si una tanda tarda 0,5 s o más, la siguiente espera 4 veces lo
+  que tardó (10 s como mucho). Se escribe ya al cerrar, antes del INFORME.TXT
+  y antes de «Enviar a Carlos». Si se va la luz, se pierde lo del último
+  segundo (o el de esa espera). La pantalla que se guarda (INFORME.BMP, F12:
+  32 K por segundo) espera a que acabe la carga.
+- *La carga, de fondo* (el núcleo de esta rama, para la memoria del
+  Termómetro y la próxima base): `Tareas.de_fondo`; `cambiar` elige la
+  primera lista que no sea de fondo (`sacar_lista`) y la de fondo solo si no
+  hay otra. La hija (`TERMO.BIN /CARGA`) lo pide con la 224, EBX = 9 (da
+  200h); la 224 con EBX = 8 da 200h más si el núcleo lo sabe hacer. Así el
+  Termómetro, la memoria USB, la red, ACPI.BIN y el escritorio no esperan los
+  10 ms de la hija cada vez, y la hija hace más (en QEMU, de 280 a 576
+  vueltas de la fuerte por segundo; en la 8c, 6,3 GFLOPS la hija y 22 los
+  otros 3, frente a los 2,9-3,4 de la 1.2: antes se llevaba la mitad el
+  Termómetro por turnos). Con la 0.8.12, la 224 con 9 no hace nada y todo va por turnos,
+  como antes (el paquete termo 1.2.1 sigue pidiendo la base 0.8.12).
+- *El ritmo, medido*: cada segundo (la pantalla y la parada de seguridad, que
+  se mira en cada uno), cada pintada y cada lectura de 2 s, con su media, la
+  más lenta y cuántas pasan de 1,5 s (3 s las lecturas): «termo: ritmo de la
+  carga: ...» por el puerto serie y «Ritmo durante la carga: ...» en la
+  sección de la prueba de INFORME.TXT.
+- *Las lecturas de RAPL* (`potencia.c`, `po_lecturas`): cuántas en la carga,
+  cuántas tarde (más de 3 s) y cuántas **perdidas**: si entre dos pasa más de
+  lo que tarda el contador de 32 bits del paquete en dar la vuelta a la
+  potencia más alta que puede haber (PL2, o el doble de lo visto, 30 W como
+  poco: con 61 µJ, unos 48 min a 90 W), la resta ya no vale: ese rato no se
+  cuenta en los vatios y se dice (por el puerto serie y en INFORME.TXT:
+  «NINGUNA PERDIDA» u «OJO: N PERDIDAS»). Y el tiempo entre lecturas, sin
+  desbordar con un rato muy largo (la cuenta en µs pasaba de 64 bits).
+- *«Carga: LIGERA (pulse F para la fuerte)» / «Carga: FUERTE (pulse F para la
+  ligera)»*, en grande, encima de los botones, antes de Calentar (y por el
+  puerto serie, «termo: en pantalla: ...»). Y en el menú de arranque de la
+  memoria, «Termometro con carga FUERTE» (por la BIOS y por UEFI:
+  «cargafuerte» en la línea del cargador).
+- *«Enviar a Carlos»*: el ASUS dijo «NO ENVIADO: el certificado del servidor
+  no vale (el certificado del servidor no vale (el certificado es de otro
+  sitio, no de actualiza.hispados.es))»: el motivo repetido y solo el del
+  último servidor (actualiza.hispados.es, que no tiene HTTPS); lo de
+  hispados.es, el primero, no se supo. Desde QEMU, con la memoria del
+  Termómetro y la red de usuario, contra el hispados.es de verdad (la cadena
+  ECDSA de Let's Encrypt de hoy: hispados.es <- YE1 <- Root YE cruzada por X2
+  <- X2 cruzada por X1), TLS.BIN (20 autoridades, con Root YE) da «la cadena
+  comprobada» y el receptor, 403 (el testigo de prueba no está dado de alta).
+  Ahora: cada servidor con su motivo («en hispados.es: ...; en
+  actualiza.hispados.es: ...»), sin repetir el texto; un servidor sin manera
+  (el certificado, la hora, sin TLS.BIN) no se vuelve a probar y, si el otro
+  falla por otra cosa, se vuelve al primero (hasta 4 intentos con cada uno);
+  un 403, 429, 413, 415 o 400 sin «ERROR ...» (el de nginx) tampoco se repite.
+  La línea de un archivo que no ha ido («...: no se ha podido enviar: ... no
+  vale (...)») ya no la toma el Termómetro por el final (miraba «no vale» a
+  secas; ahora «de ENVIO.INI no vale»). Y sin IP pero con enlace (RED.BIN
+  pidiendo la IP: el ASUS, con el cable y la luz verde) dice «sin red todavía:
+  hay cable (o Wi-Fi o el móvil), pero aún no hay dirección IP», no «no hay
+  cable». En QEMU (e1000 y RTL8139, KVM, `-smp 4`, la fuerte), con el cable
+  enchufado a los 15 s de la carga, la IP llega en 0,4-0,9 s, con la 1.2 y
+  con la 1.2.1; lo del ASUS (8 min sin IP en la primera prueba, la segunda
+  bien) no se ha reproducido: para la próxima, X:\RED.LOG y X:\BT.LOG.
+- *Pruebas* (la parte termo): 8e (`termo_ritmo`, con KVM y `-smp 4`): la
+  fuerte, la ligera y la fuerte con la memoria lenta (40 órdenes por
+  segundo): cada segundo en 2,5 s como mucho y como mucho 2 de más de 1,5 s,
+  las lecturas en 4 s, la carga de fondo y con sus vueltas, las líneas DATOS
+  de 2 en 2 s (3 como mucho), «Carga: FUERTE/LIGERA» en pantalla, el menú de
+  arranque y el INFORME.TXT; en la 4 (`termo_enviar`), el HTTPS de prueba con
+  una cadena como la de Let's Encrypt (`tls_delante.py` con `TLS_CADENA=le`:
+  la hoja P-256 <- YE1 P-384 <- Root YE cruzada por X2 <- X2 cruzada por X1
+  RSA; el ancla, Root YE) y los dos servidores mal, cada uno con su motivo; y
+  `potencia_prueba.c`, la lectura tan tarde que el contador ha podido dar la
+  vuelta. Medido (QEMU, KVM, `-smp 4`, la fuerte, la memoria a 40 órdenes
+  por segundo): con la 1.2, segundos de hasta 6,03 s y líneas DATOS a 1, 2 y
+  3 s; con la 1.2.1, el segundo más lento 1,31 s, la pantalla 1,49 s, las
+  lecturas 2,03 s, ninguno de más de 1,5 s y las líneas DATOS siempre de 2
+  en 2 s. Con la memoria rápida: 1,00 s, 1,09 s y 2,00 s.
+
 ## 14 quinvicies. El Asistente de compatibilidad (COMPAT.BIN, rama compat)
 
 *22/11/2026, la rama `compat`; aprobado por Carlos el 22/11. Todo lo cambiado

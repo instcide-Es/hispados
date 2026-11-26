@@ -320,5 +320,38 @@ int main(int argc, char **argv)
 	}
 	acaba();
 	mira(strstr(inf, "15,0 W") && strstr(inf, "Este núcleo") && strstr(inf, "los guarda el SMU") && strstr(inf, "Los AMD no dicen"), "AMD Zen: 15 W el paquete, el núcleo, y que los límites y los frenos no se leen", inf);
+
+	/* 10. (TERMO 1.2.1) las lecturas de la carga: cada 2 s, una a los 4 s
+	 * (tarde) y otra tan tarde (2 h, con 45 W) que el contador de 32 bits
+	 * del paquete (61 µJ: 262.144 J; unos 48 min al doble de lo visto, 90 W) ha podido
+	 * dar la vuelta: perdida, y ese rato no cuenta en los vatios */
+	{
+		int n, t, pe, peor, vu;
+
+		nr = 0;
+		sucesos[0] = 0;
+		tsc = 1000;
+		haswell(360, 360);	/* (PL1 45 W) */
+		po_empieza(&LEC, 1, 0, 6, 0x3C);
+		for (i = 0; i < 5; i++)
+			rato(PO_CARGA, 45, 30, 0, 1.0 / 16384, 1, 700);
+		tsc += 2 * HZ;
+		suma(0x611, 45 * 4, 1.0 / 16384);
+		tsc += 2 * HZ;
+		po_mide(PO_CARGA, tsc, HZ, 1, 700, 1000);
+		tsc += 7200 * HZ;
+		suma(0x611, 45 * 7200, 1.0 / 16384);
+		po_mide(PO_CARGA, tsc, HZ, 1, 700, 1000);
+		for (i = 0; i < 3; i++)
+			rato(PO_CARGA, 45, 30, 0, 1.0 / 16384, 1, 700);
+		po_lecturas(&n, &t, &pe, &peor, &vu);
+		acaba();
+		snprintf(ver, sizeof ver, "lecturas %d, tarde %d, perdidas %d, la peor %d ms, vuelta %d s; %.800s", n, t, pe, peor, vu, inf);
+		mira(n == 9 && t == 2 && pe == 1 && peor == 7200000 && vu > 2000 && vu < 5000 && strstr(inf, "45,0 W"),
+		     "(1.2.1) RAPL: una lectura tarde (4 s) se cuenta; una de 2 h (el contador de 32 bits ha podido dar la vuelta) se dice, se pierde y no falsea los 45 W", ver);
+		po_nueva_prueba();
+		po_lecturas(&n, &t, &pe, &peor, &vu);
+		mira(n == 0 && pe == 0, "(1.2.1) RAPL: una prueba nueva empieza sus lecturas a 0", "");
+	}
 	return mal;
 }
