@@ -700,7 +700,7 @@ static void ritmo_empieza(void)
 	memset(&ri_lee, 0, sizeof ri_lee);
 	memset(&ri_pin, 0, sizeof ri_pin);
 }
-/* «cada 1,00 s (la más lenta, 1,02 s; ninguna de más de 1,5 s)» */
+/* «cada 1,00 s de media (la más lenta, 1,02 s; ninguna de más de 1,5 s)» */
 static void ritmo_texto(char *d, int cabe, const struct ritmo *r, const char *tope)
 {
 	u32 med = r->n ? r->suma * 100 / r->n / jg_hz : 0, pe = r->peor * 100 / jg_hz;
@@ -709,8 +709,10 @@ static void ritmo_texto(char *d, int cabe, const struct ritmo *r, const char *to
 		snprintf(d, (size_t)cabe, "sin medir");
 		return;
 	}
-	snprintf(d, (size_t)cabe, "cada %u,%02u s de media (la más lenta, %u,%02u s; %s%u de más de %s)", med / 100, med % 100, pe / 100, pe % 100,
-		 r->tarde ? "" : "ninguna: ", r->tarde, tope);
+	if (r->tarde)
+		snprintf(d, (size_t)cabe, "cada %u,%02u s de media (la más lenta, %u,%02u s; %u de más de %s)", med / 100, med % 100, pe / 100, pe % 100, r->tarde, tope);
+	else
+		snprintf(d, (size_t)cabe, "cada %u,%02u s de media (la más lenta, %u,%02u s; ninguna de más de %s)", med / 100, med % 100, pe / 100, pe % 100, tope);
 }
 static void pinta(void);
 
@@ -4653,7 +4655,10 @@ static void mira_envio(void)
 	if (strcmp(t, aviso_envio + 8)) {
 		snprintf(aviso_envio, sizeof aviso_envio, "Envío: %s", t);
 		serie("termo: envío dice: %s\n", t);
-		if (!strncmp(t, "ENVIADO", 7) || !strncmp(t, "NO ENVIADO", 10) || busca(t, "Hecho") || busca(t, "Enviados ") || busca(t, "No hay ") || busca(t, "no está preparada") || busca(t, "no vale")) {
+		if (!strncmp(t, "ENVIADO", 7) || !strncmp(t, "NO ENVIADO", 10) || busca(t, "Hecho") || busca(t, "Enviados ") || busca(t, "No hay ") || busca(t, "no está preparada") || busca(t, "de ENVIO.INI no vale")) {
+			/* (1.2.1: «de ENVIO.INI no vale», no «no vale» a secas: la línea de
+			 * un archivo, «... no se ha podido enviar: ... no vale (...)», no es
+			 * el final) */
 			enviando = 0;
 			envio_acaba(t);
 		}

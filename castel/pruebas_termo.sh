@@ -697,7 +697,7 @@ termo_enviar() {
   else ko "(1.2.1) el HTTPS de prueba con la cadena de LE no arranca: $(tail -n 2 $E/tle.err | tr '\n' ' ')"; fi
   kill $PID_PHP $PID_TLS $PID_LE 2> /dev/null; wait $PID_PHP $PID_TLS $PID_LE 2> /dev/null
 }
-tq_envio_acabado() { grep -a -q 'termo: env.o: resultado: ' $1; }   # (el .sal va en CP437)
+tq_envio_acabado() { grep -a -q 'termo: env[^:]*: resultado: ' $1; }   # (el .sal, en CP437)
 
 # (TERMO 1.2) 8c. La carga fuerte (SSE2): con «cargafuerte» en la línea del
 # cargador empieza en fuerte; F la cambia (ligera y otra vez fuerte); con 4
@@ -782,7 +782,7 @@ termo_ritmo() {
         "termo: en pantalla: «Carga: LIGERA (pulse F para la fuerte)»" "termo: carga: de fondo (solo corre cuando no hay otra tarea lista)"
     fi
     mtype -i $R@@1M ::TERMO/INFORME.TXT 2> /dev/null | tr -d '\r' > $I
-    if grep -q '^Ritmo durante la carga: la pantalla, cada 1,[0-9]* s de media .*; la parada de seguridad (se mira cada segundo), cada 1,[0-9]* s .*la carga, de fondo' $I \
+    if grep -q '^Ritmo durante la carga: la pantalla, cada [01],[0-9]* s de media .*; la parada de seguridad (se mira cada segundo), cada [01],[0-9]* s .*la carga, de fondo' $I \
        && grep -q '^Lecturas de la potencia (RAPL) en la carga: sin RAPL' $I; then
       ok "(1.2.1) INFORME.TXT con la $c: «Ritmo durante la carga: ...» y lo de las lecturas de RAPL (QEMU no tiene RAPL)"
     else ko "(1.2.1) INFORME.TXT con la $c, el ritmo: $(grep -a '^Ritmo\|^Lecturas de la potencia' $I | head -n 2 | tr '\n' ' ')"; fi

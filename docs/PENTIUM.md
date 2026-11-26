@@ -11143,8 +11143,9 @@ estado el procesador sin nadie (para la próxima medida en el ASUS).
   200h); la 224 con EBX = 8 da 200h más si el núcleo lo sabe hacer. Así el
   Termómetro, la memoria USB, la red, ACPI.BIN y el escritorio no esperan los
   10 ms de la hija cada vez, y la hija hace más (en QEMU, de 280 a 576
-  vueltas de la fuerte por segundo: antes se llevaba la mitad el Termómetro
-  por turnos). Con la 0.8.12, la 224 con 9 no hace nada y todo va por turnos,
+  vueltas de la fuerte por segundo; en la 8c, 6,3 GFLOPS la hija y 22 los
+  otros 3, frente a los 2,9-3,4 de la 1.2: antes se llevaba la mitad el
+  Termómetro por turnos). Con la 0.8.12, la 224 con 9 no hace nada y todo va por turnos,
   como antes (el paquete termo 1.2.1 sigue pidiendo la base 0.8.12).
 - *El ritmo, medido*: cada segundo (la pantalla y la parada de seguridad, que
   se mira en cada uno), cada pintada y cada lectura de 2 s, con su media, la
@@ -11178,6 +11179,15 @@ estado el procesador sin nadie (para la próxima medida en el ASUS).
   (el certificado, la hora, sin TLS.BIN) no se vuelve a probar y, si el otro
   falla por otra cosa, se vuelve al primero (hasta 4 intentos con cada uno);
   un 403, 429, 413, 415 o 400 sin «ERROR ...» (el de nginx) tampoco se repite.
+  La línea de un archivo que no ha ido («...: no se ha podido enviar: ... no
+  vale (...)») ya no la toma el Termómetro por el final (miraba «no vale» a
+  secas; ahora «de ENVIO.INI no vale»). Y sin IP pero con enlace (RED.BIN
+  pidiendo la IP: el ASUS, con el cable y la luz verde) dice «sin red todavía:
+  hay cable (o Wi-Fi o el móvil), pero aún no hay dirección IP», no «no hay
+  cable». En QEMU (e1000 y RTL8139, KVM, `-smp 4`, la fuerte), con el cable
+  enchufado a los 15 s de la carga, la IP llega en 0,4-0,9 s, con la 1.2 y
+  con la 1.2.1; lo del ASUS (8 min sin IP en la primera prueba, la segunda
+  bien) no se ha reproducido: para la próxima, X:\RED.LOG y X:\BT.LOG.
 - *Pruebas* (la parte termo): 8e (`termo_ritmo`, con KVM y `-smp 4`): la
   fuerte, la ligera y la fuerte con la memoria lenta (40 órdenes por
   segundo): cada segundo en 2,5 s como mucho y como mucho 2 de más de 1,5 s,
