@@ -293,8 +293,11 @@ prepara $HVP
 # una diapositiva exportada son 481 KB: en el disquete de la prueba se hace sitio quitando lo que no hace falta
 ( cd $T; for f in PROGS/PINTURA.HVP PROGS/ARCHIVOS.HVP PROGS/MEZCLAD.HVP PROGS/SONIDOS.HVP PROGS/TERMINAL.HVP PROGS/CUENTAS.HVP \
     AUDICION.COM EQUIPO.COM HSPSND.COM HSPUSB.SYS HSPEMM.SYS ACTUALIZ.COM PARTIR.COM HSPRED.COM DESCARGA.COM CONSOLA.COM \
-    REVISAR.COM VELOCIDA.COM HSPJOY.COM CONFRED.COM PING.COM INSTALAR.COM PROTECTO.COM HSPCD.SYS XCOPIAR.COM; do
+    REVISAR.COM VELOCIDA.COM HSPJOY.COM CONFRED.COM PING.COM INSTALAR.COM PROTECTO.COM HSPCD.SYS XCOPIAR.COM \
+    PROGS/TIPOS24.DAT PROGS/TIPOS32.DAT; do
     mdel -i f.img ::HISPADOS/$f 2>/dev/null; done )
+# (con los tipos de 24 y 32 quedaban 340 KB: la exportación no cabía, tampoco
+# en la 0.9.30; esta fase no los usa: notas y diapositiva con lo de serie)
 rm -f $T/prn.bin
 acepta() { clic 351 392; sleep 0.8; }                       # el botón Aceptar del cuadro de las notas
 { arranca

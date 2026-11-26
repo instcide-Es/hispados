@@ -69,6 +69,8 @@ prepara() {
   # [GLIFOS] (los tipos crecieron con Á, Ó, €...: 90 K más; tampoco usan el
   # Mirador ni HSPUSB, salvo la prueba del propio Mirador)
   mdel -i $T/f.img ::HISPADOS/HSPUSB.SYS 2>/dev/null
+  # (0.9.31: ACTUALIZ.COM pasa de 15 a 29 KB con la firma; los módulos no lo usan)
+  mdel -i $T/f.img ::HISPADOS/ACTUALIZ.COM 2>/dev/null
   [ "$nom" = MIRADOR.HVP ] || mdel -i $T/f.img ::HISPADOS/PROGS/MIRADOR.HVP 2>/dev/null
   # [GLIFOS] solo si el módulo los usa (incluye tipos.inc): Cuentas, Datos...
   # no, y así les queda sitio para sus archivos

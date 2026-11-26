@@ -506,12 +506,18 @@ fi
 if fase 8; then
 echo "== Publicaciones: imprimir y exportar la página como BMP =="
 prepara $HVP
+# (la BMP exportada son 67 KB y, con los tipos de letra, al disquete de la
+# prueba le quedaban unos 20: no cabía, tampoco en la 0.9.30; esta fase no
+# usa los de 24 y 32)
+mdel -i $T/f.img ::HISPADOS/PROGS/TIPOS24.DAT ::HISPADOS/PROGS/TIPOS32.DAT 2>/dev/null
 rm -f $T/prn.bin
 { arranca
   tecla ctrl-u; sleep 1.2; tecla down down down ret; sleep 2          # la tarjeta de visita
   tecla ctrl-p; sleep 6; shot i1; tecla ret; sleep 0.8
   menu $M_ARCH 223; sleep 4; shot i2; tecla ret; sleep 0.8            # Archivo > Imprimir en borrador
-  menu $M_ARCH 175; sleep 0.5; escribe "tarj"; tecla ret; sleep 3; shot i3; tecla ret; sleep 0.8   # Exportar como BMP
+  menu $M_ARCH 175; sleep 0.5; escribe "tarj"; tecla ret   # Exportar como BMP: hasta 60 s al mensaje (el disquete)
+  for k in $(seq 1 60); do sleep 1; shot i3; $CHK $T/i3.ppm busca 100 200 700 400 0 8 "La página se ha guardado como imagen BMP." > /dev/null 2>&1 && break; done
+  tecla ret; sleep 0.8
   tecla ctrl-u; sleep 1.2; tecla tab down down down ret; sleep 2      # en blanco, en A5 apaisado: se imprime girado
   al100; boton1 $B_RECT; arr 40 40 140 100; boton2 444; lista 1       # un rectángulo negro...
   boton1 472; boton1 $B_RECT; arr 200 100 300 200                     # ...y en otra página, otro
