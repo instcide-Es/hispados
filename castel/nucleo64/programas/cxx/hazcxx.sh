@@ -15,6 +15,8 @@
 # en C++: libicu.a, common, i18n y stubdata), un archivo cada vez, solo lo
 # que ha cambiado.
 #   MCXXD       [etapa 10 c] MCXX dinámico, con libstdc++.so.6 y libgcc_s.so.1
+#   MIPC        [etapa 10 d] dos procesos que se hablan como los de Ladybird
+#               (C++23: AF_UNIX, SCM_RIGHTS, memfd, posix_spawn, poll)
 # Uso: hazcxx.sh SALIDA   (dice en la última línea los que ha hecho; [etapa
 # 10 c] sin el compilador cruzado, build/cruzado de hazgcc.sh, ninguno)
 set -e
@@ -34,6 +36,8 @@ for o in "$B/harfbuzz-obj" "$B/icu-obj"; do
 done
 "$AQUI/cxx.sh" -std=c++17 -O2 -Wall -o "$S/MCXX" "$AQUI/mcxx.cpp"
 $TIRA --strip-unneeded "$S/MCXX"
+"$AQUI/cxx.sh" -std=c++23 -O2 -Wall -pthread -o "$S/MIPC" "$AQUI/mipc.cpp"
+$TIRA --strip-unneeded "$S/MIPC"
 # [etapa 10 c] C++ dinámico: MCXXD, la misma prueba con libstdc++.so.6 y
 # libgcc_s.so.1 (en Hispa-64, en /lib: la unidad en memoria), con ld-musl
 if [ -f "$CR/x86_64-hispa64-linux-musl/lib64/libstdc++.so.6" ]; then
@@ -93,4 +97,4 @@ if [ $cambio = 1 ] || [ ! -f "$OI/libicu.a" ]; then rm -f "$OI/libicu.a"; ar rcs
 nice "$AQUI/cxx.sh" -std=c++17 -O2 -Wall -Wno-unused-function -DU_STATIC_IMPLEMENTATION -DU_USING_ICU_NAMESPACE=0 -I"$IC/common" -I"$IC/i18n" -o "$S/MICU" "$AQUI/micu.cpp" "$OI/libicu.a"
 $TIRA --strip-unneeded "$S/MICU"
 cp "$R/terceros/icu/data/icudt77l.dat" "$S/icudt77l.dat"
-echo "hechos: MCXX${DIN:-} MTEXTO DEJAVU.TTF MICU icudt77l.dat"
+echo "hechos: MCXX MIPC${DIN:-} MTEXTO DEJAVU.TTF MICU icudt77l.dat"

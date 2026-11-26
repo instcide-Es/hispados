@@ -254,8 +254,8 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 50 archivos: " <<< "$v" \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.3 x86_64$" <<< "$v" \
+    && grep -q "^Unidad en memoria: 52 archivos: " <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.4 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -296,7 +296,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.3 x86_64 (etapa 10 c (IPv6 y C++))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.4 x86_64 (etapa 10 d (AF_UNIX y memfd))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -313,6 +313,10 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED6: todo bien (25 pruebas)$" <<< "$v" && grep -q "^Programa «MRED6»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MUNIX: todo bien (74 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
+    && grep -q "^MIPC: todo bien (8 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en " <<< "$v" \
     && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MCXX: C++17 con la libstdc++ y musl (cxx.sh, dinámico: ld-musl, libstdc++.so.6 y libgcc_s.so.1)$" <<< "$v" && grep -q "^Programa «MCXXD»: acaba con el código 0, como debe" <<< "$v" \
     && grep -qE "^  TCP \[etapa 10\]: [1-9][0-9]* conexiones con escala de ventana" <<< "$v" \
@@ -330,7 +334,7 @@ e7_bien() {   # SALIDA N [avx]
 e7_ok() {   # SALIDA N QUÉ [avx]
   local v; v=$(serie "$1")
   if e7_bien "$1" "$2" "${4:-}"; then
-    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
+    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY) y [etapa 10 d] los sockets de Unix (MUNIX: 74 pruebas, SCM_RIGHTS, SCM_CREDENTIALS, memfd) y el IPC de Ladybird (MIPC: dos procesos, 60 cuadros por memfd), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
   else ko "etapa 7 $3 no dice lo que debe: $(grep -E '^Programa «[ML]|^M[A-Z]*: [0-9]* mal|^LUA:|^Después de musl|^  la memoria|MAL|parado' <<< "$v" | cut -c1-110 | paste -sd '|' | cut -c1-1500)"; fi
 }
 e3_dice() {   # SALIDA: lo que dice, para cuando sale mal
@@ -350,7 +354,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.3 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.4 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: (9[0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -537,7 +541,8 @@ else ko "prueba=nmi no sale (código $c): $(serie "$T/nmi.txt" | tail -4 | paste
 # [etapa 3] los pánicos en otro procesador: se paran todos y uno lo explica
 for x in "panicoap|4|199|excepción 14|Al leer de 0x0000500000000000: la página no está (desde el núcleo).|En la función PrSmp64.pánico+" \
          "paradaap|2|197|un hilo abre un mutex que no ha cerrado él|Llamada desde: Sinc64.abre_mutex+|PrSmp64.pánico+" \
-         "pilahilo|2|199|excepción 8|La pila de un hilo (o de un procesador) se ha desbordado: RSP=0xFFFFE0|(Se atiende con su propia pila: la IST 1 de la TSS.)"; do
+         "pilahilo|2|199|excepción 8|La pila de un hilo (o de un procesador) se ha desbordado: RSP=0xFFFFE0|(Se atiende con su propia pila: la IST 1 de la TSS.)" \
+         "vigilante|4|199|excepción 2|El vigilante: este procesador lleva 5 s sin atender su tic|En la función PrSmp64.atascado"; do
   IFS="|" read -r p n cod que det det2 <<< "$x"
   mb1 "apagar sinmedir sinpruebas prueba=$p" "$T/smp-$p.txt" 256 -machine q35 -smp $n; c=$?
   S=$T/smp-$p.txt
@@ -557,6 +562,14 @@ if [ $c = 199 ] && hay "$T/nmi4.txt" "^\*\*\* Hispa-64 se ha parado: excepción 
    && [ "$(serie "$T/nmi4.txt" | grep -c 'se ha parado:')" = 1 ]; then
   ok "prueba=nmi con 4 procesadores (el NMI de QEMU llega a todos): «$(serie "$T/nmi4.txt" | grep '^En el procesador')», y uno solo lo explica"
 else ko "prueba=nmi con 4 procesadores no sale (código $c): $(serie "$T/nmi4.txt" | tail -6 | paste -sd ' ')"; fi
+# [etapa 10 d] un HPET de 32 bits (hpet32: como el de VirtualBox con PIIX3),
+# puesto a dar la vuelta a los 4 s: la hora sigue (antes volvía atrás 5
+# minutos y los que dormían no despertaban); y el vigilante no ve nada raro
+mb1 "apagar sinmusl hpet32" "$T/hpet32.txt" 256 -machine q35 -smp 4; c=$?
+if [ $c = 85 ] && hay "$T/hpet32.txt" "^Reloj: el HPET, a 100,0 MHz, 3 temporizadores, contador de 32 bits$" && hay "$T/hpet32.txt" "^Hispa-64 etapa 11: todo en orden.$" \
+   && ! hay "$T/hpet32.txt" "El vigilante"; then
+  ok "hpet32 (el HPET de 32 bits, que da la vuelta a los 4 s), con 4 procesadores: la hora sigue y todo en orden; el vigilante, callado"
+else ko "hpet32 no sale (código $c): $(serie "$T/hpet32.txt" | grep -E 'Reloj|vigilante|MAL|parado' | paste -sd ' ' | cut -c1-300)"; fi
 # un procesador sin el modo largo (un qemu64 sin «lm»): lo dice y se para
 rm -f "$T/no64.txt"
 timeout 8 qemu-system-x86_64 -cpu qemu64,-lm -kernel "$T/HISPA64.BIN" -append apagar -display none -serial file:"$T/no64.txt" \
@@ -1058,8 +1071,8 @@ con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,
 v=$(serie "$T/e7.txt")
 HM1=$(TZ=Europe/Madrid date +%H:%M)
 HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.3, etapa 10 c " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  50 archivos (" <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.4, etapa 10 d " <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  52 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
    && grep -q "^creardir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
@@ -1118,7 +1131,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   }
   uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.3 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.4 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \

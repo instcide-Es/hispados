@@ -77,7 +77,7 @@ módulo Hispa64
     importar Acpica64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.11.3"
+    constante VERSIÓN = "0.11.4"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
@@ -503,6 +503,7 @@ módulo Hispa64
         si tiene("prueba=panicoap") entonces provoca_smp(1) fin
         si tiene("prueba=paradaap") entonces provoca_smp(2) fin
         si tiene("prueba=pilahilo") entonces provoca_smp(3) fin
+        si tiene("prueba=vigilante") entonces provoca_smp(4) fin
     fin
 
     ; ---- [etapa 4] los programas ----
@@ -1074,6 +1075,7 @@ módulo Hispa64
         lee_acpi(rsdp)
         prepara_apic()
         cuenta_acpi()
+        hpet_32_forzado := tiene("hpet32")
         prepara_reloj()
         cuenta_reloj()
         c := yo()

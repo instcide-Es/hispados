@@ -9,6 +9,7 @@
 #                               dinámico (con libsaludo.so)
 #   MHILOS(D), MSENALES(D), MPROCESOS(D), MMAPA(D)   estático y dinámico
 #   MBUCLE                      da vueltas sin llamar al sistema (Ctrl+C)
+#   MUNIX                       [etapa 10 d] los sockets de Unix, SCM_RIGHTS y memfd
 #   ld-musl-x86_64.so.1         el cargador dinámico (la libc.so de musl):
 #                               en Hispa-64, /lib/ld-musl-x86_64.so.1
 #   libsaludo.so                una biblioteca compartida de prueba
@@ -58,15 +59,16 @@ done
 "$M" $CF -static -o "$S/MBUCLE" "$P/mbucle.c"
 "$M" $CF -static -o "$S/MDISP" "$P/mdisp.c"          # [etapa 8] los dispositivos
 "$M" $CF -static -o "$S/MSONIDO" "$P/msonido.c" -lm  # [etapa 11] el sonido (/dev/dsp)
+"$M" $CF -static -pthread -o "$S/MUNIX" "$P/munix.c"  # [etapa 10 d] AF_UNIX y memfd
 cp "$T/libsaludo.so" "$S/libsaludo.so"
 cp "$B/musl/lib/libc.so" "$S/ld-musl-x86_64.so.1"
 cp "$B/lua-obj/lua" "$S/LUA"
 cp "$P/prueba.lua" "$S/PRUEBA.LUA"
 rm -rf "$T"
-for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO LUA libsaludo.so ld-musl-x86_64.so.1; do
+for f in MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO MUNIX LUA libsaludo.so ld-musl-x86_64.so.1; do
   strip --strip-unneeded "$S/$f"
 done
 RED=$("$AQUI/hazred.sh" "$S"); RED=${RED##*hechos: }   # [etapa 9] los programas de red (programas/red/)
 CURLS=$("$AQUI/hazcurl.sh" "$S"); CURLS=${CURLS##*hechos: }   # [etapa 10 b] curl con BearSSL (terceros/curl)
 CXX=$("$AQUI/cxx/hazcxx.sh" "$S"); CXX=${CXX##*hechos: }   # [etapa 10] los de C++ (programas/cxx/)
-echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX"
+echo "hechos: MHOLA MHOLAP MHOLAD MHILOS MHILOSD MSENALES MSENALESD MPROCESOS MPROCESOSD MMAPA MMAPAD MBUCLE MDISP MSONIDO MUNIX ld-musl-x86_64.so.1 libsaludo.so LUA PRUEBA.LUA $RED $CURLS $CXX"

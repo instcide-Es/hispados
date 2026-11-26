@@ -1,0 +1,1674 @@
+; =============================================================================
+;  unix64.cas - Hispa-64, etapa 10 d: los sockets de Unix (AF_UNIX;
+;  docs/64/HISPA-64.md, sección 21), lo que piden los programas de varios
+;  procesos que se hablan entre ellos (Ladybird: WebContent, RequestServer e
+;  ImageDecoder se pasan mensajes y descriptores por ellos), con los números y
+;  las formas de Linux x86-64:
+;   - SOCK_STREAM, SOCK_DGRAM y SOCK_SEQPACKET; socket (41) y socketpair (53),
+;     con SOCK_NONBLOCK y SOCK_CLOEXEC;
+;   - bind (49) a una ruta (relativa: desde la carpeta actual) o a un nombre
+;     abstracto (el primer octeto, 0), y el nombre automático (bind con solo
+;     la familia: «\0» y cinco cifras); listen (50), accept y accept4 (43,
+;     288), connect (42; y AF_UNSPEC en los de datagramas: desconectar);
+;     getsockname y getpeername (51, 52); shutdown (48);
+;   - send, sendto, sendmsg, recv, recvfrom, recvmsg, read, write, readv y
+;     writev, con MSG_PEEK, MSG_DONTWAIT, MSG_WAITALL, MSG_TRUNC,
+;     MSG_NOSIGNAL (sin él, EPIPE da SIGPIPE) y MSG_CMSG_CLOEXEC;
+;   - los datos de control: SCM_RIGHTS (pasar descriptores: hasta 253 en
+;     cada mensaje; el que llega es otro número del mismo objeto abierto,
+;     como dup, con su O_NONBLOCK; si no caben en el búfer de control, los de
+;     más se cierran y se da MSG_CTRUNC) y SCM_CREDENTIALS (con SO_PASSCRED,
+;     cada mensaje llega con quien lo manda: pid, uid y gid); SO_PEERCRED (el
+;     del otro extremo al conectar), SO_TYPE, SO_DOMAIN, SO_PROTOCOL,
+;     SO_ERROR, SO_ACCEPTCONN, SO_SNDBUF, SO_RCVBUF, SO_RCVTIMEO y
+;     SO_SNDTIMEO; ioctl FIONREAD, FIONBIO y TIOCOUTQ; fstat (S_IFSOCK);
+;   - poll, select y epoll (Sistema.listo_de: POLLIN, POLLOUT, POLLHUP,
+;     POLLRDHUP y POLLERR, como Linux), despertando por Sondeo64.
+;  Lo de cada socket va en una cola de mensajes del que recibe (cada envío
+;  es un mensaje; en los de flujo se leen seguidos, y un mensaje con
+;  descriptores no se junta con lo de antes: se para ahí, como Linux); lo que
+;  cabe en cada cola: 256 KB (y 64 datagramas). Un solo mutex para todos
+;  (um): así el otro extremo, mientras se mira, no se suelta debajo; lo del
+;  programa se copia antes o después, sin él.
+;  Diferencias con Linux (a propósito, por ahora): la ruta de bind no crea un
+;  archivo en el disco (es un nombre del núcleo: unlink lo quita, stat lo ve
+;  como S_IFSOCK; se suelta también al cerrar el socket); no se recogen los
+;  ciclos (un socket que viaja en su propia cola no se suelta nunca: Linux
+;  tiene su recolector, unix_gc).
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Unix64
+
+    importar Es64, Cerrojo, Monton64, Reloj64, Hilos64, Sinc64, Procesos, Sondeo64
+
+    público constante F_UNIX = 17               ; la clase de archivo abierto (las 11 a 15, de Objet64; la 16, /dev/dsp)
+    constante S_STREAM = 1
+    constante S_DGRAM = 2
+    constante S_SEQ = 5
+    constante E_NUEVO = 0
+    constante E_ESCUCHA = 1
+    constante E_CONECTADO = 2
+    constante E_ROTO = 3                        ; estaba conectado y el otro se ha ido
+    constante M_PASSCRED = 1
+    constante M_NO_LEE = 2                      ; shutdown(SHUT_RD) de este
+    constante M_NO_ESCRIBE = 4                  ; shutdown(SHUT_WR) de este
+    constante M_OTRO_NO_ESCRIBE = 8             ; el otro ha hecho shutdown(SHUT_WR): el final
+    constante M_OTRO_NO_LEE = 16                ; el otro ha hecho shutdown(SHUT_RD): EPIPE
+    constante LÍMITE = 262144                   ; lo que cabe en la cola de uno (los datos y 256 por mensaje)
+    constante MÁX_DGRAMA = 212992               ; el datagrama más grande (el SO_SNDBUF de Linux)
+    constante MÁX_COLA_DG = 64                  ; los datagramas que esperan, como mucho
+    constante MÁX_FDS = 253                     ; SCM_MAX_FD
+    constante TROZO_S = 65536                   ; los de flujo van en mensajes de hasta esto
+    constante MÁX_JUNTO = 4194304               ; lo que se manda de una vez (más: lo manda en otra llamada)
+    constante MÁX_LEE = 262144                  ; lo que se lee de una vez
+    constante LARGO_NOMBRE = 108                ; sun_path
+    constante BÚFER = 212992                    ; lo que dicen SO_SNDBUF y SO_RCVBUF
+    constante ENOENT = -2
+    constante EBADF = -9
+    constante EAGAIN = -11
+    constante ENOMEM = -12
+    constante EFAULT = -14
+    constante EINVAL = -22
+    constante EMFILE = -24
+    constante ENOTTY = -25
+    constante EPIPE = -32
+    constante ENAMETOOLONG = -36
+    constante ENOTSOCK = -88
+    constante EMSGSIZE = -90
+    constante EPROTOTYPE = -91
+    constante ENOPROTOOPT = -92
+    constante EPROTONOSUPPORT = -93
+    constante ESOCKTNOSUPPORT = -94
+    constante EOPNOTSUPP = -95
+    constante EAFNOSUPPORT = -97
+    constante EADDRINUSE = -98
+    constante ENOBUFS = -105
+    constante EISCONN = -106
+    constante ENOTCONN = -107
+    constante ECONNRESET = -104
+    constante ECONNREFUSED = -111
+    constante EPERM = -1
+    constante MSG_PEEK = 2
+    constante MSG_CTRUNC = 8
+    constante MSG_TRUNC = 0x20
+    constante MSG_DONTWAIT = 0x40
+    constante MSG_WAITALL = 0x100
+    constante MSG_NOSIGNAL = 0x4000
+    constante MSG_CMSG_CLOEXEC = 0x40000000
+    constante SOCK_NONBLOCK = 0x800
+    constante SOCK_CLOEXEC = 0x80000
+
+    público tipo Unix = estructura
+        refs: nat64                 ; los descriptores (también los que viajan en un mensaje)
+        tipo_, estado: nat64
+        par: nat64                  ; el otro extremo (o adonde van los datagramas), o 0
+        primero, último: nat64      ; la cola de lo que llega (Msj)
+        bytes, n_msj: nat64
+        pend_primero, pend_último: nat64     ; (los que escuchan) las conexiones sin aceptar
+        pend_n, pend_máx: nat64
+        sig_pend: nat64             ; (una conexión sin aceptar) la siguiente
+        escucha: nat64              ; (una conexión sin aceptar) el que escucha
+        sig_todos: nat64            ; la lista de todos
+        o_pid, o_uid, o_gid: nat64  ; los del otro extremo (SO_PEERCRED)
+        mi_pid: nat64               ; el proceso que lo ha hecho (o el que escucha)
+        marcas: nat64
+        error: nat64                ; (negativo) el error pendiente
+        rcv_plazo, snd_plazo: nat64
+        sndbuf, rcvbuf: nat64
+        ligado: nat64               ; su nombre se puede buscar (bind; unlink lo quita)
+        nombre_l: nat64             ; el largo del nombre (0: sin nombre); las rutas, sin el 0 del final
+        nombre: arreglo [112] de byte
+    fin
+
+    tipo Msj = estructura
+        sig: nat64
+        n, leído: nat64             ; los octetos (detrás de la estructura) y los ya leídos
+        pid, uid, gid: nat64        ; quien lo manda
+        n_fd: nat64                 ; los descriptores que viajan con él
+        fds: nat64                  ; (del montón) n_fd veces: la clase, el objeto y O_NONBLOCK
+        de_l: nat64                 ; el nombre de quien lo manda
+        de: arreglo [112] de byte
+    fin
+
+    variable um: Mutex
+    variable todos: nat64
+    variable auto_n: nat64
+    público variable unix_vivos, unix_hechos, unix_mensajes, unix_fds_pasados: nat64
+
+    función ux(d: nat64): puntero a Unix
+        devolver puntero(d)
+    fin
+
+    función mj(d: nat64): puntero a Msj
+        devolver puntero(d)
+    fin
+
+    función bloquea()
+        cierra_mutex(dirección(um))
+    fin
+
+    función suelta_u()
+        abre_mutex(dirección(um))
+    fin
+
+    función datos(m: puntero a Msj): nat64
+        devolver nat64(m) + tamaño(Msj)
+    fin
+
+    ; el socket de Unix del descriptor fd (o nulo, con el error)
+    función de_fd(p: puntero a Proceso, fd: nat64, ref err: ent64): puntero a Unix
+        err := 0
+        si fd >= MAX_FD entonces
+            err := EBADF
+            devolver nulo
+        fin
+        si p.fd_clase[nat32(fd)] <> F_UNIX entonces
+            si p.fd_clase[nat32(fd)] = 0 o p.fd_clase[nat32(fd)] = F_APARTADO entonces err := EBADF sino err := ENOTSOCK fin
+            devolver nulo
+        fin
+        devolver ux(p.fd_obj[nat32(fd)])
+    fin
+
+    función sin_esperar(p: puntero a Proceso, fd: nat64, marcas_: nat64): bool
+        devolver p.fd_nobloq[nat32(fd)] <> 0 o marcas_ yb MSG_DONTWAIT <> 0
+    fin
+
+    función plazo(ns: nat64): nat64
+        si ns = 0 entonces devolver nob nat64(0) fin
+        devolver ahora_ns() + ns
+    fin
+
+    ; ---- crear y soltar ----
+    ; uno nuevo (sin ponerlo en la lista: enlista, con el cerrojo), o nulo
+    función crea(tipo_: nat64, pid: nat64): puntero a Unix
+        variable u: puntero a Unix
+        u := puntero(nat64(reserva(tamaño(Unix))))
+        si u = nulo entonces devolver nulo fin
+        ceros_mem(nat64(u), tamaño(Unix))
+        u.refs := 1
+        u.tipo_ := tipo_
+        u.mi_pid := pid
+        u.sndbuf := BÚFER
+        u.rcvbuf := BÚFER
+        devolver u
+    fin
+
+    ; (con el cerrojo)
+    función enlista(u: puntero a Unix)
+        u.sig_todos := todos
+        todos := nat64(u)
+        unix_vivos := unix_vivos + 1
+        unix_hechos := unix_hechos + 1
+    fin
+
+    ; los descriptores de un mensaje, cerrados (sin el cerrojo: cerrar uno
+    ; puede soltar otro socket de Unix)
+    función suelta_fds(fds: nat64, n: nat64)
+        variable i: nat64
+        variable pf: puntero a nat64
+        si fds = 0 entonces devolver fin
+        i := 0
+        mientras i < n hacer
+            pf := puntero(fds + i * 24)
+            cierra_fd_obj(nat32(pf[0]), pf[1])
+            i := i + 1
+        fin
+        libera(puntero(fds))
+    fin
+
+    ; (sin el cerrojo) los mensajes apartados al soltar un socket: sus descriptores, cerrados
+    función cierra_aparte(m: nat64)
+        variable sig: nat64
+        mientras m <> 0 hacer
+            sig := mj(m).sig
+            suelta_fds(mj(m).fds, mj(m).n_fd)
+            libera(puntero(m))
+            m := sig
+        fin
+    fin
+
+    ; (con el cerrojo) suelta u: el otro extremo, roto; las conexiones sin
+    ; aceptar, soltadas; los mensajes con descriptores, a «aparte» (se cierran
+    ; después, sin el cerrojo)
+    función destruye(u: puntero a Unix, ref aparte: nat64)
+        variable e, m, sig: nat64
+        variable ot: puntero a Unix
+        variable pq: puntero a nat64
+        mientras u.pend_primero <> 0 hacer
+            e := u.pend_primero
+            u.pend_primero := ux(e).sig_pend
+            ux(e).escucha := 0
+            destruye(ux(e), aparte)
+        fin
+        u.pend_n := 0
+        si u.par <> 0 entonces
+            ot := ux(u.par)
+            si u.tipo_ <> S_DGRAM entonces
+                ot.par := 0
+                ot.estado := E_ROTO
+                ; (como Linux: si se ha ido sin leer lo suyo, al otro, ECONNRESET)
+                si u.n_msj > 0 entonces ot.error := nat64(ECONNRESET) fin
+            sino si ot.par = nat64(u) entonces
+                ot.par := 0
+                ot.estado := E_ROTO
+            fin
+        fin
+        ; fuera de la lista; y los que lo tenían de destino, sin él
+        pq := dirección(todos)
+        mientras valor(pq) <> 0 hacer
+            si valor(pq) = nat64(u) entonces
+                valor(pq) := u.sig_todos
+            sino
+                ot := ux(valor(pq))
+                si ot.par = nat64(u) entonces
+                    ot.par := 0
+                    ot.estado := E_ROTO
+                fin
+                pq := dirección(ot.sig_todos)
+            fin
+        fin
+        m := u.primero
+        mientras m <> 0 hacer
+            sig := mj(m).sig
+            si mj(m).n_fd > 0 entonces
+                mj(m).sig := aparte
+                aparte := m
+            sino
+                libera(puntero(m))
+            fin
+            m := sig
+        fin
+        libera(puntero(nat64(u)))
+        unix_vivos := unix_vivos - 1
+    fin
+
+    ; (de Sistema: dup, fork, y al pasarlo en un mensaje) una referencia más; (close) una menos
+    público función otro_unix(d: nat64)
+        bloquea()
+        ux(d).refs := ux(d).refs + 1
+        suelta_u()
+    fin
+
+    público función cierra_unix(d: nat64)
+        variable u: puntero a Unix
+        variable aparte: nat64
+        u := ux(d)
+        aparte := 0
+        bloquea()
+        si u.refs > 0 entonces u.refs := u.refs - 1 fin
+        si u.refs = 0 entonces destruye(u, aparte) fin
+        suelta_u()
+        cierra_aparte(aparte)
+        Sondeo64.avisa()
+    fin
+
+    ; ---- los nombres (struct sockaddr_un: la familia y sun_path) ----
+    ; el nombre de la dirección v (de l octetos) del programa, en n (con su
+    ; largo en nl: 0 si solo trae la familia); fam, la familia
+    función lee_nombre(p: puntero a Proceso, v: nat64, l: nat64, ref fam: nat32, n: puntero a byte, ref nl: nat64): ent64
+        variable a: arreglo [112] de byte
+        variable i, dl: nat64
+        nl := 0
+        fam := 0
+        si l < 2 o l > 110 entonces devolver EINVAL fin
+        si no copia_de(p, nat64(dirección(a[0])), v, l) entonces devolver EFAULT fin
+        fam := nat32(a[0]) ob (nat32(a[1]) << 8)
+        si l = 2 entonces devolver 0 fin
+        si a[2] = 0 entonces
+            ; abstracto: todo, con el 0 de delante
+            i := 2
+            mientras i < l hacer
+                n[i - 2] := a[i]
+                i := i + 1
+            fin
+            nl := l - 2
+            devolver 0
+        fin
+        ; una ruta: hasta el primer 0; si es relativa, desde la carpeta actual
+        dl := 0
+        si a[2] <> '/' entonces
+            mientras p.dir_actual[dl] <> 0 hacer
+                si dl >= LARGO_NOMBRE entonces devolver ENAMETOOLONG fin
+                n[dl] := p.dir_actual[dl]
+                dl := dl + 1
+            fin
+            si dl = 0 o n[dl - 1] <> '/' entonces
+                n[dl] := '/'
+                dl := dl + 1
+            fin
+        fin
+        i := 2
+        mientras i < l y a[i] <> 0 hacer
+            si dl >= LARGO_NOMBRE entonces devolver ENAMETOOLONG fin
+            n[dl] := a[i]
+            dl := dl + 1
+            i := i + 1
+        fin
+        n[dl] := 0
+        nl := dl
+        devolver 0
+    fin
+
+    función mismo_nombre(u: puntero a Unix, n: puntero a byte, nl: nat64): bool
+        variable i: nat64
+        si u.ligado = 0 o u.nombre_l <> nl entonces devolver falso fin
+        i := 0
+        mientras i < nl hacer
+            si u.nombre[i] <> n[i] entonces devolver falso fin
+            i := i + 1
+        fin
+        devolver cierto
+    fin
+
+    ; (con el cerrojo) el que tiene ese nombre, o nulo
+    función busca(n: puntero a byte, nl: nat64): puntero a Unix
+        variable x: nat64
+        x := todos
+        mientras x <> 0 hacer
+            si mismo_nombre(ux(x), n, nl) entonces devolver ux(x) fin
+            x := ux(x).sig_todos
+        fin
+        devolver nulo
+    fin
+
+    ; escribe la dirección (familia y nombre) en v, con el largo en lv (de entrada, lo que cabe)
+    función da_nombre(p: puntero a Proceso, v: nat64, lv: nat64, n: puntero a byte, nl: nat64): ent64
+        variable a: arreglo [112] de byte
+        variable l, largo: nat32
+        variable i: nat64
+        si lv = 0 entonces devolver 0 fin
+        si no copia_de(p, nat64(dirección(l)), lv, 4) entonces devolver EFAULT fin
+        si ent32(l) < 0 entonces devolver EINVAL fin
+        a[0] := 1
+        a[1] := 0
+        i := 0
+        mientras i < nl hacer
+            a[2 + i] := n[i]
+            i := i + 1
+        fin
+        largo := nat32(2 + nl)
+        si nl > 0 y n[0] <> 0 entonces
+            a[2 + nl] := 0
+            largo := largo + 1
+        fin
+        si l > largo entonces l := largo fin
+        si v <> 0 y l > 0 entonces
+            si no copia_a(p, v, nat64(dirección(a[0])), nat64(l)) entonces devolver EFAULT fin
+        fin
+        si no copia_a(p, lv, nat64(dirección(largo)), 4) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; (Sistema: unlink) si hay un socket ligado a esa ruta, ya no se le
+    ; encuentra por ella (sigue en marcha, con su nombre); cierto si lo había
+    público función desliga(p: puntero a Proceso, t: puntero a byte): bool
+        variable n: arreglo [112] de byte
+        variable nl: nat64
+        variable u: puntero a Unix
+        si no ruta_de(p, t, dirección(n[0]), nl) entonces devolver falso fin
+        bloquea()
+        u := busca(dirección(n[0]), nl)
+        si u <> nulo entonces u.ligado := 0 fin
+        suelta_u()
+        devolver u <> nulo
+    fin
+
+    ; (Sistema: stat) ¿hay un socket ligado a esa ruta?
+    público función ligada(p: puntero a Proceso, t: puntero a byte): bool
+        variable n: arreglo [112] de byte
+        variable nl: nat64
+        variable u: puntero a Unix
+        si no ruta_de(p, t, dirección(n[0]), nl) entonces devolver falso fin
+        bloquea()
+        u := busca(dirección(n[0]), nl)
+        suelta_u()
+        devolver u <> nulo
+    fin
+
+    ; la ruta t (del núcleo), absoluta, en n
+    función ruta_de(p: puntero a Proceso, t: puntero a byte, n: puntero a byte, ref nl: nat64): bool
+        variable dl, i: nat64
+        dl := 0
+        si t[0] = 0 entonces devolver falso fin
+        si t[0] <> '/' entonces
+            mientras p.dir_actual[dl] <> 0 hacer
+                si dl >= LARGO_NOMBRE entonces devolver falso fin
+                n[dl] := p.dir_actual[dl]
+                dl := dl + 1
+            fin
+            si dl = 0 o n[dl - 1] <> '/' entonces
+                n[dl] := '/'
+                dl := dl + 1
+            fin
+        fin
+        i := 0
+        mientras t[i] <> 0 hacer
+            si dl >= LARGO_NOMBRE entonces devolver falso fin
+            n[dl] := t[i]
+            dl := dl + 1
+            i := i + 1
+        fin
+        nl := dl
+        devolver cierto
+    fin
+
+    público función stat_unix(k: nat64, d: nat64)
+        pon_m32(k + 24, 0xC000 ob 0x1FF)                ; S_IFSOCK, 0777
+        pon_m64(k + 8, d >> 4)
+        pon_m64(k + 16, 1)
+        pon_m64(k + 56, 4096)
+    fin
+
+    ; ---- socket y socketpair ----
+    función tipo_bien(tipo_: nat64, ref err: ent64): nat64
+        variable t: nat64
+        err := 0
+        t := tipo_ yb 0xF
+        si tipo_ yb (nob nat64(0xF ob SOCK_NONBLOCK ob SOCK_CLOEXEC)) <> 0 entonces err := EINVAL fin
+        si t <> S_STREAM y t <> S_DGRAM y t <> S_SEQ entonces err := ESOCKTNOSUPPORT fin
+        devolver t
+    fin
+
+    función pon_fd(p: puntero a Proceso, fd: ent32, u: puntero a Unix, marcas_: nat64)
+        p.fd_cloexec[nat32(fd)] := 0
+        p.fd_nobloq[nat32(fd)] := 0
+        si marcas_ yb SOCK_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 fin
+        si marcas_ yb SOCK_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 fin
+        llena_fd(p, fd, F_UNIX, nat64(u))
+    fin
+
+    público función socket_unix(p: puntero a Proceso, tipo_: nat64, proto: nat64): ent64
+        variable t: nat64
+        variable err: ent64
+        variable fd: ent32
+        variable u: puntero a Unix
+        t := tipo_bien(tipo_, err)
+        si err < 0 entonces devolver err fin
+        si proto <> 0 entonces devolver EPROTONOSUPPORT fin
+        fd := aparta_fd(p, 0)
+        si fd < 0 entonces devolver EMFILE fin
+        u := crea(t, p.id)
+        si u = nulo entonces
+            devuelve_fd(p, fd)
+            devolver ENOMEM
+        fin
+        bloquea()
+        enlista(u)
+        suelta_u()
+        pon_fd(p, fd, u, tipo_)
+        devolver ent64(fd)
+    fin
+
+    público función socketpair_(p: puntero a Proceso, dom: nat64, tipo_: nat64, proto: nat64, v: nat64): ent64
+        variable t: nat64
+        variable err: ent64
+        variable fa, fb: ent32
+        variable a, b: puntero a Unix
+        variable nums: arreglo [2] de nat32
+        si dom <> 1 entonces
+            si dom = 2 o dom = 10 entonces devolver EOPNOTSUPP fin
+            devolver EAFNOSUPPORT
+        fin
+        t := tipo_bien(tipo_, err)
+        si err < 0 entonces devolver err fin
+        si proto <> 0 entonces devolver EPROTONOSUPPORT fin
+        fa := aparta_fd(p, 0)
+        si fa < 0 entonces devolver EMFILE fin
+        fb := aparta_fd(p, 0)
+        si fb < 0 entonces
+            devuelve_fd(p, fa)
+            devolver EMFILE
+        fin
+        a := crea(t, p.id)
+        b := crea(t, p.id)
+        si a = nulo o b = nulo entonces
+            si a <> nulo entonces libera(puntero(nat64(a))) fin
+            si b <> nulo entonces libera(puntero(nat64(b))) fin
+            devuelve_fd(p, fa)
+            devuelve_fd(p, fb)
+            devolver ENOMEM
+        fin
+        nums[0] := nat32(fa)
+        nums[1] := nat32(fb)
+        si no copia_a(p, v, nat64(dirección(nums[0])), 8) entonces
+            libera(puntero(nat64(a)))
+            libera(puntero(nat64(b)))
+            devuelve_fd(p, fa)
+            devuelve_fd(p, fb)
+            devolver EFAULT
+        fin
+        a.par := nat64(b)
+        b.par := nat64(a)
+        a.estado := E_CONECTADO
+        b.estado := E_CONECTADO
+        a.o_pid := p.id
+        b.o_pid := p.id
+        bloquea()
+        enlista(a)
+        enlista(b)
+        suelta_u()
+        pon_fd(p, fa, a, tipo_)
+        pon_fd(p, fb, b, tipo_)
+        devolver 0
+    fin
+
+    ; ---- bind, listen, connect, accept ----
+    público función bind_unix(p: puntero a Proceso, fd: nat64, v: nat64, l: nat64): ent64
+        variable u: puntero a Unix
+        variable err: ent64
+        variable fam: nat32
+        variable n: arreglo [112] de byte
+        variable nl, i, x: nat64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        err := lee_nombre(p, v, l, fam, dirección(n[0]), nl)
+        si err < 0 entonces devolver err fin
+        si fam <> 1 entonces devolver EINVAL fin
+        bloquea()
+        si u.nombre_l <> 0 entonces
+            suelta_u()
+            devolver EINVAL
+        fin
+        si nl = 0 entonces
+            ; el nombre automático: «\0» y cinco cifras de hexadecimal (uno libre)
+            mientras cierto hacer
+                auto_n := (auto_n + 1) yb 0xFFFFF
+                n[0] := 0
+                x := auto_n
+                i := 5
+                mientras i > 0 hacer
+                    si x yb 15 < 10 entonces n[i] := byte('0' + (x yb 15)) sino n[i] := byte('a' + (x yb 15) - 10) fin
+                    x := x >> 4
+                    i := i - 1
+                fin
+                nl := 6
+                si busca(dirección(n[0]), nl) = nulo entonces romper fin
+            fin
+        sino si busca(dirección(n[0]), nl) <> nulo entonces
+            suelta_u()
+            devolver EADDRINUSE
+        fin
+        i := 0
+        mientras i < nl hacer
+            u.nombre[i] := n[i]
+            i := i + 1
+        fin
+        u.nombre[nl] := 0
+        u.nombre_l := nl
+        u.ligado := 1
+        suelta_u()
+        devolver 0
+    fin
+
+    público función listen_unix(p: puntero a Proceso, fd: nat64, máx: nat64): ent64
+        variable u: puntero a Unix
+        variable err: ent64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si u.tipo_ = S_DGRAM entonces devolver EOPNOTSUPP fin
+        bloquea()
+        si u.nombre_l = 0 o u.estado = E_CONECTADO o u.estado = E_ROTO entonces
+            suelta_u()
+            devolver EINVAL
+        fin
+        si ent32(nat32(máx yb 0xFFFFFFFF)) < 0 o máx yb 0xFFFFFFFF > 4096 entonces máx := 4096 fin
+        u.pend_máx := máx yb 0xFFFFFFFF
+        u.estado := E_ESCUCHA
+        u.mi_pid := p.id
+        suelta_u()
+        Sondeo64.avisa()
+        devolver 0
+    fin
+
+    ; (con el cerrojo) el error de no encontrar un nombre: ENOENT (una ruta) o ECONNREFUSED (abstracto)
+    función no_está(n: puntero a byte): ent64
+        si n[0] = 0 entonces devolver ECONNREFUSED fin
+        devolver ENOENT
+    fin
+
+    público función connect_unix(p: puntero a Proceso, fd: nat64, v: nat64, l: nat64): ent64
+        variable u, ot, e: puntero a Unix
+        variable err: ent64
+        variable fam: nat32
+        variable n: arreglo [112] de byte
+        variable nl, g, lím, i: nat64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        err := lee_nombre(p, v, l, fam, dirección(n[0]), nl)
+        si err < 0 entonces devolver err fin
+        si u.tipo_ = S_DGRAM entonces
+            bloquea()
+            si fam = 0 entonces
+                ; AF_UNSPEC: desconectar
+                u.par := 0
+                u.estado := E_NUEVO
+                suelta_u()
+                devolver 0
+            fin
+            si fam <> 1 o nl = 0 entonces err := EINVAL
+            sino
+                ot := busca(dirección(n[0]), nl)
+                si ot = nulo entonces err := no_está(dirección(n[0]))
+                sino si ot.tipo_ <> S_DGRAM entonces err := EPROTOTYPE
+                sino
+                    u.par := nat64(ot)
+                    u.estado := E_CONECTADO
+                    u.o_pid := ot.mi_pid
+                fin
+            fin
+            suelta_u()
+            devolver err
+        fin
+        si fam <> 1 o nl = 0 entonces devolver EINVAL fin
+        e := crea(u.tipo_, p.id)
+        si e = nulo entonces devolver ENOMEM fin
+        lím := plazo(u.snd_plazo)
+        mientras cierto hacer
+            g := Sondeo64.gen
+            bloquea()
+            si u.estado = E_CONECTADO o u.estado = E_ROTO entonces err := EISCONN
+            sino si u.estado = E_ESCUCHA entonces err := EINVAL
+            sino
+                ot := busca(dirección(n[0]), nl)
+                si ot = nulo entonces err := no_está(dirección(n[0]))
+                sino si ot.tipo_ <> u.tipo_ entonces err := EPROTOTYPE
+                sino si ot.estado <> E_ESCUCHA entonces err := ECONNREFUSED
+                sino si ot.pend_n > ot.pend_máx entonces err := EAGAIN
+                sino
+                    ; la conexión: e, el extremo del que escucha, hasta que lo acepte
+                    e.estado := E_CONECTADO
+                    e.par := nat64(u)
+                    e.escucha := nat64(ot)
+                    e.o_pid := p.id
+                    e.mi_pid := ot.mi_pid
+                    e.marcas := ot.marcas yb M_PASSCRED
+                    i := 0
+                    mientras i <= ot.nombre_l hacer
+                        e.nombre[i] := ot.nombre[i]
+                        i := i + 1
+                    fin
+                    e.nombre_l := ot.nombre_l
+                    enlista(e)
+                    e.sig_pend := 0
+                    si ot.pend_último <> 0 entonces ux(ot.pend_último).sig_pend := nat64(e) sino ot.pend_primero := nat64(e) fin
+                    ot.pend_último := nat64(e)
+                    ot.pend_n := ot.pend_n + 1
+                    u.par := nat64(e)
+                    u.estado := E_CONECTADO
+                    u.o_pid := ot.mi_pid
+                    suelta_u()
+                    Sondeo64.avisa()
+                    devolver 0
+                fin
+            fin
+            suelta_u()
+            si err <> EAGAIN entonces romper fin
+            ; la cola del que escucha, llena: a esperar
+            si sin_esperar(p, fd, 0) entonces romper fin
+            si interrumpido(p) entonces
+                err := ERESTARTSYS
+                romper
+            fin
+            si ahora_ns() >= lím entonces romper fin
+            espera_cambio(p, g, lím)
+        fin
+        libera(puntero(nat64(e)))
+        devolver err
+    fin
+
+    público función accept_unix(p: puntero a Proceso, fd: nat64, v: nat64, lv: nat64, marcas_: nat64): ent64
+        variable u, e, c: puntero a Unix
+        variable err: ent64
+        variable nfd: ent32
+        variable g, lím, nl, i: nat64
+        variable n: arreglo [112] de byte
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si marcas_ yb (nob nat64(SOCK_NONBLOCK ob SOCK_CLOEXEC)) <> 0 entonces devolver EINVAL fin
+        si u.tipo_ = S_DGRAM entonces devolver EOPNOTSUPP fin
+        nfd := aparta_fd(p, 0)
+        si nfd < 0 entonces devolver EMFILE fin
+        lím := plazo(u.rcv_plazo)
+        mientras cierto hacer
+            g := Sondeo64.gen
+            bloquea()
+            si u.estado <> E_ESCUCHA entonces
+                suelta_u()
+                devuelve_fd(p, nfd)
+                devolver EINVAL
+            fin
+            si u.pend_primero <> 0 entonces
+                e := ux(u.pend_primero)
+                u.pend_primero := e.sig_pend
+                si u.pend_primero = 0 entonces u.pend_último := 0 fin
+                u.pend_n := u.pend_n - 1
+                e.sig_pend := 0
+                e.escucha := 0
+                e.refs := 1
+                ; (la dirección del otro, para devolverla)
+                nl := 0
+                si e.par <> 0 entonces
+                    c := ux(e.par)
+                    nl := c.nombre_l
+                    i := 0
+                    mientras i < nl hacer
+                        n[i] := c.nombre[i]
+                        i := i + 1
+                    fin
+                fin
+                suelta_u()
+                pon_fd(p, nfd, e, marcas_)
+                Sondeo64.avisa()
+                si v <> 0 entonces da_nombre(p, v, lv, dirección(n[0]), nl) fin
+                devolver ent64(nfd)
+            fin
+            suelta_u()
+            si sin_esperar(p, fd, 0) entonces err := EAGAIN
+            sino si interrumpido(p) entonces err := ERESTARTSYS
+            sino si ahora_ns() >= lím entonces err := EAGAIN
+            sino err := 0 fin
+            si err < 0 entonces
+                devuelve_fd(p, nfd)
+                devolver err
+            fin
+            espera_cambio(p, g, lím)
+        fin
+        devolver 0
+    fin
+
+    ; ---- mandar ----
+    ; (con el cerrojo) ¿cabe en la cola de o un mensaje de n octetos?
+    función cabe(ot: puntero a Unix, n: nat64): bool
+        si ot.n_msj = 0 entonces devolver cierto fin
+        si ot.tipo_ = S_DGRAM y ot.n_msj >= MÁX_COLA_DG entonces devolver falso fin
+        devolver ot.bytes + n + 256 * (ot.n_msj + 1) <= LÍMITE
+    fin
+
+    ; (con el cerrojo; poll) ¿se puede escribir en la cola de ot? Como Linux
+    ; (unix_writable), con la mitad libre: así quien espera a POLLOUT no
+    ; vuelve para escribir un poco y quedarse otra vez sin sitio
+    función escribible(ot: puntero a Unix): bool
+        si ot.n_msj = 0 entonces devolver cierto fin
+        si ot.tipo_ = S_DGRAM y ot.n_msj >= MÁX_COLA_DG entonces devolver falso fin
+        devolver (ot.bytes + 256 * ot.n_msj) * 2 <= LÍMITE
+    fin
+
+    ; (con el cerrojo) adonde va lo que manda u (o nulo, con el error en err)
+    función destino(u: puntero a Unix, n: puntero a byte, nl: nat64, dado: bool, ref err: ent64): puntero a Unix
+        variable ot: puntero a Unix
+        err := 0
+        si u.tipo_ <> S_DGRAM entonces
+            si u.estado = E_NUEVO o u.estado = E_ESCUCHA entonces
+                err := ENOTCONN
+                devolver nulo
+            fin
+            si u.marcas yb (M_NO_ESCRIBE ob M_OTRO_NO_LEE) <> 0 o u.estado = E_ROTO o u.par = 0 entonces
+                err := EPIPE
+                devolver nulo
+            fin
+            devolver ux(u.par)
+        fin
+        si u.marcas yb M_NO_ESCRIBE <> 0 entonces
+            err := EPIPE
+            devolver nulo
+        fin
+        si dado entonces
+            ot := busca(n, nl)
+            si ot = nulo entonces
+                err := no_está(n)
+                devolver nulo
+            fin
+            si ot.tipo_ <> S_DGRAM entonces
+                err := EPROTOTYPE
+                devolver nulo
+            fin
+        sino si u.par <> 0 entonces
+            ot := ux(u.par)
+        sino si u.estado = E_ROTO entonces
+            err := ECONNREFUSED
+            devolver nulo
+        sino
+            err := ENOTCONN
+            devolver nulo
+        fin
+        ; (uno conectado a otro no recibe de los demás)
+        si ot.par <> 0 y ot.par <> nat64(u) entonces
+            err := EPERM
+            devolver nulo
+        fin
+        devolver ot
+    fin
+
+    ; manda n octetos de k (del núcleo) por u: con los descriptores fds (n_fd:
+    ; van en el primer mensaje; si no se mandan, se cierran), quien lo manda
+    ; (pid, uid, gid) y, en los de datagramas, a «n» (nl) si dado. Lo mandado, o el error
+    función manda(p: puntero a Proceso, fd: nat64, u: puntero a Unix, k: nat64, n: nat64, fds: nat64, n_fd: nat64, pid: nat64, uid: nat64, gid: nat64, marcas_: nat64, dest: puntero a byte, nl: nat64, dado: bool): ent64
+        variable m: puntero a Msj
+        variable ot: puntero a Unix
+        variable hecho, trozo, g, lím, i: nat64
+        variable r: ent64
+        lím := plazo(u.snd_plazo)
+        hecho := 0
+        m := nulo
+        r := 0
+        si u.tipo_ <> S_STREAM y n > MÁX_DGRAMA entonces r := EMSGSIZE fin
+        si u.tipo_ = S_STREAM y dado entonces
+            si u.estado = E_CONECTADO entonces r := EISCONN sino r := EOPNOTSUPP fin
+        fin
+        si u.tipo_ = S_SEQ entonces dado := falso fin
+        si r = 0 y u.tipo_ = S_STREAM y n = 0 entonces
+            ; (nada que mandar; como Linux, ni los descriptores)
+            bloquea()
+            ot := destino(u, dest, nl, dado, r)
+            suelta_u()
+        sino
+            mientras r = 0 hacer
+                trozo := n - hecho
+                si u.tipo_ = S_STREAM y trozo > TROZO_S entonces trozo := TROZO_S fin
+                si m = nulo entonces
+                    m := puntero(nat64(reserva(tamaño(Msj) + trozo + 1)))
+                    si m = nulo entonces
+                        r := ENOMEM
+                        romper
+                    fin
+                fin
+                g := Sondeo64.gen
+                bloquea()
+                ot := destino(u, dest, nl, dado, r)
+                si ot <> nulo entonces
+                    si cabe(ot, trozo) entonces
+                        m.sig := 0
+                        m.n := trozo
+                        m.leído := 0
+                        m.pid := pid
+                        m.uid := uid
+                        m.gid := gid
+                        m.n_fd := n_fd
+                        m.fds := fds
+                        fds := 0
+                        n_fd := 0
+                        m.de_l := u.nombre_l
+                        i := 0
+                        mientras i < u.nombre_l hacer
+                            m.de[i] := u.nombre[i]
+                            i := i + 1
+                        fin
+                        si trozo > 0 entonces copia_mem(datos(m), k + hecho, trozo) fin
+                        si ot.último <> 0 entonces mj(ot.último).sig := nat64(m) sino ot.primero := nat64(m) fin
+                        ot.último := nat64(m)
+                        ot.bytes := ot.bytes + trozo
+                        ot.n_msj := ot.n_msj + 1
+                        unix_mensajes := unix_mensajes + 1
+                        m := nulo
+                        hecho := hecho + trozo
+                        suelta_u()
+                        Sondeo64.avisa()
+                        si hecho >= n entonces romper fin
+                        seguir
+                    fin
+                    ; la cola del otro, llena: a esperar
+                    suelta_u()
+                    si sin_esperar(p, fd, marcas_) entonces r := EAGAIN
+                    sino si interrumpido(p) entonces r := ERESTARTSYS
+                    sino si ahora_ns() >= lím entonces r := EAGAIN
+                    sino espera_cambio(p, g, lím)
+                    fin
+                sino
+                    suelta_u()
+                fin
+            fin
+        fin
+        si m <> nulo entonces libera(puntero(nat64(m))) fin
+        si fds <> 0 entonces suelta_fds(fds, n_fd) fin
+        si hecho > 0 entonces devolver ent64(hecho) fin
+        si r = EPIPE y marcas_ yb MSG_NOSIGNAL = 0 entonces señala_me(SIGPIPE) fin
+        devolver r
+    fin
+
+    ; los datos de control de sendmsg (SCM_RIGHTS y SCM_CREDENTIALS): los
+    ; descriptores, con una referencia más cada uno, en fds (del montón); y quien lo manda
+    función lee_control(p: puntero a Proceso, c: nat64, cl: nat64, ref fds: nat64, ref n_fd: nat64, ref pid: nat64, ref uid: nat64, ref gid: nat64): ent64
+        variable k: puntero a byte
+        variable off, len_, nivel, tipo_, i, cuántos, f: nat64
+        variable err: ent64
+        variable gen: nat32
+        variable pf: puntero a nat64
+        fds := 0
+        n_fd := 0
+        si c = 0 o cl = 0 entonces devolver 0 fin
+        si cl > 16384 entonces devolver ENOBUFS fin
+        k := reserva(cl)
+        si k = nulo entonces devolver ENOMEM fin
+        si no copia_de(p, nat64(k), c, cl) entonces
+            libera(k)
+            devolver EFAULT
+        fin
+        err := 0
+        off := 0
+        mientras err = 0 y off + 16 <= cl hacer
+            len_ := m64(nat64(k) + off)
+            nivel := nat64(m32(nat64(k) + off + 8))
+            tipo_ := nat64(m32(nat64(k) + off + 12))
+            si len_ < 16 o len_ > cl - off entonces
+                err := EINVAL
+                romper
+            fin
+            si nivel <> 1 entonces
+                err := EINVAL
+            sino si tipo_ = 1 entonces
+                ; SCM_RIGHTS
+                cuántos := (len_ - 16) div 4
+                si n_fd + cuántos > MÁX_FDS entonces
+                    err := EINVAL
+                    romper
+                fin
+                si fds = 0 entonces
+                    fds := nat64(reserva(MÁX_FDS * 24))
+                    si fds = 0 entonces
+                        err := ENOMEM
+                        romper
+                    fin
+                fin
+                i := 0
+                mientras i < cuántos hacer
+                    f := nat64(m32(nat64(k) + off + 16 + i * 4))
+                    si no toma_fd(p, f, gen) entonces
+                        err := EBADF
+                        romper
+                    fin
+                    pf := puntero(fds + n_fd * 24)
+                    pf[0] := nat64(p.fd_clase[nat32(f)])
+                    pf[1] := p.fd_obj[nat32(f)]
+                    pf[2] := nat64(p.fd_nobloq[nat32(f)])
+                    otro_fd_obj(nat32(pf[0]), pf[1])
+                    deja_fd(p, f, gen)
+                    n_fd := n_fd + 1
+                    i := i + 1
+                fin
+            sino si tipo_ = 2 entonces
+                ; SCM_CREDENTIALS (struct ucred: pid, uid, gid)
+                si len_ < 28 entonces
+                    err := EINVAL
+                sino
+                    pid := nat64(m32(nat64(k) + off + 16))
+                    uid := nat64(m32(nat64(k) + off + 20))
+                    gid := nat64(m32(nat64(k) + off + 24))
+                fin
+            sino
+                err := EINVAL
+            fin
+            off := off + ((len_ + 7) yb (nob nat64(7)))
+        fin
+        libera(k)
+        si err < 0 entonces
+            suelta_fds(fds, n_fd)
+            fds := 0
+            n_fd := 0
+        sino si n_fd = 0 y fds <> 0 entonces
+            libera(puntero(fds))
+            fds := 0
+        fin
+        devolver err
+    fin
+
+    ; junta en k (del núcleo, ya reservado con «cabe» octetos) los trozos del iov del programa
+    función junta(p: puntero a Proceso, iov: nat64, n_iov: nat64, k: nat64, cabe_: nat64, ref total: nat64): ent64
+        variable par: arreglo [2] de nat64
+        variable i, m: nat64
+        total := 0
+        i := 0
+        mientras i < n_iov y total < cabe_ hacer
+            si no copia_de(p, nat64(dirección(par[0])), iov + i * 16, 16) entonces devolver EFAULT fin
+            m := par[1]
+            si m > cabe_ - total entonces m := cabe_ - total fin
+            si m > 0 entonces
+                si no copia_de(p, k + total, par[0], m) entonces devolver EFAULT fin
+            fin
+            total := total + m
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; la suma de los largos del iov (EINVAL si da la vuelta)
+    función suma_iov(p: puntero a Proceso, iov: nat64, n_iov: nat64, ref total: nat64): ent64
+        variable par: arreglo [2] de nat64
+        variable i: nat64
+        total := 0
+        si n_iov > 1024 entonces devolver EMSGSIZE fin
+        i := 0
+        mientras i < n_iov hacer
+            si no copia_de(p, nat64(dirección(par[0])), iov + i * 16, 16) entonces devolver EFAULT fin
+            si ent64(par[1]) < 0 o total + par[1] < total entonces devolver EINVAL fin
+            total := total + par[1]
+            i := i + 1
+        fin
+        devolver 0
+    fin
+
+    ; sendmsg, writev (y sendto, write: un trozo): lo del iov, a «va» (la) si
+    ; se da, con los datos de control (c, cl)
+    función envía_iov(p: puntero a Proceso, fd: nat64, u: puntero a Unix, iov: nat64, n_iov: nat64, marcas_: nat64, va: nat64, la: nat64, c: nat64, cl: nat64): ent64
+        variable total, hecho, nl, fds, n_fd, pid, uid, gid: nat64
+        variable err: ent64
+        variable k: puntero a byte
+        variable fam: nat32
+        variable n: arreglo [112] de byte
+        variable dado: bool
+        err := suma_iov(p, iov, n_iov, total)
+        si err < 0 entonces devolver err fin
+        si u.tipo_ = S_STREAM entonces
+            si total > MÁX_JUNTO entonces total := MÁX_JUNTO fin
+        sino si total > MÁX_DGRAMA entonces
+            devolver EMSGSIZE
+        fin
+        dado := falso
+        nl := 0
+        n[0] := 0
+        si va <> 0 y la <> 0 entonces
+            err := lee_nombre(p, va, la, fam, dirección(n[0]), nl)
+            si err < 0 entonces devolver err fin
+            si fam <> 1 o nl = 0 entonces devolver EINVAL fin
+            dado := cierto
+        fin
+        k := reserva(total + 1)
+        si k = nulo entonces devolver ENOMEM fin
+        err := junta(p, iov, n_iov, nat64(k), total, hecho)
+        si err < 0 entonces
+            libera(k)
+            devolver err
+        fin
+        pid := p.id
+        uid := 0
+        gid := 0
+        err := lee_control(p, c, cl, fds, n_fd, pid, uid, gid)
+        si err < 0 entonces
+            libera(k)
+            devolver err
+        fin
+        si n_fd > 0 entonces unix_fds_pasados := unix_fds_pasados + n_fd fin
+        err := manda(p, fd, u, nat64(k), hecho, fds, n_fd, pid, uid, gid, marcas_, dirección(n[0]), nl, dado)
+        libera(k)
+        devolver err
+    fin
+
+    público función sendmsg_unix(p: puntero a Proceso, fd: nat64, vm: nat64, marcas_: nat64): ent64
+        variable mh: arreglo [7] de nat64
+        variable u: puntero a Unix
+        variable err: ent64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si no copia_de(p, nat64(dirección(mh[0])), vm, 56) entonces devolver EFAULT fin
+        devolver envía_iov(p, fd, u, mh[2], mh[3], marcas_, mh[0], mh[1] yb 0xFFFFFFFF, mh[4], mh[5])
+    fin
+
+    público función sendto_unix(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64, marcas_: nat64, va: nat64, la: nat64): ent64
+        variable u: puntero a Unix
+        variable err: ent64
+        variable iov: arreglo [2] de nat64
+        variable total, hecho, nl: nat64
+        variable k: puntero a byte
+        variable fam: nat32
+        variable nm: arreglo [112] de byte
+        variable dado: bool
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        ; (lo mismo que envía_iov, con un solo trozo que está en el núcleo: el iov, aquí)
+        si u.tipo_ = S_STREAM entonces
+            si n > MÁX_JUNTO entonces n := MÁX_JUNTO fin
+        sino si n > MÁX_DGRAMA entonces
+            devolver EMSGSIZE
+        fin
+        dado := falso
+        nl := 0
+        nm[0] := 0
+        si va <> 0 y la yb 0xFFFFFFFF <> 0 entonces
+            err := lee_nombre(p, va, la yb 0xFFFFFFFF, fam, dirección(nm[0]), nl)
+            si err < 0 entonces devolver err fin
+            si fam <> 1 o nl = 0 entonces devolver EINVAL fin
+            dado := cierto
+        fin
+        k := reserva(n + 1)
+        si k = nulo entonces devolver ENOMEM fin
+        si n > 0 entonces
+            si no copia_de(p, nat64(k), v, n) entonces
+                libera(k)
+                devolver EFAULT
+            fin
+        fin
+        err := manda(p, fd, u, nat64(k), n, 0, 0, p.id, 0, 0, marcas_, dirección(nm[0]), nl, dado)
+        libera(k)
+        devolver err
+    fin
+
+    público función escribe_unix(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
+        devolver sendto_unix(p, fd, v, n, 0, 0, 0)
+    fin
+
+    ; ---- recibir ----
+    ; recibe hasta n octetos en k (del núcleo): lo recibido, o el error; real,
+    ; el largo del mensaje (MSG_TRUNC); de y dl, quien lo manda; fds y n_fd, los
+    ; descriptores que llegan (quien llama los pone o los cierra); cpid, cuid,
+    ; cgid, quien lo manda (el primero)
+    función recibe(p: puntero a Proceso, fd: nat64, u: puntero a Unix, k: nat64, n: nat64, marcas_: nat64, ref real: nat64, de: puntero a byte, ref dl: nat64, ref fds: nat64, ref n_fd: nat64, ref cpid: nat64, ref cuid: nat64, ref cgid: nat64): ent64
+        variable g, lím, hecho, c, cur, i: nat64
+        variable m: puntero a Msj
+        variable r: ent64
+        variable fin_, tomó: bool
+        fds := 0
+        n_fd := 0
+        real := 0
+        dl := 0
+        hecho := 0
+        lím := plazo(u.rcv_plazo)
+        mientras cierto hacer
+            g := Sondeo64.gen
+            bloquea()
+            si u.estado = E_ESCUCHA o (u.tipo_ <> S_DGRAM y u.estado = E_NUEVO) entonces
+                suelta_u()
+                devolver EINVAL
+            fin
+            si u.primero <> 0 entonces
+                m := mj(u.primero)
+                si hecho = 0 entonces
+                    cpid := m.pid
+                    cuid := m.uid
+                    cgid := m.gid
+                    dl := m.de_l
+                    i := 0
+                    mientras i < dl hacer
+                        de[i] := m.de[i]
+                        i := i + 1
+                    fin
+                fin
+                si u.tipo_ = S_STREAM entonces
+                    cur := u.primero
+                    mientras cur <> 0 y hecho < n hacer
+                        m := mj(cur)
+                        si m.n_fd > 0 y hecho > 0 entonces romper fin
+                        c := m.n - m.leído
+                        si c > n - hecho entonces c := n - hecho fin
+                        si c > 0 entonces copia_mem(k + hecho, datos(m) + m.leído, c) fin
+                        hecho := hecho + c
+                        si marcas_ yb MSG_PEEK = 0 entonces
+                            tomó := m.n_fd > 0
+                            si tomó entonces
+                                fds := m.fds
+                                n_fd := m.n_fd
+                                m.fds := 0
+                                m.n_fd := 0
+                            fin
+                            m.leído := m.leído + c
+                            u.bytes := u.bytes - c
+                            si m.leído >= m.n entonces
+                                u.primero := m.sig
+                                si u.primero = 0 entonces u.último := 0 fin
+                                u.n_msj := u.n_msj - 1
+                                libera(puntero(nat64(m)))
+                                cur := u.primero
+                            fin
+                            si tomó entonces romper fin
+                        sino
+                            cur := m.sig
+                        fin
+                    fin
+                    suelta_u()
+                    Sondeo64.avisa()
+                    ; (MSG_WAITALL: a por más, si no se ha llenado ni han llegado descriptores)
+                    si marcas_ yb MSG_WAITALL <> 0 y marcas_ yb MSG_PEEK = 0 y hecho < n y fds = 0 entonces seguir fin
+                    devolver ent64(hecho)
+                fin
+                ; un datagrama (o un mensaje de SOCK_SEQPACKET), entero
+                real := m.n
+                c := m.n
+                si c > n entonces c := n fin
+                si c > 0 entonces copia_mem(k, datos(m), c) fin
+                si marcas_ yb MSG_PEEK = 0 entonces
+                    fds := m.fds
+                    n_fd := m.n_fd
+                    u.primero := m.sig
+                    si u.primero = 0 entonces u.último := 0 fin
+                    u.bytes := u.bytes - m.n
+                    u.n_msj := u.n_msj - 1
+                    libera(puntero(nat64(m)))
+                fin
+                suelta_u()
+                Sondeo64.avisa()
+                devolver ent64(c)
+            fin
+            ; nada que leer
+            si u.error <> 0 entonces
+                r := ent64(u.error)
+                u.error := 0
+                suelta_u()
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver r
+            fin
+            fin_ := u.marcas yb M_NO_LEE <> 0
+            si u.tipo_ <> S_DGRAM y (u.estado = E_ROTO o u.marcas yb M_OTRO_NO_ESCRIBE <> 0) entonces fin_ := cierto fin
+            suelta_u()
+            si fin_ entonces devolver ent64(hecho) fin
+            si sin_esperar(p, fd, marcas_) o ahora_ns() >= lím entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver EAGAIN
+            fin
+            si interrumpido(p) entonces
+                si hecho > 0 entonces devolver ent64(hecho) fin
+                devolver ERESTARTSYS
+            fin
+            espera_cambio(p, g, lím)
+        fin
+        devolver 0
+    fin
+
+    ; los descriptores que llegan, al programa, en el búfer de control c
+    ; (desde off, de cl): los que no caben, cerrados (y MSG_CTRUNC)
+    función pon_fds(p: puntero a Proceso, fds: nat64, n_fd: nat64, c: nat64, cl: nat64, ref off: nat64, cloexec: bool, ref ctrunc: bool)
+        variable nums: arreglo [256] de nat32
+        variable cab: arreglo [2] de nat64
+        variable cabe_, i, puestos, largo: nat64
+        variable fd: ent32
+        variable pf: puntero a nat64
+        cabe_ := 0
+        si c <> 0 y cl > off + 16 entonces cabe_ := (cl - off - 16) div 4 fin
+        si cabe_ > n_fd entonces cabe_ := n_fd fin
+        si cabe_ < n_fd entonces ctrunc := cierto fin
+        i := 0
+        mientras i < cabe_ hacer
+            fd := aparta_fd(p, 0)
+            si fd < 0 entonces
+                ctrunc := cierto
+                romper
+            fin
+            pf := puntero(fds + i * 24)
+            p.fd_cloexec[nat32(fd)] := 0
+            si cloexec entonces p.fd_cloexec[nat32(fd)] := 1 fin
+            p.fd_nobloq[nat32(fd)] := nat32(pf[2])
+            llena_fd(p, fd, nat32(pf[0]), pf[1])
+            nums[i] := nat32(fd)
+            i := i + 1
+        fin
+        puestos := i
+        ; los demás, cerrados
+        mientras i < n_fd hacer
+            pf := puntero(fds + i * 24)
+            cierra_fd_obj(nat32(pf[0]), pf[1])
+            i := i + 1
+        fin
+        libera(puntero(fds))
+        si puestos > 0 entonces
+            largo := 16 + puestos * 4
+            cab[0] := largo
+            cab[1] := 1 ob (nat64(1) << 32)            ; SOL_SOCKET, SCM_RIGHTS
+            copia_a(p, c + off, nat64(dirección(cab[0])), 16)
+            copia_a(p, c + off + 16, nat64(dirección(nums[0])), puestos * 4)
+            largo := (largo + 7) yb (nob nat64(7))
+            si off + largo > cl entonces largo := cl - off fin
+            off := off + largo
+        fin
+    fin
+
+    ; recvmsg, readv (vm = 0) y lo demás: al iov del programa
+    función recibe_iov(p: puntero a Proceso, fd: nat64, u: puntero a Unix, iov: nat64, n_iov: nat64, marcas_: nat64, vm: nat64, va: nat64, lva: nat64, c: nat64, cl: nat64): ent64
+        variable par: arreglo [2] de nat64
+        variable cab: arreglo [4] de nat64
+        variable de: arreglo [112] de byte
+        variable total, real, dl, fds, n_fd, cpid, cuid, cgid, hecho, m, i, off, nl: nat64
+        variable r, err: ent64
+        variable k: puntero a byte
+        variable fl, cero: nat32
+        variable ctrunc: bool
+        err := suma_iov(p, iov, n_iov, total)
+        si err < 0 entonces devolver err fin
+        si total > MÁX_LEE entonces total := MÁX_LEE fin
+        k := reserva(total + 1)
+        si k = nulo entonces devolver ENOMEM fin
+        r := recibe(p, fd, u, nat64(k), total, marcas_, real, dirección(de[0]), dl, fds, n_fd, cpid, cuid, cgid)
+        si r < 0 entonces
+            libera(k)
+            devolver r
+        fin
+        ; al iov
+        hecho := 0
+        i := 0
+        mientras i < n_iov y hecho < nat64(r) hacer
+            si no copia_de(p, nat64(dirección(par[0])), iov + i * 16, 16) entonces
+                err := EFAULT
+                romper
+            fin
+            m := nat64(r) - hecho
+            si m > par[1] entonces m := par[1] fin
+            si m > 0 entonces
+                si no copia_a(p, par[0], nat64(k) + hecho, m) entonces
+                    err := EFAULT
+                    romper
+                fin
+            fin
+            hecho := hecho + m
+            i := i + 1
+        fin
+        libera(k)
+        fl := 0
+        si u.tipo_ <> S_STREAM y real > nat64(r) entonces
+            fl := MSG_TRUNC
+            si marcas_ yb MSG_TRUNC <> 0 entonces r := ent64(real) fin
+        fin
+        ; los descriptores y quien lo manda (SO_PASSCRED), al búfer de control
+        off := 0
+        ctrunc := falso
+        si vm <> 0 y c <> 0 y u.marcas yb M_PASSCRED <> 0 entonces
+            si cl >= off + 28 entonces
+                cab[0] := 28
+                cab[1] := 1 ob (nat64(2) << 32)        ; SOL_SOCKET, SCM_CREDENTIALS
+                cab[2] := (cpid yb 0xFFFFFFFF) ob (cuid << 32)
+                cab[3] := cgid yb 0xFFFFFFFF
+                copia_a(p, c + off, nat64(dirección(cab[0])), 28)
+                off := off + 32
+                si off > cl entonces off := cl fin
+            sino
+                ctrunc := cierto
+            fin
+        fin
+        si n_fd > 0 entonces
+            si vm = 0 entonces c := 0 fin
+            pon_fds(p, fds, n_fd, c, cl, off, marcas_ yb MSG_CMSG_CLOEXEC <> 0, ctrunc)
+        fin
+        si ctrunc entonces fl := fl ob MSG_CTRUNC fin
+        si err < 0 entonces devolver err fin
+        ; quien lo manda (los de datagramas: su nombre; si no tiene, largo 0)
+        si vm <> 0 entonces
+            si va <> 0 entonces
+                si dl = 0 entonces
+                    cero := 0
+                    copia_a(p, vm + 8, nat64(dirección(cero)), 4)
+                sino
+                    ; (msg_namelen, en vm + 8: lo que cabe, y vuelve lo que mide)
+                    da_nombre(p, va, vm + 8, dirección(de[0]), dl)
+                fin
+            fin
+            copia_a(p, vm + 40, nat64(dirección(off)), 8)
+            copia_a(p, vm + 48, nat64(dirección(fl)), 4)
+        sino si va <> 0 entonces
+            ; recvfrom
+            si dl = 0 entonces
+                si lva <> 0 entonces
+                    cero := 0
+                    copia_a(p, lva, nat64(dirección(cero)), 4)
+                fin
+            sino
+                da_nombre(p, va, lva, dirección(de[0]), dl)
+            fin
+        fin
+        devolver r
+    fin
+
+    público función recvmsg_unix(p: puntero a Proceso, fd: nat64, vm: nat64, marcas_: nat64): ent64
+        variable mh: arreglo [7] de nat64
+        variable u: puntero a Unix
+        variable err: ent64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si no copia_de(p, nat64(dirección(mh[0])), vm, 56) entonces devolver EFAULT fin
+        devolver recibe_iov(p, fd, u, mh[2], mh[3], marcas_, vm, mh[0], 0, mh[4], mh[5])
+    fin
+
+    público función recvfrom_unix(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64, marcas_: nat64, va: nat64, lva: nat64): ent64
+        variable u: puntero a Unix
+        variable err, r: ent64
+        variable de: arreglo [112] de byte
+        variable real, dl, fds, n_fd, cpid, cuid, cgid: nat64
+        variable k: puntero a byte
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si n > MÁX_LEE entonces n := MÁX_LEE fin
+        k := reserva(n + 1)
+        si k = nulo entonces devolver ENOMEM fin
+        r := recibe(p, fd, u, nat64(k), n, marcas_, real, dirección(de[0]), dl, fds, n_fd, cpid, cuid, cgid)
+        si r > 0 entonces
+            si no copia_a(p, v, nat64(k), nat64(r)) entonces r := EFAULT fin
+        fin
+        libera(k)
+        ; (sin búfer de control: los descriptores que lleguen, cerrados)
+        si n_fd > 0 entonces suelta_fds(fds, n_fd) fin
+        si r < 0 entonces devolver r fin
+        si u.tipo_ <> S_STREAM y marcas_ yb MSG_TRUNC <> 0 entonces r := ent64(real) fin
+        si va <> 0 y lva <> 0 entonces
+            si dl = 0 entonces
+                cpid := 0
+                copia_a(p, lva, nat64(dirección(cpid)), 4)
+            sino
+                da_nombre(p, va, lva, dirección(de[0]), dl)
+            fin
+        fin
+        devolver r
+    fin
+
+    público función lee_unix(p: puntero a Proceso, fd: nat64, v: nat64, n: nat64): ent64
+        devolver recvfrom_unix(p, fd, v, n, 0, 0, 0)
+    fin
+
+    ; readv y writev
+    público función vectores_unix(p: puntero a Proceso, fd: nat64, iov: nat64, n_iov: nat64, escribir_: bool): ent64
+        variable u: puntero a Unix
+        variable err: ent64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si escribir_ entonces devolver envía_iov(p, fd, u, iov, n_iov, 0, 0, 0, 0, 0) fin
+        devolver recibe_iov(p, fd, u, iov, n_iov, 0, 0, 0, 0, 0, 0)
+    fin
+
+    ; ---- shutdown, los nombres, las opciones ----
+    público función shutdown_unix(p: puntero a Proceso, fd: nat64, cómo: nat64): ent64
+        variable u, ot: puntero a Unix
+        variable err: ent64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si cómo > 2 entonces devolver EINVAL fin
+        bloquea()
+        si u.tipo_ <> S_DGRAM y u.estado <> E_CONECTADO y u.estado <> E_ROTO entonces
+            suelta_u()
+            devolver ENOTCONN
+        fin
+        ot := nulo
+        si u.tipo_ <> S_DGRAM y u.par <> 0 entonces ot := ux(u.par) fin
+        si cómo = 0 o cómo = 2 entonces
+            u.marcas := u.marcas ob M_NO_LEE
+            si ot <> nulo entonces ot.marcas := ot.marcas ob M_OTRO_NO_LEE fin
+        fin
+        si cómo = 1 o cómo = 2 entonces
+            u.marcas := u.marcas ob M_NO_ESCRIBE
+            si ot <> nulo entonces ot.marcas := ot.marcas ob M_OTRO_NO_ESCRIBE fin
+        fin
+        suelta_u()
+        Sondeo64.avisa()
+        devolver 0
+    fin
+
+    público función nombre_unix(p: puntero a Proceso, fd: nat64, v: nat64, lv: nat64, del_otro: bool): ent64
+        variable u, ot: puntero a Unix
+        variable err: ent64
+        variable n: arreglo [112] de byte
+        variable nl, i: nat64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        bloquea()
+        ot := u
+        si del_otro entonces
+            si u.par = 0 entonces
+                suelta_u()
+                devolver ENOTCONN
+            fin
+            ot := ux(u.par)
+        fin
+        nl := ot.nombre_l
+        i := 0
+        mientras i < nl hacer
+            n[i] := ot.nombre[i]
+            i := i + 1
+        fin
+        suelta_u()
+        devolver da_nombre(p, v, lv, dirección(n[0]), nl)
+    fin
+
+    público función setsockopt_unix(p: puntero a Proceso, fd: nat64, nivel: nat64, nombre: nat64, v: nat64, l: nat64): ent64
+        variable u: puntero a Unix
+        variable err: ent64
+        variable x: nat32
+        variable tv: arreglo [2] de nat64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si nivel <> 1 entonces devolver ENOPROTOOPT fin
+        según nat16(nombre)
+            caso 20, 21:
+                si l < 16 entonces devolver EINVAL fin
+                si no copia_de(p, nat64(dirección(tv[0])), v, 16) entonces devolver EFAULT fin
+                si ent64(tv[0]) < 0 o tv[1] >= 1000000 entonces devolver EINVAL fin
+                si nombre = 20 entonces u.rcv_plazo := tv[0] * 1000000000 + tv[1] * 1000 sino u.snd_plazo := tv[0] * 1000000000 + tv[1] * 1000 fin
+                devolver 0
+            caso 16, 7, 8, 32, 33, 2, 9, 6, 13, 34, 15:
+                si l < 4 entonces devolver EINVAL fin
+                si no copia_de(p, nat64(dirección(x)), v, 4) entonces devolver EFAULT fin
+                bloquea()
+                si nombre = 16 entonces
+                    si x <> 0 entonces u.marcas := u.marcas ob M_PASSCRED sino u.marcas := u.marcas yb (nob nat64(M_PASSCRED)) fin
+                fin
+                si (nombre = 7 o nombre = 32) y x > 0 entonces u.sndbuf := nat64(x) * 2 fin
+                si (nombre = 8 o nombre = 33) y x > 0 entonces u.rcvbuf := nat64(x) * 2 fin
+                suelta_u()
+                devolver 0
+            si no:
+                devolver ENOPROTOOPT
+        fin
+        devolver 0
+    fin
+
+    público función getsockopt_unix(p: puntero a Proceso, fd: nat64, nivel: nat64, nombre: nat64, v: nat64, vl: nat64): ent64
+        variable u: puntero a Unix
+        variable err: ent64
+        variable l, largo: nat32
+        variable x: arreglo [4] de nat64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        si no copia_de(p, nat64(dirección(l)), vl, 4) entonces devolver EFAULT fin
+        si ent32(l) < 0 entonces devolver EINVAL fin
+        si nivel <> 1 entonces devolver ENOPROTOOPT fin
+        x[0] := 0
+        x[1] := 0
+        largo := 4
+        bloquea()
+        según nat16(nombre)
+            caso 3: x[0] := u.tipo_                                  ; SO_TYPE
+            caso 39: x[0] := 1                                       ; SO_DOMAIN
+            caso 38: x[0] := 0                                       ; SO_PROTOCOL
+            caso 4:                                                  ; SO_ERROR
+                x[0] := nat64(nat32((nob u.error + 1) yb 0xFFFFFFFF))
+                u.error := 0
+            caso 7: x[0] := u.sndbuf
+            caso 8: x[0] := u.rcvbuf
+            caso 16:
+                si u.marcas yb M_PASSCRED <> 0 entonces x[0] := 1 fin
+            caso 30:
+                si u.estado = E_ESCUCHA entonces x[0] := 1 fin
+            caso 17:                                                 ; SO_PEERCRED: pid, uid, gid
+                x[0] := (u.o_pid yb 0xFFFFFFFF) ob (u.o_uid << 32)
+                x[1] := u.o_gid yb 0xFFFFFFFF
+                largo := 12
+            caso 20, 21:
+                si nombre = 20 entonces x[0] := u.rcv_plazo sino x[0] := u.snd_plazo fin
+                x[1] := (x[0] mod 1000000000) div 1000
+                x[0] := x[0] div 1000000000
+                largo := 16
+            caso 2, 9, 6, 13, 34, 15: x[0] := 0
+            si no:
+                suelta_u()
+                devolver ENOPROTOOPT
+        fin
+        suelta_u()
+        si l > largo entonces l := largo fin
+        si l > 0 entonces
+            si no copia_a(p, v, nat64(dirección(x[0])), nat64(l)) entonces devolver EFAULT fin
+        fin
+        si no copia_a(p, vl, nat64(dirección(l)), 4) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    ; ---- ioctl y poll ----
+    público función ioctl_unix(p: puntero a Proceso, fd: nat64, orden: nat64, arg: nat64): ent64
+        variable u: puntero a Unix
+        variable err: ent64
+        variable x: nat32
+        variable c, m: nat64
+        u := de_fd(p, fd, err)
+        si u = nulo entonces devolver err fin
+        orden := orden yb 0xFFFFFFFF
+        si orden = 0x5421 entonces
+            ; FIONBIO
+            si no copia_de(p, nat64(dirección(x)), arg, 4) entonces devolver EFAULT fin
+            p.fd_nobloq[nat32(fd)] := 0
+            si x <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 fin
+            devolver 0
+        fin
+        si orden = 0x541B o orden = 0x5411 entonces
+            ; FIONREAD (lo que hay que leer: en los de flujo, todo; en los
+            ; demás, el próximo mensaje) y TIOCOUTQ (lo mandado sin leer: 0)
+            c := 0
+            si orden = 0x541B entonces
+                bloquea()
+                si u.tipo_ = S_STREAM entonces
+                    c := u.bytes
+                sino si u.primero <> 0 entonces
+                    c := mj(u.primero).n
+                fin
+                suelta_u()
+            fin
+            x := nat32(c)
+            si no copia_a(p, arg, nat64(dirección(x)), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        devolver ENOTTY
+    fin
+
+    ; lo que está listo (poll: POLLIN 1, POLLOUT 4, POLLERR 8, POLLHUP 0x10,
+    ; POLLRDNORM 0x40, POLLWRNORM 0x100, POLLRDHUP 0x2000), de lo pedido en ev
+    ; (POLLERR y POLLHUP, siempre)
+    público función listo_unix(d: nat64, ev: nat32): nat32
+        variable u: puntero a Unix
+        variable r: nat32
+        variable sin_leer, sin_escribir: bool
+        u := ux(d)
+        r := 0
+        bloquea()
+        si u.error <> 0 entonces r := r ob 8 fin
+        si u.estado = E_ESCUCHA entonces
+            si u.pend_n > 0 entonces r := r ob 0x41 fin
+        sino
+            si u.primero <> 0 entonces r := r ob 0x41 fin
+            si u.marcas yb M_NO_LEE <> 0 entonces r := r ob 0x2041 fin
+            si u.tipo_ <> S_DGRAM entonces
+                sin_leer := u.estado = E_ROTO o u.marcas yb (M_NO_LEE ob M_OTRO_NO_ESCRIBE) <> 0
+                sin_escribir := u.estado = E_ROTO o u.marcas yb (M_NO_ESCRIBE ob M_OTRO_NO_LEE) <> 0
+                si u.estado = E_ROTO o u.marcas yb M_OTRO_NO_ESCRIBE <> 0 entonces r := r ob 0x2041 fin
+                si (sin_leer y sin_escribir) o u.estado = E_NUEVO entonces r := r ob 0x10 fin
+                si u.estado = E_CONECTADO y u.par <> 0 entonces
+                    si escribible(ux(u.par)) y u.marcas yb M_NO_ESCRIBE = 0 entonces r := r ob 0x104 fin
+                sino
+                    ; (sin conectar, o roto: escribir dirá el error)
+                    r := r ob 0x104
+                fin
+            sino
+                si u.par <> 0 entonces
+                    si escribible(ux(u.par)) entonces r := r ob 0x104 fin
+                sino
+                    r := r ob 0x104
+                fin
+            fin
+        fin
+        suelta_u()
+        devolver r yb (ev ob 0x18)
+    fin
+
+    público función escribe_unix_resumen()
+        escribir("sockets de Unix: ", unix_hechos, " hechos, ", unix_vivos, " vivos, ", unix_mensajes, " mensajes, ", unix_fds_pasados, " descriptores pasados")
+    fin
+
+fin Unix64.

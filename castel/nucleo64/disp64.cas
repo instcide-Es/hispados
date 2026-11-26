@@ -73,6 +73,12 @@ módulo Disp64
     constante O_EXCL = 0x80
     constante O_TRUNC = 0x200
     constante O_ACCESO = 3
+    constante EPERM = -1
+    constante F_SEAL_SEAL = 1
+    constante F_SEAL_SHRINK = 2
+    constante F_SEAL_GROW = 4
+    constante F_SEAL_WRITE = 8
+    constante F_SEAL_FUTURE_WRITE = 16
 
     ; ---- la pantalla ----
     público variable fb_física: nat64           ; dónde está (física): lo pone el arranque
@@ -118,11 +124,12 @@ módulo Disp64
         n: nat64                                ; sus páginas
         marcos: nat64                           ; (del montón) MÁX_SHM_PÁG nat64 como mucho; se agranda
         cabe: nat64
+        sellos: nat64                           ; [etapa 10 d] los de memfd (F_SEAL_*)
         nombre: arreglo [64] de byte
     fin
     variable shms: arreglo [MAX_SHM] de nat64
     variable shm_mutex: Mutex
-    público variable shm_hechos, shm_vivos, shm_páginas: nat64
+    público variable shm_hechos, shm_vivos, shm_páginas, memfd_hechos: nat64
 
     función lee8(d: nat64): byte
         variable p: puntero a byte
@@ -797,6 +804,8 @@ módulo Disp64
         si prot yb 4 = 0 entonces fl := fl ob bit_nx() fin
         si clase = F_SHM entonces
             s := puntero(d)
+            ; [etapa 10 d] un memfd sellado para escribir: no se pone de escribir
+            si s.sellos yb (F_SEAL_WRITE ob F_SEAL_FUTURE_WRITE) <> 0 y prot yb 2 <> 0 entonces devolver EPERM fin
             r := 0
             cierra_mutex(dirección(shm_mutex))
             v := a
@@ -927,6 +936,9 @@ módulo Disp64
         variable pm: puntero a nat64
         n := (t + 4095) >> 12
         si n > MÁX_SHM_PÁG entonces devolver ENOMEM fin
+        ; [etapa 10 d] los sellos de memfd
+        si t < s.tamaño y s.sellos yb F_SEAL_SHRINK <> 0 entonces devolver EPERM fin
+        si t > s.tamaño y s.sellos yb F_SEAL_GROW <> 0 entonces devolver EPERM fin
         si n > s.cabe entonces
             nm := nat64(reserva(n * 8))
             si nm = 0 entonces devolver ENOMEM fin
@@ -978,6 +990,7 @@ módulo Disp64
     función quizá_fuera(s: puntero a Shm)
         variable i: nat32
         si s.refs <> 0 o s.borrado = 0 entonces devolver fin
+        s.sellos := 0
         trunca_shm_(s, 0)
         si s.marcos <> 0 entonces libera(puntero(s.marcos)) fin
         i := 0
@@ -994,6 +1007,56 @@ módulo Disp64
         si s.refs > 0 entonces s.refs := s.refs - 1 fin
         quizá_fuera(s)
         abre_mutex(dirección(shm_mutex))
+    fin
+
+    ; [etapa 10 d] memfd_create: una memoria compartida sin nombre (como las
+    ; de /dev/shm ya borradas: se suelta cuando nadie la tiene abierta ni
+    ; puesta), de 0 octetos; marcas: MFD_CLOEXEC (1, lo pone quien llama),
+    ; MFD_ALLOW_SEALING (2: sin ella, ya sellada con F_SEAL_SEAL), MFD_NOEXEC_SEAL
+    ; (8) y MFD_EXEC (0x10); MFD_HUGETLB (4), no
+    público función memfd_crea(nombre: puntero a byte, marcas_: nat64, ref obj: nat64): ent64
+        variable s: puntero a Shm
+        variable k: nat32
+        obj := 0
+        si marcas_ yb (nob nat64(0x1B)) <> 0 entonces devolver EINVAL fin
+        s := puntero(nat64(reserva(tamaño(Shm))))
+        si s = nulo entonces devolver ENOMEM fin
+        ceros_mem(nat64(s), tamaño(Shm))
+        k := 0
+        mientras k < 63 y nombre[k] <> 0 hacer
+            s.nombre[k] := nombre[k]
+            k := k + 1
+        fin
+        s.refs := 1
+        s.borrado := 1
+        si marcas_ yb 2 = 0 entonces s.sellos := F_SEAL_SEAL fin
+        cierra_mutex(dirección(shm_mutex))
+        shm_hechos := shm_hechos + 1
+        shm_vivos := shm_vivos + 1
+        memfd_hechos := memfd_hechos + 1
+        abre_mutex(dirección(shm_mutex))
+        obj := nat64(s)
+        devolver 0
+    fin
+
+    ; [etapa 10 d] fcntl F_ADD_SEALS (1033) y F_GET_SEALS (1034)
+    público función sellos_shm(d: nat64, orden: nat64, arg: nat64): ent64
+        variable s: puntero a Shm
+        variable r: ent64
+        s := puntero(d)
+        cierra_mutex(dirección(shm_mutex))
+        r := 0
+        si orden = 1034 entonces
+            r := ent64(s.sellos)
+        sino si arg yb (nob nat64(0x1F)) <> 0 entonces
+            r := EINVAL
+        sino si s.sellos yb F_SEAL_SEAL <> 0 entonces
+            r := EPERM
+        sino
+            s.sellos := s.sellos ob arg
+        fin
+        abre_mutex(dirección(shm_mutex))
+        devolver r
     fin
 
     ; unlink de /dev/shm/NOMBRE: 0, o el error (-ENOENT)

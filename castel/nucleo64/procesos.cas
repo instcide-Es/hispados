@@ -2515,6 +2515,17 @@ módulo Procesos
         fin
     fin
 
+    ; [etapa 10 d] una referencia más de lo abierto (clase, obj): lo que se
+    ; pasa por un socket de Unix (SCM_RIGHTS) mientras viaja
+    público función otro_fd_obj(clase: nat32, obj: nat64)
+        si clase = F_APARTADO entonces devolver fin
+        si clase = F_ARCHIVO y obj <> 0 entonces
+            vfs_otro(puntero(obj))
+        sino si clase > F_ARCHIVO y al_otro_fd <> 0 entonces
+            llama2_(al_otro_fd, nat64(clase), obj)
+        fin
+    fin
+
     público función cierra_fd_obj(clase: nat32, obj: nat64)
         si clase = F_APARTADO entonces devolver fin
         si clase = F_ARCHIVO y obj <> 0 entonces

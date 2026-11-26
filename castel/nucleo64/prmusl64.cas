@@ -25,7 +25,7 @@
 ; =============================================================================
 módulo PrMusl64
 
-    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redcom64, Hda64
+    importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redcom64, Hda64, Unix64
 
     público variable fallos7: nat32
 
@@ -96,6 +96,8 @@ módulo PrMusl64
         si busca_archivo("MDISP") >= 0 entonces corre("MDISP", 0) fin          ; [etapa 8] los dispositivos
         si busca_archivo("MRED") >= 0 entonces corre("MRED", 0) fin            ; [etapa 9] los sockets por 127.0.0.1, eventfd, timerfd, el azar
         si busca_archivo("MRED6") >= 0 entonces corre("MRED6", 0) fin          ; [etapa 10 c] IPv6 por ::1
+        si busca_archivo("MUNIX") >= 0 entonces corre("MUNIX", 0) fin          ; [etapa 10 d] AF_UNIX, SCM_RIGHTS y memfd
+        si busca_archivo("MIPC") >= 0 entonces corre("MIPC", 0) fin            ; [etapa 10 d] IPC entre dos procesos, como Ladybird (C++)
         si busca_archivo("MCXX") >= 0 entonces corre("MCXX", 0) fin            ; [etapa 10] C++ (la libstdc++ con musl)
         si busca_archivo("MCXXD") >= 0 entonces corre("MCXXD", 0) fin          ; [etapa 10 c] C++ dinámico (libstdc++.so.6)
         si busca_archivo("MTEXTO") >= 0 entonces corre("MTEXTO", 0) fin        ; [etapa 10] HarfBuzz y FreeType
@@ -136,6 +138,7 @@ módulo PrMusl64
         si memoria_ahora() <> mem0 entonces mal("se ha perdido memoria") fin
         si en_uso <> montón0 entonces mal("se han perdido bloques del montón") fin
         si shm_vivos <> 0 o shm_páginas <> 0 entonces mal("queda memoria compartida (/dev/shm)") fin
+        si unix_vivos <> 0 entonces mal("quedan sockets de Unix") fin
         si nat64(n_pilas) <> pilas0 entonces mal("se han perdido pilas") fin
     fin
 

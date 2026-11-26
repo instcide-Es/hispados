@@ -17,7 +17,8 @@
  *  - el escritorio, al estilo del de Hispa-Pentium: el tapiz, la barra de
  *    abajo con el botón «Inicio», un botón por ventana (pulsarlo la trae
  *    delante o la minimiza) y el reloj; el menú Inicio con los programas
- *    que haya (Pluma, Cuentas, Notas) y «Salir del escritorio»; la tecla
+ *    que haya (Pluma, Cuentas, Notas) y «Consola (salir a las órdenes)»
+ *    ([etapa 10 d]; antes, «Salir del escritorio»: lo mismo); la tecla
  *    del logo o Ctrl+Esc lo abren.
  * Las letras, las DejaVu con suavizado (oficina/comun: letras y lienzo).
  *   VENTANAS [PROGRAMA[=ARGUMENTO] ...]   (los programas, arrancados al
@@ -650,7 +651,8 @@ static void pinta_inicio(void)
 
 		if (k < N_PROGS && !hay)
 			continue;
-		t = k == N_PROGS ? "Salir del escritorio" : progs[k].nombre;
+		/* [etapa 10 d] la consola: se sale al intérprete de órdenes (ORDENES) */
+		t = k == N_PROGS ? "Consola (salir a las órdenes)" : progs[k].nombre;
 		if (k == N_PROGS)
 			lz_raya_h(&L, x + 8, y - 4, an - 16, 0xB0B6BE);
 		if (inicio_sel == k) {

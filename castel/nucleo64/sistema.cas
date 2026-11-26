@@ -47,7 +47,7 @@
 ; =============================================================================
 módulo Sistema
 
-    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Red64
+    importar Cifras64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, PorCpu64, Excep64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Vfs64, Tty64, Futex64, Tubos64, Disp64, Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Red64, Unix64
 
     constante EPERM = -1
     constante ENOENT = -2
@@ -97,13 +97,42 @@ módulo Sistema
 
     ; [etapa 9] ¿es de las nuevas? (sockets, eventfd, timerfd, /dev/urandom, los textos)
     función es_nueva(c: nat32): bool
-        devolver c = F_SOCKET o es_objeto(c)
+        devolver c = F_SOCKET o c = F_UNIX o es_objeto(c)
     fin
 
     ; ¿es fd un archivo abierto del programa?
     función fd_bien(p: puntero a Proceso, fd: nat64): bool
         si fd >= MAX_FD entonces devolver falso fin
         devolver p.fd_clase[nat32(fd)] <> 0 y p.fd_clase[nat32(fd)] <> F_APARTADO
+    fin
+
+    ; [etapa 10 d] ¿es fd un socket de Unix?
+    función es_unix(p: puntero a Proceso, fd: nat64): bool
+        devolver fd < MAX_FD y p.fd_clase[nat32(fd)] = F_UNIX
+    fin
+
+    ; [etapa 10 d] memfd_create: memoria compartida sin nombre (la de
+    ; /dev/shm, Disp64), con ftruncate y mmap MAP_SHARED, que se pasa a otro
+    ; proceso por un socket de Unix
+    función memfd_(p: puntero a Proceso, v: nat64, marcas_: nat64): ent64
+        variable nombre: arreglo [256] de byte
+        variable r: ent64
+        variable fd: ent32
+        variable obj: nat64
+        r := texto_de(p, dirección(nombre[0]), v, 250)
+        si r = -14 entonces devolver EFAULT fin
+        si r < 0 entonces devolver EINVAL fin
+        fd := aparta_fd(p, 0)
+        si fd < 0 entonces devolver EMFILE fin
+        r := memfd_crea(dirección(nombre[0]), marcas_, obj)
+        si r < 0 entonces
+            devuelve_fd(p, fd)
+            devolver r
+        fin
+        p.fd_cloexec[nat32(fd)] := nat32(marcas_ yb 1)            ; MFD_CLOEXEC
+        p.fd_nobloq[nat32(fd)] := 0
+        llena_fd(p, fd, F_SHM, obj)
+        devolver ent64(fd)
     fin
 
     ; [etapa 10 c] ¿la llamada n usa el descriptor de su primer argumento?
@@ -213,6 +242,11 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver lee_sock(p, fd, v, n)
         fin
+        ; [etapa 10 d] los de Unix
+        si p.fd_clase[nat32(fd)] = F_UNIX entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            devolver lee_unix(p, fd, v, n)
+        fin
         si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver lee_objeto(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
         ; [etapa 8] los dispositivos (Disp64)
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver lee_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
@@ -260,6 +294,10 @@ módulo Sistema
             si pos >= 0 entonces devolver ESPIPE fin
             devolver escribe_sock(p, fd, v, n)
         fin
+        si p.fd_clase[nat32(fd)] = F_UNIX entonces
+            si pos >= 0 entonces devolver ESPIPE fin
+            devolver escribe_unix(p, fd, v, n)
+        fin
         si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver escribe_objeto(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n, p.fd_nobloq[nat32(fd)] <> 0) fin
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver escribe_disp(p, p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], v, n) fin
         si n = 0 entonces devolver 0 fin
@@ -291,6 +329,8 @@ módulo Sistema
         variable total, r: ent64
         si cuántos > 1024 entonces devolver EINVAL fin
         si no fd_bien(p, fd) entonces devolver EBADF fin
+        ; [etapa 10 d] los de Unix, de una vez (un datagrama no se parte)
+        si p.fd_clase[nat32(fd)] = F_UNIX entonces devolver vectores_unix(p, fd, iov, cuántos, escribir_) fin
         total := 0
         i := 0
         mientras i < cuántos hacer
@@ -492,6 +532,10 @@ módulo Sistema
             si es_tubo(p.fd_clase[nat32(fd)]) o es_de_disp(p.fd_clase[nat32(fd)]) o es_nueva(p.fd_clase[nat32(fd)]) entonces p.fd_nobloq[nat32(fd)] := nat32((arg >> 11) yb 1) fin
             devolver 0
         fin
+        si orden = 1033 o orden = 1034 entonces                                          ; [etapa 10 d] F_ADD_SEALS y F_GET_SEALS
+            si p.fd_clase[nat32(fd)] <> F_SHM entonces devolver EINVAL fin
+            devolver sellos_shm(p.fd_obj[nat32(fd)], orden, arg)
+        fin
         si orden = 3 entonces                                                            ; F_GETFL
             si p.fd_clase[nat32(fd)] = F_CONSOLA entonces devolver 2 fin
             si p.fd_clase[nat32(fd)] = F_TUBO_L entonces devolver ent64(nat64(p.fd_nobloq[nat32(fd)]) << 11) fin
@@ -541,6 +585,10 @@ módulo Sistema
             ceros_mem(nat64(dirección(st[0])), 144)
             stat_sock(nat64(dirección(st[0])), p.fd_obj[nat32(fd)])
             r := 0
+        sino si p.fd_clase[nat32(fd)] = F_UNIX entonces
+            ceros_mem(nat64(dirección(st[0])), 144)
+            stat_unix(nat64(dirección(st[0])), p.fd_obj[nat32(fd)])
+            r := 0
         sino si es_objeto(p.fd_clase[nat32(fd)]) entonces
             ceros_mem(nat64(dirección(st[0])), 144)
             stat_objeto(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], nat64(dirección(st[0])))
@@ -584,6 +632,14 @@ módulo Sistema
             ceros_mem(nat64(dirección(st[0])), 144)
             stat_disp(es_disp(t), 0, nat64(dirección(st[0])))
             libera(t)
+            si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
+            devolver 0
+        fin
+        ; [etapa 10 d] la ruta de un socket de Unix (bind): S_IFSOCK
+        si t[0] <> 0 y ligada(p, t) entonces
+            libera(t)
+            ceros_mem(nat64(dirección(st[0])), 144)
+            stat_unix(nat64(dirección(st[0])), 0)
             si no copia_a(p, v, nat64(dirección(st[0])), 144) entonces devolver EFAULT fin
             devolver 0
         fin
@@ -644,6 +700,11 @@ módulo Sistema
         si t[0] = 0 entonces
             libera(t)
             devolver ENOENT
+        fin
+        ; [etapa 10 d] unlink de la ruta de un socket de Unix (bind)
+        si qué = 1 y desliga(p, t) entonces
+            libera(t)
+            devolver 0
         fin
         ; [etapa 8] shm_unlink: /dev/shm/NOMBRE
         si qué = 1 y es_disp(t) = F_SHM entonces
@@ -1176,8 +1237,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.3")
-        pon_texto(dirección(t[0]), 195, "etapa 10 c (IPv6 y C++)")
+        pon_texto(dirección(t[0]), 130, "0.11.4")
+        pon_texto(dirección(t[0]), 195, "etapa 10 d (AF_UNIX y memfd)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -1239,6 +1300,7 @@ módulo Sistema
         fin
         ; [etapa 9] los sockets y los objetos
         si p.fd_clase[nat32(fd)] = F_SOCKET entonces devolver listo_sock(p.fd_obj[nat32(fd)], ev) fin
+        si p.fd_clase[nat32(fd)] = F_UNIX entonces devolver listo_unix(p.fd_obj[nat32(fd)], ev) fin
         si es_objeto(p.fd_clase[nat32(fd)]) entonces devolver listo_objeto(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], ev) fin
         ; [etapa 8] los dispositivos (los sucesos: si hay en su cola)
         si es_de_disp(p.fd_clase[nat32(fd)]) entonces devolver listo_disp(p.fd_clase[nat32(fd)], p.fd_obj[nat32(fd)], ev) fin
@@ -1855,6 +1917,8 @@ módulo Sistema
                     r := tty_ioctl(p, a2 yb 0xFFFFFFFF, a3)
                 sino si p.fd_clase[nat32(a1)] = F_SOCKET entonces
                     r := ioctl_sock(p, a1, a2, a3)
+                sino si p.fd_clase[nat32(a1)] = F_UNIX entonces
+                    r := ioctl_unix(p, a1, a2, a3)
                 sino si es_objeto(p.fd_clase[nat32(a1)]) y a2 yb 0xFFFFFFFF = 0x5421 entonces
                     ; FIONBIO
                     si copia_de(p, nat64(dirección(lím)), a3, 4) entonces
@@ -1942,22 +2006,38 @@ módulo Sistema
                 fin
             caso 318: r := azar_(p, a1, a2)
             ; [etapa 9] la red y lo que pide
-            caso 41: r := socket_(p, a1, a2, a3)
-            caso 42: r := connect_(p, a1, a2, a3)
-            caso 43: r := accept_(p, a1, a2, a3, 0)
-            caso 288: r := accept_(p, a1, a2, a3, a4)
-            caso 44: r := sendto_(p, a1, a2, a3, a4, a5, a6)
-            caso 45: r := recvfrom_(p, a1, a2, a3, a4, a5, a6)
-            caso 46: r := sendmsg_(p, a1, a2, a3)
-            caso 47: r := recvmsg_(p, a1, a2, a3)
-            caso 48: r := shutdown_(p, a1, a2)
-            caso 49: r := bind_(p, a1, a2, a3)
-            caso 50: r := listen_(p, a1, a2)
-            caso 51: r := nombre_sock(p, a1, a2, a3, falso)
-            caso 52: r := nombre_sock(p, a1, a2, a3, cierto)
-            caso 53: r := -95                              ; socketpair (AF_UNIX): EOPNOTSUPP
-            caso 54: r := setsockopt_(p, a1, a2, a3, a4, a5)
-            caso 55: r := getsockopt_(p, a1, a2, a3, a4, a5)
+            caso 41:
+                si a1 = 1 entonces r := socket_unix(p, a2, a3) sino r := socket_(p, a1, a2, a3) fin    ; [etapa 10 d] AF_UNIX
+            caso 42:
+                si es_unix(p, a1) entonces r := connect_unix(p, a1, a2, a3) sino r := connect_(p, a1, a2, a3) fin
+            caso 43:
+                si es_unix(p, a1) entonces r := accept_unix(p, a1, a2, a3, 0) sino r := accept_(p, a1, a2, a3, 0) fin
+            caso 288:
+                si es_unix(p, a1) entonces r := accept_unix(p, a1, a2, a3, a4) sino r := accept_(p, a1, a2, a3, a4) fin
+            caso 44:
+                si es_unix(p, a1) entonces r := sendto_unix(p, a1, a2, a3, a4, a5, a6) sino r := sendto_(p, a1, a2, a3, a4, a5, a6) fin
+            caso 45:
+                si es_unix(p, a1) entonces r := recvfrom_unix(p, a1, a2, a3, a4, a5, a6) sino r := recvfrom_(p, a1, a2, a3, a4, a5, a6) fin
+            caso 46:
+                si es_unix(p, a1) entonces r := sendmsg_unix(p, a1, a2, a3) sino r := sendmsg_(p, a1, a2, a3) fin
+            caso 47:
+                si es_unix(p, a1) entonces r := recvmsg_unix(p, a1, a2, a3) sino r := recvmsg_(p, a1, a2, a3) fin
+            caso 48:
+                si es_unix(p, a1) entonces r := shutdown_unix(p, a1, a2) sino r := shutdown_(p, a1, a2) fin
+            caso 49:
+                si es_unix(p, a1) entonces r := bind_unix(p, a1, a2, a3) sino r := bind_(p, a1, a2, a3) fin
+            caso 50:
+                si es_unix(p, a1) entonces r := listen_unix(p, a1, a2) sino r := listen_(p, a1, a2) fin
+            caso 51:
+                si es_unix(p, a1) entonces r := nombre_unix(p, a1, a2, a3, falso) sino r := nombre_sock(p, a1, a2, a3, falso) fin
+            caso 52:
+                si es_unix(p, a1) entonces r := nombre_unix(p, a1, a2, a3, cierto) sino r := nombre_sock(p, a1, a2, a3, cierto) fin
+            caso 53: r := socketpair_(p, a1, a2, a3, a4)          ; [etapa 10 d]
+            caso 54:
+                si es_unix(p, a1) entonces r := setsockopt_unix(p, a1, a2, a3, a4, a5) sino r := setsockopt_(p, a1, a2, a3, a4, a5) fin
+            caso 55:
+                si es_unix(p, a1) entonces r := getsockopt_unix(p, a1, a2, a3, a4, a5) sino r := getsockopt_(p, a1, a2, a3, a4, a5) fin
+            caso 319: r := memfd_(p, a1, a2)                      ; [etapa 10 d] memfd_create
             caso 284: r := evento_(p, a1, 0)
             caso 290: r := evento_(p, a1, a2)
             caso 283: r := tempo_(p, a1, a2)
@@ -2085,6 +2165,8 @@ módulo Sistema
             suma_atómica(dirección(e.refs), 1)
         sino si clase = F_SOCKET entonces
             otro_sock(d)
+        sino si clase = F_UNIX entonces
+            otro_unix(d)
         sino si es_objeto(nat32(clase)) entonces
             otro_objeto(clase, d)
         sino si es_de_disp(nat32(clase)) entonces
@@ -2101,6 +2183,8 @@ módulo Sistema
             si suma_atómica(dirección(e.refs), nob nat64(0)) = 1 entonces libera(puntero(d)) fin
         sino si clase = F_SOCKET entonces
             cierra_sock(d)
+        sino si clase = F_UNIX entonces
+            cierra_unix(d)
         sino si es_objeto(nat32(clase)) entonces
             cierra_objeto(clase, d)
         sino si es_de_disp(nat32(clase)) entonces
