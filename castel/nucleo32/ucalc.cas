@@ -1498,6 +1498,8 @@ módulo UCalc
             sino si s.clase = EV_RATÓN_BAJA y s.c yb BOTÓN_IZQUIERDO <> 0 entonces
                 clic(ent32(s.a), ent32(s.b))
                 pinta()
+            sino si s.clase = EV_RUEDA entonces
+                si rueda(s) entonces pinta() fin        ; (RUEDA) la cinta, bajo la flecha
             sino si s.clase = EV_MENÚ entonces
                 si no elegido(s.b, s.a) entonces devolver 0 fin
                 pinta()

@@ -2958,6 +2958,75 @@ if sano $Q/s7.img && sin_restos $Q/s7.img && igual_en $Q/s7.img DOCS/LETRAS/B.TX
   ok "y en el disco: sano, con lo instalado igual que lo de la memoria octeto a octeto; lo traído a BAJADAS, ya borrado (RÁPIDO: en una memoria pequeña son megas)"
 else ko "lo traído por el gancho de la red no queda bien en el disco:"; lista_de $Q/s7.img | sed 's/^/        /' | head -14; fi
 
+# 7 bis. (GRUPOS, 25/11/2026) los grupos del catálogo: «grupo=código
+# p1,p2,... Nombre|Descripción», firmados con lo demás. textos (letras y
+# saludo), mixto (letras y «nadie», que no está en el catálogo) y conbase
+# (base, imprescindible, y letras): PAQUETES GRUPOS; INSTALA GRUPO= (entero,
+# otra vez: ya estaba; con un fallo, con su motivo; lo que falta); QUITA
+# GRUPO= (lo de otro grupo entero, lo imprescindible y lo que otro necesita
+# se queda); un PAQUETES sin grupos (como los de antes de la 1.9) no se
+# entera de las líneas «grupo=» y sigue instalando; y un usuario normal, no
+( cd $F && rm -rf paqg && mkdir paqg && cp paq/*.HPQ paqg/ && rm -f paqg/MALO.HPQ && $HPQ catalogo paqg \
+  && printf 'grupo=textos letras,saludo Los textos|Unas letras y un programa que saluda\r\ngrupo=mixto letras,nadie Mixto|Con uno que no está en el catálogo\r\ngrupo=conbase base,letras Con la base|La base (imprescindible) y las letras\r\n' >> paqg/CATALOGO.TXT \
+  && $HPQ firma paqg $Q/prueba.key ) >> $Q/hpq.txt 2>&1
+mkfs.fat -F 16 -n MEMORIA -C $Q/usbg.img 16384 > /dev/null && mmd -i $Q/usbg.img ::PAQUETES && mcopy -i $Q/usbg.img $F/paqg/* ::PAQUETES/
+if $HPQ comprueba $F/paqg $Q/clave.cas > /dev/null && grep -q $'^grupo=textos letras,saludo Los textos|Unas letras y un programa que saluda\r$' $F/paqg/CATALOGO.TXT \
+  && [ "$($HPQ grupos | grep -c '^grupo=')" = 6 ] && $HPQ grupos | grep -q '^grupo=oficina pluma,cuentas,oficina,pdf,agenda,bloc,pintura,accesori Toda la Oficina|' \
+  && [ -z "$($HPQ grupos $F/paq)" ]; then
+  ok "tools/hpq.py: los grupos (GRUPOS: oficina, internet, juegos, multimedia, herramientas y seguridad), en el catálogo solo con los paquetes que hay; el catálogo de prueba, con los suyos y firmado (la firma, buena)"
+else ko "tools/hpq.py no hace bien los grupos:"; $HPQ grupos | head -3 | sed 's/^/        /'; fi
+cp $Q/sis.img $Q/sg.img
+USB_IMG=$Q/usbg.img paq $Q/sg.img grupos "paquetes grupos" "paquetes instala grupo=textos" ":pausa 3" "paquetes instala grupo=textos" ":pausa 1" "paquetes instala grupo=mixto" ":pausa 1" \
+  "paquetes instala grupo=nada" "paquetes quita grupo=textos" ":pausa 2" "paquetes grupos" "paquetes instala grupo=textos" ":pausa 3" "paquetes quita grupo=conbase" ":pausa 1" "paquetes lista"
+tr -d '\r' < $Q/grupos.sal > $Q/grupos.txt
+S=$Q/grupos.txt
+mira "PAQUETES GRUPOS: cada grupo, con lo que lleva y cómo está (nadie: no está en el catálogo)" \
+  "^Grupos de paquetes de X:.PAQUETES.:$" "^  textos        Los textos: 0 de 2 instalados (faltan [0-9]* K)$" "^      letras, saludo$" \
+  "^      letras, nadie (no está en el catálogo)$" "^  conbase       Con la base: 1 de 2 instalados"
+mira "INSTALA GRUPO=textos: todo, en orden (letras antes, que saludo lo necesita), con las sumas; y el resumen" \
+  "^Grupo «Los textos» (textos): letras saludo$" "^Se va a instalar: letras 1\.1, saludo 2\.0$" "^  instalado saludo 2\.0$" "^Grupo textos: 2 instalados, 0 ya estaban, 0 fallos\.$"
+mira "otra vez: ya estaba todo; mixto: lo que no se puede, con su motivo (y lo demás, sí); un grupo que no está, se dice" \
+  "^Grupo textos: 0 instalados, 2 ya estaban, 0 fallos\.$" "^  fallo nadie: no está en el catálogo$" "^Grupo mixto: 0 instalados, 1 ya estaban, 1 fallos\.$" \
+  "^paquetes: el catálogo no trae el grupo «nada» (PAQUETES GRUPOS los dice)$"
+mira "QUITA GRUPO=textos: letras se queda (es de mixto, que está entero); saludo, se quita" \
+  "^Quitar el grupo «Los textos»:$" "^  se queda letras: es también de «Mixto», que está entero$" "^Se va a quitar: saludo 2\.0$" "^  quitado saludo 2\.0$" \
+  "^  textos        Los textos: 1 de 2 instalados"
+mira "lo que falta: INSTALA GRUPO=textos pone solo saludo; QUITA GRUPO=conbase: base es imprescindible y letras lo necesita saludo: nada que quitar" \
+  "^Se va a instalar: saludo 2\.0$" "^Grupo textos: 1 instalados, 1 ya estaban, 0 fallos\.$" "^  se queda base: es imprescindible" \
+  "^No hay nada del grupo que se pueda quitar\.$" "^3 paquetes\.$"
+if sano $Q/sg.img && sin_restos $Q/sg.img && igual_en $Q/sg.img HISPA/SALUDO.TXT $F/S2.TXT && igual_en $Q/sg.img DOCS/LETRAS/B.TXT $F/B11.TXT; then
+  ok "y en el disco: sano, sin restos, con letras y saludo (los del grupo) octeto a octeto"
+else ko "instalar y quitar grupos no deja bien el disco:"; lista_de $Q/sg.img | sed 's/^/        /' | head -12; fi
+# un PAQUETES sin grupos (el de la 1.8, si está el repositorio; si no, este
+# mismo sin leer «grupo=»): instala del catálogo con grupos sin enterarse
+mkdir -p $Q/viejo && cp $Q/clave.cas $Q/viejo/
+if git -C $AQUI log -1 > /dev/null 2>&1 && c=$(git -C $AQUI log --format=%H -S'VERSIÓN_PAQUETES = "1.9"' -- nucleo32/upaquete.cas | tail -1) && [ -n "$c" ] \
+  && git -C $AQUI show "$c^:castel/nucleo32/upaquete.cas" > $Q/viejo/upaquete.cas 2> /dev/null && grep -q 'VERSIÓN_PAQUETES = "1.8"' $Q/viejo/upaquete.cas; then
+  viejo="el de la 1.8"
+else
+  sed 's/^                lee_grupo(l + 6)$/                gr_n := 0/' $AQUI/nucleo32/upaquete.cas > $Q/viejo/upaquete.cas; viejo="uno sin grupos"
+fi
+cp $Q/sis.img $Q/sv.img
+if python3 -I $AQUI/ccastel.py $Q/viejo/upaquete.cas -o $Q/viejo/u.asm -I $AQUI/nucleo32 > /dev/null 2>&1 && nasm -f bin $Q/viejo/u.asm -o $Q/viejo/PAQUETES.BIN \
+  && mcopy -o -i $Q/sv.img $Q/viejo/PAQUETES.BIN ::HISPA/PAQUETES.BIN; then
+  USB_IMG=$Q/usbg.img paq $Q/sv.img viejo "paquetes catalogo" "paquetes instala saludo" ":pausa 3"
+  tr -d '\r' < $Q/viejo.sal > $Q/viejo.txt
+  S=$Q/viejo.txt
+  mira "un PAQUETES sin grupos ($viejo) con el catálogo con grupos: la firma, buena; las líneas «grupo=» no las mira; instala igual" \
+    "^La firma del catálogo es buena" "^  saludo    2\.0  *Un programa que saluda (la 2)$" "^  instalado saludo 2\.0$" "^Hecho\.$"
+  ! grep -q "Grupo \|grupo «\|textos" $S && ok "(y no dice nada de los grupos)" || ko "el PAQUETES sin grupos habla de ellos: $(grep -m1 'Grupo \|grupo «\|textos' $S)"
+else ko "no se ha podido hacer el PAQUETES sin grupos ($viejo)"; fi
+# un usuario normal (Biblio2, que entra sola; el administrador es Carlos): no instala grupos
+cp $Q/sis.img $Q/sn.img
+printf 'HISPA-USUARIOS 1\r\nu=1|N|0|1|BIBLIO2|Biblio2|\r\nu=2|A|0|0|CARLOS|Carlos|\r\n' > $Q/UN.TXT
+mcopy -i $Q/sn.img $Q/UN.TXT ::HISPA/USUARIOS.TXT
+USB_IMG=$Q/usbg.img paq $Q/sn.img normal ":pausa 2" "paquetes grupos" "paquetes instala grupo=textos" "paquetes quita grupo=conbase" "paquetes lista"
+tr -d '\r' < $Q/normal.sal > $Q/normal.txt
+S=$Q/normal.txt
+mira "un usuario normal ve los grupos, pero no los instala ni los quita (solo un administrador)" \
+  "^  textos        Los textos: 0 de 2 instalados" "^paquetes: solo un administrador puede instalar, reparar o quitar programas" "^1 paquetes\.$"
+[ "$(grep -c '^paquetes: solo un administrador puede instalar' $S)" = 2 ] && ok "(las dos veces: INSTALA GRUPO= y QUITA GRUPO=)" || ko "el usuario normal: $(grep -c '^paquetes: solo un administrador' $S) rechazos (tenían que ser 2)"
+
 # 8. la ventana «Programas y actualizaciones» (ACTUALIZ.BIN), desde el menú
 # Inicio («Actualizar»): la lista, instalar (con lo que necesita) y quitar con
 # sus botones; por debajo, PAQUETES
@@ -3235,8 +3304,8 @@ CAPTURAS=$G ESCRIBE=1 SATA=$Q/s5.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEM
   $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 300 238" ":pausa 1" ":captura pg0" ":clic 592 326" ":pausa 5" ":raton 790 300" ":captura pg1" \
   ":tecla down" ":tecla delete" ":pausa 1" ":captura pg2" ":tecla esc" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg3" ":tecla esc" ":tecla esc" ":pausa 1" \
   ":clic 40 585" ":pausa 1" ":clic 290 338" ":pausa 5" ":captura pg4" ":tecla ctrl-tab" ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":captura pg5" ":tecla down" ":tecla ret" ":pausa 5" ":captura pg6" \
-  ":tecla ctrl-tab" ":pausa 1" ":escribe juego" ":pausa 1" ":captura pg7" ":tecla ret" ":tecla down" ":clic 720 374" ":pausa 5" ":captura pg8" ":tecla esc" ":tecla esc" ":pausa 1" \
-  ":clic 40 585" ":pausa 1" ":captura pgm" ":clic 330 308" ":pausa 5" ":captura pgi" ":tecla esc" ":pausa 1" ":clic 40 585" ":pausa 1" ":captura pgm2" ":clic 100 348" ":pausa 5" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg9" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg10" ":pausa 6" ":captura pg11" \
+  ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":escribe juego" ":pausa 1" ":captura pg7" ":tecla ret" ":tecla down" ":clic 720 374" ":pausa 5" ":captura pg8" ":tecla esc" ":tecla esc" ":pausa 1" \
+  ":clic 40 585" ":pausa 1" ":captura pgm" ":clic 330 308" ":pausa 5" ":captura pgi" ":tecla esc" ":pausa 1" ":clic 40 585" ":pausa 1" ":captura pgm2" ":clic 100 348" ":pausa 5" ":tecla down" ":tecla down" ":tecla down" ":tecla delete" ":pausa 1" ":captura pg9" ":tecla tab" ":tecla ret" ":pausa 1" ":captura pg10" ":pausa 10" ":captura pg11" \
   ":tecla home" ":tecla down" ":tecla down" ":tecla down" ":tecla ret" ":pausa 3" ":captura pg12" ":clic 720 403" ":pausa 5" ":captura pg13" \
   ":tecla end" ":tecla up" ":tecla delete" ":pausa 1" ":captura pg14" ":tecla tab" ":tecla ret" ":pausa 4" ":captura pg15" > $Q/ventana.sal 2>&1
 miracap "Configuración (el Panel de control) trae «Programas»" pg0 negrita 140 80 160 95 "Configuración" negrita 550 341 560 351 "Programas"
@@ -3278,6 +3347,41 @@ if sano $Q/s5.img && sin_restos $Q/s5.img && ! lista_de $Q/s5.img | grep -q 'DOC
 else ko "lo hecho desde la ventana no queda bien en el disco:"; lista_de $Q/s5.img | sed 's/^/        /' | head -16; fi
 # (GUARDA_CAPTURAS=carpeta: las capturas de la ventana se quedan ahí)
 [ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/pg*.ppm "$GUARDA_CAPTURAS/"
+# (GRUPOS y RUEDA, 25/11/2026) la pestaña «Grupos» y la rueda: con lo de
+# antes instalado (letras, saludo, extra y juego) y un catálogo con grupos
+# (todo: letras, saludo, extra y visor; juegos: juego y saludo; red: la red,
+# imprescindible; y, de GRUPOS de hpq.py, «Todo Internet y redes», con red). La rueda sobre el árbol de «Instaladas» lo baja tres
+# renglones (antes no hacía nada); en Grupos, el grupo con lo que lleva
+# ([+]), su botón «Faltan 1 de 4: instalar lo que falta», la barra y el
+# resumen; luego «Ya está todo» y «Quitar grupo...» (se quedan letras,
+# que lo necesita saludo, y saludo, que es de juegos, que está entero)
+( cd $F && rm -rf paq3 && mkdir paq3 && cp paq2/*.HPQ paq3/ && $HPQ catalogo paq3 \
+  && printf 'grupo=todo letras,saludo,extra,visor Todo junto|Las letras, el saludo, lo extra y el visor\r\ngrupo=juegos juego,saludo Los juegos|El juego y el saludo\r\ngrupo=red red Solo la red|La red (imprescindible)\r\n' >> paq3/CATALOGO.TXT \
+  && $HPQ firma paq3 $Q/prueba.key ) >> $Q/hpq.txt 2>&1
+mkfs.fat -F 16 -n MEMORIA -C $Q/usb3.img 16384 > /dev/null && mmd -i $Q/usb3.img ::PAQUETES && mcopy -i $Q/usb3.img $F/paq3/* ::PAQUETES/
+cp $Q/s1.img $Q/sg.img
+mcopy -i $Q/sg.img $Q/HISPA.INI ::HISPA/
+CAPTURAS=$G ESCRIBE=1 SATA=$Q/sg.img MEMORIA=64 MODULOS= ARRANQUE=escritorio QEMU_MAS="-device usb-ehci,id=u -drive id=mu,file=$Q/usb3.img,format=raw,if=none,snapshot=on -device usb-storage,bus=u.0,drive=mu" \
+  $AQUI/nucleo32/probar.sh $Q/SEMILLA.BIN ":pausa 3" ":clic 40 585" ":pausa 1" ":clic 300 238" ":pausa 1" ":clic 592 326" ":pausa 5" ":raton 300 260" ":pausa 1" ":captura gr0" \
+  ":monitor mouse_move 0 0 -1" ":pausa 1" ":captura gr1" ":monitor mouse_move 0 0 1" ":pausa 1" ":captura gr1b" \
+  ":tecla ctrl-tab" ":tecla ctrl-tab" ":pausa 1" ":tecla down" ":raton 790 300" ":pausa 1" ":captura gr2" ":tecla right" ":pausa 1" ":captura gr3" \
+  ":clic 720 374" ":pausa 6" ":captura gr4" ":tecla esc" ":raton 790 300" ":pausa 1" ":captura gr5" ":clic 720 403" ":pausa 1" ":captura gr6" ":tecla tab" ":tecla ret" ":pausa 6" ":captura gr7" > $Q/grupos.sal 2>&1
+miracap "la rueda en «Programas y actualizaciones» (no la atendía): sobre el árbol de «Instaladas», un paso abajo, tres renglones (Sistema ya no se ve arriba)" gr1 \
+  notexto 20 160 630 185 "Sistema" notexto 20 160 630 185 "base"
+miracap "y un paso arriba, otra vez como estaba" gr1b negrita 20 160 200 195 "[-] Sistema"
+miracap "la pestaña «Grupos (4)» (con «Todo Internet y redes» de GRUPOS, que lleva red): cada grupo, con cuántos tiene instalados y su botón: «Faltan 1 de 4: instalar lo que falta», «Ya está todo»" gr2 \
+  negrita 500 115 640 145 "Grupos (4)" negrita 20 160 330 330 "[+] Todo junto" negrita 400 160 790 330 "Faltan 1 de 4" texto 400 160 790 330 "Ya est" negrita 20 160 330 330 "[+] Todo Internet y redes"
+miracap "abierto (flecha derecha): lo que lleva debajo (visor, sin instalar) y, en la ficha, qué es, lo que falta y el botón grande" gr3 \
+  negrita 20 160 330 330 "[-] Todo junto" texto 20 160 630 330 visor negrita 10 350 630 530 "Falta:" texto 150 350 630 530 "visor (209 octetos)" negrita 10 350 630 530 "instalar lo que falta"
+miracap "«Completar grupo» (instalar lo que falta): el resumen (1 instalados, 3 ya estaban, 0 fallos)" gr4 texto 120 200 680 400 "Todo junto: 1 instalados, 3 ya estaban, 0 fallos"
+miracap "y luego, el grupo entero: «4 de 4», visor (sí)" gr5 negrita 230 160 330 330 "4 de 4" texto 150 400 630 420 "visor (s"
+miracap "«Quitar grupo...»: pregunta, con lo que se quita (extra y visor; letras y saludo se quedan)" gr6 texto 120 200 680 400 "extra,visor" negrita 120 200 680 420 "Quitar el grupo"
+miracap "y después: extra y visor quitados; letras y saludo, no (el grupo, «2 de 4»)" gr7 negrita 20 160 400 330 "[-] Todo junto" negrita 230 160 330 330 "2 de 4" texto 150 350 630 530 "extra, visor (407 octetos)"
+if ! grep -q "excepción\|\*\*\*" $Q/grupos.sal; then ok "(con los grupos, ni una excepción del núcleo)"; else ko "hay excepciones con los grupos:"; grep "excepción\|\*\*\*" $Q/grupos.sal | head -3 | sed 's/^/        /'; fi
+if sano $Q/sg.img && sin_restos $Q/sg.img && ! lista_de $Q/sg.img | grep -q 'EXTRA/\|VISOR/' && igual_en $Q/sg.img HISPA/SALUDO.DAT $F/GRANDE.DAT && igual_en $Q/sg.img DOCS/LETRAS/A.TXT $F/A.TXT; then
+  ok "los grupos desde la ventana, desde fuera: el disco sano y sin restos; sin extra ni visor; con letras y saludo"
+else ko "los grupos desde la ventana no dejan bien el disco:"; lista_de $Q/sg.img | sed 's/^/        /' | head -16; fi
+[ -n "${GUARDA_CAPTURAS:-}" ] && mkdir -p "$GUARDA_CAPTURAS" && cp $G/gr*.ppm "$GUARDA_CAPTURAS/"
 if ! grep -q "excepción\|\*\*\*" $Q/ventana.sal; then ok "ni una excepción del núcleo"; else ko "hay excepciones:"; grep "excepción\|\*\*\*" $Q/ventana.sal | head -3 | sed 's/^/        /'; fi
 else
   echo "  (SOLO=${SOLO08:-$SOLO}: sin los programas instalados)"

@@ -917,6 +917,16 @@ módulo UredWifi
                     clic(ent32(s.a), ent32(s.b), veces(s.c))
                     si foco = ID_CERRAR entonces romper fin
                     pinta()
+                sino si s.clase = EV_RUEDA entonces
+                    ; (RUEDA) la lista de redes (siete a la vista, que siguen a la
+                    ; elegida): la rueda cambia de red, una por paso
+                    si n_redes > 0 y s.c yb CON_CONTROL = 0 y pasos_rueda(s.c) <> 0 entonces
+                        si elegida < 0 entonces elegida := 0 fin
+                        elegida := elegida - pasos_rueda(s.c)
+                        si elegida < 0 entonces elegida := 0 fin
+                        si elegida >= ent32(n_redes) entonces elegida := ent32(n_redes) - 1 fin
+                        pinta()
+                    fin
                 sino si s.clase = EV_TAMAÑO entonces
                     nuevo_tamaño(ent32(s.a), ent32(s.b), tamaño_)
                     pinta()

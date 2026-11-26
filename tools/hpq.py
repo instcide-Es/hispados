@@ -35,6 +35,13 @@
 #        sistema=<nombre>               (0.8.6: es del sistema; PAQUETES ACTUALIZA
 #                                        lo instala si no está, salvo si se ha
 #                                        quitado a propósito: QUITADOS.TXT)
+#        grupo=<código> <p1>,<p2>,... <Nombre>|<Descripción>
+#                                       (GRUPOS, 25/11/2026, paquetes 1.9: los
+#                                        grupos para instalar de una vez, de
+#                                        GRUPOS, con los paquetes que haya en
+#                                        la carpeta; un paquete puede estar en
+#                                        varios; un PAQUETES de antes no las
+#                                        mira; van firmadas con lo demás)
 #        serie=<N>                      (USUARIOS, 22/11/2026: la pone «firma», detrás
 #                                        de la primera línea, y la sube cada vez:
 #                                        PAQUETES no usa un catálogo de Internet con
@@ -65,6 +72,8 @@
 #    hpq.py linea PAQUETE.HPQ         (sus líneas para CATALOGO.TXT: la del
 #               paquete y la de su tipo)
 #    hpq.py tipos                     (PROGRAMAS: la tabla de los tipos)
+#    hpq.py grupos [CARPETA]          (GRUPOS: los grupos; con CARPETA, solo
+#               con los paquetes que hay en ella, como van al catálogo)
 #
 #  La firma (Ed25519, RFC 8032): el catálogo lleva las sumas de todos los
 #  paquetes, y cada paquete las de sus archivos; así que basta con firmar el
@@ -135,6 +144,48 @@ TIPO_POR_NOMBRE = {
     'juegos': 'juegos',     # (JUEGOS2)
     'clicgest': 'terceros',
 }
+
+
+# (GRUPOS, 25/11/2026) los grupos del catálogo: el código (PAQUETES INSTALA
+# GRUPO=código), su nombre, qué es y sus paquetes (los que no estén en la
+# carpeta del catálogo no se escriben; un grupo sin ninguno, tampoco). Un
+# paquete puede estar en varios. Al quitar un grupo, PAQUETES deja lo del
+# sistema («sistema=»), lo imprescindible y lo de otro grupo que esté entero.
+GRUPOS = [
+    ('oficina', 'Toda la Oficina',
+     'Pluma, Cuentas, la oficina de Hispa-386, Hispa-PDF, la Agenda, el Bloc de notas, Pintura y los Accesorios',
+     ['pluma', 'cuentas', 'oficina', 'pdf', 'agenda', 'bloc', 'pintura', 'accesori']),
+    ('internet', 'Todo Internet y redes',
+     'La red, HTTPS, el Navegador, el Correo, SSH, Tailscale y el Wi-Fi',
+     ['red', 'tls', 'navega', 'correo', 'ssh', 'tailscal', 'wifi']),
+    ('juegos', 'Todos los juegos',
+     'Los juegos de Hispa-Pentium, con el sonido y los programas de Windows (DirectX) para los de Windows',
+     ['juegos', 'sonido', 'win32']),
+    ('multimedia', 'Multimedia',
+     'El Reproductor de música, el sonido, el Mirador de imágenes, Pintura e Hispa-PDF',
+     ['reproduc', 'sonido', 'mirador', 'pintura', 'pdf']),
+    ('herramientas', 'Herramientas',
+     'Comprimidos (.ZIP), el Termómetro, el Asistente de compatibilidad, los Accesorios y la Consola',
+     ['comprim', 'termo', 'compat', 'accesori', 'consola']),
+    ('seguridad', 'Seguridad',
+     'Escudo, el antivirus, con todas sus firmas (las de ClamAV: la base, la del mes y la del día)',
+     ['escudo', 'escbase', 'escmes', 'escdia']),
+]
+GRUPO = re.compile(r'^[a-z0-9_-]{1,12}$')
+
+
+def lineas_grupos(hay):
+    """(GRUPOS) las líneas «grupo=» del catálogo, con los paquetes de «hay»."""
+    filas = []
+    for codigo, nombre, desc, lista in GRUPOS:
+        if not GRUPO.match(codigo):
+            falla('el grupo «%s» no vale como código (hasta 12: a-z, 0-9, «-» y «_»)' % codigo)
+        if '|' in nombre or '|' in desc or any(c in nombre for c in '\r\n'):
+            falla('el grupo «%s»: ni el nombre ni la descripción pueden llevar «|»' % codigo)
+        ps = [n for n in lista if n in hay]
+        if ps:
+            filas.append('grupo=%s %s %s|%s' % (codigo, ','.join(ps), nombre, desc))
+    return filas
 
 
 def tipo_valido(t):
@@ -349,7 +400,8 @@ SISTEMA = [
     # (0.8.9) 1.6: (COMPAT) los ganchos del Asistente al instalar o actualizar win32 (PAQUETES y ACTUALIZ /BANDEJA)
     # (0.8.10) 1.7: (SDHCI, UEFI) el «núcleo de antes» también en un GRUB.CFG con multiboot2 (lo instalado en SD/eMMC por UEFI)
     # (0.8.11) 1.8: (SIN-ADMIN) un usuario normal pone al día lo instalado con el catálogo firmado (sin /FORZAR)
-    ('paquetes', '1.8', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas y sin instalar, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
+    # (0.8.13) 1.9: (GRUPOS) los grupos («Toda la Oficina»...: INSTALA GRUPO=, la pestaña Grupos) y (RUEDA) la rueda en la ventana
+    ('paquetes', '1.9', 'Programas y actualizaciones: PAQUETES y su ventana (pendientes, al día, instaladas, sin instalar y grupos, por tipos)', 'base >= 0.8.2, nucleo >= 0.7', [
         ('PAQUETES.BIN', r'\HISPA\PAQUETES.BIN'), ('ACTUALIZ.BIN', r'\HISPA\ACTUALIZ.BIN'),
         ('PROGRAMA.BIN', r'\HISPA\PROGRAMA.BIN')]),
     # (JUEGOS) la 0.8.7: UDP sin esperar (rpila.cas: un juego lo pregunta en cada cuadro)
@@ -574,6 +626,8 @@ def catalogo(carpeta):
     # estas líneas
     hay = {x.split()[0][len('paquete='):] for x in filas if x.startswith('paquete=')}
     filas += ['sistema=%s' % n for n in sorted(DEL_SISTEMA) if n in hay]
+    # (GRUPOS) y los grupos (un PAQUETES de antes de la 1.9 no los mira)
+    filas += lineas_grupos(hay)
     with open(os.path.join(carpeta, 'CATALOGO.TXT'), 'wb') as f:
         f.write(a437(MAGIA_CATALOGO) + b'\r\n')
         for x in filas:
@@ -913,6 +967,17 @@ def principal(a):
         return 0
     if orden == 'linea':
         sys.stdout.buffer.write(linea_catalogo(a[2]) + b'\r\n')
+        return 0
+    if orden == 'grupos':
+        if len(a) > 2:
+            hay = set()
+            for n in sorted(os.listdir(a[2])):
+                if n.upper().endswith('.HPQ'):
+                    hay.add(lee_paquete(os.path.join(a[2], n))[0]['nombre'])
+        else:
+            hay = {n for _, _, _, l in GRUPOS for n in l}
+        for x in lineas_grupos(hay):
+            print(x)
         return 0
     if orden == 'tipos':
         for c, n in TIPOS:

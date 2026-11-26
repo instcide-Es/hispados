@@ -3556,6 +3556,65 @@ verdad, con versiones que tenían fallos ya arreglados. Uno de una carpeta del
 equipo (el CD, una memoria USB) más viejo se usa, con un aviso (lo ha puesto ahí
 quien está delante). Un PAQUETES de antes no mira esa línea.
 
+**Los grupos** (25/11/2026, rama `paq-grupos`, para la 0.8.13: PAQUETES
+**1.9**; Carlos: «poder instalar paquetes enteros como Toda la Oficina, Todo
+Internet y redes»). Detrás de las de `sistema=`, una línea por grupo, firmada
+con lo demás:
+
+```
+grupo=oficina pluma,cuentas,oficina,pdf,agenda,bloc,pintura,accesori Toda la Oficina|Pluma, Cuentas, ...
+```
+
+El código (hasta 12 letras: `PAQUETES INSTALA GRUPO=oficina`), sus paquetes
+con comas (un paquete puede estar en varios grupos) y, tras un espacio, el
+nombre y la descripción separados por `|`. Los grupos están en `GRUPOS` de
+`tools/hpq.py` y `catalogo` solo escribe los paquetes que hay en la carpeta
+(`hpq.py grupos [CARPETA]` los enseña). Los de ahora:
+
+| Código | Nombre | Lleva |
+|---|---|---|
+| oficina | Toda la Oficina | pluma, cuentas, oficina, pdf, agenda, bloc, pintura, accesori |
+| internet | Todo Internet y redes | red, tls, navega, correo, ssh, tailscal, wifi |
+| juegos | Todos los juegos | juegos, sonido, win32 |
+| multimedia | Multimedia | reproduc, sonido, mirador, pintura, pdf |
+| herramientas | Herramientas | comprim, termo, compat, accesori, consola |
+| seguridad | Seguridad | escudo, escbase, escmes, escdia |
+
+- `PAQUETES GRUPOS`: cada grupo, cuántos tiene instalados, lo que falta (en K)
+  y lo que lleva («(sí)» lo instalado; «(no está en el catálogo)»).
+- `PAQUETES INSTALA GRUPO=oficina`: pone lo que falte, con lo que necesite
+  delante (un solo plan, con sus sumas y su barra); lo que no se pueda (no
+  está en el catálogo, o lo que necesita no se puede poner) va a los fallos y
+  se sigue con lo demás. Al final: `Grupo oficina: 3 instalados, 4 ya
+  estaban, 1 fallos.` y una línea `  fallo nombre: por qué` por cada uno.
+- `PAQUETES QUITA GRUPO=oficina` (solo un administrador, como instalar): se
+  quedan lo del sistema (`sistema=`), lo imprescindible, lo que es también de
+  otro grupo que está entero y lo que necesita un programa que se queda; dice
+  por qué se queda cada uno (`  se queda pluma: es también de «...», que está
+  entero`).
+- `PAQUETES FICHAS /CATALOGO` da `g|código|nombre|descripción|p1,p2...|lo que
+  sale al quitarlo` para la ventana.
+- **Un PAQUETES de antes de la 1.9 no mira las líneas `grupo=`** (solo
+  conoce `paquete=`, `tipo=`, `sistema=` y `serie=`): sigue instalando igual
+  con el catálogo nuevo; `INSTALA GRUPO=...` le parece un paquete que no está.
+- **La ventana** («Programas y actualizaciones», PROGRAMA.BIN): una pestaña
+  más, **Grupos (n)** (`PROGRAMA /GRUPOS`): cada grupo en el árbol, con
+  `[+]`/`[-]` para ver lo que lleva, cuántos tiene («4 de 7») y su botón:
+  «Instalar todo (N paquetes, X MB)», «Faltan 3 de 7: instalar lo que falta
+  (X MB)» o «Ya está todo»; al acabar, el resumen en una ventanita
+  (instalados, ya estaban y los fallos con su motivo). «Quitar grupo...»,
+  solo para un administrador y con confirmación (dice lo que sale). A un
+  usuario normal el botón le dice «Instalar: solo un administrador» y la
+  ficha, que un usuario normal puede poner al día lo instalado.
+- **(RUEDA) La rueda, en la ventana**: PROGRAMA.BIN no atendía el suceso de
+  la rueda (desde que sustituyó a ACTUALIZ.BIN en la 0.8.5; en Pluma, el Bloc
+  o Mi equipo, sí): ahora desplaza la lista que hay debajo de la flecha
+  (tres renglones por paso), y fuera de ellas, el árbol; Ctrl+rueda, la
+  letra. De paso: tampoco la atendían la Calculadora (la cinta), el Reloj
+  (las vueltas del cronómetro) y el Wi-Fi (la lista de redes: cambia de red,
+  una por paso); el Mapa de caracteres, el Panel de control y el Asistente
+  no tienen nada que desplazar.
+
 ### Lo instalado: C:\HISPA\PAQUETES
 
 Un **registro por paquete**, `NOMBRE.PQI`: **la cabecera de su paquete, tal

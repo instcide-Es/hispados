@@ -18,6 +18,14 @@
 ;    PAQUETES SUELTOS                  los programas sin paquete (.EXE, .BIN, .HVP)
 ;    PAQUETES FICHAS                   lo instalado con todo, para «Programas instalados»
 ;    PAQUETES QUITA nombre /DEPENDIENTES   y lo que lo necesite, antes
+;    (GRUPOS, 25/11/2026: 1.9)
+;    PAQUETES GRUPOS                   los grupos del catálogo («Toda la Oficina»...)
+;    PAQUETES INSTALA GRUPO=oficina    instala lo que falte del grupo (lo que
+;                                      necesita, antes), y dice al final lo
+;                                      instalado, lo que ya estaba y los fallos
+;    PAQUETES QUITA GRUPO=oficina      quita el grupo, salvo lo del sistema, lo
+;                                      imprescindible, lo de otro grupo que está
+;                                      entero y lo que necesite otro que se queda
 ;    (base, red y paquetes no se quitan nunca: son imprescindibles)
 ;    /FORZAR                           quitar aunque lo necesite otro; poner
 ;                                      una versión más vieja o la misma
@@ -61,6 +69,11 @@
 ;  aparte) se apunta en el registro al instalarlo; y si no, se deduce del
 ;  nombre (tipo_por_nombre), o es «otros».
 ;
+;  (GRUPOS) Los grupos: en el catálogo, una línea por grupo (tools/hpq.py,
+;  GRUPOS; un PAQUETES de antes de la 1.9 no las mira):
+;      grupo=<código> <paquete>,<paquete>,... <Nombre>|<Descripción>
+;  Un paquete puede estar en varios. Están firmadas con lo demás del catálogo.
+;
 ;  Un paquete (.HPQ, tools/hpq.py) es una cabecera de texto (nombre, versión,
 ;  descripción, lo que necesita, con lo que choca y sus archivos, cada uno
 ;  con su destino, su tamaño y su SHA-256) y, detrás, los archivos. Lo
@@ -94,7 +107,8 @@ módulo UPaquetes
     constante RUTA = 160
     constante NINGUNO = 0xFFFFFFFF
     constante URL_POR_DEFECTO = "http://actualiza.hispados.es/pentium/"
-    constante VERSIÓN_PAQUETES = "1.8"                ; (CORTES) (COMPAT, 0.8.9: 1.6) (SDHCI, 0.8.10: 1.7) (SIN-ADMIN, 0.8.11: 1.8)
+    constante VERSIÓN_PAQUETES = "1.9"                ; (CORTES) (COMPAT, 0.8.9: 1.6) (SDHCI, 0.8.10: 1.7) (SIN-ADMIN, 0.8.11: 1.8) (GRUPOS: 1.9)
+    constante MAX_GRUPOS = 16                   ; (GRUPOS) los grupos del catálogo
 
     ; (PROGRAMAS) los tipos: el código y su nombre, en el orden en que salen
     ; (los mismos que TIPOS en tools/hpq.py; docs/PENTIUM.md, sección 13)
@@ -234,6 +248,16 @@ módulo UPaquetes
     variable quitados: arreglo [MAX_QUITADOS] de byte
     variable quitados2: arreglo [MAX_QUITADOS] de byte
     variable quitados_leídos: bool
+    ; (GRUPOS) los grupos del catálogo: «grupo=código p1,p2,... Nombre|Descripción»
+    variable gr_n: nat32
+    variable gr_código: arreglo [MAX_GRUPOS] de arreglo [16] de byte
+    variable gr_lista: arreglo [MAX_GRUPOS] de arreglo [256] de byte
+    variable gr_nombre: arreglo [MAX_GRUPOS] de puntero a byte
+    variable gr_desc: arreglo [MAX_GRUPOS] de puntero a byte
+    variable gr_pedido: nat32 = 0xFFFFFFFF      ; INSTALA GRUPO=: cuál (NINGUNO: ninguno)
+    variable gr_ya: arreglo [MAX_PAQ] de bool   ; INSTALA GRUPO=: cada uno, si ya estaba
+    variable gr_fallo: arreglo [MAX_PAQ] de puntero a byte   ; y por qué no se ha podido (nulo: bien)
+    variable gr_sale: arreglo [MAX_PAQ] de bool ; lo que sale al quitar un grupo (por lo instalado)
     variable sueltos_n: nat32
     variable suelto_ruta: arreglo [MAX_SUELTOS] de arreglo [RUTA] de byte
     variable suelto_tamaño: arreglo [MAX_SUELTOS] de nat32
@@ -1161,6 +1185,27 @@ módulo UPaquetes
     fin
 
     ; CATALOGO.TXT: «paquete=nombre versión ARCHIVO.HPQ octetos sha256 descripción»
+    ; (GRUPOS) una línea de grupo (lo de detrás de «grupo=»): el nombre y la
+    ; descripción se quedan en el catálogo (el «|», a 0)
+    función lee_grupo(l: puntero a byte)
+        variable q: puntero a byte
+        palabra(l, 0, gr_código[gr_n], 16)
+        palabra(l, 1, gr_lista[gr_n], 256)
+        q := tras_palabras(l, 2)
+        gr_nombre[gr_n] := q
+        mientras valor(q) <> 0 y valor(q) <> '|' hacer q := q + 1 fin
+        si valor(q) = '|' entonces
+            valor(q) := 0
+            q := q + 1
+        fin
+        gr_desc[gr_n] := q
+        a_minúsculas(gr_código[gr_n])
+        si gr_código[gr_n][0] <> 0 y gr_lista[gr_n][0] <> 0 entonces
+            si valor(gr_nombre[gr_n]) = 0 entonces gr_nombre[gr_n] := gr_código[gr_n] fin
+            gr_n := gr_n + 1
+        fin
+    fin
+
     función carga_catálogo(): bool
         variable m, n, k, t: nat32
         variable p, l: puntero a byte
@@ -1195,6 +1240,7 @@ módulo UPaquetes
         cat_tipos_n := 0
         cat_sis_n := 0
         cat_serie := 0
+        gr_n := 0
         p := cat
         mientras p < cat + n y cat_n < MAX_PAQ hacer
             l := p
@@ -1214,6 +1260,10 @@ módulo UPaquetes
             si empieza_por(l, "sistema=") y cat_sis_n < MAX_PAQ entonces
                 palabra(l + 8, 0, cat_sis[cat_sis_n], 12)
                 si cat_sis[cat_sis_n][0] <> 0 entonces cat_sis_n := cat_sis_n + 1 fin
+            fin
+            ; (GRUPOS) «grupo=código p1,p2,... Nombre|Descripción»
+            si empieza_por(l, "grupo=") y gr_n < MAX_GRUPOS entonces
+                lee_grupo(l + 6)
             fin
             si empieza_por(l, "paquete=") entonces
                 l := l + 8
@@ -2222,6 +2272,8 @@ módulo UPaquetes
         escribir("  PAQUETES INSTALA X.HPQ        instala ese archivo de paquete\n")
         escribir("  PAQUETES ACTUALIZA [nombre]   pone al día lo instalado (también un usuario normal, con el catálogo firmado)\n")
         escribir("  PAQUETES QUITA nombre         lo quita (/DEPENDIENTES: y lo que lo necesite)\n")
+        escribir("  PAQUETES GRUPOS               los grupos («Toda la Oficina»...) y lo que llevan\n")
+        escribir("  PAQUETES INSTALA GRUPO=nombre lo que falte de un grupo; QUITA GRUPO=nombre, el grupo\n")
         escribir("  PAQUETES REPARA [nombre]      comprueba sus archivos y vuelve a poner lo dañado\n")
         escribir("  PAQUETES ARCHIVOS nombre      sus archivos, y si están como se instalaron\n")
         escribir("  PAQUETES SUELTOS              los programas que no son de ningún paquete\n")
@@ -2444,6 +2496,20 @@ módulo UPaquetes
                     escribir("\n")
                 fin
             fin
+            ; (GRUPOS) «g|código|nombre|descripción|p1,p2...|lo que sale al quitarlo»
+            para i desde 1 hasta gr_n hacer
+                escribir("g|", gr_código[i - 1], "|", gr_nombre[i - 1], "|", gr_desc[i - 1], "|", gr_lista[i - 1], "|")
+                quitables(i - 1, falso)
+                alguno := falso
+                para j desde 1 hasta ins_n hacer
+                    si gr_sale[j - 1] entonces
+                        si alguno entonces escribir(",") fin
+                        escribir(ins_nombre[j - 1])
+                        alguno := cierto
+                    fin
+                fin
+                escribir("\n")
+            fin
         fin
     fin
 
@@ -2610,6 +2676,260 @@ módulo UPaquetes
         fin
     fin
 
+    ; =========================================================================
+    ;  (GRUPOS, 25/11/2026) Los grupos: «Toda la Oficina», «Todo Internet y
+    ;  redes»... (las líneas «grupo=» del catálogo)
+    ; =========================================================================
+    ; el grupo de ese código (NINGUNO si no está)
+    función grupo_de(código: puntero a byte): nat32
+        variable i: nat32
+        para i desde 1 hasta gr_n hacer
+            si iguales_sin_caja(gr_código[i - 1], código) entonces devolver i - 1 fin
+        fin
+        devolver NINGUNO
+    fin
+
+    ; el k-ésimo paquete del grupo g (falso si no hay tantos)
+    función miembro(g: nat32, k: nat32, destino: puntero a byte): bool
+        variable p: puntero a byte
+        variable i: nat32
+        p := gr_lista[g]
+        mientras k > 0 y valor(p) <> 0 hacer
+            si valor(p) = ',' entonces k := k - 1 fin
+            p := p + 1
+        fin
+        i := 0
+        mientras valor(p) <> 0 y valor(p) <> ',' y i < 11 hacer
+            destino[i] := minúscula(valor(p))
+            i := i + 1
+            p := p + 1
+        fin
+        destino[i] := 0
+        devolver i > 0
+    fin
+
+    ; ¿lo marca el catálogo del sistema («sistema=»)?
+    función es_del_sistema(nombre: puntero a byte): bool
+        variable i: nat32
+        para i desde 1 hasta cat_sis_n hacer
+            si iguales(cat_sis[i - 1], nombre) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; cuántos tiene el grupo (de los que están en el catálogo), cuántos están
+    ; instalados, y lo que se trae de los que faltan (octetos de sus .HPQ)
+    función cuenta_grupo(g: nat32, ref total: nat32, ref hay: nat32, ref falta_oct: nat32)
+        variable k, c: nat32
+        variable n: arreglo [12] de byte
+        total := 0
+        hay := 0
+        falta_oct := 0
+        k := 0
+        mientras miembro(g, k, n) hacer
+            k := k + 1
+            c := mejor_del_catálogo(n, 0, "")
+            si instalado(n) <> NINGUNO entonces
+                total := total + 1
+                hay := hay + 1
+            sino si c <> NINGUNO entonces
+                total := total + 1
+                falta_oct := falta_oct + cat_tamaño[c]
+            fin
+        fin
+    fin
+
+    ; ¿está entero (todo lo suyo del catálogo, instalado)?
+    función grupo_entero(g: nat32): bool
+        variable t, h, oc: nat32
+        cuenta_grupo(g, t, h, oc)
+        devolver t > 0 y h = t
+    fin
+
+    ; lo que sale al quitar el grupo g: en «gr_sale» (por lo instalado). Lo del
+    ; sistema, lo imprescindible y lo de otro grupo entero se queda; y, luego,
+    ; lo que necesite algo que se queda. Con «di», dice por qué se queda cada uno.
+    función quitables(g: nat32, di: bool): nat32
+        variable k, j, i, h, n_: nat32
+        variable n: arreglo [12] de byte
+        variable r: arreglo [100] de byte
+        variable más, otro: bool
+        para i desde 1 hasta ins_n hacer gr_sale[i - 1] := falso fin
+        k := 0
+        mientras miembro(g, k, n) hacer
+            k := k + 1
+            j := instalado(n)
+            si j = NINGUNO entonces seguir fin
+            si imprescindible(j, r) entonces
+                si di entonces imprimir2("  se queda %s: es imprescindible (%s)\n", pt(n), pt(r)) fin
+                seguir
+            fin
+            si es_del_sistema(n) entonces
+                si di entonces imprimir1("  se queda %s: es del sistema\n", pt(n)) fin
+                seguir
+            fin
+            otro := falso
+            para h desde 1 hasta gr_n hacer
+                si no otro y h - 1 <> g entonces
+                    i := 0
+                    mientras miembro(h - 1, i, r) hacer
+                        si iguales(r, n) y grupo_entero(h - 1) entonces
+                            otro := cierto
+                            si di entonces imprimir2("  se queda %s: es también de «%s», que está entero\n", pt(n), pt(gr_nombre[h - 1])) fin
+                            romper
+                        fin
+                        i := i + 1
+                    fin
+                fin
+            fin
+            si no otro entonces gr_sale[j] := cierto fin
+        fin
+        ; lo que necesita uno que se queda, se queda (hasta que no cambie nada)
+        más := cierto
+        mientras más hacer
+            más := falso
+            para j desde 1 hasta ins_n hacer
+                si gr_sale[j - 1] entonces
+                    para i desde 1 hasta ins_n hacer
+                        si gr_sale[j - 1] y i <> j y no gr_sale[i - 1] y necesita_a(i - 1, j - 1) entonces
+                            gr_sale[j - 1] := falso
+                            más := cierto
+                            si di entonces imprimir2("  se queda %s: lo necesita %s\n", pt(ins_nombre[j - 1]), pt(ins_nombre[i - 1])) fin
+                        fin
+                    fin
+                fin
+            fin
+        fin
+        n_ := 0
+        para i desde 1 hasta ins_n hacer si gr_sale[i - 1] entonces n_ := n_ + 1 fin fin
+        devolver n_
+    fin
+
+    ; PAQUETES GRUPOS: cada grupo, lo que lleva y cómo está
+    función di_grupos(): bool
+        variable g, k, t, h, oc: nat32
+        variable n: arreglo [12] de byte
+        variable d: arreglo [4] de nat32
+        si no carga_catálogo() entonces
+            escribir("paquetes: sin catálogo no se saben los grupos\n")
+            devolver falso
+        fin
+        si gr_n = 0 entonces
+            imprimir1("El catálogo de %s no trae grupos.\n", pt(origen))
+            devolver cierto
+        fin
+        imprimir1("Grupos de paquetes de %s:\n", pt(origen))
+        para g desde 1 hasta gr_n hacer
+            cuenta_grupo(g - 1, t, h, oc)
+            escribir("  ")
+            columna(gr_código[g - 1], 14)
+            escribir(gr_nombre[g - 1])
+            d[0] := h
+            d[1] := t
+            d[2] := (oc + 1023) div 1024
+            si t > 0 y h = t entonces
+                imprimir2(": ya está todo (%u de %u)\n", d[0], d[1])
+            sino
+                imprimir(": %u de %u instalados (faltan %u K)\n", d)
+            fin
+            escribir("      ")
+            k := 0
+            mientras miembro(g - 1, k, n) hacer
+                si k > 0 entonces escribir(", ") fin
+                escribir(n)
+                si instalado(n) <> NINGUNO entonces
+                    escribir(" (sí)")
+                sino si mejor_del_catálogo(n, 0, "") = NINGUNO entonces
+                    escribir(" (no está en el catálogo)")
+                fin
+                k := k + 1
+            fin
+            escribir("\n")
+        fin
+        devolver cierto
+    fin
+
+    ; INSTALA GRUPO=código: al plan, lo que falta (lo que no se pueda, a los
+    ; fallos, con su motivo, y se sigue con lo demás)
+    función planea_grupo(código: puntero a byte): bool
+        variable g, k, pn, on: nat32
+        variable n: arreglo [12] de byte
+        variable d: arreglo [4] de nat32
+        si no carga_catálogo() entonces
+            escribir("paquetes: sin catálogo no se saben los grupos\n")
+            devolver falso
+        fin
+        g := grupo_de(código)
+        si g = NINGUNO entonces
+            imprimir1("paquetes: el catálogo no trae el grupo «%s» (PAQUETES GRUPOS los dice)\n", pt(código))
+            devolver falso
+        fin
+        si gr_pedido <> NINGUNO entonces devolver mal("un grupo cada vez") fin
+        gr_pedido := g
+        d[0] := pt(gr_nombre[g])
+        d[1] := pt(gr_código[g])
+        imprimir("Grupo «%s» (%s):", dirección(d[0]))
+        k := 0
+        mientras miembro(g, k, n) hacer
+            escribir(" ", n)
+            k := k + 1
+        fin
+        escribir("\n")
+        k := 0
+        mientras miembro(g, k, n) y k < MAX_PAQ hacer
+            gr_ya[k] := instalado(n) <> NINGUNO
+            gr_fallo[k] := nulo
+            si no gr_ya[k] y en_plan(n) = NINGUNO entonces
+                si mejor_del_catálogo(n, 0, "") = NINGUNO entonces
+                    gr_fallo[k] := "no está en el catálogo"
+                sino
+                    pn := plan_n
+                    on := orden_n
+                    si no planea(n, 0, "", 0) entonces
+                        plan_n := pn
+                        orden_n := on
+                        si se_cancela() entonces devolver falso fin
+                        gr_fallo[k] := "no se puede traer, o lo que necesita no se puede poner (lo dice arriba)"
+                    fin
+                fin
+            fin
+            k := k + 1
+        fin
+        devolver cierto
+    fin
+
+    ; y, al final, lo que ha pasado: instalados, ya estaban y los fallos
+    función resumen_grupo()
+        variable g, k, ins, ya, mal_: nat32
+        variable n: arreglo [12] de byte
+        variable d: arreglo [4] de nat32
+        g := gr_pedido
+        si g = NINGUNO entonces devolver fin
+        ins := 0
+        ya := 0
+        mal_ := 0
+        k := 0
+        mientras miembro(g, k, n) y k < MAX_PAQ hacer
+            si gr_ya[k] entonces
+                ya := ya + 1
+            sino si instalado(n) <> NINGUNO entonces
+                ins := ins + 1
+            sino
+                mal_ := mal_ + 1
+                si gr_fallo[k] = nulo entonces
+                    si cancelado entonces gr_fallo[k] := "cancelado" sino gr_fallo[k] := "no se ha podido instalar (lo dice arriba)" fin
+                fin
+                imprimir2("  fallo %s: %s\n", pt(n), pt(gr_fallo[k]))
+            fin
+            k := k + 1
+        fin
+        d[0] := pt(gr_código[g])
+        d[1] := ins
+        d[2] := ya
+        d[3] := mal_
+        imprimir("Grupo %s: %u instalados, %u ya estaban, %u fallos.\n", dirección(d[0]))
+    fin
+
     ; hace el plan: comprueba que todo cabe junto, las sumas de todo, y
     ; luego instala uno a uno (lo que se necesita, antes)
     función hace_plan(): bool
@@ -2696,6 +3016,11 @@ módulo UPaquetes
             k := k + 1
             si palabra_[0] = '/' entonces seguir fin
             alguno := cierto
+            si empieza_por(palabra_, "grupo=") o empieza_por(palabra_, "GRUPO=") entonces
+                ; (GRUPOS) lo que falte del grupo
+                si no planea_grupo(dirección(palabra_[6])) entonces devolver falso fin
+                seguir
+            fin
             si es_archivo(palabra_) entonces
                 absoluta(palabra_, r)
                 cab := lee_cabecera(r, largo)
@@ -2731,6 +3056,17 @@ módulo UPaquetes
             fin
         fin
         si no alguno entonces devolver mal("¿qué paquete? PAQUETES INSTALA nombre (o X.HPQ)") fin
+        si gr_pedido <> NINGUNO y orden_n = 0 entonces
+            ; (GRUPOS) nada que poner: o ya está todo, o nada se puede
+            resumen_grupo()
+            devolver cierto
+        fin
+        k := 0
+        si gr_pedido <> NINGUNO entonces
+            si hace_plan() entonces k := 1 fin
+            resumen_grupo()
+            devolver k = 1
+        fin
         devolver hace_plan()
     fin
 
@@ -2819,6 +3155,27 @@ módulo UPaquetes
             si palabra_[0] = '/' entonces seguir fin
             alguno := cierto
             a_minúsculas(palabra_)
+            si empieza_por(palabra_, "grupo=") entonces
+                ; (GRUPOS) lo del grupo que se puede quitar
+                si no carga_catálogo() entonces
+                    escribir("paquetes: sin catálogo no se saben los grupos\n")
+                    devolver falso
+                fin
+                j := grupo_de(dirección(palabra_[6]))
+                si j = NINGUNO entonces
+                    imprimir1("paquetes: el catálogo no trae el grupo «%s» (PAQUETES GRUPOS los dice)\n", pt(dirección(palabra_[6])))
+                    devolver falso
+                fin
+                imprimir1("Quitar el grupo «%s»:\n", pt(gr_nombre[j]))
+                si quitables(j, cierto) = 0 entonces
+                    escribir("No hay nada del grupo que se pueda quitar.\n")
+                    devolver cierto
+                fin
+                para i desde 1 hasta ins_n hacer
+                    si gr_sale[i - 1] entonces sale[i - 1] := cierto fin
+                fin
+                seguir
+            fin
             j := instalado(palabra_)
             si j = NINGUNO entonces
                 imprimir1("paquetes: %s no está instalado\n", pt(palabra_))
@@ -3177,6 +3534,8 @@ módulo UPaquetes
             bien := sueltos()
         sino si iguales(orden_, "fichas") entonces
             fichas()
+        sino si iguales(orden_, "grupos") entonces
+            bien := di_grupos()                 ; (GRUPOS)
         sino
             imprimir1("paquetes: no sé qué es «%s» (PAQUETES AYUDA)\n", pt(orden_))
             bien := falso
