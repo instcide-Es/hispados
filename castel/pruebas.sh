@@ -2566,9 +2566,9 @@ for hc in xhci ehci; do
     if grep -q "asistente: guardado HISPA.INI (Ana:, HISPA)$" $S && grep -q "^teclado=us" $Z/ini.txt && grep -q "^modo=800x600" $Z/ini.txt && grep -q "^set modo=800x600x32,800x600,auto$" $Z/cfg.txt; then
       ok "lo guardado con el ratón: el teclado de EE. UU. y la pantalla como estaba"
     else ko "el asistente, con el ratón, no guarda lo elegido:"; cat $Z/ini.txt | sed 's/^/        /'; fi
-    # la segunda entrada del menú del disco: el intérprete de órdenes, en modo texto, con el teclado guardado
+    # la tercera entrada del menú del disco (desde la 0.8.13 la segunda es la «SIN ACPI»): el intérprete de órdenes, en modo texto, con el teclado guardado
     desde_disco $Z/d$hc.img $Z/b$hc.sal
-    espera_menu "Hispa-Pentium: el interprete" b0$hc; teclas down ret
+    espera_menu "Hispa-Pentium: el interprete" b0$hc; teclas down down ret
     espera_a "lanzo ORDENES.BIN" 40 $Z/b$hc.sal; sleep 1
     teclas v e r ret d i r spc backslash h i s p a backslash h i s p a dot i n i ret; sleep 1.5; textoz b1$hc
     # y PAQUETES, en el sistema instalado: lo instalado, y que sus archivos son los que se instalaron
