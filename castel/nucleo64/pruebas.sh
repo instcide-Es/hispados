@@ -1085,11 +1085,16 @@ else ko "etapa 6, el intérprete no hace lo que debe (código $c): $(sed -n '/^O
 # MBUCLE un RIP no canónico justo antes de su iretq; ese iretq falla en el
 # anillo 0 y, en vez de pararse el sistema, se cierra el programa (SIGSEGV)
 # y el intérprete sigue
-LINEA7="apagar sinpruebas escribir ordenes prueba=salida" con_interprete "$T/e7s.txt" 'MBUCLE{intro}{indicador}eco sigue{intro}{indicador}salir{intro}'; c=$?
+# (con KVM: el procesador de verdad falla en el iretq, en el anillo 0; con
+# TCG, QEMU deja pasar el iretq y el fallo llega ya en el anillo 3, al
+# ejecutar en esa dirección: también se cierra el programa, por el otro camino)
+K7=""; M7="^El programa MBUCLE (proceso [0-9]*) ha querido volver con unos registros que no valen (CS, SS o RIP de su marco): se cierra (SIGSEGV).$"
+if [ -w /dev/kvm ]; then K7="-enable-kvm"; else M7="$M7|^El programa MBUCLE (proceso [0-9]*) ha intentado ejecutar en la dirección 0x8000000000000000"; fi
+LINEA7="apagar sinpruebas escribir ordenes prueba=salida" con_interprete "$T/e7s.txt" 'MBUCLE{intro}{indicador}eco sigue{intro}{indicador}salir{intro}' $K7; c=$?
 v=$(serie "$T/e7s.txt")
-if [ $c = 85 ] && grep -q "^El programa MBUCLE (proceso [0-9]*) ha querido volver con unos registros que no valen (CS, SS o RIP de su marco): se cierra (SIGSEGV).$" <<< "$v" \
+if [ $c = 85 ] && grep -qE "$M7" <<< "$v" \
    && grep -q "^(MBUCLE se ha cerrado por la señal 11" <<< "$v" && grep -q "^sigue$" <<< "$v" && grep -q "^El intérprete de órdenes ha acabado (código 0).$" <<< "$v"; then
-  ok "etapa 10 c, la tabla de arreglos: el iretq de vuelta a MBUCLE con un RIP no canónico (prueba=salida) cierra el programa (SIGSEGV), sin parar el núcleo; el intérprete sigue"
+  ok "etapa 10 c, la tabla de arreglos: el iretq de vuelta a MBUCLE con un RIP no canónico (prueba=salida$( [ -n "$K7" ] && echo ', con KVM: falla en el anillo 0')) cierra el programa (SIGSEGV), sin parar el núcleo; el intérprete sigue"
 else ko "etapa 10 c, la tabla de arreglos no hace lo que debe (código $c): $(grep -E 'MBUCLE|registros que no valen|parado|sigue|intérprete' <<< "$v" | cut -c1-120 | paste -sd '|')"; fi
 # lo mismo por un teclado USB (sin 8042: todo llega por tecla_hid)
 TECLAS7U='echo canción ñandú a@b{intro}{indicador}echo holx{retro}a{intro}{indicador}echo Hola {bloqmayus}abc{bloqmayus}d{intro}{indicador}HOLA uno{intro}{indicador}salir{intro}'
