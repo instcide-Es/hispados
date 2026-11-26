@@ -3999,6 +3999,7 @@ Windows y WSL). No se empieza todavía.
 | `procesos.cas` (`prepara_procesos`) | la plantilla de los registros, a cero |
 | `programas/musl/munix.c` | MUNIX: 77 pruebas (también en Linux: las mismas) |
 | `programas/cxx/mipc.cpp` | MIPC (C++23): dos procesos como los de Ladybird |
+| `programas/cxx/hispa64.cmake` | el archivo de «toolchain» de CMake para el compilador cruzado (para Ladybird y sus bibliotecas) |
 | `programas/ventanas/ventanas.c`, `programas/ordenes.c` | la consola en el menú Inicio; dónde guardar en `ayuda` |
 
 Lo que dicen (q35, 4 procesadores, con KVM):
@@ -4046,10 +4047,10 @@ primero mira en su memoria (la misma).
 
 ### Lo que queda (y más adelante)
 
-- **El navegador**: lo siguiente de la lista de la sección 20 (`readlink
-  /proc/self/exe` ya va; `pthread_setname_np`, `sched_getaffinity` con el
-  número de verdad), CMake y Ninja con el archivo de «toolchain» para el
-  compilador cruzado, las bibliotecas (Skia, libjpeg-turbo, libpng, libwebp,
+- **El navegador**: lo siguiente de la lista de la sección 20 (ya van
+  `readlink /proc/self/exe`, `pthread_setname_np` y `sched_getaffinity`;
+  el archivo de «toolchain» de CMake, `programas/cxx/hispa64.cmake`, ya
+  está: probado compilando MIPC con CMake), las bibliotecas (Skia, libjpeg-turbo, libpng, libwebp,
   woff2, simdutf, fast_float, SQLite, libxml2) y Ladybird sin ventana.
 - **Los sockets de Unix**: la ruta de bind en el disco de verdad (hoy, un
   nombre del núcleo); el recolector de ciclos (un socket que viaja en su
