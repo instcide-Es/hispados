@@ -679,7 +679,9 @@ módulo Inicio
                 ; cuando se usan, y siempre en Todos los programas > Accesorios
                 ; (PINTURA32, 0.8.8) y Pintura 2, del sistema, como la Pintura de la
                 ; oficina de antes: en Todos los programas > Multimedia
-                si progs[k].carpeta = C_ACCESORIOS o acaba_en_pintura(programa_de(i)) entonces progs[k].rango := SIN_RANGO sino rango := rango + 1 fin
+                ; (REMOTA, 0.8.13) y lo de Sistema («Dejar entrar a Claude», REMOTA.MNU del
+                ; paquete ssh 0.9), tampoco: dejaba fuera a Facturas; va en Sistema
+                si progs[k].carpeta = C_ACCESORIOS o progs[k].carpeta = C_SISTEMA o acaba_en_pintura(programa_de(i)) entonces progs[k].rango := SIN_RANGO sino rango := rango + 1 fin
             fin
             i := i + 1
         fin
