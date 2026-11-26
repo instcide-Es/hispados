@@ -621,15 +621,21 @@ módulo Usuario
             si nuevo < antes o nuevo > PILA_INICIO entonces devolver SIN_MEMORIA fin
             v := redondear(antes, PÁGINA)
             mientras v < nuevo hacer
-                m := reservar_marco()
-                si m = 0 o no mapear(actual.cr3, v, m, ESCRIBIR ob USUARIO) entonces
-                    si m <> 0 entonces soltar_marco(m) fin
-                    ; lo que se había puesto, fuera
-                    mientras v > redondear(antes, PÁGINA) hacer
-                        v := v - PÁGINA
-                        soltar_marco(desmapear(actual.cr3, v))
+                ; (auditoría P4b) si ya hay página (la 180 de WIN32 la pone por
+                ; encima del quiebre), se queda la que hay: mapear encima perdía
+                ; su marco para siempre
+                si banderas_de(actual.cr3, v) = 0 entonces
+                    m := reservar_marco()
+                    si m = 0 o no mapear(actual.cr3, v, m, ESCRIBIR ob USUARIO) entonces
+                        si m <> 0 entonces soltar_marco(m) fin
+                        ; lo que se había puesto, fuera
+                        mientras v > redondear(antes, PÁGINA) hacer
+                            v := v - PÁGINA
+                            m := desmapear(actual.cr3, v)
+                            si m <> 0 entonces soltar_marco(m) fin
+                        fin
+                        devolver SIN_MEMORIA
                     fin
-                    devolver SIN_MEMORIA
                 fin
                 v := v + PÁGINA
             fin
@@ -637,7 +643,10 @@ módulo Usuario
             si nuevo > antes o nuevo < actual.quiebre_inicio entonces devolver NO_VALE fin
             v := redondear(nuevo, PÁGINA)
             mientras v < redondear(antes, PÁGINA) hacer
-                soltar_marco(desmapear(actual.cr3, v))
+                ; (auditoría) desmapear da 0 si no había página: soltar el marco 0
+                ; lo destaparía (y el siguiente que lo pida borra la IVT y la BDA)
+                m := desmapear(actual.cr3, v)
+                si m <> 0 entonces soltar_marco(m) fin
                 v := v + PÁGINA
             fin
         fin
