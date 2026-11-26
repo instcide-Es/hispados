@@ -29,6 +29,7 @@
 #include <netinet/in.h>
 #include <netinet/icmp6.h>
 #include <arpa/inet.h>
+#include <sys/uio.h>
 #include "../musl/comun.h"
 
 #define MUCHO (200 * 1024)
@@ -284,7 +285,24 @@ static int por_lo(void)
 	r = connect(c, (struct sockaddr *)&s6, sizeof s6);
 	MIRA(r < 0 && errno == ENETUNREACH, "con IPV6_V6ONLY, a ::ffff:127.0.0.1: ENETUNREACH");
 	close(c);
-	printf("  los errores: EAFNOSUPPORT, ENETUNREACH\n");
+	/* (auditoría H2) sendmsg con trozos que dan la vuelta al sumarlos: un error, sin estropear el núcleo */
+	{
+		static char b[8];
+		struct iovec v[2] = { { b, (size_t)-1 }, { b, 2 } };
+		struct msghdr mh;
+		c = socket(AF_INET6, SOCK_DGRAM, 0);
+		s6 = dir6("::1", 9);
+		memset(&mh, 0, sizeof mh);
+		mh.msg_name = &s6;
+		mh.msg_namelen = sizeof s6;
+		mh.msg_iov = v;
+		mh.msg_iovlen = 2;
+		errno = 0;
+		r = sendmsg(c, &mh, 0);
+		MIRA(r < 0 && (errno == EMSGSIZE || errno == EINVAL || errno == EFAULT), "sendmsg con trozos que dan la vuelta: un error (y el núcleo sigue)");
+		close(c);
+	}
+	printf("  los errores: EAFNOSUPPORT, ENETUNREACH; sendmsg con trozos que dan la vuelta, rechazado\n");
 	return acaba("MRED6");
 }
 

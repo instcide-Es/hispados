@@ -1,6 +1,7 @@
 #include <resolv.h>
 #include <string.h>
 #include <time.h>
+#include "syscall.h"
 
 int __res_mkquery(int op, const char *dname, int class, int type,
 	const unsigned char *data, int datalen,
@@ -33,8 +34,13 @@ int __res_mkquery(int op, const char *dname, int class, int type,
 	q[i+3] = class;
 
 	/* Make a reasonably unpredictable id */
-	clock_gettime(CLOCK_REALTIME, &ts);
-	id = ts.tv_nsec + ts.tv_nsec/65536UL & 0xffff;
+	/* Hispa-64: from getrandom (the clock alone is guessable, and two
+	 * queries made together got nearly the same id) */
+	if (__syscall(SYS_getrandom, &id, sizeof id, 0) != sizeof id) {
+		clock_gettime(CLOCK_REALTIME, &ts);
+		id = ts.tv_nsec + ts.tv_nsec/65536UL;
+	}
+	id &= 0xffff;
 	q[0] = id/256;
 	q[1] = id;
 

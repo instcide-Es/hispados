@@ -1604,9 +1604,11 @@ módulo Ip64
     fin
 
     ; un puerto libre (de 49152 a 65535)
+    ; ([etapa 10 c] cada vez desde uno al azar, RFC 6056: el de una pregunta
+    ; al DNS no se adivina por el de antes; antes, seguidos)
     público función puerto_libre(tipo_: nat32, proto: nat32): nat32
         variable k, p: nat32
-        si puerto_sig = 0 entonces puerto_sig := azar32() mod 16384 fin
+        puerto_sig := azar32() mod 16384
         k := 0
         mientras k < 16384 hacer
             puerto_sig := (puerto_sig + 1) mod 16384

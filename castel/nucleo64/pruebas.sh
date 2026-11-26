@@ -312,7 +312,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^LUA: todo bien (16 pruebas); hoy es " <<< "$v" \
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
-    && grep -q "^MRED6: todo bien (24 pruebas)$" <<< "$v" && grep -q "^Programa «MRED6»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MRED6: todo bien (25 pruebas)$" <<< "$v" && grep -q "^Programa «MRED6»: acaba con el código 0, como debe" <<< "$v" \
     && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MCXX: C++17 con la libstdc++ y musl (cxx.sh, dinámico: ld-musl, libstdc++.so.6 y libgcc_s.so.1)$" <<< "$v" && grep -q "^Programa «MCXXD»: acaba con el código 0, como debe" <<< "$v" \
     && grep -qE "^  TCP \[etapa 10\]: [1-9][0-9]* conexiones con escala de ventana" <<< "$v" \

@@ -1,0 +1,44 @@
+--- a/src/network/res_mkquery.c
++++ b/src/network/res_mkquery.c
+@@ -1,6 +1,7 @@
+ #include <resolv.h>
+ #include <string.h>
+ #include <time.h>
++#include "syscall.h"
+ 
+ int __res_mkquery(int op, const char *dname, int class, int type,
+ 	const unsigned char *data, int datalen,
+@@ -33,8 +34,13 @@
+ 	q[i+3] = class;
+ 
+ 	/* Make a reasonably unpredictable id */
+-	clock_gettime(CLOCK_REALTIME, &ts);
+-	id = ts.tv_nsec + ts.tv_nsec/65536UL & 0xffff;
++	/* Hispa-64: from getrandom (the clock alone is guessable, and two
++	 * queries made together got nearly the same id) */
++	if (__syscall(SYS_getrandom, &id, sizeof id, 0) != sizeof id) {
++		clock_gettime(CLOCK_REALTIME, &ts);
++		id = ts.tv_nsec + ts.tv_nsec/65536UL;
++	}
++	id &= 0xffff;
+ 	q[0] = id/256;
+ 	q[1] = id;
+ 
+--- a/src/network/res_msend.c
++++ b/src/network/res_msend.c
+@@ -217,9 +217,14 @@
+ 			if (j==nns) continue;
+ 
+ 			/* Find which query this answer goes with, if any */
++			/* Hispa-64: the id and the question too (RFC 5452) */
+ 			for (i=next; i<nqueries && (
+ 				answers[next][0] != queries[i][0] ||
+-				answers[next][1] != queries[i][1] ); i++);
++				answers[next][1] != queries[i][1] ||
++				rlen < qlens[i] ||
++				answers[next][4] != queries[i][4] ||
++				answers[next][5] != queries[i][5] ||
++				memcmp(answers[next]+12, queries[i]+12, qlens[i]-12) ); i++);
+ 			if (i==nqueries) continue;
+ 			if (alens[i]) continue;
+ 

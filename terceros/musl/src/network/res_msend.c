@@ -217,9 +217,14 @@ int __res_msend_rc(int nqueries, const unsigned char *const *queries,
 			if (j==nns) continue;
 
 			/* Find which query this answer goes with, if any */
+			/* Hispa-64: the id and the question too (RFC 5452) */
 			for (i=next; i<nqueries && (
 				answers[next][0] != queries[i][0] ||
-				answers[next][1] != queries[i][1] ); i++);
+				answers[next][1] != queries[i][1] ||
+				rlen < qlens[i] ||
+				answers[next][4] != queries[i][4] ||
+				answers[next][5] != queries[i][5] ||
+				memcmp(answers[next]+12, queries[i]+12, qlens[i]-12) ); i++);
 			if (i==nqueries) continue;
 			if (alens[i]) continue;
 

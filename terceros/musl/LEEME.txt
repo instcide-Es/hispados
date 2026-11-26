@@ -16,6 +16,13 @@ parches-seguridad/):
   CVE-2026-6042    iconv, el decodificador de GB18030
                    https://www.openwall.com/lists/musl/2026/04/03/2
 
+Y uno de Hispa-64 (etapa 10 c, la auditoría: parches-hispa/), en el
+resolutor de nombres: el id de cada pregunta al DNS, de getrandom (era de
+la hora: se adivinaba, y la de A y la de AAAA salían casi iguales), y la
+respuesta se acepta solo si trae su id y su misma pregunta (RFC 5452; antes,
+el id y de quién venía). El puerto de origen lo da el núcleo, al azar.
+  0001-dns-id-al-azar-y-pregunta.patch   src/network/res_mkquery.c y res_msend.c
+
 No se instala en el sistema: se compila con el gcc del sistema, para
 x86-64, en el árbol de construcción del proyecto (build/, que no va a git):
 

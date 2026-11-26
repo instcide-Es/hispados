@@ -282,6 +282,15 @@ int main(void)
 		close(tl[1]);
 		printf("  cerrar mientras otro hilo lee: EBADF, dup2 encima, el read acaba con «%.4s» y luego EPIPE\n", leído_b);
 	}
+	/* (auditoría H7) clone con un TLS no canónico: -EPERM, como Linux (antes, el
+	 * wrmsr de FS_BASE paraba el núcleo) */
+	{
+		static char pila[4096];
+		long r6 = syscall(SYS_clone, 0x3d0f00UL /* CLONE_VM|FS|FILES|SIGHAND|THREAD|SYSVSEM|SETTLS|PARENT_SETTID|CHILD_CLEARTID */ & ~0x300000UL,
+		                  pila + sizeof pila, 0, 0, 0x8000000000000UL << 4);
+		MIRA(r6 == -1 && errno == EPERM, "clone con un TLS no canónico: EPERM");
+		printf("  clone con un TLS no canónico: %s\n", r6 == -1 && errno == EPERM ? "EPERM" : "¡no da error!");
+	}
 	/* AVX */
 	if (__builtin_cpu_supports("avx")) {
 		for (i = 0; i < N; i++) pthread_create(&h[i], 0, avx, (void *)i);
