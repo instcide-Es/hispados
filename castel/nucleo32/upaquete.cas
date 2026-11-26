@@ -2067,16 +2067,24 @@ módulo UPaquetes
     ; también en la entrada del núcleo de antes. buf tiene el GRUB.CFG; da
     ; la entrada (en cfg_ant, si hace falta cambiarla)
     variable cfg_ant: arreglo [2048] de byte
+    ; (0.8.12b, el Acer One 10) y « sinacpi», si la primera entrada lo lleva
+    ; (INSTALAR lo hereda de la memoria: con ACPI, ese equipo se queda parado)
     función con_sdhci(e: puntero a byte): puntero a byte
-        variable tok: arreglo [160] de byte
+        variable tok: arreglo [176] de byte
         variable p: puntero a byte
         variable i, j, k: nat32
+        tok[0] := 0
+        si buscar(buf, "NUCLEO.BIN escritorio escritura sinacpi") <> nulo entonces Textos32.copiar(tok, " sinacpi") fin
         p := buscar(buf, " sdhci=")
-        si p = nulo entonces devolver e fin
-        k := 0
-        mientras k < 150 y p[k] <> 0 y (k = 0 o p[k] > ' ') hacer
-            tok[k] := p[k]
-            k := k + 1
+        si p = nulo y tok[0] = 0 entonces devolver e fin
+        k := longitud(tok)
+        si p <> nulo entonces
+            i := 0
+            mientras i < 150 y p[i] <> 0 y (i = 0 o p[i] > ' ') hacer
+                tok[k] := p[i]
+                k := k + 1
+                i := i + 1
+            fin
         fin
         tok[k] := 0
         i := 0

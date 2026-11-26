@@ -65,6 +65,16 @@
 # (0.8.12) Las entradas con ACPI de las dos llevan «fichaequipo»: ACPI.BIN deja
 # la ficha técnica en X:\EQUIPO (las tablas ACPI y PCI.TXT) y en ACPI.TXT los
 # aparatos de las I2C (la pantalla táctil y el acelerómetro).
+# (0.8.12b, el Acer One 10: lo instalado se quedaba parado con ACPI.BIN) Con
+# INSTALAR_MAS="sinacpi", la entrada Instalar lo lleva y INSTALAR lo hereda:
+# lo instalado arranca sin ACPI (con la otra entrada, con ACPI). Con
+# INSTALADO_SDHCI="9094F000:e,9094D000" (las controladoras SD/eMMC de «modo
+# ACPI» de ese equipo, las de su \SDHCI.TXT), una entrada más, tras las de
+# prueba: arrancar lo instalado en el eMMC sin ACPI desde la memoria (GRUB
+# busca \HISPA\NUCLEO.BIN en los discos), sin cambiar su menú.
+# Con FIRMWARE_DIR=carpeta, lo de esa carpeta (el firmware de las tarjetas
+# Wi-Fi, que no es libre: no está en el repositorio) va a X:\FIRMWARE, y
+# INSTALAR lo copia a C:\FIRMWARE (como \SDHCI.TXT y \SDIO.TXT de X:).
 # Necesita ser root (losetup, mount), python3, nasm, parted, dosfstools y
 # grub-pc-bin (grub-install --target=i386-pc); (UEFI) y grub-efi-amd64-bin
 # y grub-efi-ia32-bin (grub-mkimage).
@@ -122,6 +132,8 @@ if [ -n "${TERMO:-}" ]; then
   bash $AQUI/termo/prepara_memoria.sh $W/termo
 fi
 cp $W/f/* $W/m/
+# (0.8.12b) el firmware de las tarjetas Wi-Fi, a X:\FIRMWARE
+if [ -n "${FIRMWARE_DIR:-}" ]; then mkdir -p $W/m/FIRMWARE; cp "$FIRMWARE_DIR"/* $W/m/FIRMWARE/; fi
 # (RTL8723BS) la memoria de prueba del Wi-Fi por SDIO: RED.LOG y el Wi-Fi primero
 [ -n "${PRUEBA_WIFI_SDIO:-}${PRUEBA_WIFI_RADIO:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
 [ -n "${TERMO:-}" ] && cp -r $W/termo $W/m/TERMO
@@ -253,6 +265,10 @@ G
       menu_efi "2. Wi-Fi con la radio apagada: el interprete de ordenes (texto: REDWIFI /ESTADO)" SEMILLA.BIN "ordenes $N conred fichaequipo" "$M2" auto
       menu_efi "3. Wi-Fi con la radio apagada: el escritorio, sin pedirle nada a la BIOS (solo mirar)" ESCRIT8.BIN "escritorio $N conred fichaequipo hpradiosolover" "$M2" auto
     fi
+    # (0.8.12b) lo instalado en el eMMC, sin ACPI, desde la memoria
+    if [ -n "${INSTALADO_SDHCI:-}" ]; then
+      printf 'menuentry "8. Hispa-Pentium INSTALADO en el eMMC, SIN ACPI (desde esta memoria; su menu no se toca)" {\n  search --no-floppy --file /HISPA/NUCLEO.BIN --set=root\n  multiboot2 /HISPA/NUCLEO.BIN escritorio escritura sinacpi registro sdhci=%s\n  set gfxpayload=auto\n  boot\n}\n' "$INSTALADO_SDHCI"
+    fi
     menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (la medida de la pantalla, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "$M2" auto '  if [ "$modo" = auto ]; then
     set gfxpayload=auto
   elif [ -n "$modo" ]; then
@@ -276,7 +292,7 @@ menuentry "Ver los modos de video que da el firmware (GOP) de este equipo" {
 G
     menu_efi "Hispa-Pentium 0.8 (UEFI): el interprete de ordenes (texto, en la pantalla del firmware)" SEMILLA.BIN "ordenes $N" "$M2" auto
     menu_efi "Hispa-Pentium 0.8 (UEFI): la consola del nucleo: dice los discos y el USB que encuentra" SEMILLA.BIN "$N" "$M2" auto
-    menu_efi "Instalar Hispa-Pentium 0.8 en el disco duro (o en una tarjeta SD)" SEMILLA.BIN "instalar unidad=M" "$I2" auto
+    menu_efi "Instalar Hispa-Pentium 0.8 en el disco duro (o en una tarjeta SD)" SEMILLA.BIN "instalar unidad=M${INSTALAR_MAS:+ $INSTALAR_MAS}" "$I2" auto
     cat <<'G'
 menuentry "Diagnostico (UEFI): la pantalla, la memoria, el PCI y ACPI (para hacer una foto)" {
   set pager=1
@@ -361,7 +377,7 @@ menuentry "Ver los modos de video que da la BIOS de este equipo" {
 G
   entrada "Hispa-Pentium 0.8: el interprete de ordenes (modo texto)" SEMILLA.BIN "ordenes $N"
   entrada "Hispa-Pentium 0.8: la consola del nucleo (modo texto): dice los discos y el USB que encuentra" SEMILLA.BIN "$N"
-  printf 'menuentry "Instalar Hispa-Pentium 0.8 en el disco duro" {\n  multiboot /SEMILLA.BIN instalar unidad=M\n%s  boot\n}\n' "$INSTALA"
+  printf 'menuentry "Instalar Hispa-Pentium 0.8 en el disco duro" {\n  multiboot /SEMILLA.BIN instalar unidad=M%s\n%s  boot\n}\n' "${INSTALAR_MAS:+ $INSTALAR_MAS}" "$INSTALA"
   [ -n "$EFI_PLAT" ] && echo fi         # (UEFI)
 } > $W/m/boot/grub/grub.cfg
 grub-install --target=i386-pc --boot-directory=$W/m/boot --modules="part_msdos fat multiboot all_video videoinfo read echo" $L > $W/grub.txt 2>&1 || { cat $W/grub.txt; exit 1; }
