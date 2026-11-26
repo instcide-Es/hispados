@@ -91,7 +91,7 @@ Probar en QEMU: `qemu-system-i386 -fda hispados-disquete.img`.
 
 **Requisitos:** procesador **386 o superior** (386, 486, Pentium...) y 640 KB de memoria; para Hispa Ventanas, además memoria extendida (2 MB o más). En un 8086, 186 o 286 Hispa-386 lo dice al arrancar en vez de colgarse: para esos equipos está **Hispa-8086** ([`h8086/`](h8086/)).
 
-La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáticas en emuladores, pero falta probarla en más PCs reales. Si encuentras un fallo, abre una *issue* contando el equipo (o el emulador) y qué pasó.
+La 0.9 es una **versión de pruebas**: pasa más de mil comprobaciones automáticas en emuladores, pero falta probarla en más PCs reales. Si encuentras un fallo, abre una *issue* contando el equipo (o el emulador) y qué pasó. Si es un **fallo de seguridad**, no lo cuentes en una *issue* pública: avísanos en privado, como dice [SECURITY.md](SECURITY.md).
 
 ## Novedades
 
