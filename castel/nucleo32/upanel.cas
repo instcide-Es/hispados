@@ -72,6 +72,7 @@ módulo UPanel
     constante ID_RED_AUTO = 41                  ; 41, 42 y 43
     constante ID_WIFI = 44
     constante ID_TAILSCALE = 45
+    constante ID_REMOTA = 46                    ; (REMOTA, 0.8.13) «Dejar entrar a Claude...»: SSHD /REMOTA
     constante ID_PANTALLA = 51
     constante ID_BATERÍA = 52
     constante ID_BOTÓN = 53
@@ -708,6 +709,10 @@ módulo UPanel
         yy := yy + LT + 6 * E
         x := sx + botón(ID_WIFI, sx, yy, "Redes Wi-Fi...", falso, falso) + LA
         botón(ID_TAILSCALE, x, yy, "Tailscale...", falso, falso)
+        yy := yy + alto_botón() + 2 * E
+        ; (REMOTA, 0.8.13) la consola remota también desde aquí (como en el
+        ; menú Inicio > Sistema): la ventana con el código de un solo uso
+        botón(ID_REMOTA, sx, yy, "Dejar entrar a Claude...", falso, falso)
         yy := yy + alto_botón() + 4 * E
         Controles.texto(sx, yy, "Los detalles, en la Consola: IPCONFIG /TODO", C_SUAVE)
     fin
@@ -943,6 +948,9 @@ módulo UPanel
             caso ID_TAILSCALE:
                 r := lanzar_suelto("\\TAILSCAL.BIN", "/VENTANA")
                 si es_error(r) entonces copiar(aviso, "No est\xA0 Tailscale (el paquete \xAEtailscal\xAF)") fin
+            caso ID_REMOTA:
+                r := lanzar_suelto("\\SSHD.BIN", "/REMOTA")
+                si es_error(r) entonces copiar(aviso, "No est\xA0 la consola remota (el paquete \xAEssh\xAF 0.9 o m\xA0s)") fin
             caso ID_TAPIZ, ID_TAPIZ + 1, ID_TAPIZ + 2: pon(AJ_TAPIZ, id - ID_TAPIZ)
             caso ID_IMAGEN:
                 r := lanzar_suelto("\\MIRADOR.BIN", "")

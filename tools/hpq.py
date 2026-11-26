@@ -365,8 +365,18 @@ VERSION_0811 = '0.8.11'
 # llamadas del Bluetooth: la 0.8.12 (la que sale con esta rama)
 VERSION_0812 = '0.8.12'
 VERSION_BT = VERSION_0812
+# (0.8.13, 26/11/2026, rama pentium-0813) junta hpmini-radio (WIFI.BIN mira
+# la patilla W_DISABLE# y enciende la radio sola; ACPI.BIN, en la base, pide a
+# la WMI de HP que encienda el Wi-Fi: hpradio.c), acer-instalar (INSTALAR
+# hereda «sinacpi», «registro» y «sdhci=»; \SDHCI.TXT, \SDIO.TXT y \FIRMWARE
+# de la memoria; el menú instalado con su entrada SIN ACPI), termo-121 (las
+# tareas de fondo del núcleo: la 224 con EBX = 9), paq-grupos (paquetes 1.9 y
+# la rueda en la Calculadora, el Reloj y el Wi-Fi), p4b (mover_quiebre), la
+# regla de REMOTA.LOG en \HISPA (permisos.cas) y «Dejar entrar a Claude...»
+# en Configuración > Red (PANEL.BIN). Suben base y wifi
+VERSION_0813 = '0.8.13'
 SISTEMA = [
-    ('base', VERSION_0812, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
+    ('base', VERSION_0813, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
         ('ESCRIT8.BIN', r'\HISPA\NUCLEO.BIN'), ('ORDENES.BIN', r'\HISPA\ORDENES.BIN'), ('RATON.BIN', r'\HISPA\RATON.BIN'),
         ('USUARIOS.BIN', r'\HISPA\USUARIOS.BIN'), ('ARGON2.BIN', r'\HISPA\ARGON2.BIN'),
         ('PANEL.BIN', r'\HISPA\PANEL.BIN'), ('HORARED.BIN', r'\HISPA\HORARED.BIN'),
@@ -427,7 +437,8 @@ SISTEMA = [
     # (0.8.10) (INTEL) la Intel 7265, etapa 1: encuentra las redes (sin el firmware de Intel, que no va en el paquete)
     # (0.8.11) (SIN-ADMIN) el diagnóstico en WIFI.LOG sin Registro=SI, y la ventana dice dónde está
     # (0.8.12) (MÓVIL) la ventana dice «la red va por el móvil por USB»
-    ('wifi', VERSION_0812, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
+    # (0.8.13) (HPMINI-RADIO) la radio apagada por la patilla W_DISABLE#: la mira cada segundo y enciende sola; la tecla del Wi-Fi
+    ('wifi', VERSION_0813, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
         ('BCM43XX.FW', r'\HISPA\BCM43XX.FW'), ('BCM43XXH.FW', r'\HISPA\BCM43XXH.FW'), ('BCM43XX.TXT', r'\HISPA\BCM43XX.TXT')]),
