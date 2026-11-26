@@ -400,7 +400,8 @@ SISTEMA = [
     # 0.8.5, «--tipo herramientas»; su .MNU dice «tipo=Accesorios»)
     # (AGENDA) la 1.1: el Reloj, con los festivos de festivos.cas (los de la
     # comunidad y los locales) y dos clics en un día abren la Agenda
-    ('accesori', '1.1', 'Accesorios: la Calculadora (científica y de oficina: euros, IVA y cinta), el Reloj (calendario con festivos, alarma, cronómetro y cuenta atrás) y el Mapa de caracteres', 'base >= 0.8.4', [
+    # (0.8.13) 1.1.1: (RUEDA, rama paq-grupos) la rueda en la cinta de la Calculadora y en las vueltas del Reloj
+    ('accesori', '1.1.1', 'Accesorios: la Calculadora (científica y de oficina: euros, IVA y cinta), el Reloj (calendario con festivos, alarma, cronómetro y cuenta atrás) y el Mapa de caracteres', 'base >= 0.8.4', [
         ('CALC.BIN', r'\HISPA\CALC.BIN'), ('RELOJ.BIN', r'\HISPA\RELOJ.BIN'), ('CARACTER.BIN', r'\HISPA\CARACTER.BIN'),
         ('CALC.MNU', r'\HISPA\MENU\CALC.MNU'), ('RELOJ.MNU', r'\HISPA\MENU\RELOJ.MNU'), ('CARACTER.MNU', r'\HISPA\MENU\CARACTER.MNU'),
         ('CALC.ICP', r'\HISPA\MENU\CALC.ICP'), ('RELOJ.ICP', r'\HISPA\MENU\RELOJ.ICP'), ('CARACT.ICP', r'\HISPA\MENU\CARACT.ICP')]),
@@ -453,11 +454,14 @@ SISTEMA = [
     # (OFICINA2) hvprun 0.10: la rueda, Alt+letra, los títulos largos (con más
     # de 63 letras el núcleo no hacía la ventana), el módulo en la unidad del
     # sistema y la carpeta de los documentos (castel/nucleo32/hvprun/poficina.inc)
-    ('hvprun', '0.10', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido, la rueda y Alt+letra)', 'base >= 0.7', [
+    # (0.8.13) 0.10.1: el guardar seguro de la 0.9.31 (api.inc 98 a 102, ventanas/guardar.inc y
+    # hvprun/pguardar.inc): los .HVP de la oficina 1.1.1 guardan por ahí
+    ('hvprun', '0.10.1', 'HVPRUN: los programas de Hispa Ventanas dentro del escritorio (con su sonido, la rueda y Alt+letra)', 'base >= 0.7', [
         ('HVPRUN.BIN', r'\HISPA\HVPRUN.BIN')]),
     # (OFICINA2) la oficina 1.1: con Datos, el Lector, Publicaciones y
     # Presentaciones, y los tipos de letra en todos sus tamaños (TIPOS12/24/32)
-    ('oficina', '1.1', 'La oficina de Hispa-386: Pluma, Cuentas, Facturas, Datos, Presentaciones, Publicaciones y Lector', 'hvprun >= 0.10', [
+    # (0.8.13) 1.1.1: los .HVP de Hispa-DOS 0.9.31 (el guardar seguro): piden hvprun 0.10.1
+    ('oficina', '1.1.1', 'La oficina de Hispa-386: Pluma, Cuentas, Facturas, Datos, Presentaciones, Publicaciones y Lector', 'hvprun >= 0.10.1', [
         ('FACTURAS.HVP', r'\OFICINA\FACTURAS.HVP'), ('PLUMA.HVP', r'\OFICINA\PLUMA.HVP'),
         ('CUENTAS.HVP', r'\OFICINA\CUENTAS.HVP'), ('MIRADOR.HVP', r'\OFICINA\MIRADOR.HVP'),
         ('DATOS.HVP', r'\OFICINA\DATOS.HVP'), ('LECTOR.HVP', r'\OFICINA\LECTOR.HVP'),
@@ -662,7 +666,9 @@ def busca(nombre, carpetas):
 NAVEGA_RECURSOS = ['DEFAULT.CSS', 'QUIRKS.CSS', 'ADBLOCK.CSS', 'INTERNAL.CSS', 'MESSAGES', 'BROTLI.DIC', 'INICIO.HTM']
 NAVEGA_FUENTES = ['SANS.TTF', 'SANSN.TTF', 'SERIF.TTF', 'SERIFN.TTF', 'MONO.TTF', 'MONON.TTF']
 OPCIONALES = [
-    ('navega', '0.2.3', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
+    # (0.8.13) 0.2.4: lo de la auditoría de los Navegadores de la 0.9.31 (w32/surf y w32/navega tal
+    # cual: CORS en fetch y XMLHttpRequest, SameSite, localStorage por origen, pushState, HSPTLS, WSOCK32)
+    ('navega', '0.2.4', 'El Navegador: la web de hoy (NetSurf con JavaScript), con pestañas y descargas',
      'base >= 0.8.3, red >= 0.8.1, tls >= 0.8.1', [
         ('NAVEGA/NAVEGA.BIN', r'\HISPA\NAVEGA\NAVEGA.BIN'), ('NAVEGA/NAVEGA.INI', r'\HISPA\NAVEGA\NAVEGA.INI'),
         ('NAVEGA/LEEME.TXT', r'\HISPA\NAVEGA\LEEME.TXT')]
