@@ -226,7 +226,7 @@ fi
   shot a18
   tecla tab spc; sleep 1                    # «No»
   shot a19
-  # ---- y salir de Hispa Ventanas con Pintura abierta ----
+  # ---- y salir de Hispa Ventanas con Pintura abierta (con cambios: pregunta) ----
   tecla ret; sleep 2.5
   arrastra 1 $(X 30) $(Y 30) $(X 90) $(Y 30)
   tecla alt-c ret; sleep 1                  # (y con la ventana de todos los colores)
@@ -234,6 +234,8 @@ fi
   aparca
   shot a20
   clic 756 13; sleep 1; tecla ret; sleep 2.5
+  shot a20p                                 # [0.9.31] con cambios: pregunta (WM_QUERYENDSESSION)
+  tecla tab spc; sleep 4                    # «No»: sale sin guardar
   shot a21
   send 'ECHO TRAS-SALIR'
   send 'BIN\XMSTEST' 2.5
@@ -314,6 +316,7 @@ chk $T/a20.ppm titulo 214 150 activa "Todos los colores" px 224 185 0 "el primer
   px 374 185 15 "el decimosexto: piedra" px 574 281 9 "el último del cubo: blanco" \
   px 650 161 4 "un clic en ella: primario, terracota" px 680 167 12 "y con el derecho: secundario, añil"
 # -- salida --
+chk $T/a20p.ppm busca 150 200 650 400 0 8 "La imagen tiene cambios sin guardar."
 chk $T/a21.ppm tam 720 400
 check "Hispa Ventanas ha terminado."
 check "TRAS-SALIR"

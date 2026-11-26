@@ -18,7 +18,15 @@
 ;                   la misma ruta con esa extensión (el archivo de datos)
 ;    hvl_leer       ESI=ruta EDI=búfer ECX=tamaño -> EAX=octetos leídos (0 si
 ;                   no está); detrás deja un 0
-;    hvl_escribir   ESI=ruta EDX=datos ECX=octetos -> CF=1 si no se puede (o no cabe entero)
+;    hvl_escribir   ESI=ruta EDX=datos ECX=octetos -> CF=1 si no se puede (o no cabe entero);
+;                   primero en un temporal: si falla, el archivo de antes queda
+;                   como estaba (guardar.inc)
+;                   (HV gua_crear y HV gua_cerrar: lo mismo, a trozos)
+;    hvl_reemplazar (solo con %define HVL_REEMPLAZAR antes del %include)
+;                   ESI=ruta que se va a escribir («Guardar como») EDX=la del
+;                   documento (0: ninguna) EBP=dueña EDI=título -> CF=1 si ya
+;                   hay otro archivo con ese nombre y no se quiere reemplazar
+;                   («Ya existe... ¿Quiere reemplazarlo?», Sí / No)
 ; =============================================================================
 
 hvl_clases:
@@ -181,28 +189,9 @@ hvl_leer:
         pop ebx
         ret
 
+; (sin vaciar el de antes: guardar.inc, en VENTANAS.COM)
 hvl_escribir:
-        push eax
-        push ebx
-        push esi
-        HV dos_crear
-        jc .x
-        mov ebx, eax
-        mov esi, edx
-        HV dos_escribir
-        jc .e
-        cmp eax, ecx                ; disco lleno: DOS escribe menos sin CF
-        je .e                       ; (igual: CF=0)
-        stc
-.e:
-        pushf
-        HV dos_cerrar
-        popf
-.x:
-        pop esi
-        pop ebx
-        pop eax
-        ret
+        HVJ gua_escribir
 
 hvl_clave:
         push eax
@@ -232,3 +221,78 @@ hvl_clave:
         pop ecx
         pop eax
         ret
+
+%ifdef HVL_REEMPLAZAR
+hvl_reemplazar:
+        pushad
+        test edx, edx               ; ¿es el mismo del documento? Eso es guardar
+        jz .mira
+        xor ebx, ebx
+.cmp:
+        mov al, [esi+ebx]
+        mov ah, [edx+ebx]
+        cmp al, 'a'
+        jb .c1
+        cmp al, 'z'
+        ja .c1
+        sub al, 32
+.c1:
+        cmp ah, 'a'
+        jb .c2
+        cmp ah, 'z'
+        ja .c2
+        sub ah, 32
+.c2:
+        cmp al, ah
+        jne .mira
+        test al, al
+        jz .si
+        inc ebx
+        jmp .cmp
+.mira:
+        push esi
+        xor al, al
+        HV dos_abrir
+        pop esi
+        jc .si                      ; no está: nada que reemplazar
+        mov ebx, eax
+        HV dos_cerrar
+        push edi
+        mov edi, hvl_txt
+        push esi
+        mov esi, hvl_t_existe
+        call hvl_cad
+        pop esi
+        mov ecx, 100
+.n:
+        lodsb
+        test al, al
+        jz .n1
+        stosb
+        dec ecx
+        jnz .n
+.n1:
+        mov esi, hvl_t_reempl
+        call hvl_cad
+        mov byte [edi], 0
+        pop edi
+        mov esi, hvl_txt
+        mov eax, DM_SI_NO
+        HV dlg_mensaje
+        cmp eax, ID_SI
+        jne .no
+.si:
+        popad
+        clc
+        ret
+.no:
+        popad
+        stc
+        ret
+hvl_t_existe db "Ya hay un archivo con ese nombre:", 10, 0
+hvl_t_reempl db 10, "¿Quiere reemplazarlo? (lo que tiene se perderá)", 0
+
+        section .bss
+hvl_txt     resb 200
+        section .text
+%endif

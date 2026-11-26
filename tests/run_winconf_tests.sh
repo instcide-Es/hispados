@@ -9,7 +9,9 @@
 #   1) Al arrancar, AUTOEXEC.BAT llama a WINCONF /AUTO (hay WIN.COM): aplica
 #      los cambios y reinicia. CONFIG.SYS queda con la opción «Windows» (la de
 #      omisión) y su bloque; AUTOEXEC.BAT, con la PATH de Windows y el bloque
-#      :WINDOWS; SYSTEM.INI, con vshare.386 comentado; los de antes, .SIN; los
+#      :WINDOWS; SYSTEM.INI, con vshare.386 comentado; los de antes, .SIN
+#      (también SYSTEM.SIN, y sin temporales: [0.9.31] se escribe en un
+#      .$$$ y se cambia el nombre); los
 #      .WIN, .APL.
 #   2) Tras el reinicio: la opción Windows (CONFIG=WINDOWS), PATH con las dos
 #      carpetas, la orden de Windows hecha, WIN se encuentra desde A:\, y
@@ -114,6 +116,10 @@ grep -qE "HSPSND|HSPJOY|HSPDPMI|HSPEMM" $T/blk && ko "bloque :WINDOWS con emulad
 grep -q "^;device=vshare.386" $T/s1 && ! grep -q "^device=vshare.386" $T/s1 && ok "SYSTEM.INI: vshare.386 comentado" || ko "SYSTEM.INI: vshare.386"
 grep -q "^device=vcache.386" $T/s1 && ok "SYSTEM.INI: lo demás, igual" || ko "SYSTEM.INI: vcache.386 tocado"
 mtype -i $T/f.img ::CONFIG.SIN | tr -d '\r' | cmp -s - <(tr -d '\r' < $T/CONFIG.SYS) && ok "CONFIG.SIN = el de antes" || ko "CONFIG.SIN"
+# [0.9.31] SYSTEM.INI también deja su copia, y no quedan temporales
+mtype -i $T/f.img ::WINDOWS/SYSTEM.SIN | cmp -s - $T/SYSTEM.INI && ok "SYSTEM.SIN = el de antes" || ko "SYSTEM.SIN"
+check $T/l1.txt "(el anterior queda como SYSTEM.SIN)"
+mdir -/ -b -i $T/f.img :: | grep -q '\$\$\$' && ko "quedan temporales .\$\$\$" || ok "sin temporales .\$\$\$"
 mdir -i $T/f.img ::WINDOWS > $T/dw
 grep -qE "^CONFIG +APL" $T/dw && grep -qE "^AUTOEXEC +APL" $T/dw && ! grep -qE " WIN +[0-9]" $T/dw && ok ".WIN pasados a .APL" || ko ".WIN/.APL"
 

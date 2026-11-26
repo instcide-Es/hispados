@@ -560,6 +560,8 @@ pin_proc:
         je .crear
         cmp eax, WM_CLOSE
         je .cerrar
+        cmp eax, WM_QUERYENDSESSION ; [0.9.31] se sale de Hispa Ventanas
+        je .fin_sesion
         cmp eax, WM_DESTROY
         je .destruir
         HVJ ven_defecto
@@ -583,6 +585,11 @@ pin_proc:
         HV ven_invalidar
         mov eax, WM_SIZE
         HVJ ven_defecto
+.fin_sesion:                        ; ¿cambios sin guardar? Se pregunta, como
+        call preguntar
+        setnc al                    ; al cerrar (EAX=0: «Cancelar», no se sale)
+        movzx eax, al
+        ret
 .cerrar:
         cmp dword [arr], 0
         jne hecho

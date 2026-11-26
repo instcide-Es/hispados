@@ -536,7 +536,10 @@ cfg_cargar:
         mov esi, cfg_ruta
         xor al, al
         call dos_abrir
+        jnc .abierto
+        call gua_abrir_bak          ; ¿se fue la luz al guardar? CENTRO.BAK
         jc .defecto
+.abierto:
         mov ebx, eax
         mov edi, [cfg_buf]
         mov ecx, CFG_MAX - 2
@@ -1450,22 +1453,18 @@ cfg_guardar:
 .escribe:
         mov edx, eax
         push esi
-        mov esi, cfg_ruta
-        call dos_crear
+        mov esi, cfg_ruta           ; (en un temporal: si falla, el de antes
+        call gua_crear              ; queda entero; guardar.inc)
         pop esi
         jc .mal
         mov ebx, eax
         call dos_escribir
-        pushf
-        call dos_cerrar             ; (al cerrar se escribe lo último: también
-        jc .malc                    ; puede fallar)
-        popf
+        setc al
+        call gua_cerrar
         jc .mal
         mov [cfg_len], ecx
         mov [cfg_suma], edx
         jmp .x
-.malc:
-        popf
 .mal:
         mov byte [cfg_fallo], 1
 .x:

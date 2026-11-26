@@ -9,7 +9,7 @@
 #    con las unidades en el árbol y el espacio libre abajo;
 #  - C: desde el árbol; vista Detalles; ordenar por tamaño y al revés;
 #  - carpeta nueva, copiar y pegar, arrastrar a otra carpeta (mover), cortar
-#    y pegar, cambiar el nombre (F2), arrastrar una carpeta al árbol (a otra
+#    (con su trama sobre el icono, [0.9.31]: no solo el color) y pegar, cambiar el nombre (F2), arrastrar una carpeta al árbol (a otra
 #    unidad: copia);
 #  - copiar al disquete con la ventana de progreso; «Ya existe» (No); el
 #    disco lleno (Cancelar: no queda nada a medias);
@@ -184,7 +184,8 @@ LX=300                                      # (x de los nombres de la lista)
   aparca
   shot a10
   # ---- cortar UNO.TXT y pegarlo en SUB ----
-  tecla u ctrl-x s ret; sleep 2
+  tecla u ctrl-x; sleep 1; aparca; shot ac   # [0.9.31] cortado y elegido: la trama
+  tecla s ret; sleep 2
   tecla ctrl-v; sleep 2
   tecla backspace; sleep 2
   # ---- cambiar el nombre: GRANDE.BIN -> ENORME.BIN ----
@@ -360,7 +361,11 @@ grep -qx 'Nombre=Administrador de archivos' $T/centro.txt && ok "CENTRO.INI: el 
 grep -q '^Reabrir=' $T/centro.txt && ko "CENTRO.INI: queda «Reabrir=»" || ok "CENTRO.INI: sin «Reabrir=» al acabar"
 fsck_bien $T/f.img "el disquete"
 fsck_bien $T/c.img "el disco duro" 63
-muestra a1 iconos; muestra a3 detalles; muestra a9 arrastrar; muestra a14 progreso; muestra a16 ya_existe
+# [0.9.31] lo cortado (y elegido) se ve sin depender del color: una trama
+# de puntos blancos sobre su icono (fuera del dibujo, el azul de la fila)
+chk $T/ac.ppm px 254 188 9 "cortado: trama sobre el icono" px 255 189 9 "cortado: trama (2)" \
+  px 254 202 9 "cortado: trama (3)" nopx 255 188 9 "cortado: trama, un punto sí y otro no"
+muestra ac cortado; muestra a1 iconos; muestra a3 detalles; muestra a9 arrastrar; muestra a14 progreso; muestra a16 ya_existe
 muestra a17 disco_lleno; muestra a19 eliminar; muestra a21 propiedades; muestra a23 buscar; muestra a24 menu
 muestra a26 bloc; muestra a27 vuelta; muestra a28 sin_disquete; muestra a30 maximizada
 [ -n "${GUARDAR:-}" ] && cp $T/*.ppm $T/c.img $T/f.img "$GUARDAR"/

@@ -494,17 +494,13 @@ copiar_uno:
         ret
 ; recorrer: cada archivo, a su sitio; cada carpeta, creada
 cb_copiar:
-        push eax
-        mov esi, [cu_dst]           ; el destino: cu_dst + lo que sigue a cu_src
-        mov edi, cu_otro
-        call hvl_cad
-        mov esi, w_ruta
-        add esi, [cu_lsrc]
-        call hvl_cad
-        mov byte [edi], 0
-        pop eax
         cmp eax, 3
         je .bien
+        call cu_compone             ; el destino: cu_dst + lo que sigue a cu_src
+        jnc .cabe
+        mov eax, R_OMITIDO          ; [0.9.31] una ruta demasiado larga: se
+        jmp .r                      ; salta (y cuenta como no hecho)
+.cabe:
         cmp eax, 2
         je .dir
         mov esi, w_ruta
@@ -524,6 +520,44 @@ cb_copiar:
         clc
         ret
 .no:
+        stc
+        ret
+
+; (interna) [0.9.31] cu_otro = [cu_dst] y lo que en w_ruta sigue a los
+; [cu_lsrc] primeros octetos, sin pasar de 127 letras (cu_otro mide 128: antes
+; se salía por encima de op_dest) -> CF=1 si no cabe. Conserva los registros
+cu_compone:
+        pushad
+        mov edi, cu_otro
+        mov ecx, 127
+        mov esi, [cu_dst]
+        call .copia
+        jc .no
+        mov esi, w_ruta
+        add esi, [cu_lsrc]
+        call .copia
+        jc .no
+        mov byte [edi], 0
+        popad
+        clc
+        ret
+.no:
+        mov byte [cu_otro], 0
+        popad
+        stc
+        ret
+.copia:
+        lodsb
+        test al, al
+        jz .c_si
+        jecxz .c_no
+        stosb
+        dec ecx
+        jmp .copia
+.c_si:
+        clc
+        ret
+.c_no:
         stc
         ret
 
@@ -758,19 +792,15 @@ mover_uno:
 .x:
         ret
 cb_mover:
-        push eax
-        mov esi, [cu_dst]
-        mov edi, cu_otro
-        call hvl_cad
-        mov esi, w_ruta
-        add esi, [cu_lsrc]
-        call hvl_cad
-        mov byte [edi], 0
-        pop eax
-        cmp eax, 2
-        je .dir
         cmp eax, 3
         je .sale
+        call cu_compone
+        jnc .cabe
+        mov eax, R_OMITIDO          ; [0.9.31] una ruta demasiado larga: se
+        jmp .r                      ; salta (y la carpeta de antes se queda)
+.cabe:
+        cmp eax, 2
+        je .dir
         mov esi, w_ruta
         mov edi, cu_otro
         call mover_archivo

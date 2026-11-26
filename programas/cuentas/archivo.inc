@@ -41,10 +41,12 @@ ESC_TAM     equ 8192                ; el búfer de escribir
 TROZO       equ 16384               ; lo que se lee de una vez
 
 ; ---- escribir ----
-; abre para escribir el archivo ESI; CF=1 si no se puede
+; abre para escribir el archivo ESI; CF=1 si no se puede. [0.9.31] Se
+; escribe en un temporal y, al cerrar, toma su nombre: si algo falla, el de
+; antes queda entero (guardar.inc)
 esc_abre:
         push eax
-        HV dos_crear
+        HV gua_crear
         jc .x
         mov [esc_h], eax
         mov dword [esc_n], 0
@@ -130,13 +132,14 @@ esc_vuelca:
         ret
 ; cierra; CF=1 si algo no se ha podido escribir (el disco lleno...)
 esc_cierra:
+        push eax
         push ebx
         call esc_vuelca
         mov ebx, [esc_h]
-        HV dos_cerrar
+        mov al, [esc_mal]
+        HV gua_cerrar              ; (CF=1 si no se ha guardado)
         pop ebx
-        cmp byte [esc_mal], 1
-        cmc                         ; (CF=1 si esc_mal vale 1)
+        pop eax
         ret
 
 ; ¿el nombre del archivo acaba en .CSV? -> ZF=1 si sí
@@ -338,6 +341,18 @@ guarda_como:
 .f2:
         mov byte [edi], 0
         mov byte [csv_avisado], 0
+        mov esi, nombre             ; [0.9.31] ¿hay ya otro archivo con ese
+        mov edx, nom_ant            ; nombre? Se pregunta si se reemplaza
+        mov edi, t_guardar_como
+        call hvl_reemplazar
+        jnc .escribe
+        mov esi, nom_ant
+        mov edi, nombre
+        mov ecx, 80
+        rep movsb
+        popad                       ; (no: el nombre de antes, y otra vez el cuadro)
+        jmp guarda_como
+.escribe:
         popad
         call guarda_escribe
         jnc .x
@@ -484,6 +499,7 @@ guarda_escribe:
 ; ---- abrir: el archivo ESI (acabado en 0) ----
 cargar:
         pushad
+        mov byte [car_rec], 0
         mov [car_ruta], esi
         xor al, al
         HV dos_abrir
@@ -552,6 +568,12 @@ cargar:
         jnz .nm
 .nmx:
         mov byte [edi], 0
+        cmp byte [car_rec], 0       ; [0.9.31] no cabía entero: se dice, y sin
+        je .entero                  ; nombre, para que Guardar no lo escriba
+        mov byte [nombre], 0        ; recortado encima (pide uno nuevo)
+        mov esi, t_recortado
+        call aviso
+.entero:
         call al_principio
         cmp dword [barra_v], 0
         je .sinv
@@ -710,8 +732,11 @@ lee_hoj:
         jz .ct2
         inc esi
         cmp edi, aj_buf + CEL_MAX - 1
-        jae .ct1
+        jae .ct_rec
         stosb
+        jmp .ct1
+.ct_rec:
+        mov byte [car_rec], 1       ; [0.9.31] la celda no cabe entera
         jmp .ct1
 .ct2:
         mov byte [edi], 0
@@ -762,8 +787,11 @@ lee_csv:
 .pon:
         mov byte [car_ini], 0
         cmp edi, aj_buf + CEL_MAX - 1
-        jae .pl
+        jae .rec
         stosb
+        jmp .pl
+.rec:
+        mov byte [car_rec], 1       ; [0.9.31] la celda no cabe entera
         jmp .pl
 .sep:
         call .celda
@@ -783,15 +811,18 @@ lee_csv:
         cmp byte [edi], 0
         je .cx
         cmp ecx, NCOL
-        jae .cx
+        jae .cxr
         cmp edx, NFIL
-        jae .cx
+        jae .cxr
         push esi
         mov esi, aj_buf
         call cel_pon
         call fecha_auto
         pop esi
 .cx:
+        ret
+.cxr:
+        mov byte [car_rec], 1       ; [0.9.31] fuera de la hoja: se dirá
         ret
 
 ; la celda ECX, EDX acaba de recibir el texto ESI: si es una fecha
@@ -928,6 +959,7 @@ car_ruta    resd 1
 car_tam     resd 1
 car_buf     resd 1
 car_mango   resd 1
+car_rec     resb 1                  ; [0.9.31] al abrir, algo no cabía (filas, columnas o letras)
 car_h       resd 1
 rl          resb RL_TAM             ; los registros de una interrupción
 esc_mal     resb 1                  ; algo no se ha podido escribir

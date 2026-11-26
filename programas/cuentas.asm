@@ -805,6 +805,11 @@ t_err_circ  db "#CIRC", 0
 t_err_ref   db "#REF", 0
 t_cambios   db "La hoja tiene cambios sin guardar.", 10, "¿Quiere guardarlos?", 0
 t_no_abrir  db "No se ha podido abrir el archivo.", 0
+t_recortado db "El archivo es demasiado grande para Cuentas (como mucho,", 10
+            db "64 columnas, 1.000 filas y 127 letras por celda):", 10
+            db "se ha abierto solo lo que cabe.", 10
+            db "Para no perder el resto, la hoja se queda sin nombre:", 10
+            db "al guardarla se pedirá uno nuevo.", 0
 t_no_guardar db "No se ha podido guardar la hoja.", 10
             db "Compruebe que el disco no está lleno ni protegido.", 0
 t_csv_pierde db "Un archivo .CSV solo guarda lo escrito en las celdas de la hoja que", 10
@@ -1023,6 +1028,8 @@ cue_proc:
         je .crear
         cmp eax, WM_CLOSE
         je .cerrar
+        cmp eax, WM_QUERYENDSESSION ; [0.9.31] se sale de Hispa Ventanas
+        je .fin_sesion
         cmp eax, WM_DESTROY
         je .destruir
         HVJ ven_defecto
@@ -1086,6 +1093,15 @@ cue_proc:
         call cuenta_cols
         call inval
         jmp hecho
+.fin_sesion:                        ; ¿cambios sin guardar? Se pregunta, como
+        cmp byte [editando], 0
+        je .fs1
+        call commit_edit
+.fs1:
+        call preguntar
+        setnc al                    ; al cerrar (EAX=0: «Cancelar», no se sale)
+        movzx eax, al
+        ret
 .cerrar:
         cmp byte [editando], 0
         je .c1
@@ -3635,6 +3651,7 @@ simbolo:
 %include "barra.inc"
 %define CTX_PUENTE
 %include "contexto.inc"
+%define HVL_REEMPLAZAR              ; («Guardar como»: ¿reemplazarlo?)
 %include "hvplib.inc"
 
 ; =============================================================================

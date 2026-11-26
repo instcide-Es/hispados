@@ -88,8 +88,7 @@ Cada etapa termina con algo que se ve y se puede probar en QEMU y en un PC real.
    ([ARCHIVOS], `programas/archivos.asm`, ver «Administrador de archivos»). La
    segunda tanda de juegos (Bloques, Solitario, Tragabolas y Almacén) ya
    está (`tests/run_juegos2_tests.sh`). Pendiente (se
-   hará según haga falta en las etapas 4 y 5): avisar de los
-   textos sin guardar al salir con el botón «Salir»; órdenes
+   hará según haga falta en las etapas 4 y 5): órdenes
    de menú desactivadas o con marca; tabuladores y ajuste de línea en el
    cuadro de texto; varias copias del mismo programa a la vez; elegir el
    «solo el contorno» (`AJ_CONTORNO`) desde Configuración. Hecho después
@@ -222,8 +221,17 @@ VENTANAS [/1024 | /800 | /640 | /MODO:AxB[xC] | /MODO:AUTO] [/8 | /15 | /16 | /2
   encargo de ejecutar `REINICIA.COM` o `APAGAR.COM` de su carpeta, sin
   «volver», vuelve a modo texto y termina; el lanzador quita HSPDPMI de la
   memoria y ejecuta el programa, que escribe en el disco lo pendiente y
-  reinicia o apaga (si el Bloc de notas tiene cambios sin guardar, pregunta
-  antes). Si falta el programa, lo dice y no sale. CENTRO.INI se guarda
+  reinicia o apaga (si hay cambios sin guardar, pregunta antes: [0.9.31]
+  `apa_consultar`, en `ventanas/apagado.inc`, lo hace al volver a
+  Hispa-DOS, apagar, reiniciar, ejecutar un programa de DOS desde el Centro
+  o cambiar la resolución: el Bloc de notas dice «se perderán. ¿Continuar?»,
+  y a la ventana principal de cada programa .HVP le envía
+  WM_QUERYENDSESSION —como SendMessage en Windows, con `msg_enviar`— y el
+  programa contesta en el momento con su «¿Quiere guardarlos?»: Pluma,
+  Cuentas, Publicaciones, Presentaciones, Pintura, el Mirador y Facturas
+  (esta, si FACTURAS.DAT está dañado y hay cambios que no ha podido
+  guardar). EAX=0 es «Cancelar» o «no se ha podido guardar»: no se sale.
+  Quien no lo atiende deja salir: `ven_defecto` devuelve 1). Si falta el programa, lo dice y no sale. CENTRO.INI se guarda
   con el cuadro aún en pantalla, antes de dejar el encargo (y al salir ya no
   se repite): si no se puede escribir (la memoria USB protegida, quitada o
   que no responde) lo dice —«No se ha podido guardar el Centro de programas
@@ -2341,6 +2349,16 @@ Añadida para la imagen de fondo del escritorio ([FONDO]; 98 entradas: la
 |---|---|
 | `esc_imagen` (EAX=0: lo que hay puesto → EAX=forma, ESI=ruta, ECX=estado, EDX=número de cambio; EAX=1, ESI=ruta, EDX=forma: la pone → CF=1 y EAX=el error; EAX=2, EDI=búfer: la carpeta de VENTANAS.COM) | la imagen de fondo del escritorio: la usan Configuración (apartado Escritorio y al guardar VENTANAS.INI) y Mirador («Poner como fondo de escritorio»). Los registros, en «La imagen de fondo del escritorio» |
 
+Añadidas en la 0.9.31 para guardar sin vaciar el archivo de antes (103
+entradas; `ventanas/guardar.inc`, en la parte alta: una sola copia, en vez
+de una en cada .HVP):
+
+| Entrada | Para qué |
+|---|---|
+| `gua_crear` (ESI=ruta → EAX=manejador; CF=1 si no, o si es de solo lectura), `gua_cerrar` (EBX=manejador, AL=1 si algo falló al escribir → CF=1 si no se ha guardado) | escribir a trozos: todo va a un temporal (`.$$$`); al cerrar, si está entero, el de antes pasa a `.BAK`, el temporal toma su nombre y la `.BAK` se borra; si no, el de antes queda como estaba (Cuentas) |
+| `gua_escribir` (ESI=ruta, EDX=datos, ECX=octetos → CF=1 si no) | lo mismo, de una vez: es `hvl_escribir` |
+| `gua_ext` (ESI=ruta, EDI=búfer de 132, EAX=extensión, EDX=la de reserva), `gua_atrib` (ESI=ruta → CF=0 y CL=atributos si está) | para quien hace su propio guardado seguro (Publicaciones y Presentaciones) |
+
 Un módulo compilado con menos entradas en su cabecera (63, 66, 72, 76, 80, 82, 84, 85 u 86) sigue
 cargándose igual; uno que pida más de las que tiene un Hispa Ventanas
 anterior no se carga y lo dice.
@@ -2357,7 +2375,13 @@ repartir: los programas no se enteran.
 (no gastan sitio en VENTANAS.COM): `hvl_cad` y `hvl_num` (componer textos),
 `hvl_lee_num`, `hvl_opcion` (buscar `/X` en los parámetros), `hvl_ruta` (la
 ruta del módulo con otra extensión: el archivo de datos), `hvl_leer` y
-`hvl_escribir` (un archivo entero), `hvl_clave` (buscar `Clave=` en un
+`hvl_escribir` (un archivo entero; [0.9.31] sin vaciar el de antes: se
+escribe en un temporal, la misma ruta con `.$$$`, y solo si cabe entero el
+de antes pasa a `.BAK`, el temporal toma su nombre y la `.BAK` se borra;
+`ventanas/guardar.inc`, que también usan el Bloc de notas y CENTRO.INI, y
+`gua_crear`/`gua_cerrar` para quien escribe a trozos, como Cuentas; si falta
+CENTRO.INI, Hispa Ventanas lee CENTRO.BAK), `hvl_reemplazar` (en «Guardar
+como», «Ya hay un archivo con ese nombre… ¿Quiere reemplazarlo?»), `hvl_clave` (buscar `Clave=` en un
 texto) y `hvl_clases`.
 
 ### Cómo se hace un programa
@@ -2620,8 +2644,9 @@ los pasos de deshacer; otro, del tamaño justo, para lo copiado. El relleno
 va por tramos de fila, sin recursión.
 
 Pendiente: ampliar la vista (lupa), voltear y girar, líneas a 45° con
-Mayús, elegir la fuente del texto y avisar de los cambios sin guardar al
-salir con el botón «Salir» de la barra de arriba (como el Bloc de notas).
+Mayús y elegir la fuente del texto. (Avisar de los cambios sin guardar al
+salir con el botón «Salir» de la barra de arriba: hecho en la 0.9.31, con
+WM_QUERYENDSESSION.)
 
 ### Reproductor de sonido
 

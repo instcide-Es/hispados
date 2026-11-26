@@ -128,4 +128,10 @@
         HVF dlg_lista               ; 96  EBP=dueña EDI=título ESI=pregunta EBX=textos (uno cada EDX octetos) ECX=cuántos -> EAX=el elegido (-1: ninguno)
         ; ---- [FONDO] la imagen de fondo del escritorio (98 entradas; ventanas/fondo.inc) ----
         HVF esc_imagen              ; 97  EAX=0 -> EAX=ajuste ESI=ruta ECX=estado EDX=serie; EAX=1 ESI=ruta EDX=ajuste: la pone -> EAX=0 o error (CF=1); EAX=2 EDI=búfer: la carpeta de VENTANAS.COM; [ESTILO] EAX=3 -> EAX=0 clásico / 1 barra de tareas; EAX=4 EDX=0/1: ponerlo (CF=1 si no se puede)
+        ; ---- [0.9.31] guardar sin vaciar el de antes (ventanas/guardar.inc; 103 entradas) ----
+        HVF gua_crear               ; 98  ESI=ruta -> EAX=manejador (de un temporal .$$$); CF=1 si no (o es de solo lectura)
+        HVF gua_cerrar              ; 99  EBX=manejador AL=1 si algo falló al escribir -> CF=1 si no se ha guardado (el de antes, entero)
+        HVF gua_escribir            ; 100 ESI=ruta EDX=datos ECX=octetos: todo de una vez, igual -> CF=1 si no
+        HVF gua_ext                 ; 101 ESI=ruta EDI=búfer (132) EAX=extensión ('BAK') EDX=la de reserva: la ruta con esa extensión
+        HVF gua_atrib               ; 102 ESI=ruta -> CF=0 y CL=atributos (4300h) si está; CF=1 si no
 %endmacro

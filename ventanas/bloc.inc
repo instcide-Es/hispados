@@ -401,16 +401,9 @@ bloc_escribir:
         jmp .c
 .cf:
         sub edi, edx
-        mov esi, bloc_nombre
-        call dos_crear
-        jc .falla
-        mov ebx, eax
-        mov esi, edx
-        mov ecx, edi
-        call dos_escribir
-        pushf
-        call dos_cerrar
-        popf
+        mov esi, bloc_nombre        ; (en un temporal: si falla, el de antes
+        mov ecx, edi                ; queda entero; guardar.inc)
+        call gua_escribir
         jc .falla
         mov eax, edx
         call mem_soltar

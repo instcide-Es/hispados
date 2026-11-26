@@ -82,8 +82,8 @@ ico_talla_poner:
 
 ; ESI=las opciones de más (« /MODO:1440x900x8 /PRUEBA», 31 letras como
 ; mucho; 0: ninguna): vuelve a cargar Hispa Ventanas -> EAX=0 se hace, 1 no
-; se puede (sin el lanzador), 2 el usuario no ha querido (texto sin guardar
-; en el Bloc de notas)
+; se puede (sin el lanzador), 2 el usuario no ha querido (cambios sin
+; guardar: apa_consultar)
 pan_reiniciar:
         push ebx
         push ecx
@@ -95,25 +95,10 @@ pan_reiniciar:
         mov eax, 1
         cmp word [lz_seg], 0
         je .x
-        cmp dword [bloc_ven], 0     ; ¿texto sin guardar en el Bloc de notas?
-        je .poner
-        push esi
-        mov ebp, [bloc_edit]
-        mov eax, EM_MODIFICADO
-        call msg_enviar
-        pop esi
-        test eax, eax
-        jz .poner
-        push esi
-        mov esi, apa_bloc
-        mov edi, pan_t_tit
-        mov eax, DM_ACEPTAR_CANCELAR
-        mov ebp, [pan_duena]
-        call dlg_mensaje
-        pop esi
-        cmp eax, ID_ACEPTAR
+        mov edi, pan_t_tit          ; ¿cambios sin guardar? [0.9.31] en el Bloc
+        call apa_consultar          ; de notas y en cada programa
         mov eax, 2
-        jne .x
+        jc .x
 .poner:
         movzx edx, word [lz_seg]    ; a la memoria del lanzador
         shl edx, 4

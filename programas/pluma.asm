@@ -554,7 +554,9 @@ t_cambios   db "El documento tiene cambios sin guardar.", 10, "¿Quiere guardarl
 t_no_abrir  db "No se ha podido abrir el archivo.", 0
 t_no_guardar db "No se ha podido guardar el documento.", 0
 t_largo     db "El documento es demasiado largo para Pluma:", 10
-            db "se han abierto solo las primeras 30.000 letras.", 0
+            db "se han abierto solo las primeras 30.000 letras.", 10
+            db "Para no perder el resto, se queda sin nombre:", 10
+            db "al guardarlo se pedirá uno nuevo.", 0
 t_lleno     db "No cabe más texto en el documento (30.000 letras).", 0
 t_impreso   db "El documento se ha enviado a la impresora.", 0
 t_e_imprimir db "No se ha podido imprimir.", 10
@@ -806,6 +808,8 @@ plu_proc:
         je .crear
         cmp eax, WM_CLOSE
         je .cerrar
+        cmp eax, WM_QUERYENDSESSION ; [0.9.31] se sale de Hispa Ventanas
+        je .fin_sesion
         cmp eax, WM_DESTROY
         je .destruir
         HVJ ven_defecto
@@ -881,6 +885,11 @@ plu_proc:
         mov eax, ecx
         call desplaza
         jmp hecho
+.fin_sesion:                        ; ¿cambios sin guardar? Se pregunta, como
+        call preguntar
+        setnc al                    ; al cerrar (EAX=0: «Cancelar», no se sale)
+        movzx eax, al
+        ret
 .cerrar:
         call preguntar
         jc hecho
@@ -4116,6 +4125,7 @@ cargar:
         loop .t
         jmp .tf
 .largo:
+        mov byte [recortado], 1     ; [0.9.31] y el nombre fuera (en .fin)
         mov esi, t_largo
         call aviso
 .tf:
@@ -4172,6 +4182,11 @@ cargar:
         mov esi, nom_tmp
         mov edi, nombre
         call copia
+        cmp byte [recortado], 0     ; [0.9.31] recortado: sin nombre, para que
+        je .fin1                    ; Guardar no lo escriba encima del entero
+        mov byte [nombre], 0        ; (pide uno nuevo)
+        mov byte [recortado], 0
+.fin1:
         call compone
         call pon_titulo
         call pon_barra
@@ -4239,6 +4254,18 @@ guardar_como:
         call hvl_cad
 .f2:
         mov byte [edi], 0
+        mov esi, nombre             ; [0.9.31] ¿hay ya otro archivo con ese
+        mov edx, nom_ant            ; nombre? Se pregunta si se reemplaza
+        mov edi, t_guardar_como
+        call hvl_reemplazar
+        jnc .escribe
+        mov esi, nom_ant
+        mov edi, nombre
+        mov ecx, 96
+        rep movsb
+        popad                       ; (no: el nombre de antes, y otra vez el cuadro)
+        jmp guardar_como
+.escribe:
         popad
         call guarda_escribe
         jnc .x
@@ -5626,6 +5653,7 @@ pl_letra:
 %define CTX_PUENTE
 %include "contexto.inc"
 %include "ortografia.inc"
+%define HVL_REEMPLAZAR              ; («Guardar como»: ¿reemplazarlo?)
 %include "hvplib.inc"
 
 FBUF_TAM    equ 3 * MAX_TXT + 24
@@ -5735,6 +5763,7 @@ titulo      resb 100
 nombre      resb 96
 nom_tmp     resb 96
 nom_ant     resb 96                 ; (OFICINA2) el nombre de antes de «Guardar como»
+recortado   resb 1                  ; [0.9.31] el archivo no cabía entero
 busca_txt   resb 44
 reemp_txt   resb 44
 num_txt     resb 12
