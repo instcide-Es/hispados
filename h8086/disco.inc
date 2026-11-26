@@ -32,7 +32,7 @@
 ;  de 32 megas son 32 K, que en estas máquinas no sobran.
 ; =============================================================================
 N_ARCH      equ 8                   ; archivos abiertos a la vez (sin FILES=)
-N_UNI       equ 5                   ; unidades: A:, B:, C: y dos de controladores (D:, E:)
+N_UNI       equ 8                   ; unidades: A:, B:, C: y cinco de controladores (D: a H:)
 C_TAM       equ 516                 ; una entrada de la reserva de sectores:
 C_UNI       equ 0                   ; db su unidad (FFh: libre), dw su sector
 C_LBA       equ 2                   ; (en 2) y los 512 octetos (en 4)
@@ -988,10 +988,12 @@ crudo:
 ; de dos segundos sin usarse, puede que hayan cambiado el disquete (un XT no
 ; avisa): se leen otra vez sus medidas y su FAT. CF=1 si no hay disco
 disco_fresco:
-        cmp byte [u_bios], 0x80     ; (un disco duro no se cambia)
-        jae .vale
         cmp byte [abiertos], 0
         jne .vale
+        cmp word [u_dev+2], 0       ; (a un controlador se le pregunta)
+        jne dev_medio
+        cmp byte [u_bios], 0x80     ; (un disco duro no se cambia)
+        jae .vale
         push es
         xor ax, ax
         mov es, ax

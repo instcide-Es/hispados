@@ -175,9 +175,10 @@ el Makefile ya no hace los disquetes si se pasa).
   mismas cuatro medidas): **DERRIBO**, de pala, pelota y ladrillos, y
   **MARCIANADA**, de marcianitos, con sus instrucciones en `JUEGOS.TXT`
   (ver «Juegos», más abajo).
-- **Prueba automática** (`make -C h8086 prueba`): 932 comprobaciones en
-  QEMU, en cincuenta y una partes (con las de PLUMA, CUENTAS, los juegos,
-  INSTALAR, el menú y las de la auditoría de la 0.14; unas hora y cuarto) (y la batería entera se pasa también con el
+- **Prueba automática** (`make -C h8086 prueba`): 976 comprobaciones en
+  QEMU, en cincuenta y seis partes (con las de PLUMA, CUENTAS, los juegos,
+  INSTALAR, el menú, las de la auditoría de la 0.14 y las de los
+  controladores de DOS y la red, `prueba/partes_drivers.sh`; unas hora y cuarto) (y la batería entera se pasa también con el
   núcleo en la memoria alta, `MODO=alto`, y como en un 8086, `MODO=8086`): arrancando de disquete y de disco duro, con
   discos partidos y formateados por el propio sistema, disquetes de siete
   medidas, una sola disquetera cambiando de disquete, discos estropeados a
@@ -271,12 +272,12 @@ con su disquetera y su disco duro.
   dentro de los primeros 2 gigas, y un solo disco duro.
 - De 8 a 64 archivos abiertos entre todos los programas (FILES=). Sin la
   vieja interfaz de archivos por FCB.
-- La consola de INT 21h (01h a 0Ch) y los números de archivo 0 a 2 van a la
-  BIOS directamente: un controlador que se llame CON (un ANSI.SYS) se carga
-  y se puede abrir por su nombre, pero no sustituye a la consola.
-- A un controlador de bloque no se le pregunta si han cambiado el disco
-  (órdenes 1 y 2): vale para discos fijos, como DISCORAM. Los controladores
-  tienen que ser binarios (.SYS), no .EXE. Dos unidades como mucho (D:, E:).
+- Con un ANSI.SYS cargado, la línea de órdenes se sigue editando con la
+  BIOS (lo que escriben los programas sí pasa por él). Cinco unidades de
+  controladores como mucho (D: a H:). Sin CLOCK$ (los relojes de tarjeta de
+  los XT), sin las órdenes 13 y 14 (abrir y cerrar un dispositivo), sin
+  INT 28h y sin el redirector de INT 2Fh (MSCDEX): ver
+  [DRIVERS-MICROSOFT.md](../DRIVERS-MICROSOFT.md).
 - En un PC o un XT (sin reloj) la fecha hay que darla con FECHA cada vez que
   se enciende, y no pasa sola al día siguiente a medianoche.
 - Las mayúsculas con tilde no existen en la página 437 (salvo É): TECLADO
@@ -625,14 +626,27 @@ pasa a su rutina de estrategia y luego a la de interrupción
   extensión, es el dispositivo: `COPIAR carta.txt PRN`, `DIR > PRN`,
   `orden > NUL`, `COPIAR CON nota.txt`. Los números de archivo 3 y 4 son AUX
   y PRN.
-- **`DEVICE=archivo [parámetros]`** en CONFIG.SYS carga un controlador al
-  estilo de DOS: un binario con su cabecera al principio. Se carga en lo
-  alto del núcleo, se le manda la orden 0 (iniciar), que devuelve hasta
-  dónde se queda residente, y:
-  - si es **de carácter**, se enlaza detrás de NUL y se abre por su nombre;
+- **`DEVICE=archivo [parámetros]`** en CONFIG.SYS carga un controlador
+  como los de DOS (desde la rama `h8086-drivers`, como MS-DOS 3.3 y 5): un
+  binario con su cabecera al principio, o un `.EXE` (se le aplican las
+  reubicaciones). Se carga en lo alto del núcleo, se le manda la orden 0
+  (iniciar) con su línea (acabada en retorno y salto), la unidad que le
+  tocaría y hasta dónde puede llegar, y devuelve hasta dónde se queda
+  residente. Se enlaza en la cadena detrás de NUL, y:
+  - si es **de carácter**, se abre por su nombre; si dice ser la consola (un
+    ANSI.SYS, como NANSI de FreeDOS), la consola de los programas va por él;
   - si es **de bloque**, cada unidad que diga tener recibe la letra
-    siguiente (D:, E:), con las medidas (BPB) que dé; los sectores se le
-    piden de uno en uno (órdenes 4 y 8).
+    siguiente (de D: a H:), con las medidas (BPB) que dé; los sectores se le
+    piden de uno en uno (órdenes 4 y 8) y, antes, se le pregunta si han
+    cambiado el disco (orden 1) y, si es así, sus medidas nuevas (orden 2).
+  - Al controlador se le llama como lo llama DOS: ES:BX en la petición y
+    DS:SI en su cabecera (los comprimidos con UPX lo necesitan).
+- **IOCTL** (INT 21h/44h, de 00h a 0Fh) y **la lista de listas** (52h, con
+  la cadena de controladores desde NUL) como en MS-DOS 3.3; e **INT 29h**,
+  la salida rápida. Los **residentes** (31h, INT 27h) y, con ellos, los
+  **packet drivers** de red (probado con el de la NE2000 de Crynwr) y los
+  controladores de ratón (CuteMouse). Todo en
+  [DRIVERS-MICROSOFT.md](../DRIVERS-MICROSOFT.md), «Hito 1».
 - **DISCORAM.SYS** es el ejemplo, y sirve: `DEVICE=\DISCORAM.SYS 64` deja un
   disco en memoria de 64 K (de 16 a 512) en D:, con formato y vacío. Lo que
   ocupa se le quita a los programas. Con **`/E`**

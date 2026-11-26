@@ -42,6 +42,20 @@ P_SECTOR    equ 20
         dw %2, dev_estr, %3
         db %4
 %endmacro
+; La «lista de listas» de MS-DOS (INT 21h/52h, en ES:BX = sysvars), con lo
+; que se usa de ella para recorrer la memoria y los controladores: detrás de
+; la palabra -2 (la primera cabecera de memoria) y, en 22h, la cabecera de
+; NUL, de donde sale la cadena. Lo que aquí no hay (DPB, SFT, CDS, FCB,
+; búferes) va a FFFF:FFFF, como «no hay»
+sv_mcb      dw 0                    ; -2  la primera cabecera de memoria
+sysvars     dd -1, -1               ; 0   DPB, 4 la tabla de archivos (SFT)
+            dd -1                   ; 8   CLOCK$
+sv_con      dw dev_con, 0           ; 0Ch CON
+            dw 512                  ; 10h el sector más grande
+            dd -1, -1, -1           ; 12h búferes, 16h CDS, 1Ah FCB
+            dw 0                    ; 1Eh
+sv_nbloq    db 3                    ; 20h cuántas unidades de bloque
+            db N_UNI                ; 21h la última letra (LASTDRIVE)
 dev_nul:    DISPOSITIVO dev_con, 0x8004, dev_i_nul, "NUL     "
 dev_con:    DISPOSITIVO dev_aux, 0x8003, dev_i_con, "CON     "
 dev_aux:    DISPOSITIVO dev_prn, 0x8000, dev_i_aux, "AUX     "
@@ -52,6 +66,7 @@ dev_lpt1:   dw 0xFFFF, 0xFFFF, 0x8000, dev_estr, dev_i_prn
 
 ; pone el segmento en los enlaces de la cadena (al arrancar)
 disp_ini:
+        mov [sv_con+2], cs
         mov [dev_nul+2], cs
         mov [dev_con+2], cs
         mov [dev_aux+2], cs
@@ -102,6 +117,15 @@ dev_int:
         je .escribir
         cmp al, 9
         je .escribir
+        cmp al, 6                   ; ¿hay algo que leer? De CON, si hay
+        jne .fin_j                  ; una tecla
+        cmp dl, 1
+        jne .fin_j
+        mov ah, 1
+        int 0x16
+        jnz .fin_j
+        mov byte [es:bx+P_ESTADO+1], 3      ; (ocupado)
+.fin_j:
         jmp .fin                    ; lo demás (iniciar, vaciar...): hecho
 .leer:
         mov word [es:bx+P_CUANTOS], 0
@@ -190,13 +214,7 @@ dev_int:
         jnz .e_mal
         jmp short .e_sig
 .e_con:
-        push bx
-        push bp
-        mov ah, 0x0E
-        mov bx, 7
-        int 0x10
-        pop bp
-        pop bx
+        int 0x29                    ; (la salida rápida: la BIOS)
 .e_sig:
         inc di
         loop .e
@@ -219,9 +237,15 @@ dev_int:
         retf
 
 ; ---- pedirle algo a un dispositivo ----
-; manda la petición `pet` (ya rellena) al dispositivo de cabecera DX:AX.
-; Conserva los registros
+; manda la petición `pet` (ya rellena) al dispositivo de cabecera DX:AX
+; (dev_pide: la de DI). DS = el núcleo. Conserva los registros
 dev_llama:
+        push di
+        mov di, pet
+        call dev_pide
+        pop di
+        ret
+dev_pide:
         push ax
         push bx
         push cx
@@ -231,27 +255,26 @@ dev_llama:
         push bp
         push ds
         push es
-        mov byte [pet], 26
-        mov word [pet+P_ESTADO], 0
+        mov byte [di], 26
+        mov word [di+P_ESTADO], 0
         mov es, dx
         mov si, ax
         mov [dv_far+2], dx
         mov ax, [es:si+D_ESTR]
         mov [dv_far], ax
-        mov ax, [es:si+D_INT]
-        push ax
+        push word [es:si+D_INT]
+        push di                     ; (por si el controlador lo cambia)
         push cs
         pop es
-        mov bx, pet
-        call far [dv_far]
-        pop ax
-        push cs
-        pop ds
-        mov [dv_far], ax
-        push cs
+        mov bx, di
+        mov ds, dx                  ; (con DS:SI en su cabecera, como en DOS:
+        call far [cs:dv_far]        ; los comprimidos con UPX cuentan con ello)
+        push cs                     ; su «estrategia»...
         pop es
-        mov bx, pet
-        call far [dv_far]
+        pop bx
+        pop word [cs:dv_far]
+        mov ds, [cs:dv_far+2]
+        call far [cs:dv_far]        ; ...y su «interrupción»
         pop es
         pop ds
         pop bp
@@ -262,6 +285,53 @@ dev_llama:
         pop bx
         pop ax
         cld
+        ret
+
+; ---- la consola, por un CON cargado con DEVICE= (un ANSI.SYS) ----
+; Si un controlador de carácter dice ser la entrada o la salida de la consola
+; (bits 0 y 1 de sus atributos), lo que los programas escriben y leen por la
+; consola (INT 21h 01h a 0Ch y los números de archivo 0 a 2) pasa por él,
+; como en MS-DOS. con_pide le manda la orden AL (4 leer, 5 mirar sin sacar, 8
+; escribir) con un octeto, el de con_car -> AL = el octeto leído o mirado;
+; ZF=1 si dice «ocupado» (al mirar: no hay tecla). Conserva lo demás
+con_pide:
+        push di
+        push dx
+        push ds
+        push cs
+        pop ds
+        mov di, pet_con
+        mov [di+P_ORDEN], al
+        mov word [di+P_CUANTOS], 1
+        mov word [di+P_DONDE], con_car
+        mov [di+P_DONDE+2], cs
+        mov ax, [con_dev]
+        mov dx, [con_dev+2]
+        call dev_pide
+        mov al, [di+P_MEDIO]        ; (lo que da «mirar»)
+        cmp byte [di+P_ORDEN], 5
+        je .m
+        mov al, [con_car]
+.m:
+        mov ah, [di+P_ESTADO+1]
+        and ah, 2
+        xor ah, 2
+        pop ds
+        pop dx
+        pop di
+        ret
+; ¿hay una tecla esperando? ZF=1 si no. No conserva AX (DS = el núcleo)
+hay_tecla:
+        cmp byte [tecla_cod], 0  ; (el código de una flecha, por dar)
+        jne .x
+        cmp word [con_dev+2], 0
+        je .bios
+        mov al, 5
+        jmp con_pide
+.bios:
+        mov ah, 1
+        int 0x16
+.x:
         ret
 
 ; lee ([es_op]=0) o escribe (1) CX octetos de [es_seg]:[es_off] en el
@@ -326,6 +396,67 @@ dev_bloque:
         ret
 .bien:
         clc
+        ret
+
+; (de disco_fresco, sin archivos abiertos) ¿han cambiado el disco de la
+; unidad cargada, que es de un controlador? Se le pregunta (orden 1, MEDIA
+; CHECK); si dice que sí, o que no lo sabe, se le piden las medidas del disco
+; nuevo (orden 2, BUILD BPB; si es «de IBM», con el primer sector de la FAT,
+; como en MS-DOS), se olvida lo guardado de él y se vuelven a leer. Si no
+; sabe contestar, el disco es el mismo (un disco fijo). CF=1 si falla
+dev_medio:
+        mov al, [u_sub]
+        mov [pet+1], al
+        mov al, [bpb_ant+10]        ; el octeto del medio que se conocía
+        mov [pet+P_MEDIO], al
+        mov byte [pet+P_ORDEN], 1
+        call .llama
+        jnz .igual
+        mov al, [pet+P_DONDE]       ; 1: el mismo; FFh: otro; 0: no se sabe
+        dec al
+        jz .igual
+        call sec_vuelca
+        jc .x
+        les si, [u_dev]
+        test byte [es:si+D_ATR+1], 0x20
+        push cs
+        pop es
+        jnz .bpb                    ; (bit 13: no es de IBM, no hace falta)
+        mov ax, 1
+        mov bx, sector
+        mov byte [op13], 2
+        call dev_bloque
+        jc .x
+        mov word [buf_lba], 0xFFFF
+        mov al, [sector]
+        mov [pet+P_MEDIO], al
+.bpb:
+        mov word [pet+P_DONDE], sector
+        mov [pet+P_DONDE+2], cs
+        mov byte [pet+P_ORDEN], 2
+        call .llama
+        mov ax, E_DISCO
+        stc
+        jnz .x
+        mov ax, [pet+18]            ; las medidas nuevas
+        mov [u_bpb], ax
+        mov ax, [pet+20]
+        mov [u_bpb+2], ax
+        mov al, [unidad_act]        ; y lo de antes ya no vale
+        call cache_olvida
+        mov word [dir_act], 0
+        mov byte [dir_txt], 0
+        jmp disco_ini
+.igual:
+        jmp disco_fresco.vale
+.x:
+        ret
+; (interna) la petición, al controlador de la unidad -> ZF=0 si da error
+.llama:
+        mov ax, [u_dev]
+        mov dx, [u_dev+2]
+        call dev_llama
+        test byte [pet+P_ESTADO+1], 0x80
         ret
 
 ; ¿es de un dispositivo el nombre con que acaba `ruta`? CF=0 y DX:AX = su

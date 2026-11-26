@@ -19,14 +19,20 @@
 ;  Lo que no se entiende se dice y se sigue con la línea siguiente.
 ;
 ;  DEVICE=. El archivo (un binario con su cabecera de dispositivo al
-;  principio, como los .SYS de DOS; no valen los que son .EXE) se carga en lo
-;  alto del núcleo, detrás de la tabla de archivos y de la reserva; se llama
-;  a su rutina de inicio (orden 0), que devuelve hasta dónde se queda, y:
-;    - si es de carácter, se enlaza detrás de NUL: se abre por su nombre;
+;  principio, como los .SYS de DOS, o un .EXE, al que se le quita la cabecera
+;  y se le aplican las reubicaciones) se carga en lo alto del núcleo, detrás
+;  de la tabla de archivos y de la reserva; se llama a su rutina de inicio
+;  (orden 0) con la línea (acabada en retorno y salto, como en MS-DOS), la
+;  unidad que le tocaría y hasta dónde puede llegar; devuelve hasta dónde se
+;  queda, y:
+;    - se enlaza detrás de NUL (la cadena de INT 21h/52h);
+;    - si es de carácter, se abre por su nombre; si
+;      dice ser la consola (bits 0 y 1, un ANSI.SYS), la consola va por él;
 ;    - si es de bloque, cada unidad que diga tener recibe la letra siguiente
-;      (D:, E:) con las medidas (BPB) que dé. Se le piden los sectores de uno
-;      en uno (órdenes 4 y 8). No se le pregunta si han cambiado el disco
-;      (órdenes 1 y 2): vale para discos fijos, como uno en memoria.
+;      (de D: a H:) con las medidas (BPB) que dé. Se le piden los sectores de
+;      uno en uno (órdenes 4 y 8), y antes se le pregunta si han cambiado el
+;      disco (orden 1) y, si lo han cambiado, sus medidas nuevas (orden 2)
+;      (dispositivos.inc, dev_medio).
 ;  Por eso CONFIG.SYS se lee dos veces: primero todo lo demás, que decide lo
 ;  que miden la tabla y la reserva, y luego los DEVICE=, que van detrás.
 ; =============================================================================
@@ -351,6 +357,7 @@ config_device:
         mov word [es_off], 0
         mov byte [es_op], 0
         mov cx, [bx+H_TAM]
+        mov [cf_lon], cx
         push bx
         call h_es
         pop bx
@@ -358,6 +365,47 @@ config_device:
         call h_cierra
         popf
         jc .no_carga
+        ; un controlador en formato .EXE (como los de MS-DOS 5 en adelante):
+        ; se le aplican las reubicaciones y se le quita la cabecera, y queda
+        ; como uno binario, con su primera cabecera de dispositivo al principio
+        push ds
+        mov bp, [cf_tope]
+        mov ds, bp
+        mov es, bp
+        cmp word [0], 0x5A4D        ; «MZ»
+        jne .bin
+        mov dx, [8]                 ; los párrafos de la cabecera
+        mov cx, [6]                 ; cuántas reubicaciones
+        mov si, [0x18]              ; y dónde están
+        jcxz .mueve
+.reub:
+        lodsw                       ; cada una: desplazamiento y segmento,
+        xchg ax, bx                 ; contados desde detrás de la cabecera
+        lodsw
+        add ax, dx
+        add ax, bp
+        mov es, ax
+        add [es:bx], bp
+        loop .reub
+.mueve:
+        mov cl, 4
+        shl dx, cl
+        mov si, dx
+        xor di, di
+        mov es, bp
+        mov cx, [cs:cf_lon]
+        sub cx, si
+        jb .bin
+        rep movsb
+.bin:
+        pop ds
+        mov si, [cf_arg]
+.fl:
+        lodsb                       ; la línea acaba en retorno y salto, como
+        test al, al                 ; en MS-DOS (hay controladores que leen
+        jnz .fl                     ; sus parámetros hasta ahí)
+        mov word [si-1], 0x0A0D
+        mov [si+1], al
         xor si, si                  ; SI = la cabecera (puede haber varias)
 .cab:
         mov es, [cf_tope]
@@ -370,8 +418,11 @@ config_device:
         mov byte [pet+P_ORDEN], 0
         mov byte [pet+1], 0
         mov byte [pet+P_MEDIO], 0
-        mov word [pet+P_DONDE], 0
-        mov ax, [cf_tope]
+        mov word [pet+P_DONDE], 0   ; (y hasta dónde puede llegar, como en
+        mov ax, [mem_kb]            ; MS-DOS 5: dejando 64 K a lo demás)
+        mov cl, 6
+        shl ax, cl
+        sub ax, 0x1000
         mov [pet+P_DONDE+2], ax
         mov ax, [cf_arg]
         mov [pet+18], ax
@@ -401,14 +452,20 @@ config_device:
         jmp .dice
 .instala:
         mov es, [cf_tope]
-        test byte [es:si+D_ATR+1], 0x80
-        jz .bloque
-        mov ax, [dev_nul+D_SIG]     ; de carácter: detrás de NUL
-        mov [es:si+D_SIG], ax
+        mov ax, [dev_nul+D_SIG]     ; a la cadena, detrás de NUL (como en
+        mov [es:si+D_SIG], ax       ; MS-DOS, también los de bloque)
         mov ax, [dev_nul+D_SIG+2]
         mov [es:si+D_SIG+2], ax
         mov [dev_nul+D_SIG], si
         mov [dev_nul+D_SIG+2], es
+        test byte [es:si+D_ATR+1], 0x80
+        jz .bloque
+        test byte [es:si+D_ATR], 3  ; ¿es la consola (un ANSI.SYS)? Desde
+        jz .sig                     ; ahora, la consola va por él
+        mov [con_dev], si
+        mov [con_dev+2], es
+        mov [sv_con], si
+        mov [sv_con+2], es
         jmp short .sig
 .bloque:
         ; de bloque: a cada unidad suya, una letra (mientras queden)
@@ -464,6 +521,8 @@ config_device:
 .fin:
         mov ax, [cf_tope2]
         mov [cf_tope], ax
+        mov al, [cf_uni]            ; (para la lista de INT 21h/52h)
+        mov [sv_nbloq], al
         ret
 
 ; SI salta los espacios

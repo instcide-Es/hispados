@@ -125,6 +125,27 @@ $(B)/CUENTA.COM: prueba/cuenta.asm | $(B)
 $(B)/SALUDO.SYS: prueba/saludo.asm | $(B)
 	$(CP437) $< $(B)/gen/saludo.asm && $(NASM) -f bin -o $@ $(B)/gen/saludo.asm
 
+# los controladores y programas de prueba de DEVICE=, IOCTL y la red
+# (prueba/partes_drivers.sh): uno en formato .EXE, uno de bloque «de quitar
+# y poner» con sus dos discos de 20 K detrás, y los que les preguntan
+$(B)/SALUDOX.SYS: prueba/saludox.asm | $(B)
+	$(CP437) $< $(B)/gen/saludox.asm && $(NASM) -f bin -o $@ $(B)/gen/saludox.asm
+
+$(B)/DISQUITO.SYS: prueba/disquito.asm | $(B)
+	$(CP437) $< $(B)/gen/disquito.asm && $(NASM) -f bin -o $(B)/gen/disquito.bin $(B)/gen/disquito.asm
+	rm -f $(B)/gen/dq1.img $(B)/gen/dq2.img
+	mformat -C -i $(B)/gen/dq1.img -t 5 -h 1 -s 8 -r 1 -c 1 -v UNO ::
+	mformat -C -i $(B)/gen/dq2.img -t 5 -h 1 -s 8 -r 1 -c 1 -v DOS ::
+	printf 'disco uno\r\n' > $(B)/gen/UNO.TXT && mcopy -i $(B)/gen/dq1.img $(B)/gen/UNO.TXT ::
+	printf 'disco dos\r\n' > $(B)/gen/DOS.TXT && mcopy -i $(B)/gen/dq2.img $(B)/gen/DOS.TXT ::
+	cat $(B)/gen/disquito.bin $(B)/gen/dq1.img $(B)/gen/dq2.img > $@
+
+$(B)/IOCTL.COM: prueba/ioctl.asm | $(B)
+	$(CP437) $< $(B)/gen/ioctl.asm && $(NASM) -f bin -o $@ $(B)/gen/ioctl.asm
+
+$(B)/PAQUETE.COM: prueba/paquete.asm | $(B)
+	$(CP437) $< $(B)/gen/paquete.asm && $(NASM) -f bin -o $@ $(B)/gen/paquete.asm
+
 $(B)/LEEME.TXT: LEEME.TXT | $(B)
 	$(CP437) $< $(B)/gen/leeme.tmp && sed 's/$$/\r/' $(B)/gen/leeme.tmp > $@
 
@@ -168,7 +189,7 @@ $(B)/oficina8086-%.img: $(OFICINA)
 all: $(OFICINAS)
 
 # lo que solo hace falta para probar (la prueba lo copia a sus disquetes)
-PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM
+PRUEBAS = $(B)/N8.COM $(B)/CUENTA.COM $(B)/SALUDO.SYS $(B)/XMS.COM $(B)/SALUDOX.SYS $(B)/DISQUITO.SYS $(B)/IOCTL.COM $(B)/PAQUETE.COM
 
 # Hispa-BASIC (docs/8086/BASIC.md): varios fuentes; se ensambla desde la
 # carpeta de los ya pasados a la página 437, como el núcleo

@@ -21,8 +21,9 @@
 ;    - INT 25h e INT 26h: leer y escribir sectores «en crudo», como en DOS;
 ;    - lanza el intérprete de órdenes, que es un programa aparte
 ;      (command.asm).
-;  Lo que falta: los controladores de dispositivo (DEVICE=), el modo 286...
-;  (ver «Etapas» en el documento).
+;    - los controladores de dispositivo de DOS (DEVICE=: config.inc y
+;      dispositivos.inc), IOCTL (44h), la lista de listas (52h), INT 29h y
+;      los residentes (31h, INT 27h): docs/DRIVERS-MICROSOFT.md.
 ;
 ;  Mapa de memoria: el núcleo se carga en 0070:0000 y ahí se queda, con sus
 ;  variables, su pila y la copia de la FAT detrás; el programa que se ejecuta
@@ -82,6 +83,19 @@ N_PUENTES   equ 7
         PUENTE b_int26, b_punteros + 12
         PUENTE b_int27, b_punteros + 16
         PUENTE b_int2f, b_punteros + 20
+; INT 29h, la salida rápida de la consola (la usan los programas y los
+; controladores de consola, que la cambian por la suya): con la BIOS
+b_int29:
+        push ax
+        push bx
+        push bp
+        mov ah, 0x0E
+        mov bx, 7
+        int 0x10
+        pop bp
+        pop bx
+        pop ax
+        iret
 ; el punto de entrada del gestor de memoria extendida (empieza así para que
 ; otro programa pueda engancharse, como manda la norma)
 b_xms:
@@ -282,6 +296,8 @@ inicio:
         mov [es:0x26*4+2], cs
         mov word [es:0x27*4], b_int27
         mov [es:0x27*4+2], cs
+        mov word [es:0x29*4], b_int29
+        mov [es:0x29*4+2], cs
         mov bx, b_punteros          ; el puente: de momento, el núcleo está aquí
         mov cx, N_PUENTES
 .pt:
@@ -336,6 +352,7 @@ inicio:
         ; controladores cargados (config_lee deja dicho dónde)
         mov ax, [cf_tope]
         mov [mem_seg], ax           ; ahí empieza la memoria que se reparte
+        mov [sv_mcb], ax
         call mem_ini
         mov byte [primera], 1
 
@@ -509,6 +526,7 @@ f21:
         F21 0x4F, f4F
         F21 0x50, f50
         F21 0x51, f51
+        F21 0x52, f52
         F21 0x54, f54
         F21 0x56, f56
         F21 0x57, f57
@@ -531,10 +549,7 @@ f06:
         mov al, [bp+R_DX]
         cmp al, 0xFF
         jne pon_car_dos
-        cmp byte [tecla_cod], 0     ; (el código de una flecha, por dar)
-        jne .hay
-        mov ah, 1
-        int 0x16
+        call hay_tecla
         jnz .hay
         or byte [bp+R_BAND], 0x40
         mov byte [bp+R_AX], 0
@@ -582,10 +597,7 @@ f0B:
         mov al, 0xFF
         cmp word [red_ent], 0
         jne .x
-        cmp byte [tecla_cod], 0     ; (el código de una flecha, por dar)
-        jne .x
-        mov ah, 1
-        int 0x16
+        call hay_tecla
         mov al, 0
         jz .x
         dec al
@@ -831,29 +843,226 @@ f54:
         mov al, [verificar]
         mov [bp+R_AX], al
         ret
-; 44h, con AL=0: qué hay detrás del número de archivo BX -> DX (bit 7: es un
-; dispositivo; entonces, bits 0 y 1: es la consola). Lo demás de 44h no está
+; 44h, IOCTL, según AL (como en MS-DOS 3.3):
+;   0     qué hay detrás del número de archivo BX -> DX (bit 7: un
+;         dispositivo; entonces, bits 0 a 3 los de sus atributos: consola,
+;         NUL, reloj; bit 14, que entiende IOCTL)
+;   1     ponerlo (se toma nota); 0Bh, los reintentos (también)
+;   2, 3  leer o escribir CX octetos de control de DS:DX en el dispositivo
+;         del archivo BX (órdenes 3 y 12) -> AX = cuántos
+;   4, 5  lo mismo, en el controlador de la unidad BL (0: la de trabajo)
+;   6, 7  ¿está listo para leer o escribir el archivo BX? -> AL = FFh o 0
+;   8     ¿se puede sacar el disco de la unidad BL? -> AX = 0 sí, 1 es fijo
+;   9     ¿es de red la unidad BL? -> DX (bit 12 a 0: no); 0Ah, el archivo
+;   0Dh   la IOCTL genérica de la unidad BL (CH categoría, CL función,
+;         DS:DX los datos; orden 19), si su controlador la entiende
+;   0Eh, 0Fh  qué letra tiene la unidad BL -> AL = 0 (solo una)
+; Lo de los controladores se les pide a ellos, si dicen que lo entienden
+; (t44); a los discos de la BIOS, solo el 8
 f44:
-        cmp byte [bp+R_AX], 0
-        je .va
-        mov ax, E_FUNCION
-        jmp f_error
-.va:
-        mov ax, [bp+R_BX]
-        mov dx, 0x80D3
-        cmp ax, PRIMERO
-        jb .x
-        call h_ficha
-        jnc .f
-        jmp f_error
-.f:
-        mov dx, 0x80C0
-        cmp byte [bx+H_USO], 2
+        mov cl, [bp+R_AX]
+        cmp cl, 1
         je .x
-        mov dl, [bx+H_UNI]
-        xor dh, dh
+        cmp cl, 0x0B
+        je .x
+        cmp cl, 0x0A
+        je .cero
+        cmp cl, 0x0E
+        jb .n
+        cmp cl, 0x0F
+        ja .no
+        mov byte [bp+R_AX], 0
 .x:
+        ret
+.cero:
+        mov word [bp+R_DX], 0
+        ret
+.no:
+        mov ax, E_FUNCION
+.err:
+        jmp f_error
+.n:
+        cmp cl, 0x0C
+        je .no
+        cmp cl, 4
+        jb .h
+        cmp cl, 6
+        jb .u
+        cmp cl, 8
+        jb .h
+.u:
+        mov al, [bp+R_BX]           ; ---- por unidad ----
+        dec al
+        jns .u1
+        mov al, [unidad_def]
+.u1:
+        call unidad_pon
+        jc .err
+        mov al, [u_sub]
+        mov [pet+1], al
+        mov ax, [u_dev]
+        mov dx, [u_dev+2]
+        cmp cl, 9
+        jne .u8
+        xor bx, bx                  ; 9: sus atributos, o 0
+        test dx, dx
+        jz .u9
+        mov es, dx
+        mov si, ax
+        mov bx, [es:si+D_ATR]
+        and bh, 0xEF
+.u9:
+        mov [bp+R_DX], bx
+        ret
+.u8:
+        test dx, dx
+        jnz .pide
+        cmp cl, 8                   ; de la BIOS: solo el 8
+        jne .no
+        mov ax, 1
+        cmp byte [u_bios], 0x80
+        sbb ax, 0
+        mov [bp+R_AX], ax
+        ret
+.h:
+        mov ax, [bp+R_BX]           ; ---- por número de archivo ----
+        cmp ax, PRIMERO
+        jae .hf
+        mov dx, 0x80D3              ; la consola
+        test cl, cl
+        jz .dx
+        mov ax, [sv_con]
+        mov dx, [sv_con+2]
+        jmp short .pide
+.hf:
+        call h_ficha
+        jc .err
+        cmp byte [bx+H_USO], 2
+        je .hd
+        mov dl, [bx+H_UNI]          ; un archivo: 0, su unidad
+        xor dh, dh
+        test cl, cl
+        jz .dx
+        cmp cl, 6
+        jb .no
+        mov ax, [bx+H_POS]          ; 6: ¿queda algo por leer? 7: sí
+        mov dx, [bx+H_POS+2]
+        sub ax, [bx+H_TAM]
+        sbb dx, [bx+H_TAM+2]
+        sbb al, al
+        cmp cl, 7
+        jne .al
+        mov al, 0xFF
+.al:
+        mov [bp+R_AX], al
+        ret
+.hd:
+        mov ax, [bx+H_TAM]          ; un dispositivo
+        mov dx, [bx+H_TAM+2]
+        test cl, cl
+        jnz .pide
+        mov es, dx
+        mov si, ax
+        mov dx, [es:si+D_ATR]
+        and dx, 0x680F
+        or dx, 0x80C0
+.dx:
         mov [bp+R_DX], dx
+        ret
+.pide:
+        ; CL = la subfunción, DX:AX = el controlador: t44 dice qué orden se
+        ; le manda y qué atributo tiene que tener para entenderla
+        mov bl, cl
+        cmp bl, 0x0D
+        jne .p1
+        mov bl, 9
+.p1:
+        sub bl, 2
+        xor bh, bh
+        mov di, bx
+        shl bx, 1
+        add bx, di
+        add bx, t44
+        mov es, dx
+        mov si, ax
+        mov di, [bx+1]
+        test [es:si+D_ATR], di
+        jnz .vale
+        test di, di
+        jnz .no2
+.vale:
+        push cs
+        pop es
+        mov ch, [bx]
+        mov [pet+P_ORDEN], ch
+        mov bx, [bp+R_DX]
+        mov [pet+P_DONDE], bx
+        mov bx, [bp+R_DS]
+        mov [pet+P_DONDE+2], bx
+        mov bx, [bp+R_CX]
+        mov [pet+P_CUANTOS], bx
+        cmp cl, 0x0D
+        jne .ll
+        xchg bl, bh                 ; la genérica: 13 categoría, 14 función,
+        mov [pet+13], bx            ; 15 SI, 17 DI, 19 los datos
+        mov bx, [bp+R_SI]
+        mov [pet+15], bx
+        mov bx, [bp+R_DI]
+        mov [pet+17], bx
+        mov bx, [bp+R_DX]
+        mov [pet+19], bx
+        mov bx, [bp+R_DS]
+        mov [pet+21], bx
+.ll:
+        call dev_llama
+        mov bx, [pet+P_ESTADO]
+        test bh, 0x80
+        jz .bien
+        mov al, bl                  ; (el error del controlador, como en DOS:
+        xor ah, ah                  ; más 13h)
+        add al, 0x13
+        jmp f_error
+.no2:
+        jmp .no
+.bien:
+        mov ax, [pet+P_CUANTOS]     ; 2 a 5: cuántos
+        cmp cl, 6
+        jb .a
+        cmp cl, 8
+        ja .x2
+        mov al, bh                  ; 6 a 8: el bit de «ocupado»
+        and al, 2
+        shr al, 1
+        cmp cl, 8                   ; 8: ocupado es fijo (1)
+        je .ocho
+        dec al                      ; 6 y 7: ocupado es «no» (0)
+.ocho:
+        xor ah, ah
+.a:
+        mov [bp+R_AX], ax
+.x2:
+        ret
+; la orden y el atributo que hace falta, de las subfunciones 2 a 8 y 0Dh
+t44     db 3
+        dw 0x4000
+        db 12
+        dw 0x4000
+        db 3
+        dw 0x4000
+        db 12
+        dw 0x4000
+        db 6
+        dw 0
+        db 10
+        dw 0
+        db 15
+        dw 0x0800
+        db 19
+        dw 0x0040
+; 52h: la «lista de listas» -> ES:BX (dispositivos.inc, sysvars)
+f52:
+        mov word [bp+R_BX], sysvars
+        mov [bp+R_ES], cs
         ret
 ; 4Dh: el código con que terminó el último programa -> AL (AH = 0)
 f4D:
@@ -897,15 +1106,16 @@ pon_car_dos:
         pop ax
         ret
 .pantalla:
+        cmp word [cs:con_dev+2], 0  ; ¿un CON cargado con DEVICE=? A él
+        je .bios
         push ax
-        push bx
-        push bp
-        mov ah, 0x0E
-        mov bx, 7
-        int 0x10
-        pop bp
-        pop bx
+        mov [cs:con_car], al
+        mov al, 8
+        call con_pide
         pop ax
+        ret
+.bios:
+        int 0x29                    ; (la salida rápida: b_int29, la BIOS)
         ret
 ; escribe AL; el salto de línea (10) baja y vuelve al margen: así van los
 ; textos del núcleo. Conserva los registros
@@ -1036,6 +1246,11 @@ tecla:
 .fin:
         mov word [red_ent], 0
 .teclado:
+        cmp word [con_dev+2], 0     ; ¿un CON cargado con DEVICE=? De él
+        je .bios
+        mov al, 4
+        jmp con_pide
+.bios:
         xor al, al                  ; ¿queda por dar el código de una tecla
         xchg al, [tecla_cod]        ; de las de dos veces?
         test al, al
@@ -1697,6 +1912,7 @@ cf_ficha    resw 1
 cf_tope     resw 1                  ; el segmento donde acaba el núcleo
 cf_arg      resw 1
 cf_tope2    resw 1
+cf_lon      resw 1                  ; lo que mide el controlador (DEVICE=)
 bajo_seg    resw 1                  ; donde está el puente
 p_esta      resw 2                  ; sus rutinas, para llamarlas desde arriba
 p_abre      resw 2
@@ -1720,6 +1936,9 @@ fecha_xt    resw 1                  ; la fecha, en las máquinas sin reloj
 dv_pet      resw 2                  ; la petición que apunta la «estrategia»
 dv_far      resw 2
 pet         resb 26                 ; la petición a un dispositivo
+pet_con     resb 26                 ; y la de la consola (con_pide)
+con_dev     resw 2                  ; el CON cargado con DEVICE= (0: ninguno)
+con_car     resb 1                  ; su octeto
 red_ent     resw 1                  ; la ficha del archivo que hace de entrada (0: el teclado)
 red_sal     resw 1                  ; (detrás de red_ent) y de salida (0: la pantalla)
 mem_seg     resw 1                  ; la primera cabecera de la memoria que se reparte
