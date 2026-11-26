@@ -980,6 +980,9 @@ class Request {
     if (u instanceof Request) { op = Object.assign({ method: u.method, headers: u.headers, body: u.__b }, op); u = u.url; }
     this.url = N.absoluta(S(u));
     this.method = S(op.method || 'GET').toUpperCase();
+    // (auditoría 486, n.º 0) como pide fetch: un «token» de HTTP, y ni CONNECT, ni TRACE ni TRACK
+    if (!/^[A-Z]{1,16}$/.test(this.method) || /^(CONNECT|TRACE|TRACK)$/.test(this.method))
+      throw new TypeError('método de petición no válido: ' + this.method.slice(0, 20));
     this.headers = new Headers(op.headers);
     this.credentials = op.credentials || 'same-origin';
     this.signal = op.signal || null;
@@ -1076,7 +1079,12 @@ class XMLHttpRequest extends EventTarget {
     this.onreadystatechange = null; this.onload = null; this.onerror = null; this.onloadend = null; this.onabort = null; this.ontimeout = null;
     oculto(this, '__h', new Headers()); oculto(this, '__cab', ''); oculto(this, '__id', 0);
   }
-  open(m, u) { this.__m = S(m).toUpperCase(); this.__u = N.absoluta(S(u)); this.readyState = 1; this.__ev('readystatechange'); }
+  open(m, u) {
+    this.__m = S(m).toUpperCase();
+    // (auditoría 486, n.º 0) el mismo «token» que en fetch
+    if (!/^[A-Z]{1,16}$/.test(this.__m) || /^(CONNECT|TRACE|TRACK)$/.test(this.__m)) throw new TypeError('método de petición no válido: ' + this.__m.slice(0, 20));
+    this.__u = N.absoluta(S(u)); this.readyState = 1; this.__ev('readystatechange');
+  }
   setRequestHeader(k, v) { this.__h.append(k, v); }
   overrideMimeType() {}
   send(b) {

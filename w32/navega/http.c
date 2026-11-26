@@ -495,8 +495,12 @@ static int cab_de(const char *c, const char *nombre) {
 }
 static int pet_arma(Pet *p) {
   char *g = p->sin_galletas ? NULL : gal_para(&p->u, p->cruzada, p->sub, p->post, 0), host[150];
-  const char *acc;
-  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 900 + (p->js_cab ? 2010 : 0);
+  const char *acc, *met = p->js_metodo ? p->js_metodo : p->post ? "POST" : "GET";
+  u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 900 + (p->js_cab ? 2010 : 0), k;
+  /* (auditoría 486, n.º 0) el método de fetch lo pone la página y no se contaba
+   * en n: solo letras, de 1 a 16 (un «token» de HTTP); si no, el de siempre */
+  for (k = 0; k < 17 && ((met[k] >= 'A' && met[k] <= 'Z') || (met[k] >= 'a' && met[k] <= 'z')); k++) ;
+  if (!k || met[k]) met = p->post ? "POST" : "GET";
   free(p->pet);
   p->pet = malloc(n);
   if (!p->pet) { free(g); return 0; }
@@ -507,7 +511,7 @@ static int pet_arma(Pet *p) {
       : p->sub ? "image/png,image/gif,image/jpeg,image/bmp,image/x-icon;q=0.9,*/*;q=0.1" : "text/html,text/plain;q=0.9,*/*;q=0.5";
   n = sprintf(p->pet, "%s %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\n"
               "%s%s%sAccept-Language: %s\r\nConnection: keep-alive\r\n%s",
-              p->js_metodo ? p->js_metodo : p->post ? "POST" : "GET", p->u.ruta, host,
+              met, p->u.ruta, host,
               http_agente ? http_agente(p->u.servidor) : HTTP_AGENTE,
               acc ? "Accept: " : "", acc ? acc : "", acc ? "\r\n" : "", http_idioma, g ? g : "");
   free(g);

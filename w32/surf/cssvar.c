@@ -30,8 +30,12 @@
 
 /* ---- un texto que crece ---- */
 typedef struct { char *t; size_t n, cap; int mal; } Txt;
+/* (auditoría 486) tope de lo expandido: unos var() que usan otros 10 veces cada
+ * uno, 8 niveles, hacían de 785 octetos de hoja 110 MB */
+#define TX_MAX ((size_t)2 << 20)
 static void tx_pon(Txt *x, const char *s, size_t n) {
   if (x->mal) return;
+  if (n > TX_MAX || x->n + n > TX_MAX) { x->mal = 1; return; }
   if (x->n + n + 1 > x->cap) {
     size_t c = x->cap ? x->cap * 2 : 4096;
     char *q;
@@ -239,6 +243,7 @@ static int expande(Txt *x, const char *v, size_t l, Var *loc, Var *extra, int pr
   size_t k = 0, ini = 0;
   int bien = 1;
   while (k + 4 <= l) {
+    if (x->mal) return 0;                   /* (auditoría 486) pasado el tope: no seguir */
     if (memcmp(v + k, "var(", 4) || (k && (isalnum((unsigned char)v[k - 1]) || v[k - 1] == '-'))) { k++; continue; }
     {
       const char *a = v + k + 4, *f = v + l, *e = hasta(a, f, ")"), *c = hasta(a, e, ",");

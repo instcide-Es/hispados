@@ -612,6 +612,22 @@ static char *con_marca(const char *u) {
   if (q) { strcpy(q, u); if (marca) strcat(q, marca); }
   return q;
 }
+/* (auditoría 486, n.º 1b) las páginas hechas aquí no corren JavaScript: si
+ * no, el <script> de una dirección («http://banco/<script>...») corría con el
+ * origen de esa dirección */
+static int propia_sin_js;
+/* & < > " a sus entidades, en d (como mucho max - 1 letras, sin cortar una) */
+static const char *html_escapa(const char *s, char *d, int max) {
+  int n = 0;
+  for (; s && *s; s++) {
+    const char *e = *s == '&' ? "&amp;" : *s == '<' ? "&lt;" : *s == '>' ? "&gt;" : *s == '"' ? "&quot;" : NULL;
+    int l = e ? (int)strlen(e) : 1;
+    if (n + l > max - 1) break;
+    if (e) { memcpy(d + n, e, l); n += l; } else d[n++] = *s;
+  }
+  d[n] = 0;
+  return d;
+}
 static void muestra(Pagina *p, const char *url_hist) {
   char t[260];
   int seg;
@@ -649,7 +665,7 @@ static void muestra(Pagina *p, const char *url_hist) {
   sprintf(t, "%.200s - Navegador", pag->doc.titulo && pag->doc.titulo[0] ? pag->doc.titulo : url_hist ? url_hist : "Navegador");
   SetWindowTextA(vent, t);
   estado[0] = 0;
-  js_pagina(pag);                               /* [JS] sus <script> */
+  if (!propia_sin_js) js_pagina(pag);           /* [JS] sus <script> (no en las propias) */
   /* autofocus: el campo que pide la página, con el foco (y a la vista, si es
    * una página nueva; al volver a una, solo si ya se ve) */
   if (pag && url_hist && foco < 0 && pag->autofoco >= 0 && pag->autofoco < pag->n_foco && !foco_dir) {
@@ -667,12 +683,16 @@ static void muestra(Pagina *p, const char *url_hist) {
 }
 /* una página hecha aquí: el inicio, los avisos */
 static void pagina_propia(const char *url, const char *html) {
+  propia_sin_js = 1;
   muestra(pag_nueva(url, (const u8 *)html, strlen(html), 1, 0), url);
+  propia_sin_js = 0;
 }
 static void pagina_error(const char *url, const char *porque) {
   static char h[1400];
-  sprintf(h, "<title>No se ha podido abrir</title><h1>No se ha podido abrir la p\341gina</h1><p>%.600s</p>"
-             "<p><b>Direcci\363n:</b> %.400s</p><p>Puede probar otra vez con <b>Recargar</b>.</p>", porque, url);
+  char ep[601], eu[401];
+  sprintf(h, "<title>No se ha podido abrir</title><h1>No se ha podido abrir la p\341gina</h1><p>%s</p>"
+             "<p><b>Direcci\363n:</b> %s</p><p>Puede probar otra vez con <b>Recargar</b>.</p>",
+          html_escapa(porque, ep, sizeof ep), html_escapa(url, eu, sizeof eu));
   pagina_propia(url, h);
 }
 static void pagina_inicio(void) {
@@ -1224,13 +1244,14 @@ static void carga_avanza(void) {
     if (p) { muestra(p, pet.url); luego = 1; }
     else {
       static char h[900];
+      char eu[401], et[71];
       if (pet.estado >= 400)
-        sprintf(h, "<title>Error %d</title><h1>El servidor responde con el error %d</h1><p><b>Direcci\363n:</b> %.400s</p>", pet.estado, pet.estado, pet.url);
+        sprintf(h, "<title>Error %d</title><h1>El servidor responde con el error %d</h1><p><b>Direcci\363n:</b> %s</p>", pet.estado, pet.estado, html_escapa(pet.url, eu, sizeof eu));
       else if (!pet.n_datos)
         sprintf(h, "<title>Sin contenido</title><p>El servidor no ha enviado nada (respuesta %d).</p>", pet.estado);
       else
         sprintf(h, "<title>No se puede mostrar</title><h1>No se puede mostrar</h1><p>Esta direcci\363n no es una p\341gina: es un archivo "
-                   "de tipo <b>%.70s</b> (%u octetos). Para bajarlo, use la orden HTTPS de Hispa-DOS.</p>", pet.tipo, pet.n_datos);
+                   "de tipo <b>%s</b> (%u octetos). Para bajarlo, use la orden HTTPS de Hispa-DOS.</p>", html_escapa(pet.tipo, et, sizeof et), pet.n_datos);
       { char *u = pet.url; pet.url = NULL; pagina_propia(u, h); free(u); }
     }
   }
