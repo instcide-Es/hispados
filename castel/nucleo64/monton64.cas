@@ -33,6 +33,20 @@ módulo Monton64
     público variable octetos: nat64         ; octetos pedidos ahora
     público variable páginas: nat64         ; páginas de 4 KB que tiene el montón ahora
     público variable reservas, liberaciones: nat64
+    ; [etapa 10 c] la cuarentena de los bloques grandes: las físicas de los
+    ; que se han liberado (ya quitados de las tablas y de la TLB de este
+    ; procesador; los demás aún pueden tenerlos en la suya), que se devuelven
+    ; de una vez cuando se juntan muchas (vacía_cuarentena: un solo aviso de
+    ; vaciar la TLB, entera, para todas). Hasta entonces siguen contando como
+    ; del montón (páginas). La zona de los bloques grandes no se reutiliza:
+    ; una entrada vieja en la TLB de otro solo llega a una física en
+    ; cuarentena, nunca a la de otro.
+    constante CUARENTENA = 2048             ; (8 MB como mucho)
+    constante GRANDE_YA = 128               ; los de más páginas (512 KB), sin cuarentena (con su propio aviso)
+    variable cua: arreglo [CUARENTENA] de nat64
+    variable cua_n: nat64
+    variable cua_cerrojo: nat64
+    público variable cuarentenas: nat64     ; las veces que se ha vaciado
 
     función l32(d: nat64): nat32
         variable p: puntero a nat32
@@ -212,8 +226,38 @@ módulo Monton64
     fin
 
     ; devuelve el bloque p (de reserva)
+    ; [etapa 10 c] devuelve lo de la cuarentena: de 256 en 256 físicas, un aviso
+    ; a los demás procesadores (que vacíen su TLB entera) y, hecho, a la
+    ; memoria libre. Sin ningún cerrojo tomado (como Pagina64.avisa_tlb)
+    público función vacía_cuarentena()
+        variable b, k, j: nat64
+        variable f: arreglo [256] de nat64
+        mientras cierto hacer
+            b := toma(dirección(cua_cerrojo))
+            k := 0
+            mientras k < 256 y cua_n > 0 hacer
+                cua_n := cua_n - 1
+                f[k] := cua[nat32(cua_n)]
+                k := k + 1
+            fin
+            suelta(dirección(cua_cerrojo), b)
+            si k = 0 entonces devolver fin
+            avisa_tlb(0, 1000)                  ; (más de 32: la TLB entera, también lo global)
+            cuarentenas := cuarentenas + 1
+            j := 0
+            mientras j < k hacer
+                si f[j] <> nob nat64(0) entonces devuelve(f[j]) fin
+                j := j + 1
+            fin
+            b := toma(dirección(cerrojo))
+            páginas := páginas - k
+            suelta(dirección(cerrojo), b)
+        fin
+    fin
+
     público función libera(p: puntero a byte)
-        variable b, d, n, pág, i: nat64
+        variable b, d, n, pág, i, k, j: nat64
+        variable fís: arreglo [GRANDE_YA] de nat64
         variable c: nat32
         si p = nulo entonces devolver fin
         d := nat64(p) - CABECERA
@@ -246,10 +290,53 @@ módulo Monton64
             ; [etapa 3] fuera de las tablas sin el cerrojo tomado: desmapea avisa a
             ; los demás procesadores, y espera a que vacíen su TLB (la zona de los
             ; bloques grandes no se reutiliza: nadie más puede estar en ellas)
+            ; [etapa 10 c] Las páginas, fuera de las tablas (y de la TLB de
+            ; este); sus físicas, a la cuarentena (antes, un aviso a los demás
+            ; procesadores y una espera por página: cerrar un socket de UDP o
+            ; una tubería, 64 KB, eran 17, y con 4 u 8 procesadores con TCG
+            ; abrir y cerrar uno costaba de 7 a 30 ms: sección 20). Los de
+            ; más de GRANDE_YA páginas, con un solo aviso para todas.
+            si pág > GRANDE_YA entonces
+                i := 0
+                mientras i < pág hacer
+                    k := 0
+                    mientras k < 64 y i + k < pág hacer
+                        fís[k] := desmapea_aquí(d - CABECERA + ((i + k) << 12))
+                        k := k + 1
+                    fin
+                    avisa_tlb(d - CABECERA + (i << 12), k)
+                    j := 0
+                    mientras j < k hacer
+                        si fís[j] <> nob nat64(0) entonces devuelve(fís[j]) fin
+                        j := j + 1
+                    fin
+                    i := i + k
+                fin
+                devolver
+            fin
+            ; (lo de la cuarentena sigue siendo del montón hasta que se devuelve)
+            b := toma(dirección(cerrojo))
+            páginas := páginas + pág
+            suelta(dirección(cerrojo), b)
             i := 0
             mientras i < pág hacer
-                devuelve(desmapea(d - CABECERA + (i << 12)))
+                fís[i] := desmapea_aquí(d - CABECERA + (i << 12))
                 i := i + 1
+            fin
+            mientras cierto hacer
+                b := toma(dirección(cua_cerrojo))
+                si cua_n + pág <= CUARENTENA entonces
+                    i := 0
+                    mientras i < pág hacer
+                        cua[nat32(cua_n)] := fís[i]
+                        cua_n := cua_n + 1
+                        i := i + 1
+                    fin
+                    suelta(dirección(cua_cerrojo), b)
+                    romper
+                fin
+                suelta(dirección(cua_cerrojo), b)
+                vacía_cuarentena()
             fin
             devolver
         sino

@@ -156,6 +156,7 @@ módulo PrMem64
             si vivos[i] <> nulo entonces libera(vivos[i]) fin
             i := i + 1
         fin
+        vacía_cuarentena()                      ; ([etapa 10 c] lo que espera, devuelto)
         si en_uso <> 0 o octetos <> 0 entonces mal("al acabar quedan bloques en uso") fin
         si l0 - libres <> (páginas - p0) + (nat64(tablas) - t0) entonces mal("al acabar falta memoria física (se pierde)") fin
         escribir("Montón: ", n, " reservas y liberaciones al azar (de 1 a 20025 octetos, ", grandes, " grandes; ", k, " a la vez), ")

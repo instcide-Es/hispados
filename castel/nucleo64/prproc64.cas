@@ -60,6 +60,7 @@ módulo PrProc64
     ; la memoria que se cuenta: los marcos libres, más los que tiene el montón y
     ; las tablas del núcleo (que se quedan)
     función memoria_ahora(): nat64
+        vacía_cuarentena()                      ; ([etapa 10 c] lo del montón que espera, devuelto)
         devolver libres + páginas + nat64(tablas)
     fin
 

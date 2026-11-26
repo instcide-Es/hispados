@@ -19,7 +19,7 @@
 ; =============================================================================
 módulo Sinc64
 
-    importar Cifras64, Cerrojo, Excep64, Monton64, Hilos64, Reloj64, Apic64
+    importar Cifras64, Es64, Cerrojo, Excep64, Monton64, PorCpu64, Hilos64, Reloj64, Apic64
 
     público tipo Suceso = estructura
         cerrojo: nat64
@@ -126,8 +126,15 @@ módulo Sinc64
     fin
 
     ; ---- mutex ----
+    ; ¿está el hilo h en un procesador ahora?
+    función corriendo(d: nat64): bool
+        variable h: puntero a Hilo
+        h := puntero(d)
+        devolver h.estado = CORRIENDO y h.en_cpu <> 0
+    fin
+
     público función cierra_mutex(m: puntero a Mutex)
-        variable b: nat64
+        variable b, t0: nat64
         variable h: puntero a Hilo
         h := actual()
         b := toma(dirección(m.cerrojo))
@@ -135,6 +142,20 @@ módulo Sinc64
             suelta(dirección(m.cerrojo), b)
             detén_ini("un hilo cierra un mutex que ya tiene cerrado")
             detén_fin()
+        fin
+        ; [etapa 10 c] si quien lo tiene está corriendo en otro procesador, se
+        ; espera un poco sin dormir (hasta 50 µs: lo suelta enseguida, casi
+        ; siempre): dormirse y despertarse cuesta mucho más que eso, y con
+        ; varios hilos que se pasan el mismo mutex (el de la red: abrir y
+        ; cerrar sockets a la vez) se iba en eso casi todo el tiempo (como el
+        ; «optimistic spinning» de Linux)
+        si m.dueño <> 0 y n_cpus > 1 y tsc_hz <> 0 entonces
+            t0 := tsc()
+            mientras m.dueño <> 0 y corriendo(m.dueño) y tsc() - t0 < tsc_hz div 20000 hacer
+                suelta(dirección(m.cerrojo), b)
+                pausa()
+                b := toma(dirección(m.cerrojo))
+            fin
         fin
         si m.dueño <> 0 entonces m.esperas := m.esperas + 1 fin
         mientras m.dueño <> 0 hacer

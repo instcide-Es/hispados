@@ -53,6 +53,7 @@ módulo Hilos64
     público constante MUERTO = 4
     público constante CUANTO = 2                ; tics de cada turno (20 ms)
     público constante V_PLAN = 0xF2             ; el aviso de «replanifica»
+    constante GRANO_HZ = 10000                  ; [etapa 10 c] 100 µs: lo que corre uno antes de que otro de su prioridad le pase por delante
     público constante CUALQUIERA = 0xFFFFFFFF   ; (crea) en cualquier procesador
 
     público tipo Hilo = estructura
@@ -121,7 +122,7 @@ módulo Hilos64
     variable difuntos_cerrojo: nat64
     variable próximo_id: nat64
     público variable va: bool                   ; el planificador está en marcha
-    público variable creados, acabados_n, robados, expropiaciones: nat64
+    público variable creados, acabados_n, robados, expropiaciones, avisos_despertar: nat64
     ; el reposo
     público variable con_mwait: bool
     público variable pista_mwait: nat32
@@ -352,6 +353,7 @@ módulo Hilos64
         si n = h entonces
             h.estado := CORRIENDO
             c.cuanto := 0
+            c.turno_tsc := tsc()
             suelta_sin(dirección(cola_cerrojo[c.número]))
             restaura(b)
             devolver
@@ -363,6 +365,7 @@ módulo Hilos64
         n.rodajas := n.rodajas + 1
         c.desde_usuario := 0
         c.cuanto := 0
+        c.turno_tsc := tsc()
         c.cambios := c.cambios + 1
         c.anterior := nat64(h)
         c.hilo := nat64(n)
@@ -431,7 +434,19 @@ módulo Hilos64
         devolver cand
     fin
 
-    ; avisa al procesador t de que tiene un hilo nuevo en su cola
+    ; [etapa 10 c] ¿el que corre en c ha tenido ya su parte del turno? (100 µs:
+    ; uno de su misma prioridad que se despierta le pasa por delante)
+    función turno_gastado(c: puntero a Cpu): bool
+        si tsc_hz = 0 entonces devolver c.cuanto > 0 fin
+        devolver tsc() - c.turno_tsc >= tsc_hz div GRANO_HZ
+    fin
+
+    ; avisa al procesador t de que tiene un hilo nuevo en su cola. [etapa
+    ; 10 c] Uno de la misma prioridad que el que corre allí le pasa por
+    ; delante si este lleva ya 100 µs (GRANO_HZ): antes esperaba a que el otro
+    ; acabase su turno (el tic, hasta 20 ms), y un mutex que se pasa de un
+    ; hilo a otro en otro procesador costaba eso cada vez (con 4
+    ; procesadores, abrir un socket, 17 ms en vez de 1,2: sección 20)
     función avisa(t: nat32, h: puntero a Hilo)
         variable c, m: puntero a Cpu
         variable cur: puntero a Hilo
@@ -439,12 +454,17 @@ módulo Hilos64
         c := cpu(t)
         si t = m.número entonces
             cur := hilo(m.hilo)
-            si m.hilo = m.ociosa o h.prioridad < cur.prioridad entonces m.expropiar := 1 fin
+            si m.hilo = m.ociosa o h.prioridad < cur.prioridad entonces m.expropiar := 1
+            sino si h.prioridad = cur.prioridad y turno_gastado(m) entonces m.expropiar := 1 fin
             devolver
         fin
         cur := hilo(c.hilo)
         si c.ocioso <> 0 o c.hilo = c.ociosa o h.prioridad < cur.prioridad entonces
             c.expropiar := 1
+            ipi(c.apic, 0x4000 ob V_PLAN)
+        sino si h.prioridad = cur.prioridad y c.expropiar = 0 y turno_gastado(c) entonces
+            c.expropiar := 1
+            avisos_despertar := avisos_despertar + 1
             ipi(c.apic, 0x4000 ob V_PLAN)
         fin
     fin
