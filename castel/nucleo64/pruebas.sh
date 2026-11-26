@@ -254,7 +254,7 @@ e3_bien() {   # SALIDA N
 e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
-    && grep -q "^Unidad en memoria: 45 archivos: " <<< "$v" \
+    && grep -q "^Unidad en memoria: 50 archivos: " <<< "$v" \
     && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.2 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
@@ -312,7 +312,9 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^LUA: todo bien (16 pruebas); hoy es " <<< "$v" \
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
-    && grep -q "^MCXX: todo bien (35 pruebas)$" <<< "$v" && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MRED6: todo bien (24 pruebas)$" <<< "$v" && grep -q "^Programa «MRED6»: acaba con el código 0, como debe" <<< "$v" \
+    && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MCXX: C++17 con la libstdc++ y musl (cxx.sh, dinámico: ld-musl, libstdc++.so.6 y libgcc_s.so.1)$" <<< "$v" && grep -q "^Programa «MCXXD»: acaba con el código 0, como debe" <<< "$v" \
     && grep -qE "^  TCP \[etapa 10\]: [1-9][0-9]* conexiones con escala de ventana" <<< "$v" \
     && grep -qE "^MSONIDO: todo bien \((1|15) pruebas\)$" <<< "$v" && grep -q "^Programa «MSONIDO»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MTEXTO: todo bien (6 pruebas)$" <<< "$v" && [ -n "$MTX" ] && grep -qxF "$MTX" <<< "$v" \
@@ -328,7 +330,7 @@ e7_bien() {   # SALIDA N [avx]
 e7_ok() {   # SALIDA N QUÉ [avx]
   local v; v=$(serie "$1")
   if e7_bien "$1" "$2" "${4:-}"; then
-    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi»), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
+    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
   else ko "etapa 7 $3 no dice lo que debe: $(grep -E '^Programa «[ML]|^M[A-Z]*: [0-9]* mal|^LUA:|^Después de musl|^  la memoria|MAL|parado' <<< "$v" | cut -c1-110 | paste -sd '|' | cut -c1-1500)"; fi
 }
 e3_dice() {   # SALIDA: lo que dice, para cuando sale mal
@@ -1018,11 +1020,17 @@ done
 manda_teclas() {   # MONITOR.sock TEXTO... (con el mapa español; {intro} {retro} {izq} {arriba} {ctrl-c} {pausa}...)
   python3 -I "$AQUI/programas/teclas.py" "$@"
 }
+demo_hora() {   # TEXTO HH:MM_ANTES HH:MM_DESPUÉS DÍA: ¿dice DEMO la hora de Madrid (entre las dos) y el día?
+  local l h
+  l=$(grep -E "^Hoy es [a-záéíóú]+, [0-9]+ de [a-z]+ de 20[0-9]{2}, y en Madrid son las [0-9]{2}:[0-9]{2} \(horario de (invierno|verano)\)\.$" <<< "$1") || return 1
+  h=$(grep -oE "son las [0-9]{2}:[0-9]{2}" <<< "$l" | cut -c9-)
+  [[ ! "$h" < "$2" ]] && [[ ! "$h" > "$3" ]] && grep -q "^Hoy es [a-záéíóú]*, $4 de " <<< "$l"
+}
 con_interprete() {   # SALIDA TEXTO [opciones de QEMU]: «apagar sinpruebas escribir ordenes»; las teclas, al ver el indicador
   local s=$1 x=$2 q c; shift 2
   rm -f "$s" "$T/mon7.sock"
   timeout 180 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "apagar sinpruebas escribir ordenes" -display none -serial file:"$s" \
-    -monitor unix:"$T/mon7.sock",server,nowait $DBG -no-reboot -nic none -m 256 -machine q35 -smp 4 "$@" > /dev/null 2>&1 &
+    -monitor unix:"$T/mon7.sock",server,nowait $DBG -no-reboot -nic none -m 256 -machine q35 -smp 4 -rtc base=localtime "$@" > /dev/null 2>&1 &
   q=$!
   for _ in $(seq 1 300); do grep -q "^/> " "$s" 2> /dev/null && break; sleep 0.2; done
   manda_teclas --serie "$s" "$T/mon7.sock" "$x"
@@ -1034,22 +1042,29 @@ truncate -s 48M "$T/w7/fat.img" && mkfs.fat -F 32 -n ESCRIBIR "$T/w7/fat.img" > 
 # ([etapa 11] {indicador}: la orden siguiente, cuando el intérprete ha vuelto a dar
 # su indicador: lo tecleado antes salía, con el eco, en medio de lo que aún escribía
 # la de antes, a veces)
-TECLAS7='ver{intro}{indicador}dir /{intro}{indicador}cd /sata0{intro}{indicador}mkdir prueba{intro}{indicador}cd prueba{intro}{indicador}echo hola desde el teclado > saludo.txt{intro}{indicador}'
-TECLAS7+='type saludo.txt{intro}{indicador}cp saludo.txt copia.txt{intro}{indicador}dir{intro}{indicador}mkdir /nada{intro}{indicador}cd /{intro}{indicador}HOLA uno dos{intro}{indicador}CUENTA 3{intro}{indicador}'
-TECLAS7+='noexiste{intro}{indicador}echo canción ñandú pingüino àlex a@b#c{intro}{indicador}echo holx{retro}a{intro}{indicador}echo mudo{izq}{izq}n{intro}{indicador}{arriba}{intro}{indicador}'
-TECLAS7+='basura{ctrl-u}echo limpio{intro}{indicador}echo Hola {bloqmayus}abcñ{bloqmayus}def{intro}{indicador}a medias{ctrl-c}{indicador}'
+TECLAS7='ver{intro}{indicador}listar /{intro}{indicador}cd /sata0{intro}{indicador}creardir prueba{intro}{indicador}cd prueba{intro}{indicador}escribir hola desde el teclado > saludo.txt{intro}{indicador}'
+TECLAS7+='mostrar saludo.txt{intro}{indicador}copiar saludo.txt copia.txt{intro}{indicador}DIR{intro}{indicador}creardir /nada{intro}{indicador}cd /{intro}{indicador}HOLA uno dos{intro}{indicador}CUENTA 3{intro}{indicador}'
+TECLAS7+='noexiste{intro}{indicador}eco canción ñandú pingüino àlex a@b#c{intro}{indicador}eco holx{retro}a{intro}{indicador}eco mudo{izq}{izq}n{intro}{indicador}{arriba}{intro}{indicador}'
+TECLAS7+='basura{ctrl-u}eco limpio{intro}{indicador}echo Hola {bloqmayus}abcñ{bloqmayus}def{intro}{indicador}a medias{ctrl-c}{indicador}'
 TECLAS7+='HIJOS lee{intro}{pausa}una línea{intro}{pausa}{ctrl-c}{indicador}'
 TECLAS7+='HIJOS lee{intro}{pausa}otra{intro}{ctrl-d}{indicador}'
+# ([etapa 10 c] las órdenes, con sus nombres en español; DIR y echo, los de siempre, también)
 # [etapa 7] Lua (el de verdad, con musl) con un guion y a mano; MBUCLE, que no llama al sistema, parado con Ctrl+C
 TECLAS7+='LUA /PRUEBA.LUA uno dos{intro}{indicador}LUA{intro}{pausa}{pausa}print(6 * 7, "ñandú"){intro}{pausa}{ctrl-d}{indicador}'
-TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{indicador}salir{intro}'
+TECLAS7+='MBUCLE{intro}{pausa}{pausa}{pausa}{ctrl-c}{indicador}ayuda{intro}{indicador}DEMO{intro}{indicador}salir{intro}'
+# [etapa 10 c] DEMO (programas/demo.cas, en Castel): la cuenta y la hora de Madrid, la de aquí
+HM0=$(TZ=Europe/Madrid date +%H:%M)
 con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,format=raw -device ide-hd,drive=s0,bus=ide.0; c=$?
 v=$(serie "$T/e7.txt")
+HM1=$(TZ=Europe/Madrid date +%H:%M)
+HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
 if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.2, etapa 10 b " <<< "$v" \
-   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  45 archivos (" <<< "$v" \
+   && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  50 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
-   && grep -q "^mkdir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
+   && grep -q "^creardir: «/nada»: es de solo leer .*(EROFS, error 30 de Linux)$" <<< "$v" \
+   && grep -q "^  listar \[RUTA...\]  " <<< "$v" && grep -q "^También se entienden con los nombres de otros sistemas: dir y ls (listar),$" <<< "$v" \
+   && grep -q "^6 por 7 son 42.$" <<< "$v" && demo_hora "$v" "$HM0" "$HM1" "$HOY" \
    && grep -q "^  argc = 3: HOLA uno dos$" <<< "$v" && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && ! grep -q "^(HOLA " <<< "$v" \
    && grep -q "^(CUENTA ha acabado con el código 30)$" <<< "$v" \
    && grep -q "^No hay ninguna orden ni ningún programa que se llame «noexiste»" <<< "$v" \
@@ -1064,7 +1079,7 @@ if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 
    && grep -q "^El intérprete de órdenes ha acabado (código 0).$" <<< "$v" \
    && [ "$(mtype -i "$T/w7/fat.img" ::prueba/copia.txt 2> /dev/null)" = "hola desde el teclado" ] \
    && fsck.fat -n "$T/w7/fat.img" > "$T/w7/fsck.txt" 2>&1; then
-  ok "etapa 6, el intérprete ORDENES con las teclas del monitor de QEMU (PS/2, mapa español, $(manda_teclas -n "$TECLAS7" | wc -w) teclas): ver, dir, cd, mkdir, echo > archivo, type, cp (en el disco: fsck.fat bien), EROFS, HOLA uno dos, CUENTA 3 (código 30), una que no está, «canción ñandú pingüino àlex a@b#c», Bloq Mayús, Retroceso, las flechas, la historia, Ctrl+U, Ctrl+C (en el indicador y a HIJOS: 130), Ctrl+D; [etapa 7] Lua con un guion y a mano (print(6 * 7)), y Ctrl+C a MBUCLE, que no llama al sistema; salir"
+  ok "etapa 6, el intérprete ORDENES con las teclas del monitor de QEMU (PS/2, mapa español, $(manda_teclas -n "$TECLAS7" | wc -w) teclas): ver, listar (y DIR), cd, creardir, escribir > archivo, mostrar, copiar (en el disco: fsck.fat bien), ayuda, [etapa 10 c] DEMO (6 por 7 y la hora de Madrid), EROFS, HOLA uno dos, CUENTA 3 (código 30), una que no está, «canción ñandú pingüino àlex a@b#c», Bloq Mayús, Retroceso, las flechas, la historia, Ctrl+U, Ctrl+C (en el indicador y a HIJOS: 130), Ctrl+D; [etapa 7] Lua con un guion y a mano (print(6 * 7)), y Ctrl+C a MBUCLE, que no llama al sistema; salir"
 else ko "etapa 6, el intérprete no hace lo que debe (código $c): $(sed -n '/^ORDENES, el/,$p' <<< "$v" | tr -d '\b' | cut -c1-80 | paste -sd '|' | cut -c1-1500)"; fi
 # lo mismo por un teclado USB (sin 8042: todo llega por tecla_hid)
 TECLAS7U='echo canción ñandú a@b{intro}{indicador}echo holx{retro}a{intro}{indicador}echo Hola {bloqmayus}abc{bloqmayus}d{intro}{indicador}HOLA uno{intro}{indicador}salir{intro}'
@@ -1361,6 +1376,7 @@ srv9() {   # VARIABLE MODO ARGUMENTOS...: arranca un servidor y deja su puerto e
 PH9=""; PS9=""; PN9=""; PE9=""; PD9=""
 srv9 PH9 http 0 a.bin; srv9 PS9 https 0 a.bin certs/servidor.pem certs/servidor.key; srv9 PN9 ntp 0 3600; srv9 PE9 eco 0
 srv9 PD9 dns 53 10.0.2.2
+PH6=""; srv9 PH6 http6 0 a.bin               # [etapa 10 c] HTTP por IPv6 (en ::1, que es fec0::2 para el invitado)
 red9() {   # SALIDA NIC CPUS LÍNEA [dns]: arranca con RED.PRB y el cliente del eco
   local s=$1 nic=$2 n=$3 l=$4 m="RED.PRB,CA.PEM"
   if [ -n "${PRB9:-}" ]; then cp "$PRB9" "$R9/RED.PRB"; else   # [etapa 10 b] otras órdenes
@@ -1480,6 +1496,30 @@ if [ -n "$PH9" ] && [ -n "$PS9" ] && [ -f "$R9/CA.PEM" ]; then
      && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"; then
     ok "etapa 10 b, curl 8.14.1 con BearSSL (e1000e, 2 procesadores$( [ -n "$PD9" ] && echo ', IP fija y el DNS de prueba')): MCURL, cinco a la vez con la interfaz «multi» (HTTP, a trozos, 5 redirecciones, HTTPS), sha256 bien ($(grep -o 'a la vez en [0-9]* ms' <<< "$v" | head -1)); CURL con -L, --cacert y --resolve, sin la autoridad de prueba (60), -f con un 404 (22)$( [ -n "$PD9" ] && echo ', por su nombre con DNS y uno que no existe (6)'); sin sockets al acabar"
   else ko "etapa 10 b, curl no hace lo que debe: $(serie "$T/e10b.txt" | grep -E '^MCURL|^CURL:|^curl:|^Programa .*CURL|MAL|parado|^Después de la red' | cut -c1-140 | paste -sd '|' | cut -c1-1800)"; fi
+  # [etapa 10 c] IPv6 por la red de usuario de QEMU (anuncia fec0::/64): la
+  # dirección de SLAAC, el router y el DNS del anuncio; con el DNS de prueba,
+  # el AAAA de «anfitrion6.prueba» (fec0::2), tres pings de ICMPv6 y un GET
+  # por TCP sobre IPv6 (MRED6); MCURL y CURL a http://[fec0::2]:PUERTO/ (lo
+  # lleva QEMU a ::1 del anfitrión), con su sha256
+  if [ -n "$PH6" ]; then
+    {
+      [ -n "$PD9" ] && echo "MRED6 red anfitrion6.prueba $PH6"
+      echo "MCURL http://[fec0::2]:$PH6/a.bin"
+      echo "CURL -sS -o /dev/null -w CURL6:%{http_code}:%{size_download}:%{remote_ip}\\n http://[fec0::2]:$PH6/a.bin"
+    } > "$R9/V6.PRB"
+    PRB9=$R9/V6.PRB red9 "$T/e10c.txt" e1000e 2 "$l10b"
+    v=$(serie "$T/e10c.txt")
+    if grep -qE "^Red: [a-z0-9]+: IPv6 fec0::[0-9a-f:]+/64 \(SLAAC\), de enlace fe80::[0-9a-f:]+, router fe80::[0-9a-f:]+" <<< "$v" \
+       && grep -q "^MCURL: http://\[fec0::2\]:$PH6/a.bin: 200, 1048576 octetos; sha256 = $SHA9 (http, HTTP/1.1)$" <<< "$v" \
+       && grep -q "^CURL6:200:1048576:fec0::2$" <<< "$v" \
+       && { [ -z "$PD9" ] || { grep -q "^MRED6: todo bien (5 pruebas)$" <<< "$v" && grep -q "^  anfitrion6.prueba es fec0::2 (AAAA)$" <<< "$v" \
+            && grep -q "^  ping de ICMPv6 a fec0::2: 3 enviados, 3 recibidos" <<< "$v" && grep -q "^  HTTP por TCP sobre IPv6, \[fec0::2\]:$PH6: 10[0-9]* octetos" <<< "$v"; }; } \
+       && ! grep -q "^Programa .*: acaba con el código [0-9]*$" <<< "$v" \
+       && grep -q "^Después de la red: 0 sockets (.*0 objetos$" <<< "$v" \
+       && ! grep -q "MAL:" <<< "$v" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$v"; then
+      ok "etapa 10 c, IPv6 por la red de QEMU (e1000e, 2 procesadores): $(grep -m1 -oE 'IPv6 fec0::[0-9a-f:]+/64 \(SLAAC\)' <<< "$v"), el router y el DNS del anuncio; MCURL y CURL a [fec0::2] (sha256 bien)$( [ -n "$PD9" ] && echo '; el AAAA del DNS de prueba, 3 pings de ICMPv6 y HTTP por TCP sobre IPv6 (MRED6)'); sin sockets al acabar"
+    else ko "etapa 10 c, IPv6 por la red no hace lo que debe: $(grep -E '^Red: .*IPv6|^MRED6|^  [a-z0-9]*6.prueba|^  ping de ICMPv6|^  HTTP por|^MCURL|^CURL6|^curl:|^Programa|MAL|parado|^Después de la red' <<< "$v" | cut -c1-140 | paste -sd '|' | cut -c1-1500)"; fi
+  else ko "etapa 10 c, sin el servidor de HTTP por IPv6 (::1) en el anfitrión: $(head -2 "$R9/srv_http6.txt" 2> /dev/null | paste -sd ' ')"; fi
   # la zona: la hora local con cambio de horario, y el CMOS en UTC o en hora local
   v=$(serie "$T/e9b.txt"); w=$(serie "$T/e9a.txt")
   if grep -q "zona UTC (TZ=UTC0), el CMOS en UTC$" <<< "$v" && grep -q "zona Europa/Madrid (TZ=CET-1CEST,M3.5.0,M10.5.0/3), el CMOS en hora local$" <<< "$w" \
