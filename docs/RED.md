@@ -276,6 +276,13 @@ el riesgo sea el menor posible:
 5. No publicar más versiones para el canal viejo: desde la 0.9.31, solo
    firmadas.
 
+Probado con `tests/run_transicion_0931_tests.sh` (no va en `make test`:
+necesita la imagen USB publicada de la 0.9.30, `VIEJA=` o el primer
+argumento; con la de Hispa-486, su sección `gama=486`): el ACTUALIZAR de la
+0.9.30 lee la lista firmada, instala la 0.9.31 (ACTUALIZ.COM, KERNEL.SYS y
+COMMAND.COM nuevos, los `*.INI` del usuario intactos) y, ya en la 0.9.31, la
+misma lista firmada con otra clave no vale.
+
 ### Formato del paquete .PAQ
 
 Lo genera `tools/paquete.py` a partir de una carpeta con la **misma estructura**

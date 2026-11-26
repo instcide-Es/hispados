@@ -91,6 +91,9 @@ gua_ext:
         ret
 
 ; (interna) ESI=nombre de antes EDI=el nuevo -> CF=1 si no se puede
+; (HVPRUN de Hispa-Pentium, que no pasa por el DOS de modo real, pone su
+; gua_renombra y su gua_atrib y define GUA_PROPIOS: castel/nucleo32/hvprun)
+%ifndef GUA_PROPIOS
 gua_renombra:
         pushad                      ; los dos nombres, en el búfer de paso
         push edi
@@ -110,6 +113,7 @@ gua_renombra:
         mov dword [rmcs+0x00], 0    ; (que no se quede para los demás)
         popad
         ret
+%endif
 
 gua_crear:
         push ecx
@@ -170,6 +174,7 @@ gua_crear:
         ret
 
 ; ESI=ruta -> CF=0 y CL=sus atributos (INT 21h, 4300h) si está; CF=1 si no
+%ifndef GUA_PROPIOS
 gua_atrib:
         push eax
         mov eax, 0x4300
@@ -180,6 +185,7 @@ gua_atrib:
         clc
 .x:
         ret
+%endif
 
 gua_cerrar:
         pushad

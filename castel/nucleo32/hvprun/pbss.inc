@@ -36,3 +36,6 @@ p_ficha     resb 64                 ; (OFICINA2) la ficha de un usuario (llamada
 p_titulo    resb 68                 ; (OFICINA2) el título, acortado
         alignb 16
 pres_buf    resd PRES_MAX           ; una tira de la superficie, en 32 bits
+gua_ruta    resb GUA_RUTA           ; [0.9.31] guardar.inc
+gua_tmp     resb GUA_RUTA
+gua_bak     resb GUA_RUTA

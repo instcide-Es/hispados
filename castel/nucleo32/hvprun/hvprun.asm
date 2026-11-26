@@ -106,6 +106,8 @@ hpu_salto:
 %include "pfaltan.inc"              ; lo que el gestor espera del escritorio
 %include "psonido.inc"              ; (SONIDO) el sonido, sobre el de Hispa-Pentium
 %include "poficina.inc"             ; (OFICINA2) la carpeta de los documentos, la rueda y Alt+letra
+%include "pguardar.inc"             ; [0.9.31] guardar sin vaciar el de antes (ventanas/guardar.inc)
+%include "guardar.inc"
 
 ; ---- la tabla de la interfaz, en el orden de api.inc ----
 ; (las de nombre HVA_x, si las hay, sustituyen a las de Ventanas)
