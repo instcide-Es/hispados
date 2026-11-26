@@ -3948,7 +3948,11 @@ Windows y WSL). No se empieza todavía.
   espacio del programa y lo suyo del proceso antes de salir de la lista y
   con el cerrojo; antes, entre medias, el último podía destruir el espacio
   que aún tenía en su CR3 y soltar el proceso). Con su prueba de carrera
-  (MUNIX). H3 ya lo arregló la 10 c (`toma_fd`); H12 y H13, abajo.
+  (MUNIX). Y **H13** (el hijo de un vfork usa el mutex de la memoria de su
+  padre, cuyo espacio tiene prestado: los demás hilos del padre siguen, y
+  un munmap suyo a la vez que el hijo leía o escribía podía dejarle un marco
+  ya soltado; es lo de `posix_spawn`, que Ladybird hace con muchos hilos en
+  marcha). H3 ya lo arregló la 10 c (`toma_fd`); H12, abajo.
 - **`/tmp`, de escribir siempre** (lo pidió Carlos: `curl -o` en la «/» daba
   «Read-only file system»): un disco en memoria (Discos64, la clase
   `D_MEM`, «tmp»: 32 MB de sectores de 512) con su FAT16 hecha al arrancar
@@ -3980,7 +3984,7 @@ Windows y WSL). No se empieza todavía.
 |---|---|
 | `unix64.cas` | los sockets de Unix: socket, socketpair, bind, listen, connect, accept, send/recv y sus formas, SCM_RIGHTS y SCM_CREDENTIALS, las opciones, ioctl, poll |
 | `sistema.cas` | el reparto por la clase (`es_unix`), memfd_create (319), F_ADD_SEALS y F_GET_SEALS, unlink y stat de la ruta de un socket, readv/writev de una vez |
-| `procesos.cas` | `otro_fd_obj`; H4 en `sal_hilo` |
+| `procesos.cas` | `otro_fd_obj`; H4 en `sal_hilo`; H13 en `cierra_mem` y `abre_mem` |
 | `disp64.cas` | `memfd_crea`, `sellos_shm`, los sellos en ftruncate y mmap |
 | `futex64.cas` | H11 |
 | `hilos64.cas`, `excep64.cas`, `porcpu64.cas` | el vigilante, despertar con límite |
@@ -4049,6 +4053,6 @@ primero mira en su memoria (la misma).
 - **`/tmp`**: devolver las páginas de lo que se borra (hoy se quedan hasta
   apagar: FAT no dice qué cúmulos quedan libres al disco de abajo).
 - **De la auditoría**: H12 (un hilo que migra a mitad de un aviso de
-  vaciar la TLB) y H13 (vfork: el hijo con sus regiones y el padre con las
-  suyas sobre las mismas tablas).
+  vaciar la TLB); y de H13, que el hijo de un vfork siga con su copia de las
+  regiones (ya con el mutex del padre).
 - **VirtualBox**: lo que diga el vigilante en el equipo de Carlos.

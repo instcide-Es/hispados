@@ -419,12 +419,26 @@ módulo Procesos
     fin
 
     ; [etapa 7] el mutex de la memoria del proceso (regiones y páginas)
+    ; [etapa 10 d] (auditoría H13) el hijo de un vfork (CLONE_VM y
+    ; CLONE_VFORK: el espacio es de su padre) usa el mutex de la memoria del
+    ; padre: los demás hilos del padre siguen y pueden hacer munmap a la vez
+    ; que el hijo lee o escribe en esas mismas tablas (antes, cada uno con su
+    ; mutex: el hijo podía escribir en un marco ya soltado)
+    función mutex_mem(p: puntero a Proceso): nat64
+        variable q: puntero a Proceso
+        si p.prestado <> 0 y p.vfork_padre <> 0 entonces
+            q := puntero(p.vfork_padre)
+            devolver nat64(dirección(q.m_cerrojo))
+        fin
+        devolver nat64(dirección(p.m_cerrojo))
+    fin
+
     público función cierra_mem(p: puntero a Proceso)
-        cierra_mutex(puntero(nat64(dirección(p.m_cerrojo))))
+        cierra_mutex(puntero(mutex_mem(p)))
     fin
 
     público función abre_mem(p: puntero a Proceso)
-        abre_mutex(puntero(nat64(dirección(p.m_cerrojo))))
+        abre_mutex(puntero(mutex_mem(p)))
     fin
 
     ; cambia los permisos de [a, b): 0, o -ENOMEM si algo de ahí no es de una región
