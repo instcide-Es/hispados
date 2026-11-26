@@ -42,6 +42,7 @@ módulo Semilla
 
     ; ---- la consola ----
     variable línea: arreglo [80] de byte
+    variable args_instalar: arreglo [24] de byte          ; (0.8.12b) lo que se le pasa a INSTALAR.BIN
     variable largo: nat32
     variable palabra1: arreglo [40] de byte
 
@@ -1300,8 +1301,15 @@ módulo Semilla
         si no apagada y buscar(línea_del_cargador(), "instalar") = nulo entonces Usbmovil.lanzador := nat32(dirección(lanza_red_movil)) fin
         si buscar(línea_del_cargador(), "instalar") <> nulo entonces
             ; el programa que instala el sistema en el disco duro (la
-            ; pantalla es suya: esta consola espera a que acabe)
-            lanza("INSTALAR.BIN", nulo)
+            ; pantalla es suya: esta consola espera a que acabe). (0.8.12b, el
+            ; Acer One 10) Se le dice «sinacpi» si la línea del cargador lo
+            ; lleva (lo instalado arranca sin ACPI) y «sin8042» si el equipo no
+            ; tiene 8042 (su puerto 64h lee FFh: la entrada de emergencia de lo
+            ; instalado no puede dejar el USB, que es su teclado)
+            args_instalar[0] := 0
+            si buscar(línea_del_cargador(), "sinacpi") <> nulo entonces concatenar(args_instalar, "sinacpi ") fin
+            si buscar(línea_del_cargador(), "sin8042") <> nulo o meter_puerto(0x64) = 0xFF entonces concatenar(args_instalar, "sin8042") fin
+            si args_instalar[0] = 0 entonces lanza("INSTALAR.BIN", nulo) sino lanza("INSTALAR.BIN", dirección(args_instalar[0])) fin
         sino si buscar(línea_del_cargador(), "escritorio") <> nulo entonces
             apunta0("arranque: paso: el escritorio\n")      ; (TERMO)
             arranca()

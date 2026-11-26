@@ -90,8 +90,18 @@ módulo Instala
     constante A_HISPA = 0
     constante A_RAÍZ = 1
     constante A_OTRA = 2
-    constante MAX_OTRAS = 8                     ; [WIN32] (eran 4: \WIN32, \HISPA32 y \HISPA\MENU, además)
+    constante MAX_OTRAS = 10                    ; [WIN32] (eran 4: \WIN32, \HISPA32 y \HISPA\MENU, además)
     variable destinos: arreglo [MAX_ARCHIVOS] de byte
+    ; (0.8.12b, el Acer One 10) de dónde sale cada archivo: DE_SISTEMA (la
+    ; unidad del sistema, M:, lo que trae el cargador), DE_X (la raíz de la
+    ; memoria USB: \SDHCI.TXT y \SDIO.TXT, que aprende ahí un arranque con
+    ; ACPI y el cargador no trae) o DE_X_FW (X:\FIRMWARE: el firmware de las
+    ; tarjetas Wi-Fi, que va a C:\FIRMWARE)
+    constante DE_SISTEMA = 0
+    constante DE_X = 1
+    constante DE_X_FW = 2
+    variable orígenes: arreglo [MAX_ARCHIVOS] de byte
+    variable ruta_t: arreglo [40] de byte
     variable otras: arreglo [MAX_OTRAS] de arreglo [16] de byte   ; sus nombres («OFICINA», o «HISPA\PAQUETES»)
     variable otras_en_hispa: arreglo [MAX_OTRAS] de bool         ; va dentro de \HISPA (no en la raíz)
     ; (SDHCI, UEFI) o dentro de otra de ellas (\EFI\BOOT: en \EFI): su número; EN_RAÍZ si no
@@ -110,6 +120,15 @@ módulo Instala
     ; disco aunque arranque sin ACPI; y \SDHCI.TXT, también a la raíz
     variable sdhci_op: arreglo [160] de byte
     variable sdhci_txt: arreglo [601] de byte
+    ; (0.8.12b, el Acer One 10: lo instalado se quedaba parado en el escritorio,
+    ; con ACPI.BIN) lo que el núcleo le pasa a INSTALAR de su línea: «sinacpi»
+    ; (la entrada Instalar de la memoria lo lleva: lo instalado arranca sin
+    ; ACPI, y la otra entrada es la «CON ACPI») y «sin8042» (el equipo no
+    ; tiene teclado ni ratón PS/2: la entrada de emergencia no puede dejar el
+    ; USB sin tocar, que entonces no hay teclado)
+    variable mis_args: arreglo [200] de byte
+    variable hereda_sinacpi: bool
+    variable sin_8042: bool
 
     ; ---- la FAT32 que se escribe ----
     variable por_cluster: nat32                 ; sectores por cluster
@@ -998,7 +1017,7 @@ módulo Instala
     ; copia un archivo de la unidad del sistema a HISPA, a la raíz o a otra carpeta
     función copia_archivo(i: nat32, dónde: nat32)
         variable m, mide, c, lba, n, k, sectores, queda, leídos: nat32
-        m := abrir(nombres[i])
+        m := abrir(ruta_de(i))
         si es_error(m) entonces fallo("No se puede leer uno de los archivos del sistema:", nombres[i]) fin
         mide := tamaños[i]
         sectores := (mide + 511) div 512
@@ -1137,6 +1156,43 @@ módulo Instala
         devolver n > 4 y t[n - 4] = '.' y t[n - 3] = ext[0] y t[n - 2] = ext[1] y t[n - 1] = ext[2]
     fin
 
+    ; (0.8.12b) lo que llevan las entradas del menú instalado: con
+    ; «sinacpi» heredado, la primera va sin ACPI y la segunda es la «CON
+    ; ACPI»; si no, al revés (la segunda, «SIN ACPI», para el equipo que se
+    ; queda parado con ACPI.BIN). Las dos, con el USB (teclado y ratón)
+    función escritorio_args(): puntero a byte
+        si hereda_sinacpi entonces devolver "escritorio escritura sinacpi" fin
+        devolver "escritorio escritura"
+    fin
+
+    función otro_acpi_args(): puntero a byte
+        si hereda_sinacpi entonces devolver "escritorio escritura" fin
+        devolver "escritorio escritura sinacpi"
+    fin
+
+    función rótulo_otro_acpi(): puntero a byte
+        si hereda_sinacpi entonces devolver "menuentry \"Hispa-Pentium CON ACPI (apagar de verdad y la bateria; en este equipo puede quedarse parado)\" {\n" fin
+        devolver "menuentry \"Hispa-Pentium SIN ACPI (si se queda parado al arrancar o en el escritorio)\" {\n"
+    fin
+
+    función órdenes_args(): puntero a byte
+        si hereda_sinacpi entonces devolver "ordenes escritura sinacpi" fin
+        devolver "ordenes escritura"
+    fin
+
+    ; la de emergencia: sin los discos, la red ni ACPI; y sin el USB, salvo
+    ; en un equipo sin 8042 (el Acer One 10: su teclado y su touchpad son USB,
+    ; y sin USB no habría con qué manejarlo)
+    función emergencia_args(): puntero a byte
+        si sin_8042 entonces devolver "escritorio sindisco sinred sinacpi" fin
+        devolver "escritorio sindisco sinusb sinred sinacpi"
+    fin
+
+    función rótulo_emergencia(): puntero a byte
+        si sin_8042 entonces devolver "menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, la red ni ACPI (el teclado y el raton, por USB) (800 x 600)\" {\n" fin
+        devolver "menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n"
+    fin
+
     ; el menú de arranque del disco. El asistente del primer arranque cambia
     ; luego su línea «set modo=» (la medida de la pantalla).
     función haz_cfg()
@@ -1155,28 +1211,45 @@ módulo Instala
             cfg_más("# (UEFI) arrancado por UEFI (\\EFI\\BOOT): multiboot2 y la pantalla del firmware (GOP)\n")
             cfg_más("if [ \"$grub_platform\" = efi ]; then\n  insmod efi_gop\n  insmod efi_uga\nfi\n")
             cfg_más("menuentry \"Hispa-Pentium\" {\n  if [ \"$grub_platform\" = efi ]; then\n")
-            cfg_núcleo("    multiboot2", "escritorio escritura")
+            cfg_núcleo("    multiboot2", escritorio_args())
             cfg_más("  else\n")
-            cfg_núcleo("    multiboot", "escritorio escritura")
+            cfg_núcleo("    multiboot", escritorio_args())
+            cfg_más("  fi\n  set gfxpayload=$modo\n  boot\n}\n")
+            cfg_más(rótulo_otro_acpi())
+            cfg_más("  if [ \"$grub_platform\" = efi ]; then\n")
+            cfg_núcleo("    multiboot2", otro_acpi_args())
+            cfg_más("  else\n")
+            cfg_núcleo("    multiboot", otro_acpi_args())
             cfg_más("  fi\n  set gfxpayload=$modo\n  boot\n}\n")
             cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n  if [ \"$grub_platform\" = efi ]; then\n")
-            cfg_núcleo("    multiboot2", "ordenes escritura")
+            cfg_núcleo("    multiboot2", órdenes_args())
             cfg_más("    set gfxpayload=auto\n  else\n")
-            cfg_núcleo("    multiboot", "ordenes escritura")
+            cfg_núcleo("    multiboot", órdenes_args())
             cfg_más("    set gfxpayload=text\n  fi\n  boot\n}\n")
-            cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
+            cfg_más(rótulo_emergencia())
+            cfg_más("  if [ \"$grub_platform\" = efi ]; then\n    multiboot2 /HISPA/NUCLEO.BIN ")
+            cfg_más(emergencia_args())
+            cfg_más("\n")
             cfg_módulos("    module2")
-            cfg_más("    set gfxpayload=auto\n  else\n    multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
+            cfg_más("    set gfxpayload=auto\n  else\n    multiboot /HISPA/NUCLEO.BIN ")
+            cfg_más(emergencia_args())
+            cfg_más("\n")
             cfg_módulos("    module")
             cfg_más("  fi\n  boot\n}\n")
         sino
             cfg_más("menuentry \"Hispa-Pentium\" {\n")
-            cfg_núcleo("  multiboot", "escritorio escritura")
+            cfg_núcleo("  multiboot", escritorio_args())
+            cfg_más("  set gfxpayload=$modo\n  boot\n}\n")
+            cfg_más(rótulo_otro_acpi())
+            cfg_núcleo("  multiboot", otro_acpi_args())
             cfg_más("  set gfxpayload=$modo\n  boot\n}\n")
             cfg_más("menuentry \"Hispa-Pentium: el interprete de ordenes (modo texto)\" {\n")
-            cfg_núcleo("  multiboot", "ordenes escritura")
+            cfg_núcleo("  multiboot", órdenes_args())
             cfg_más("  set gfxpayload=text\n  boot\n}\n")
-            cfg_más("menuentry \"Hispa-Pentium de emergencia: sin tocar los discos, el USB, la red ni ACPI (800 x 600)\" {\n  multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi\n")
+            cfg_más(rótulo_emergencia())
+            cfg_más("  multiboot /HISPA/NUCLEO.BIN ")
+            cfg_más(emergencia_args())
+            cfg_más("\n")
             cfg_módulos("  module")
             cfg_más("  boot\n}\n")
         fin
@@ -1256,7 +1329,7 @@ módulo Instala
     fin
 
     función busca_archivos()
-        variable m, i: nat32
+        variable m, i, n: nat32
         variable e: Entrada
         variable hay_núcleo, hay_boot, hay_core, hay_órdenes, hay_mapa: bool
         n_archivos := 0
@@ -1271,6 +1344,7 @@ módulo Instala
             si e.nombre[0] <> '.' y e.atributos yb (CARPETA ob 0x08) = 0 entonces
                 para i desde 0 hasta 12 hacer nombres[n_archivos][i] := mayúscula(e.nombre[i]) fin
                 tamaños[n_archivos] := e.tamaño
+                orígenes[n_archivos] := DE_SISTEMA
                 ; (CARPETAS.TXT no se instala: dice adónde van los demás)
                 si iguales(nombres[n_archivos], "CARPETAS.TXT") entonces
                     hay_mapa := cierto
@@ -1291,29 +1365,42 @@ módulo Instala
         ; (0.8.5) si no caben todos, no se instala a medias
         si n_archivos >= MAX_ARCHIVOS entonces fallo("Hay demasiados archivos que instalar.", "") fin
         cerrar(m)
+        de_la_memoria()                         ; (0.8.12b)
+        si n_archivos >= MAX_ARCHIVOS entonces fallo("Hay demasiados archivos que instalar.", "") fin
         mapa[0] := 0
         n_otras := 0
         si hay_mapa entonces
             i := lee_entero("CARPETAS.TXT", mapa, 4096)
             mapa[i] := 0
         fin
-        para i desde 1 hasta n_archivos hacer destinos[i - 1] := destino_de(nombres[i - 1]) fin
+        para i desde 1 hasta n_archivos hacer
+            destinos[i - 1] := destino_de(nombres[i - 1])
+            ; (0.8.12b) el firmware de X:\FIRMWARE, a \FIRMWARE
+            si orígenes[i - 1] = DE_X_FW entonces
+                n := otra_de("FIRMWARE", EN_RAÍZ)
+                si n <> EN_RAÍZ entonces destinos[i - 1] := A_OTRA + n fin
+            fin
+        fin
         dd[0] := n_archivos
         registra("instalar: %u archivos que instalar\n")
         sdhci_op[0] := 0
         para i desde 1 hasta n_archivos hacer
-            si iguales(nombres[i - 1], "SDHCI.TXT") entonces lee_sdhci() fin
+            si iguales(nombres[i - 1], "SDHCI.TXT") entonces lee_sdhci(i - 1) fin
         fin
+        ; (0.8.12b) sin \SDHCI.TXT, lo que diga la línea del cargador («sdhci=...»:
+        ; la entrada Instalar de la memoria del Acer One 10 lo lleva), para que
+        ; lo instalado vea su disco arrancando sin ACPI
+        si sdhci_op[0] = 0 entonces sdhci_de_la_línea() fin
         si no hay_núcleo o no hay_boot o no hay_core o no hay_órdenes o sectores_core = 0 o sectores_core > 2000 entonces
             fallo("Faltan los archivos del sistema que hay que instalar (NUCLEO.BIN,", "ORDENES.BIN, BOOT.IMG y CORE.IMG). Arranque de la memoria USB.")
         fin
     fin
 
     ; (0.8.10) \SDHCI.TXT: sus líneas «DIRECCIÓN IRQ sd|emmc», a sdhci_op
-    función lee_sdhci()
+    función lee_sdhci(cuál: nat32)
         variable n, i, k, b, c: nat32
         variable t: arreglo [16] de byte
-        n := lee_entero("SDHCI.TXT", sdhci_txt, 600)
+        n := lee_entero(ruta_de(cuál), sdhci_txt, 600)
         sdhci_txt[n] := 0
         i := 0
         mientras i < n hacer
@@ -1351,6 +1438,80 @@ módulo Instala
         cfg_más(args)
         cfg_más(sdhci_op)
         cfg_más("\n")
+    fin
+
+    ; (0.8.12b) «sdhci=...» de la línea del cargador, a sdhci_op
+    función sdhci_de_la_línea()
+        variable p: puntero a byte
+        variable k: nat32
+        p := buscar(mis_args, "sdhci=")
+        si p = nulo entonces devolver fin
+        Textos32.copiar(sdhci_op, " ")
+        k := 1
+        mientras k < 150 y p[k - 1] > ' ' hacer
+            sdhci_op[k] := p[k - 1]
+            k := k + 1
+        fin
+        sdhci_op[k] := 0
+        dd[0] := nat32(dirección(sdhci_op[1]))
+        registra("instalar: las controladoras SD/eMMC de la línea del cargador, en el GRUB.CFG: %s\n")
+    fin
+
+    ; (0.8.12b) la ruta de un archivo que se instala (de M:, o de la memoria X:)
+    función ruta_de(i: nat32): puntero a byte
+        si orígenes[i] = DE_SISTEMA entonces devolver dirección(nombres[i][0]) fin
+        si orígenes[i] = DE_X entonces Textos32.copiar(ruta_t, "X:\\") sino Textos32.copiar(ruta_t, "X:\\FIRMWARE\\") fin
+        concatenar(ruta_t, nombres[i])
+        devolver dirección(ruta_t[0])
+    fin
+
+    función ya_en_la_lista(nombre: puntero a byte): bool
+        variable i: nat32
+        para i desde 1 hasta n_archivos hacer
+            si iguales(nombres[i - 1], nombre) entonces devolver cierto fin
+        fin
+        devolver falso
+    fin
+
+    ; (0.8.12b, el Acer One 10) lo que hay en la memoria USB (X:) y el
+    ; cargador no trae: \SDHCI.TXT y \SDIO.TXT (lo aprende ahí un arranque
+    ; con ACPI; antes solo se instalaban si venían como módulo, y lo instalado
+    ; no veía su eMMC sin ACPI) y lo de X:\FIRMWARE (a C:\FIRMWARE: el Wi-Fi)
+    función de_la_memoria()
+        variable m, i: nat32
+        variable e: Entrada
+        si es_cd entonces devolver fin
+        m := abrir("X:\\")
+        si no es_error(m) entonces
+            mientras n_archivos < MAX_ARCHIVOS y entrada(m, e) hacer
+                si e.nombre[0] <> '.' y e.atributos yb (CARPETA ob 0x08) = 0 entonces
+                    para i desde 0 hasta 12 hacer nombres[n_archivos][i] := mayúscula(e.nombre[i]) fin
+                    si (iguales(nombres[n_archivos], "SDHCI.TXT") o iguales(nombres[n_archivos], "SDIO.TXT")) y no ya_en_la_lista(nombres[n_archivos]) entonces
+                        tamaños[n_archivos] := e.tamaño
+                        orígenes[n_archivos] := DE_X
+                        dd[0] := nat32(dirección(nombres[n_archivos][0]))
+                        registra("instalar: X:\\%s (lo aprendido en este equipo), también\n")
+                        n_archivos := n_archivos + 1
+                    fin
+                fin
+            fin
+            cerrar(m)
+        fin
+        m := abrir("X:\\FIRMWARE")
+        si no es_error(m) entonces
+            mientras n_archivos < MAX_ARCHIVOS y entrada(m, e) hacer
+                si e.nombre[0] <> '.' y e.atributos yb (CARPETA ob 0x08) = 0 entonces
+                    para i desde 0 hasta 12 hacer nombres[n_archivos][i] := mayúscula(e.nombre[i]) fin
+                    tamaños[n_archivos] := e.tamaño
+                    orígenes[n_archivos] := DE_X_FW
+                    dd[0] := nat32(dirección(nombres[n_archivos][0]))
+                    dd[1] := e.tamaño
+                    registra("instalar: X:\\FIRMWARE\\%s (%u octetos), a \\FIRMWARE\n")
+                    n_archivos := n_archivos + 1
+                fin
+            fin
+            cerrar(m)
+        fin
     fin
 
     ; lee un archivo corto de la unidad del sistema entero, a p. Da lo leído.
@@ -1594,6 +1755,14 @@ módulo Instala
             cerrar(i)
         fin
         si es_cd entonces registra("instalar: desde el CD\n") fin
+        ; (0.8.12b) lo que hereda lo instalado de la línea del cargador (el núcleo)
+        mis_args[0] := 0
+        argumentos(mis_args, 80)
+        mis_args[79] := 0
+        hereda_sinacpi := buscar(mis_args, "sinacpi") <> nulo
+        sin_8042 := buscar(mis_args, "sin8042") <> nulo
+        si hereda_sinacpi entonces registra("instalar: «sinacpi» en la línea del cargador: lo instalado arranca sin ACPI (la segunda entrada, con ACPI)\n") fin
+        si sin_8042 entonces registra("instalar: el equipo no tiene 8042: la entrada de emergencia, con el USB (el teclado y el ratón)\n") fin
         bienvenida()
         busca_archivos()
         busca_discos()

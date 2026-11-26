@@ -222,6 +222,28 @@ if [ "$(id -u)" = 0 ] && command -v grub-install > /dev/null && [ -d /usr/lib/gr
         "^arranque: por UEFI (32 bits, GOP .*la línea del cargador: escritorio escritura sdhci=$basei$" "^escritorio: en marcha"
     fi
   fi
+  # (0.8.12b, el Acer One 10: lo instalado se quedaba parado con ACPI.BIN) el
+  # menú instalado lleva siempre una entrada «SIN ACPI» con el USB; y con
+  # «sinacpi» en la línea de Instalar, lo instalado la hereda (la otra entrada
+  # es la «CON ACPI»); con «sin8042» (el Acer no tiene 8042: el núcleo lo ve
+  # por su puerto 64h, que lee FFh), la de emergencia no deja el USB
+  if grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura sinacpi sdhci=$basei$" $X/cfgi.txt && grep -q 'Hispa-Pentium SIN ACPI (si se queda parado' $X/cfgi.txt \
+    && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinusb sinred sinacpi$" $X/cfgi.txt; then
+    ok "INSTALAR: el menú instalado lleva también «Hispa-Pentium SIN ACPI» (con el USB y « sdhci=...»), y la de emergencia sigue sin el USB (hay 8042)"
+  else ko "INSTALAR no pone la entrada «SIN ACPI» en el menú instalado:"; grep -n "menuentry\|NUCLEO.BIN" $X/cfgi.txt | sed 's/^/        /' | head -12; fi
+  I=$X/inst3.img; rm -f $I; truncate -s 512M $I
+  CAPTURAS=$X ESCRIBE=1 SD=$I SATA=$X/sata.img MODULOS=$INST ARRANQUE="instalar unidad=M sinacpi sin8042" $AQUI/nucleo32/probar.sh $X/SEMILLA.BIN ":pausa 1" \
+    ":tecla ret" ":texto t1" ":tecla ret" ":texto t2" ":tecla ret" ":pausa 6" ":texto t3" ":tecla ret" > $X/inst3.sal 2>&1
+  S=$X/inst3.sal
+  dd if=$I of=$X/vol3.img bs=512 skip=2048 conv=sparse status=none
+  rm -f $X/cfg3.txt; mcopy -n -i $X/vol3.img ::HISPA/GRUB.CFG $X/cfg3.txt > /dev/null 2>&1
+  if grep -q "Hispa-Pentium está instalado" $X/t3.txt && grep -q "^instalar: «sinacpi» en la línea del cargador" $S && grep -q "^instalar: el equipo no tiene 8042" $S \
+    && [ "$(grep -m1 'NUCLEO.BIN escritorio escritura' $X/cfg3.txt | sed 's/^ *//')" = "multiboot2 /HISPA/NUCLEO.BIN escritorio escritura sinacpi sdhci=$basei" -o "$(grep -m1 'NUCLEO.BIN escritorio escritura' $X/cfg3.txt | sed 's/^ *//')" = "multiboot /HISPA/NUCLEO.BIN escritorio escritura sinacpi sdhci=$basei" ] \
+    && grep -q 'Hispa-Pentium CON ACPI' $X/cfg3.txt && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio escritura sdhci=$basei$" $X/cfg3.txt \
+    && grep -q "multiboot /HISPA/NUCLEO.BIN ordenes escritura sinacpi sdhci=$basei$" $X/cfg3.txt \
+    && grep -q "multiboot /HISPA/NUCLEO.BIN escritorio sindisco sinred sinacpi$" $X/cfg3.txt && ! grep -q "sinusb" $X/cfg3.txt && fsck.fat -n $X/vol3.img > /dev/null 2>&1; then
+    ok "INSTALAR con «sinacpi sin8042» (la memoria del Acer One 10): lo instalado arranca sin ACPI (la segunda, «CON ACPI»), y la de emergencia, con el USB (el teclado)"
+  else ko "INSTALAR no hereda «sinacpi» o «sin8042»:"; grep -n "menuentry\|NUCLEO.BIN" $X/cfg3.txt | sed 's/^/        /' | head -14; grep "^instalar:" $S | sed 's/^/        /' | head -6; fi
 else
   echo "  (sin root o sin grub-install para PC no se prueba INSTALAR en la tarjeta SD)"
 fi
