@@ -54,6 +54,7 @@ módulo Excep64
     público variable parados: nat32         ; cuántos se han parado (lo dice al_parar)
     público variable otros: nat32           ; a cuántos se ha mandado parar
     público variable parada_de: nat64       ; 0, o el número + 1 del procesador que se está parando
+    público variable motivo_nmi: puntero a byte     ; [etapa 10 d] por qué se manda el NMI (el vigilante), o nulo
     ; [etapa 4] lo que se hace con una excepción de un programa (Procesos):
     ; al_fallo_usuario(n, marco, error, cr2) devuelve cierto si se ha
     ; arreglado (una página que se pone al tocarla) y, si no, cierra el
@@ -270,6 +271,7 @@ módulo Excep64
         fin
         escribir("\n*** Hispa-64 se ha parado: excepción ", n, " ***\n")
         escribir(nombre(n), "\n")
+        si n = 2 y motivo_nmi <> nulo entonces escribir(motivo_nmi, "\n") fin
         dónde()
         k := 1
         mientras k <= 3 hacer

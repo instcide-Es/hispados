@@ -29,6 +29,8 @@ módulo Reloj64
     público variable tsc_hz: nat64              ; la frecuencia del TSC (medida)
     público variable tsc_invariante: bool
     variable pm_antes: nat32
+    variable hpet_antes: nat32
+    público variable hpet_32_forzado: bool      ; [etapa 10 d] «hpet32» en la línea de órdenes: como si fuera de 32 bits (las pruebas)
     variable pm_suma: nat64
     variable cuenta0: nat64
     variable cerrojo: nat64                 ; [etapa 3] el reloj de ACPI se suma en pm_suma: de uno en uno
@@ -51,7 +53,22 @@ módulo Reloj64
     público función cuenta(): nat64
         variable v, d: nat32
         variable b, s: nat64
-        si fuente = HPET entonces devolver m64(hpet + 0xF0) fin
+        si fuente = HPET y hpet_64 entonces devolver m64(hpet + 0xF0) fin
+        ; [etapa 10 d] un HPET de 32 bits (el de VirtualBox con el chipset
+        ; PIIX3, por ejemplo): da la vuelta cada 5 minutos (a 14,3 MHz); se
+        ; suma como el reloj de ACPI (antes se leía como si fuese de 64 bits:
+        ; a los 5 minutos la hora volvía atrás y los que dormían no
+        ; despertaban)
+        si fuente = HPET entonces
+            b := toma(dirección(cerrojo))
+            v := m32(hpet + 0xF0)
+            d := v - hpet_antes
+            pm_suma := pm_suma + nat64(d)
+            hpet_antes := v
+            s := pm_suma
+            suelta(dirección(cerrojo), b)
+            devolver s
+        fin
         si fuente = PM entonces
             b := toma(dirección(cerrojo))
             v := lee_pm()
@@ -92,10 +109,12 @@ módulo Reloj64
             devolver falso
         fin
         hpet_temps := nat32((cap >> 8) yb 31) + 1
-        hpet_64 := cap yb 0x2000 <> 0
+        hpet_64 := cap yb 0x2000 <> 0 y no hpet_32_forzado
         hpet_sustituye := cap yb 0x8000 <> 0
         pon_m64(hpet + 0x10, m64(hpet + 0x10) yb (nob nat64(3)))   ; parado y sin sustituir
         pon_m64(hpet + 0xF0, 0)
+        ; [etapa 10 d] (hpet32, las pruebas) que dé la vuelta de los 32 bits a los 4 s
+        si hpet_32_forzado entonces pon_m64(hpet + 0xF0, nat64(0xFFFFFFFF) - muldiv(4000000000, 1000000, hpet_periodo)) fin
         pon_m64(hpet + 0x10, m64(hpet + 0x10) ob 1)                 ; a contar
         devolver cierto
     fin
@@ -139,6 +158,7 @@ módulo Reloj64
         variable t0, c0, c1: nat64
         si pon_hpet() entonces
             fuente := HPET
+            hpet_antes := m32(hpet + 0xF0)
         sino si pm_tmr <> 0 entonces
             fuente := PM
             pm_antes := lee_pm()

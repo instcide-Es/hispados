@@ -537,6 +537,18 @@ módulo PrSmp64
         devolver hondo(n + 1) + relleno[(n + 1) yb 127]
     fin
 
+    ; [etapa 10 d] prueba=vigilante: las interrupciones quitadas y a dar
+    ; vueltas sin fin (lo que parecía el cuelgue de VirtualBox): el vigilante
+    ; lo ve a los 5 s y le manda un NMI, que dice dónde estaba
+    función atascado()
+        ensamblador
+            cli
+        .vuelta:
+            db 0xF3, 0x90               ; pause
+            jmp .vuelta
+        fin
+    fin
+
     función pánico(arg: nat64)
         variable p: puntero a nat64
         si arg = 1 entonces
@@ -544,6 +556,8 @@ módulo PrSmp64
             escribir(valor(p), "\n")
         sino si arg = 2 entonces
             abre_mutex(dirección(un_mutex))
+        sino si arg = 4 entonces
+            atascado()
         sino
             escribir(hondo(0), "\n")
         fin
@@ -559,6 +573,7 @@ módulo PrSmp64
         si qué = 1 entonces escribir("Prueba: un fallo de página en un hilo del procesador ", k, "...\n") fin
         si qué = 2 entonces escribir("Prueba: abrir un mutex sin haberlo cerrado, en un hilo del procesador ", k, "...\n") fin
         si qué = 3 entonces escribir("Prueba: una función que se llama a sí misma sin fin, en un hilo (su pila es de 32 KB)...\n") fin
+        si qué = 4 entonces escribir("Prueba: un hilo del procesador ", k, " quita las interrupciones y da vueltas sin fin (el vigilante)...\n") fin
         h := crea(nat64(dirección(pánico)), nat64(qué), "pánico", NORMAL, k)
         une(h)
         escribir("¡No se ha parado!\n")

@@ -523,9 +523,22 @@ módulo Hilos64
 
     ; despierta un hilo que duerme (devuelve falso si no dormía)
     público función despierta(h: puntero a Hilo): bool
+        variable t0: nat64
+        variable t: puntero a byte
         si no cambia_si(dirección(h.estado), DURMIENDO, LISTO) entonces devolver falso fin
         ; (puede estar aún dejando su procesador: hasta que lo deje, a nadie más)
-        mientras h.en_cpu <> 0 hacer pausa() fin
+        ; [etapa 10 d] con un límite: dejarlo son microsegundos; si en 5 s no
+        ; lo ha dejado, algo va mal y se dice (antes se quedaba aquí sin más)
+        t0 := tsc()
+        mientras h.en_cpu <> 0 hacer
+            pausa()
+            si tsc_hz > 0 y tsc() - t0 > tsc_hz * 5 entonces
+                detén_ini("un hilo despertado no deja su procesador")
+                t := puntero(h.nombre)
+                escribir("El hilo «", t, "» (", h.id, ") sigue en el procesador ", h.cpu, " 5 s después de dormirse.\n")
+                detén_fin()
+            fin
+        fin
         encola(h)
         devolver cierto
     fin
@@ -945,6 +958,60 @@ módulo Hilos64
         fin
     fin
 
+    ; ---- [etapa 10 d] el vigilante ----
+    ; Desde el tic del procesador 0 (que mira a los demás) y del 1 (que mira
+    ; al 0), cada medio segundo: un procesador en marcha cuyo tic no se mueve
+    ; en 5 s se ha quedado con las interrupciones quitadas (dando vueltas en
+    ; un cerrojo, o esperando algo que no llega): se le manda un NMI, y
+    ; Excep64 dice dónde estaba y quién lo había llamado (antes, el sistema se
+    ; quedaba quieto sin decir nada: la 0.11.3 en VirtualBox con 4
+    ; procesadores, sección 21). Y uno ocioso con hilos en su cola durante 2 s
+    ; (un aviso de replanificar perdido): se dice y se le avisa otra vez.
+    público variable vigilante_nmi, vigilante_avisos, vigilante_atrás: nat64
+    variable vigía_hora: nat64
+    variable vigilante_hecho: nat64
+    constante VIGÍA_TICS = 50
+
+    función vigila(c: puntero a Cpu)
+        variable k: nat32
+        variable oc: puntero a Cpu
+        variable ahora: nat64
+        si c.número > 1 entonces devolver fin
+        si c.tics mod VIGÍA_TICS <> 0 entonces devolver fin
+        ; (el 0, también la hora: que nunca vaya hacia atrás)
+        si c.número = 0 entonces
+            ahora := ahora_ns()
+            si ahora < vigía_hora entonces
+                vigilante_atrás := vigilante_atrás + 1
+                si vigilante_atrás <= 3 entonces escribir("(El vigilante: la hora del núcleo ha ido ", (vigía_hora - ahora) div 1000000, " ms hacia atrás.)\n") fin
+            fin
+            vigía_hora := ahora
+        fin
+        si n_cpus < 2 entonces devolver fin
+        k := 0
+        mientras k < n_cpus hacer
+            oc := cpu(k)
+            si k <> c.número y (c.número = 0 o k = 0) y oc.en_marcha <> 0 y oc.parado = 0 entonces
+                si oc.tics = oc.vigía_tics entonces oc.vigía_quieto := oc.vigía_quieto + 1 sino oc.vigía_quieto := 0 fin
+                oc.vigía_tics := oc.tics
+                si oc.vigía_quieto >= 10 y vigilante_hecho = 0 entonces
+                    vigilante_hecho := 1
+                    vigilante_nmi := vigilante_nmi + 1
+                    motivo_nmi := "El vigilante: este procesador lleva 5 s sin atender su tic (las interrupciones quitadas: un cerrojo o una espera que no acaba). Lo que hacía:"
+                    ipi(oc.apic, 0x4400)
+                fin
+                si oc.ocioso <> 0 y cola_n[k] > 0 entonces oc.vigía_ocioso := oc.vigía_ocioso + 1 sino oc.vigía_ocioso := 0 fin
+                si oc.vigía_ocioso >= 4 entonces
+                    oc.vigía_ocioso := 0
+                    vigilante_avisos := vigilante_avisos + 1
+                    escribir("(El vigilante: el procesador ", k, " está en reposo con ", cola_n[k], " hilos en su cola: se le avisa otra vez.)\n")
+                    ipi(oc.apic, 0x4000 ob V_PLAN)
+                fin
+            fin
+            k := k + 1
+        fin
+    fin
+
     ; ---- lo que hace cada tic (Apic64.al_tic: con las interrupciones quitadas) ----
     función tic_hilos()
         variable c: puntero a Cpu
@@ -966,6 +1033,7 @@ módulo Hilos64
         ; (el reloj de ACPI se va sumando: hay que leerlo antes de que dé la vuelta)
         si c.número = 0 y c.tics yb 63 = 0 entonces ahora_ns() fin
         si reloj_prim <> 0 entonces despierta_vencidos() fin
+        vigila(c)
         si c.hilo <> c.ociosa y (c.cuanto >= CUANTO o c.expropiar <> 0) entonces
             si c.expropiar <> 0 entonces expropiaciones := expropiaciones + 1 fin
             planifica()

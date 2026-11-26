@@ -60,6 +60,10 @@ módulo PorCpu64
         ancla_tsc, ancla_tics: nat64    ; el último tic que llegó a su hora: su TSC y cuántos iban
         perdidos_ancla: nat64       ; los perdidos hasta él
         turno_tsc: nat64            ; [etapa 10 c] el TSC de cuando empezó el turno del que corre (Hilos64.avisa)
+        ; [etapa 10 d] el vigilante (Hilos64.vigila): sus tics la última vez
+        ; que se miró, y cuántas veces seguidas sin moverse; y cuántas veces
+        ; seguidas ocioso con hilos en su cola
+        vigía_tics, vigía_quieto, vigía_ocioso: nat64
     fin
 
     variable bsp: Cpu alineado 64           ; (en su línea de la caché)
