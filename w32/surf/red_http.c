@@ -8,6 +8,7 @@
  * ============================================================================= */
 #include "../navega/nav.h"
 #include "rh.h"
+#include "../navega/cors.h"
 
 /* lo de html.c que usa http.c */
 int min_c(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
@@ -26,8 +27,8 @@ int a_utf8(const char *o, int n, char *d) {
   }
   return p - d;
 }
-/* ¿de otro sitio? (SameSite): sin saber quién pide, como si no */
-int nav_cruzada(const char *de, const char *a) { (void)de; (void)a; return 0; }
+/* ¿de otro sitio? (SameSite): la de verdad, la del Navegador propio (cors.h) */
+int nav_cruzada(const char *de, const char *a) { return cors_cruzada(de, a); }
 
 typedef struct { Pet p; char err[700]; } RH;
 
@@ -81,6 +82,8 @@ void rh_suelta(void *v) {
 }
 /* [JS] lo de fetch: otro método, y document.cookie */
 void rh_metodo(void *v, const char *metodo) { RH *r = v; r->p.js_metodo = copia(metodo); }
+/* [JS] de otro sitio (SameSite) y sin galletas (fetch a otro origen sin credentials) */
+void rh_js(void *v, int cruzada, int sin_galletas) { RH *r = v; r->p.cruzada = cruzada; r->p.sin_galletas = sin_galletas; }
 char *rh_galletas_de(const char *url) { return http_galletas(url); }
 void rh_pon_galleta(const char *url, const char *linea) { http_pon_galleta(url, linea); }
 void rh_inicia(const char *idioma) {

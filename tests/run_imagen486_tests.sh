@@ -211,7 +211,7 @@ checkn $T/l3.txt "HSPRED"
 checkn $T/l3.txt "HSPWIFI"
 checkn $T/l3.txt "Wi-Fi"                   # (HSPSND sí avisa de la tarjeta de sonido, como siempre)
 check $T/l3.txt "Hispa Ventanas ha terminado."
-check $T/l3.txt "Hispa-DOS versión 0.9.30"
+check $T/l3.txt "Hispa-DOS versión 0.9.31"
 [ -n "${GUARDAR:-}" ] && for f in $T/h[0-9].ppm; do cp $f "$GUARDAR"/i486_$(basename $f); done 2>/dev/null
 
 # instalar en un disco que ya tiene Hispa-DOS: INSTALL, [A] y S (USB de 486)
@@ -309,7 +309,7 @@ sleep 1
   mon quit; } | maquina 7 120 -drive file=$T/hdd.img,format=raw,if=ide -boot c -netdev user,id=n0 -device ne2k_pci,netdev=n0
 kill $HTTP_PID 2>/dev/null
 echo "-- 7) ACTUALIZAR en el Hispa-486 instalado: su gama --"
-check $T/l7.txt "Tienes instalado Hispa-DOS 0.9.30 (Hispa-486)."
+check $T/l7.txt "Tienes instalado Hispa-DOS 0.9.31 (Hispa-486)."
 check $T/l7.txt "Paquete de Hispa-486"
 check $T/l7.txt "¿Descargar e instalar la 0.9.98?"
 checkn $T/l7.txt "Paquete de Hispa-386"

@@ -3,8 +3,8 @@
 # ventana de Hispa Ventanas; docs/486/NAVEGADOR2.md), sin Internet: instalado
 # en C:\HISPADOS\INTERNET (lo del disquete «Internet» y lo de «Internet 2»),
 # contra el servidor de pruebas del anfitrión (tests/tools/surf_servidor.py,
-# por HTTPS con la raíz de pruebas de tests/tools/nav_certs.sh: RAIZ.CER junto
-# al programa). Se mira en las capturas y en lo que recibe el servidor:
+# por HTTPS con la raíz de pruebas de tests/tools/nav_certs.sh: RAIZ.CER en
+# AUTORID\, junto al programa). Se mira en las capturas y en lo que recibe el servidor:
 #  - el menú Inicio, grupo Internet: «Navegador completo» (lo crea Hispa
 #    Ventanas si encuentra INTERNET\NAVEGA2.EXE) y abre el programa;
 #  - una página de disco (file:) con letras de ancho variable y tablas;
@@ -42,7 +42,8 @@ mkdir -p $T/c
 mcopy -s -n -i "$IMG" ::HISPADOS $T/c/
 I=$T/c/HISPADOS/INTERNET
 mkdir -p $I/RECURSOS $I/FUENTES $T/c/PAGINAS
-cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA2.EXE $T/RAIZ.CER $I/
+cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA2.EXE $I/
+mkdir -p $I/AUTORID; cp $T/RAIZ.CER $I/AUTORID/
 cp $B/HW32.COM $B/MSVCRT.DLL $T/c/HISPADOS/
 cp w32/surf/recursos/* terceros/netsurf/netsurf/resources/{default,quirks,adblock,internal}.css $I/RECURSOS/
 cp terceros/dejavu/*.TTF $I/FUENTES/

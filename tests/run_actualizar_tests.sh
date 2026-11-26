@@ -16,6 +16,13 @@
 #   (g) [HISPA-486] las gamas: una sección con «gama=486» no es para este
 #       Hispa-386 (ni se ofrece ni se avisa); la de su gama, sí.
 #   (d) la dirección tomada de la clave ACTUALIZAR= de \HISPADOS\RED.INI.
+#   [FIRMA] (0.9.31) todas las listas van firmadas con la clave DE PRUEBA
+#   (tests/firma/clave_prueba.key) y en el disquete va build/ACTPRUEB.COM (el
+#   ACTUALIZAR que la lleva). Y además:
+#   (h) una lista sin firmar: no se cree nada («no lleva la firma»);
+#   (i) una lista firmada y cambiada después: «NO es buena»;
+#   (j) lo que va DETRÁS de la línea de la firma no se lee (una sección
+#       colada ahí no sale).
 #   (+) una dirección https:// se rechaza con su mensaje.
 # Todo en un espacio de nombres de red propio (unshare -rn): no usa Internet.
 # ACTUALIZAR (net installer) test, with QEMU user networking + own HTTP server.
@@ -24,7 +31,7 @@ cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 B=build
 NIC=${NIC:-ne2k_pci}
-for f in HSPRED CONFRED ACTUALIZAR; do
+for f in HSPRED CONFRED ACTUALIZAR ACTPRUEB; do
   [ -f $B/$f.COM ] || { echo "falta $B/$f.COM (make)"; exit 1; }
 done
 [ -f "$IMG" ] || { echo "falta la imagen $IMG (make)"; exit 1; }
@@ -41,19 +48,19 @@ PORT=${PORT:-8080}
 mkdir -p $T/www
 # --- los ficheros versiones.txt que sirve el servidor HTTP (en CP437, como un
 #     servidor real de Hispa-DOS, para que los acentos cuadren) ---
-printf '[0.9.30]\ncpu=386\n'                                        > $T/www/aldia.txt
+printf '[0.9.31]\ncpu=386\n'                                        > $T/www/aldia.txt
 { printf '; lista de versiones de prueba\n\n'
   printf '[0.9.99]\n'
   printf 'nota=Batería en la barra y consola remota\n'
   printf 'descarga=http://ejemplo/hispados/\n'; } | iconv -f UTF-8 -t CP437 > $T/www/nueva.txt
-{ printf '[0.9.30]\n'
+{ printf '[0.9.31]\n'
   printf 'cpu=386\n'
   printf 'disco=0\n'
   printf 'nivel=1\n'
   printf 'edicion=Hispa-DOS con Hispa Ventanas (grafico)\n'
   printf 'paquete=http://10.0.2.2:%s/noexiste.paq\n' "$PORT"
   printf 'nota=Da el salto al entorno grafico\n'; } | iconv -f UTF-8 -t CP437 > $T/www/recom.txt
-{ printf '[0.9.30]\n'
+{ printf '[0.9.31]\n'
   printf 'cpu=386\n'
   printf 'nivel=0\n'
   printf 'edicion=Hispa-DOS con Hispa Ventanas\n\n'
@@ -72,6 +79,23 @@ printf '[0.9.30]\ncpu=386\n'                                        > $T/www/ald
   printf 'nota=La de Hispa-386\n'; } | iconv -f UTF-8 -t CP437 > $T/www/gamas.txt
 { printf '[0.9.50]\n'
   printf 'nota=Esta vino de RED.INI\n'; } | iconv -f UTF-8 -t CP437  > $T/www/redini.txt
+# [FIRMA] firmarlas con la clave de prueba (recom.txt dice un paquete que no se
+# baja: uno de mentira, para su SHA-256)
+printf 'x' > $T/www/noexiste.paq
+for l in aldia nueva recom limite gamas redini; do
+  python3 tools/firma_versiones.py firma $T/www/$l.txt --clave tests/firma/clave_prueba.key > /dev/null \
+    || { echo "no se pudo firmar $l.txt"; exit 1; }
+done
+# (h) sin firmar
+{ printf '[0.9.96]\n'; printf 'nota=Lista sin firmar\n'; } > $T/www/sinfirma.txt
+# (i) firmada y cambiada después (la nota)
+{ printf '[0.9.95]\n'; printf 'nota=Nota de verdad\n'; } > $T/www/cambiada.txt
+python3 tools/firma_versiones.py firma $T/www/cambiada.txt --clave tests/firma/clave_prueba.key > /dev/null
+sed -i 's/Nota de verdad/Nota cambiada/' $T/www/cambiada.txt
+# (j) una sección colada detrás de la firma
+{ printf '[0.9.94]\n'; printf 'nota=La firmada\n'; } > $T/www/colada.txt
+python3 tools/firma_versiones.py firma $T/www/colada.txt --clave tests/firma/clave_prueba.key > /dev/null
+{ printf '[1.2.3]\n'; printf 'nota=Seccion colada\n'; } >> $T/www/colada.txt
 python3 -m http.server --bind 127.0.0.1 --directory $T/www $PORT > $T/http.log 2>&1 &
 HTTP_PID=$!
 sleep 1
@@ -83,6 +107,7 @@ printf 'DHCP=SI\r\nACTUALIZAR=%s/redini.txt\r\n' "$U" > $T/REDACT.INI
 
 cp "$IMG" $T/f.img
 mcopy -o -i $T/f.img $T/REDACT.INI ::REDACT.INI
+mcopy -o -i $T/f.img $B/ACTPRUEB.COM ::HISPADOS/ACTUALIZ.COM || { echo "no cabe ACTPRUEB.COM en el disquete"; exit 1; }
 
 # corre NOMBRE TIEMPO «s|orden»...
 corre() {
@@ -99,6 +124,7 @@ fail=0
 ok() { echo "  OK   $1"; }
 ko() { echo "  FAIL $1"; fail=1; }
 check() { if grep -qF -- "$2" $T/$1.txt; then ok "$2"; else ko "$2"; fi; }
+checkn() { if grep -qF -- "$2" $T/$1.txt; then ko "(no debe salir) $2"; else ok "no sale: $2"; fi; }
 
 CMDS=("8|ACTUALIZAR $U/aldia.txt"                    # (c) sin HSPRED a mano -> lo carga solo
       '3|HSPRED' '4|CONFRED'
@@ -108,6 +134,9 @@ CMDS=("8|ACTUALIZAR $U/aldia.txt"                    # (c) sin HSPRED a mano -> 
       "7|ACTUALIZAR $U/limite.txt"                   # (f) límite por hardware
       "7|ACTUALIZAR $U/gamas.txt"                    # (g) las gamas
       '3|ACTUALIZAR https://ejemplo.org/x.txt'       # (+) https:// rechazado
+      "7|ACTUALIZAR $U/sinfirma.txt"                 # (h) sin firmar
+      "7|ACTUALIZAR $U/cambiada.txt"                 # (i) cambiada tras firmar
+      "7|ACTUALIZAR $U/colada.txt"                   # (j) sección colada detrás
       '2|DEL A:\HISPADOS\RED.INI'
       '2|COPY A:\REDACT.INI A:\HISPADOS\RED.INI'
       "7|ACTUALIZAR"                                 # (d) URL de RED.INI
@@ -124,7 +153,7 @@ else
   ok "no pide «Cargue HSPRED» (lo carga solo)"
 fi
 # (a) al día
-check f "Hispa-DOS 0.9.30 está al día."
+check f "Hispa-DOS 0.9.31 está al día."
 # (b) versión nueva, con nota y descarga
 check f "Hay una versión nueva: 0.9.99"
 check f "Batería en la barra y consola remota"
@@ -132,11 +161,11 @@ check f "Descárgala en: http://ejemplo/hispados/"
 # (e) recomendación por edición más rica; contestamos N
 check f "Tu equipo admite la edición"
 check f "Hispa-DOS con Hispa Ventanas (grafico)"
-check f "¿Descargar e instalar la 0.9.30?"
+check f "¿Descargar e instalar la 0.9.31?"
 check f "Da el salto al entorno grafico"
 check f "De acuerdo: solo mirar"
 # (f) límite por hardware
-check f "Tu equipo llega hasta la 0.9.30"
+check f "Tu equipo llega hasta la 0.9.31"
 check f "Edicion Total"
 check f "Pentium o superior"
 # (g) las gamas: la de Hispa-486 no se mira; la de Hispa-386, sí
@@ -151,6 +180,15 @@ check f "Las direcciones https:// (cifradas) todavía no funcionan"
 check f "Hay una versión nueva: 0.9.50"
 check f "Esta vino de RED.INI"
 check f "fin-de-la-prueba"
+# [FIRMA]
+check f "no lleva la firma de Hispa-DOS"
+checkn f "Lista sin firmar"
+check f "La firma de la lista de versiones NO es buena"
+checkn f "Nota cambiada"
+checkn f "Nota de verdad"
+check f "Hay una versión nueva: 0.9.94"
+checkn f "1.2.3"
+checkn f "Seccion colada"
 
 if [ $fail -ne 0 ] || [ -n "${VERBOSE:-}" ]; then sed -n '/>ACTUALIZAR$/,$p' $T/f.txt | head -160; fi
 exit $fail

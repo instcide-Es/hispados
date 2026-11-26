@@ -236,7 +236,8 @@ if quiere 4 && [ $CON32 = 1 ]; then
     rm -rf $T/c; mkdir -p $T/c
     mcopy -s -n -i "$IMG" ::HISPADOS $T/c/
     mkdir -p $T/c/HISPADOS/INTERNET
-    cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA.EXE $T/RAIZ.CER $T/c/HISPADOS/INTERNET/
+    cp $B/MSVCRT.DLL $B/WSOCK32.DLL $B/HSPTLS.DLL $B/HSPJS.DLL $B/NAVEGA.EXE $T/c/HISPADOS/INTERNET/
+    mkdir -p $T/c/HISPADOS/INTERNET/AUTORID; cp $T/RAIZ.CER $T/c/HISPADOS/INTERNET/AUTORID/
     cp $B/HW32.COM $B/MSVCRT.DLL $T/c/HISPADOS/
     printf 'Inicio=http://10.0.2.2:%d/larga\r\nIdioma=es-ES\r\nJavaScript=NO\r\n' $P > $T/c/HISPADOS/INTERNET/NAVEGA.INI
     python3 tests/tools/mkhdd.py $T/c.img 16 $T/c/HISPADOS > /dev/null

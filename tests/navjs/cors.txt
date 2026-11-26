@@ -1,0 +1,3 @@
+espera 4000
+vuelca
+registro

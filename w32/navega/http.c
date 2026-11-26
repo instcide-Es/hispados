@@ -467,12 +467,12 @@ const char *http_cabecera(const Pet *p, const char *nombre) {
 }
 void http_empieza(Pet *p) {
   char *u = p->url, *c = p->cuerpo, tc[sizeof p->tipo_cuerpo];
-  int post = p->post, cruzada = p->cruzada, sub = p->sub;
+  int post = p->post, cruzada = p->cruzada, sub = p->sub, sin_galletas = p->sin_galletas;
   u32 nc = p->n_cuerpo, max = p->max;
   memcpy(tc, p->tipo_cuerpo, sizeof tc);
   memset(p, 0, sizeof *p);
   p->url = u; p->cuerpo = c; p->post = post; p->n_cuerpo = nc;
-  p->cruzada = cruzada; p->sub = sub; p->max = max ? max : CUERPO_MAX;
+  p->cruzada = cruzada; p->sub = sub; p->sin_galletas = sin_galletas; p->max = max ? max : CUERPO_MAX;
   memcpy(p->tipo_cuerpo, tc, sizeof tc);
   p->fase = H_NADA;
   p->largo = -1;
@@ -494,7 +494,7 @@ static int cab_de(const char *c, const char *nombre) {
   return 0;
 }
 static int pet_arma(Pet *p) {
-  char *g = gal_para(&p->u, p->cruzada, p->sub, p->post, 0), host[150];
+  char *g = p->sin_galletas ? NULL : gal_para(&p->u, p->cruzada, p->sub, p->post, 0), host[150];
   const char *acc;
   u32 n = strlen(p->u.ruta) + (g ? strlen(g) : 0) + p->n_cuerpo + 900 + (p->js_cab ? 2010 : 0);
   free(p->pet);
@@ -588,7 +588,7 @@ static int cabeceras(Pet *p) {
   p->estado = atoi(t + 1);
   for (l = p->cab; (l = strchr(l, '\n')); ) {
     l++;
-    if (!_strnicmp(l, "Set-Cookie:", 11)) { l += 11; while (*l == ' ') l++; gal_pon(&p->u, l, 0); }
+    if (!p->sin_galletas && !_strnicmp(l, "Set-Cookie:", 11)) { l += 11; while (*l == ' ') l++; gal_pon(&p->u, l, 0); }
   }
   p->cerrar = !v11;
   if ((t = http_cabecera(p, "Connection"))) { if (!_strnicmp(t, "close", 5)) p->cerrar = 1; else if (!_strnicmp(t, "keep-alive", 10)) p->cerrar = 0; }

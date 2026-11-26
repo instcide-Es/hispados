@@ -6,8 +6,10 @@ REM y deja sus cambios en \WINDOWS\CONFIG.WIN y AUTOEXEC.WIN. WINCONF los
 REM pone (con la opción «Windows» en el menú, sin los emuladores de
 REM Hispa-DOS) y reinicia; si ya están, no hace nada. Guía: docs/WINDOWS.md.
 IF EXIST C:\WINDOWS\WIN.COM C:\HISPADOS\WINCONF /AUTO
-REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL, JUEGOS o PRUEBA)
+REM CONFIG = la opción elegida en el menú de CONFIG.SYS (NORMAL, JUEGOS,
+REM PRUEBA o JUEGOSSE: Juegos sin EMS, que carga lo mismo que JUEGOS)
 IF "%CONFIG%"=="JUEGOS" GOTO JUEGOS
+IF "%CONFIG%"=="JUEGOSSE" GOTO JUEGOS
 IF "%CONFIG%"=="PRUEBA" GOTO PRUEBA
 REM [SOLO-MEDIO: la opción «Instalar» (INSTALAR quita estas líneas en el
 REM disco duro, hasta la otra marca)

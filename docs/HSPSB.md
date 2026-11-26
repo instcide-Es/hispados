@@ -30,6 +30,14 @@ Hace falta `HSPEMM.SYS` (los puertos solo se pueden atrapar en modo V86):
   tarjeta (32 KB; con `LH`, arriba si cabe). Hace falta para los juegos con
   DOS/4GW (Doom, Duke Nukem 3D, Mortal Kombat…): sin él van por VCPI y no
   suenan. La opción «Juegos» del disquete y de la memoria USB ya lo carga.
+- **«Juegos sin EMS»** (0.9.31, la 4.ª opción del menú): lo mismo que
+  «Juegos», pero HSPEMM con `NOEMS`. Los 64 KB del marco de la EMS pasan a ser
+  memoria superior, y ahí caben HSPSND con la Sound Blaster emulada (56 KB con
+  HD Audio o AC'97) y HSPDPMI. Medido en QEMU con HD Audio (auditoría del
+  25/11/2026): a un programa le quedan **606 KB** (con «Juegos», 550 KB; con
+  «Normal», 559 KB). Sigue habiendo VCPI (DOS/4GW: Doom, Duke Nukem 3D…) y la
+  Sound Blaster emulada; lo que no hay es EMS: los juegos que la piden, con
+  «Juegos».
 - Si el juego está configurado con la IRQ 7 (Doom y Duke Nukem 3D vienen
   así) y deja la 5 tapada, la IRQ se le entrega en la 7. Mejor configurarlo
   con la 5.

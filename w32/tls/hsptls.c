@@ -10,20 +10,24 @@
  *     servidor con certificado ECDSA o RSA, y ChaCha20-Poly1305 o AES-GCM;
  *   - la comprobación del certificado: cadena hasta una de las autoridades
  *     raíz de anclas.h (hechas con tools/mkanclas.sh de w32/tls/raices) o de
- *     los archivos *.CER (X.509 en DER) que haya en la carpeta del programa,
- *     nombre del servidor y fechas con el reloj del equipo;
+ *     los archivos *.CER (X.509 en DER) que haya en la subcarpeta AUTORID\
+ *     de la del programa (no en la del programa: ahí guarda HTTPS.EXE lo que
+ *     baja), nombre del servidor y fechas con el reloj del equipo;
  *   - la memoria de certificados: comprobar la cadena de clicgest.es (dos
  *     firmas ECDSA P-384) le cuesta a un 486 a 66 MHz unos 13 segundos, así
  *     que la cadena que ya se dio por buena para un servidor (su resumen
  *     SHA-256, con el nombre) se recuerda una semana (HSPTLS.CCH, junto al
  *     programa) y mientras tanto no se vuelve a comprobar: el apretón de
- *     manos baja a unos 2 segundos. Si el servidor cambia de certificado, o
- *     pasa la semana, se comprueba otra vez entera;
+ *     manos baja a unos 2 segundos. Si el servidor cambia de certificado,
+ *     pasa la semana o caduca algún certificado de la cadena, se comprueba
+ *     otra vez entera;
  *   - el azar: no hay generador del sistema, así que se junta lo imprevisible
  *     que hay (el contador del reloj —PIT— y el de ciclos —TSC, si lo hay—
  *     cada vez que llega algo de la red o se llama aquí, la hora, lo que
  *     quiera añadir el programa con TlsAzar: teclas, ratón) y una semilla que
- *     se guarda de una vez para otra (HSPTLS.SEM, junto al programa);
+ *     se guarda de una vez para otra (HSPTLS.SEM, junto al programa; si ahí
+ *     no se puede escribir —un disquete protegido, un CD—, en C:\). Sin TSC
+ *     y sin semilla, TlsInfo lo dice («poco azar»);
  *   - el paso de los registros por un socket de WSOCK32.DLL sin bloqueo.
  *
  *  Las funciones (stdcall). Devuelven TLS_ESPERA (-2) si aún no se puede y
@@ -31,7 +35,8 @@
  *    TlsAbrir(socket, servidor)         -> la conexión (NULL: sin memoria)
  *    TlsConectar(t, ms)                 -> 1 hecho el apretón de manos
  *    TlsLeer(t, búfer, n, ms)           -> octetos; 0 = el servidor cerró
- *    TlsEscribir(t, datos, n)           -> n (espera lo que haga falta)
+ *    TlsEscribir(t, datos, n)           -> n (espera lo que haga falta, pero
+ *                                          si en 60 s no sale nada, -1)
  *    TlsCerrar(t)                       (no cierra el socket)
  *    TlsError(t), TlsTextoError(código), TlsInfo(t, texto, n), TlsAzar(d, n)
  *    TlsCiclos(t)  -> lo que lleva gastado el procesador en cifrar y en el
@@ -79,7 +84,7 @@ typedef struct TLS {
   br_x509_minimal_context xc;
   const br_x509_class *xv;     /* lo que ve BearSSL: la memoria, delante */
   br_x509_decoder_context dc;
-  u32 cad_n, cad_len[CAD_N], n_cert, dias;
+  u32 cad_n, cad_len[CAD_N], n_cert, dias, usos;
   u8 directo, de_memoria;
   u32 s;
   int error, fin_tcp, hecho;
@@ -92,9 +97,17 @@ typedef struct TLS {
 
 /* ---- el azar ---- */
 static br_sha256_context pozo;
-static int pozo_listo, hay_tsc;
+static int pozo_listo, hay_tsc, poco_azar;
 static char carpeta[150];      /* la del programa, acabada en barra */
 
+#ifdef TLS_ANFITRION          /* (la prueba en el anfitrión, tests/tls/: sin puertos ni CPUID) */
+u32 anf_pit(void);
+int anf_tsc(void);
+static u32 pit(void) { return anf_pit(); }
+static int cpuid_tsc(void) { return anf_tsc(); }
+#define rdtsc_de(a, d) ((a) = (d) = 0)
+#else
+#define rdtsc_de(a, d) __asm__ volatile("rdtsc" : "=a"(a), "=d"(d))
 static u32 pit(void) {
   u8 a, b;
   __asm__ volatile("outb %%al, $0x43" : : "a"(0));
@@ -112,18 +125,39 @@ static int cpuid_tsc(void) {
   __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1));
   return (d >> 4) & 1;
 }
+#endif
 static void ruido(void) {
   u32 v[4];
   v[0] = pit(); v[1] = GetTickCount(); v[2] = v[3] = 0;
-  if (hay_tsc) __asm__ volatile("rdtsc" : "=a"(v[2]), "=d"(v[3]));
+  if (hay_tsc) rdtsc_de(v[2], v[3]);
   br_sha256_update(&pozo, v, sizeof v);
+}
+/* la semilla de ruta, al pozo: 1 si había */
+static int semilla_lee(const char *ruta) {
+  u8 sem[32];
+  u32 n = 0;
+  HANDLE h = CreateFileA(ruta, 0x80000000u, 1, NULL, 3, 0, NULL);
+  if (h == (HANDLE)-1) return 0;
+  if (!ReadFile(h, sem, sizeof sem, &n, NULL)) n = 0;
+  CloseHandle(h);
+  br_sha256_update(&pozo, sem, n);
+  memset(sem, 0, sizeof sem);
+  return n >= 16;
+}
+static int semilla_escribe(const char *ruta, const u8 *sem) {
+  u32 n = 0;
+  HANDLE h = CreateFileA(ruta, 0x40000000u, 0, NULL, 2, 0x80, NULL);
+  if (h == (HANDLE)-1) return 0;
+  if (!WriteFile(h, sem, 32, &n, NULL)) n = 0;
+  CloseHandle(h);
+  return n == 32;
 }
 static void pozo_inicia(void) {
   ST st;
   char ruta[170];
   u8 sem[32];
   u32 n = 0, k;
-  HANDLE h;
+  int habia;
   br_sha256_init(&pozo);
   hay_tsc = cpuid_tsc();
   GetLocalTime(&st);
@@ -133,25 +167,21 @@ static void pozo_inicia(void) {
   for (k = n; k > 0 && carpeta[k - 1] != '\\' && carpeta[k - 1] != ':'; k--) ;
   carpeta[k] = 0;
   ruido();
-  /* la semilla de la otra vez, y se deja una nueva para la siguiente */
+  /* la semilla de la otra vez (junto al programa y, si la hay, la de C:\),
+   * y se deja una nueva para la siguiente: junto al programa o, si ahí no
+   * se puede escribir (un disquete protegido, un CD), en C:\ */
   memcpy(ruta, carpeta, k);
   memcpy(ruta + k, "HSPTLS.SEM", 11);
-  h = CreateFileA(ruta, 0x80000000u, 1, NULL, 3, 0, NULL);
-  if (h != (HANDLE)-1) {
-    n = 0;
-    ReadFile(h, sem, sizeof sem, &n, NULL);
-    CloseHandle(h);
-    br_sha256_update(&pozo, sem, n);
-  }
+  habia = semilla_lee(ruta);
+  habia |= semilla_lee("C:\\HSPTLS.SEM");
   ruido();
   br_sha256_update(&pozo, "semilla", 7);
   br_sha256_out(&pozo, sem);
-  h = CreateFileA(ruta, 0x40000000u, 0, NULL, 2, 0x80, NULL);
-  if (h != (HANDLE)-1) {
-    WriteFile(h, sem, sizeof sem, &n, NULL);
-    CloseHandle(h);
-  }
+  if (!semilla_escribe(ruta, sem)) semilla_escribe("C:\\HSPTLS.SEM", sem);
+  memset(sem, 0, sizeof sem);
   br_sha256_update(&pozo, "uso", 3);
+  /* sin TSC ni semilla (la primera vez en un 486): poco azar, y se dice */
+  poco_azar = !hay_tsc && !habia;
   pozo_listo = 1;
 }
 void WINAPI TlsAzar(const void *d, int n) {
@@ -160,7 +190,10 @@ void WINAPI TlsAzar(const void *d, int n) {
   ruido();
 }
 
-/* ---- las autoridades de más: los *.CER (DER) de la carpeta del programa ---- */
+/* ---- las autoridades de más: los *.CER (DER) de AUTORID\, en la carpeta
+ * del programa. Antes valía cualquier *.CER de la carpeta misma, donde
+ * HTTPS.EXE guarda lo que baja: «HTTPS https://x/RAIZ.CER» dejaba una
+ * autoridad nueva para siempre ---- */
 #define N_MAS 4
 static br_x509_trust_anchor anclas[TAs_NUM + N_MAS];
 static int n_anclas;
@@ -210,11 +243,12 @@ static void ancla_de_archivo(const char *ruta) {
 static void anclas_inicia(void) {
   FINDA f;
   HANDLE h;
-  char ruta[170];
+  char ruta[200];
   u32 k = strlen(carpeta);
   memcpy(anclas, TAs, sizeof TAs);
   n_anclas = TAs_NUM;
   memcpy(ruta, carpeta, k);
+  memcpy(ruta + k, "AUTORID\\", 8); k += 8;
   memcpy(ruta + k, "*.CER", 6);
   h = FindFirstFileA(ruta, &f);
   if (h == (HANDLE)-1) return;
@@ -232,7 +266,10 @@ static void anclas_inicia(void) {
  * entera a la comprobación de verdad y, si vale, se apunta ---- */
 #define MEM_N 16
 #define MEM_DIAS 7
-static struct { u8 h[32]; u32 dia; } memoria[MEM_N];
+/* dia: cuando se comprobó; hasta: el último día que vale el certificado de
+ * la cadena que caduca antes (notAfter); usos: los de la clave del servidor
+ * (KEYX, SIGN), los que dijo la comprobación de verdad */
+static struct { u8 h[32]; u32 dia, hasta, usos; } memoria[MEM_N];
 static int mem_leida, mem_sig;
 #define TLS_DE(c) ((TLS *)((char *)(c) - offsetof(TLS, xv)))
 static void mem_archivo(int escribir) {
@@ -301,18 +338,32 @@ static unsigned xm_end_chain(const br_x509_class **c) {
   if (!mem_leida) { mem_leida = 1; mem_archivo(0); }
   mem_resumen(t, h);
   for (k = 0; k < MEM_N; k++)
-    if (memoria[k].dia && !memcmp(memoria[k].h, h, 32) && t->dias >= memoria[k].dia && t->dias < memoria[k].dia + MEM_DIAS) {
+    if (memoria[k].dia && !memcmp(memoria[k].h, h, 32) && t->dias >= memoria[k].dia && t->dias < memoria[k].dia + MEM_DIAS
+        && t->dias <= memoria[k].hasta && memoria[k].usos) {
       br_x509_decoder_init(&t->dc, 0, 0);
       br_x509_decoder_push(&t->dc, t->cadena, t->cad_len[0]);
-      if (br_x509_decoder_get_pkey(&t->dc)) { t->de_memoria = 1; return 0; }
+      if (br_x509_decoder_get_pkey(&t->dc)) { t->de_memoria = 1; t->usos = memoria[k].usos; return 0; }
     }
   mem_vuelca(t);
   r = t->xc.vtable->end_chain(&t->xc.vtable);
   if (r == 0) {
+    u32 hasta = 0xFFFFFFFFu, o = 0, j;
+    unsigned usos = 0;
+    t->xc.vtable->get_pkey(&t->xc.vtable, &usos);
+    /* el notAfter que llega antes, de todos los certificados de la cadena */
+    for (j = 0; j < t->n_cert; j++) {
+      br_x509_decoder_init(&t->dc, 0, 0);
+      br_x509_decoder_push(&t->dc, t->cadena + o, t->cad_len[j]);
+      if (!t->dc.decoded) { hasta = 0; break; }
+      if (t->dc.notafter_days < hasta) hasta = t->dc.notafter_days;
+      o += t->cad_len[j];
+    }
     for (k = 0; k < MEM_N && memcmp(memoria[k].h, h, 32); k++) ;
     if (k == MEM_N) k = mem_sig = (mem_sig + 1) % MEM_N;
     memcpy(memoria[k].h, h, 32);
-    memoria[k].dia = t->dias;
+    memoria[k].dia = hasta ? t->dias : 0;      /* (sin fechas, no se recuerda) */
+    memoria[k].hasta = hasta;
+    memoria[k].usos = usos;
     mem_archivo(1);
   }
   return r;
@@ -320,7 +371,7 @@ static unsigned xm_end_chain(const br_x509_class **c) {
 static const br_x509_pkey *xm_get_pkey(const br_x509_class *const *c, unsigned *usos) {
   TLS *t = TLS_DE(c);
   if (t->de_memoria) {
-    if (usos) *usos = BR_KEYTYPE_KEYX | BR_KEYTYPE_SIGN;
+    if (usos) *usos = t->usos;                 /* (los de la comprobación de verdad) */
     return br_x509_decoder_get_pkey(&t->dc);
   }
   return t->xc.vtable->get_pkey(&t->xc.vtable, usos);
@@ -409,7 +460,8 @@ TLS *WINAPI TlsAbrir(u32 s, const char *servidor) {
 
 static u32 tsc(void) {
   u32 a = 0, d;
-  if (hay_tsc) __asm__ volatile("rdtsc" : "=a"(a), "=d"(d));
+  if (hay_tsc) rdtsc_de(a, d);
+  (void)d;
   return a;
 }
 /* pasa registros entre BearSSL y el socket mientras se pueda (y cuenta los
@@ -500,9 +552,11 @@ int WINAPI TlsLeer(TLS *t, void *b, int n, int ms) {
     Sleep(0);
   }
 }
+#define ESCRIBE_MS 60000      /* sin poder mandar nada en 60 s: se da por cortada */
 int WINAPI TlsEscribir(TLS *t, const void *d, int n) {
   br_ssl_engine_context *e = &t->cc.eng;
   int hecho = 0;
+  u32 t0 = GetTickCount();
   while (hecho < n) {
     unsigned st;
     size_t q;
@@ -516,9 +570,11 @@ int WINAPI TlsEscribir(TLS *t, const void *d, int n) {
       memcpy(p, (const u8 *)d + hecho, q);
       br_ssl_engine_sendapp_ack(e, q);
       hecho += (int)q;
+      t0 = GetTickCount();
       continue;
     }
     if (t->fin_tcp) { if (!t->error) t->error = -10054; return -1; }
+    if (vencido(t0, ESCRIBE_MS)) { if (!t->error) t->error = -10060; t->fin_tcp = 1; return -1; }
     Sleep(0);
   }
   br_ssl_engine_flush(e, 0);
@@ -570,7 +626,7 @@ const char *WINAPI TlsTextoError(int e) {
 int WINAPI TlsInfo(TLS *t, char *b, int n) {
   br_ssl_session_parameters sp;
   const char *c, *f;
-  char r[80];
+  char r[200];
   u32 k = 0, l;
   if (!t || !t->hecho || n < 1) return 0;
   br_ssl_engine_get_session_parameters(&t->cc.eng, &sp);
@@ -586,6 +642,14 @@ int WINAPI TlsInfo(TLS *t, char *b, int n) {
   l = strlen(f); memcpy(r + k, f, l); k += l;
   r[k++] = ','; r[k++] = ' ';
   l = strlen(c); memcpy(r + k, c, l + 1); k += l;
+  if (poco_azar) {
+    static const char poco[] = " (poco azar: sin TSC ni semilla; la pr\363xima vez ya habr\341 semilla)";
+    memcpy(r + k, poco, sizeof poco); k += sizeof poco - 1;
+  }
+  if (n_anclas > TAs_NUM) {
+    static const char mas[] = " (con autoridades de m\341s, de AUTORID)";
+    memcpy(r + k, mas, sizeof mas); k += sizeof mas - 1;
+  }
   if (k >= (u32)n) k = n - 1;
   memcpy(b, r, k); b[k] = 0;
   return (int)k;

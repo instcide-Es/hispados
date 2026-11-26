@@ -23,6 +23,7 @@
 #include "dom.h"
 #include "quickjs.h"
 #include "nav_domjs.h"
+#include "cors.h"
 
 #define MFILE FILE
 u32 WINAPI GetTickCount(void);
@@ -571,7 +572,12 @@ FN(f_url) { USA; (void)a; return a_js(pg->url, -1); }
 FN(f_pon_url) {
   char *t;
   USA;
-  if ((t = de_js(a[0], NULL))) { pg->url = ar_texto(&pg->doc.ar, t, -1); nav->pon_url(t); free(t); }
+  if ((t = de_js(a[0], NULL))) {
+    /* (history.pushState y location.hash: solo dentro del mismo origen; con
+     * otro, la página pasaría por otro sitio: sus galletas y su almacén) */
+    if (!cors_mismo(pg->url, t)) { free(t); return JS_ThrowTypeError(c, "SecurityError: pushState a otro origen"); }
+    pg->url = ar_texto(&pg->doc.ar, t, -1); nav->pon_url(t); free(t);
+  }
   return JS_UNDEFINED;
 }
 FN(f_absoluta) {
@@ -676,28 +682,33 @@ static void alm_guarda(const char *origen, const char *datos) {
   }
   free(todo); free(l);
 }
+/* el origen del almacén: el de la dirección de la página, que sabe C (no el
+ * que diga el JavaScript de la página, que puede cambiar URL.prototype);
+ * 0 si no tiene (about:, file:...: sin almacén en el disco) */
+static int alm_origen(char *o) { return pg && cors_origen(pg->url, o, 160); }
 FN(f_almacen) {
-  const char *o;
+  char o[160];
   char *d = NULL;
   JSValue r;
   int k;
   USA;
-  if (!(o = JS_ToCString(c, a[0]))) return JS_EXCEPTION;
-  if (JS_ToBool(c, a[1])) d = alm_lee(o);
+  if (!alm_origen(o)) return JS_NewString(c, "");
+  if (JS_ToBool(c, a[0])) d = alm_lee(o);
   else for (k = 0; k < SES_MAX; k++) if (ses[k].origen && !strcmp(ses[k].origen, o)) { d = malloc(strlen(ses[k].datos) + 1); if (d) strcpy(d, ses[k].datos); }
-  JS_FreeCString(c, o);
   r = JS_NewString(c, d ? d : "");
   free(d);
   return r;
 }
 FN(f_guarda_almacen) {
-  const char *o, *d;
+  const char *d;
+  char o[160];
   int k, libre = 0;
   USA;
-  if (!(o = JS_ToCString(c, a[0]))) return JS_EXCEPTION;
-  if (!(d = JS_ToCString(c, a[2]))) { JS_FreeCString(c, o); return JS_EXCEPTION; }
-  if (strlen(d) > 60000) { JS_FreeCString(c, o); JS_FreeCString(c, d); return JS_ThrowRangeError(c, "QuotaExceededError: el almacen esta lleno"); }
-  if (JS_ToBool(c, a[1])) alm_guarda(o, d);
+  if (!alm_origen(o)) return JS_UNDEFINED;
+  if (!(d = JS_ToCString(c, a[1]))) return JS_EXCEPTION;
+  if (strlen(d) > 60000) { JS_FreeCString(c, d); return JS_ThrowRangeError(c, "QuotaExceededError: el almacen esta lleno"); }
+  if (strchr(d, '\n') || strchr(d, '\r')) { JS_FreeCString(c, d); return JS_UNDEFINED; }   /* (JSON.stringify no los deja; una línea por origen) */
+  if (JS_ToBool(c, a[0])) alm_guarda(o, d);
   else {
     for (k = 0; k < SES_MAX && !(ses[k].origen && !strcmp(ses[k].origen, o)); k++) if (!ses[k].origen) libre = k;
     if (k == SES_MAX) { k = libre; free(ses[k].origen); free(ses[k].datos); ses[k].origen = malloc(strlen(o) + 1); if (ses[k].origen) strcpy(ses[k].origen, o); ses[k].datos = NULL; }
@@ -705,7 +716,7 @@ FN(f_guarda_almacen) {
     ses[k].datos = malloc(strlen(d) + 1);
     if (ses[k].datos) strcpy(ses[k].datos, d);
   }
-  JS_FreeCString(c, o); JS_FreeCString(c, d);
+  JS_FreeCString(c, d);
   return JS_UNDEFINED;
 }
 
@@ -741,7 +752,10 @@ FN(f_des_temporiza) {
 /* ---- la red: una cola de peticiones (fetch, XMLHttpRequest y los guiones
  * de fuera); una en marcha, por http.c, cuando el Navegador no está cargando
  * una página ---- */
-typedef struct { int id, guion, redirs, post; char *metodo, *url, *cab, *cuerpo; u32 n_cuerpo; } PetJs;
+/* cred: las galletas que pide la página (0 «omit», 1 «same-origin», 2
+ * «include» o withCredentials); otro: ha ido (o ido a parar) a otro origen,
+ * y entonces la respuesta solo la lee si el servidor lo deja (CORS) */
+typedef struct { int id, guion, redirs, post, cred, otro; char *metodo, *url, *cab, *cuerpo; u32 n_cuerpo; } PetJs;
 #define COLA_MAX 32
 static PetJs cola[COLA_MAX];
 static int n_cola;
@@ -757,12 +771,12 @@ static char *copia(const char *t, int n) {
   return p;
 }
 static void pet_suelta(PetJs *p) { free(p->metodo); free(p->url); free(p->cab); free(p->cuerpo); memset(p, 0, sizeof *p); }
-static int encola(int id, int guion, const char *metodo, const char *url, const char *cab, const char *cuerpo, u32 n_cuerpo) {
+static int encola(int id, int guion, const char *metodo, const char *url, const char *cab, const char *cuerpo, u32 n_cuerpo, int cred) {
   PetJs *p;
   if (n_cola == COLA_MAX) return 0;
   p = &cola[n_cola++];
   memset(p, 0, sizeof *p);
-  p->id = id; p->guion = guion;
+  p->id = id; p->guion = guion; p->cred = cred;
   p->metodo = copia(metodo ? metodo : "GET", -1);
   p->url = copia(url, -1);
   p->cab = copia(cab ? cab : "", -1);
@@ -772,17 +786,18 @@ static int encola(int id, int guion, const char *metodo, const char *url, const 
   return 1;
 }
 FN(f_pide) {
-  int id = 0;
+  int id = 0, cred = 1;
   const char *m, *u, *h, *b = NULL;
   size_t nb = 0;
   USA;
   JS_ToInt32(c, &id, a[0]);
   m = JS_ToCString(c, a[1]); u = JS_ToCString(c, a[2]); h = JS_ToCString(c, a[3]);
   if (argc > 4 && !JS_IsNull(a[4]) && !JS_IsUndefined(a[4])) b = JS_ToCStringLen(c, &nb, a[4]);
+  if (argc > 5) JS_ToInt32(c, &cred, a[5]);
   if (m && u && h) {
     char *u1252 = malloc(strlen(u) + 1);
     if (u1252) { u1252[utf8_a_1252((const u8 *)u, strlen(u), u1252)] = 0; }
-    if (!u1252 || !encola(id, -1, m, u1252, h, b, nb)) {
+    if (!u1252 || !encola(id, -1, m, u1252, h, b, nb, cred)) {
       JSValue args[5] = { JS_NewInt32(c, id), JS_NewInt32(c, 0), JS_NewString(c, ""), JS_NewString(c, ""), JS_NewString(c, "demasiadas peticiones") };
       JS_FreeValue(c, JS_Call(c, fn_llega, JS_UNDEFINED, 5, args));
       { int k; for (k = 0; k < 5; k++) JS_FreeValue(c, args[k]); }
@@ -823,9 +838,9 @@ static const JSCFunctionListEntry funciones_n[] = {
   JS_CFUNC_DEF("absoluta", 1, f_absoluta), JS_CFUNC_DEF("absolutaDe", 2, f_absoluta_de), JS_CFUNC_DEF("ir", 2, f_ir),
   JS_CFUNC_DEF("historia", 1, f_historia), JS_CFUNC_DEF("galletas", 0, f_galletas), JS_CFUNC_DEF("ponGalleta", 1, f_pon_galleta),
   JS_CFUNC_DEF("ancho", 0, f_ancho), JS_CFUNC_DEF("alto", 0, f_alto), JS_CFUNC_DEF("ahora", 0, f_ahora),
-  JS_CFUNC_DEF("idioma", 0, f_idioma), JS_CFUNC_DEF("agente", 0, f_agente), JS_CFUNC_DEF("registro", 2, f_registro), JS_CFUNC_DEF("almacen", 2, f_almacen),
-  JS_CFUNC_DEF("guardaAlmacen", 3, f_guarda_almacen), JS_CFUNC_DEF("temporiza", 2, f_temporiza),
-  JS_CFUNC_DEF("desTemporiza", 1, f_des_temporiza), JS_CFUNC_DEF("pide", 5, f_pide), JS_CFUNC_DEF("cancela", 1, f_cancela),
+  JS_CFUNC_DEF("idioma", 0, f_idioma), JS_CFUNC_DEF("agente", 0, f_agente), JS_CFUNC_DEF("registro", 2, f_registro), JS_CFUNC_DEF("almacen", 1, f_almacen),
+  JS_CFUNC_DEF("guardaAlmacen", 2, f_guarda_almacen), JS_CFUNC_DEF("temporiza", 2, f_temporiza),
+  JS_CFUNC_DEF("desTemporiza", 1, f_des_temporiza), JS_CFUNC_DEF("pide", 6, f_pide), JS_CFUNC_DEF("cancela", 1, f_cancela),
 };
 
 /* =============================================================================
@@ -977,7 +992,7 @@ static Guion *guion_nuevo(Nodo *n) {
     {
       /* ¿ya compilado? entonces no hace falta pedirlo */
       if (comp_busca(clave_url(g->url), 0xFFFFFFFF)) g->estado = 1;
-      else if (!encola(-1, n_gs - 1, "GET", g->url, "Accept: */*\r\n", NULL, 0)) g->estado = 2;
+      else if (!encola(-1, n_gs - 1, "GET", g->url, "Accept: */*\r\n", NULL, 0, 2)) g->estado = 2;
     }
   } else {
     if (n->hijo && n->hijo->texto) { g->codigo = n->hijo->t; g->n_codigo = n->hijo->n; }
@@ -1012,7 +1027,7 @@ static u32 clave_url(const char *u) { return fnv(u, strlen(u), 2166136261u); }
 static int listo(Guion *g) {
   if (g->estado != 1) return 0;
   if (g->url && !g->codigo && !comp_busca(clave_url(g->url), 0xFFFFFFFF)) {
-    g->estado = encola(-1, (int)(g - gs), "GET", g->url, "Accept: */*\r\n", NULL, 0) ? 0 : 2;
+    g->estado = encola(-1, (int)(g - gs), "GET", g->url, "Accept: */*\r\n", NULL, 0, 2) ? 0 : 2;
     return 0;
   }
   return 1;
@@ -1269,17 +1284,35 @@ static void entrega(int ok) {
   } else if (cx) {
     JSValue args[5];
     int k;
+    char *vis;
     args[0] = JS_NewInt32(cx, p->id);
     args[1] = JS_NewInt32(cx, ok ? jp.estado : 0);
     args[2] = a_js(p->url, -1);
-    args[3] = ok && jp.cab ? JS_NewStringLen(cx, jp.cab + (jp.cab[0] == '\n'), jp.n_cab - (jp.cab[0] == '\n')) : JS_NewString(cx, "");
+    /* (las cabeceras, sin Set-Cookie; de otro origen, solo las que deja CORS) */
+    vis = ok && jp.cab ? cors_visibles(jp.cab, p->otro, !jp.sin_galletas) : NULL;
+    args[3] = vis ? JS_NewString(cx, vis + (vis[0] == '\n')) : JS_NewString(cx, "");
+    free(vis);
     args[4] = ok ? (jp.datos ? JS_NewStringLen(cx, (char *)jp.datos, jp.n_datos) : JS_NewString(cx, "")) : a_js(jp.error, -1);
     JS_FreeValue(cx, llama(fn_llega, 5, args));
     for (k = 0; k < 5; k++) JS_FreeValue(cx, args[k]);
   }
 }
+/* [JS] lo que no se deja pedir o leer (CORS): a fetch, como un error de la
+ * red, y al registro (la consola), con por qué */
+static void js_rechaza(const char *por) {
+  char b[400];
+  sprintf(b, "%.200s: %.190s", en_marcha.url ? en_marcha.url : "", por);
+  reg("[error] ", b, strlen(b));
+  memset(&jp, 0, sizeof jp);
+  sprintf(jp.error, "%.190s", por);
+  entrega(0);
+  pet_suelta(&en_marcha);
+}
+/* el origen de la página (0: no tiene, «null») */
+static int js_origen(char *o) { return pg && cors_origen(pg->url, o, 160); }
 void js_avanza(void) {
   int r;
+  char o[160];
   if (!cx) return;
   if (!jp_activa && n_cola) {
     en_marcha = cola[0];
@@ -1287,6 +1320,20 @@ void js_avanza(void) {
     n_cola--;
   empieza:
     memset(&jp, 0, sizeof jp);
+    if (en_marcha.guion < 0) {
+      /* fetch y XMLHttpRequest: a otro origen (o tras pasar por otro), sin las
+       * cabeceras que no sean «simples» ni otro método que GET, HEAD o POST
+       * (no se pregunta antes con OPTIONS); y nunca las prohibidas (Cookie,
+       * Host, Origin...). docs/486/NAVEGADOR.md, «Lo que puede pedir una página» */
+      char *cab = NULL;
+      const char *por;
+      int hay = js_origen(o);
+      if (!pg || !cors_mismo(pg->url, en_marcha.url)) en_marcha.otro = 1;
+      por = cors_pide(en_marcha.metodo, en_marcha.cab, en_marcha.otro, hay ? o : NULL, &cab);
+      if (por) { js_rechaza(por); return; }
+      free(en_marcha.cab);
+      en_marcha.cab = cab;
+    }
     jp.url = copia(en_marcha.url, -1);
     jp.post = en_marcha.post;
     jp.cuerpo = en_marcha.post ? copia(en_marcha.cuerpo ? en_marcha.cuerpo : "", en_marcha.n_cuerpo) : NULL;
@@ -1296,6 +1343,10 @@ void js_avanza(void) {
     jp.sub = 1;
     jp.cruzada = pg ? nav_cruzada(pg->url, jp.url) : 1;
     http_empieza(&jp);
+    /* las galletas: con «include» (o withCredentials), las que toquen
+     * (SameSite, arriba); con «same-origin», solo al mismo origen; con
+     * «omit», nunca. Sin ellas, tampoco se guardan las que mande */
+    jp.sin_galletas = en_marcha.guion < 0 && !(en_marcha.cred == 2 || (en_marcha.cred == 1 && !en_marcha.otro));
     jp.js_cab = en_marcha.cab;
     jp.js_metodo = strcmp(en_marcha.metodo, "GET") && strcmp(en_marcha.metodo, "POST") ? en_marcha.metodo : NULL;
     jp_activa = 1;
@@ -1305,6 +1356,13 @@ void js_avanza(void) {
     r = http_avanza(&jp);
     if (r == 0) return;
     jp_activa = 0;
+    /* de otro origen: la respuesta (también la de una redirección) solo si
+     * el servidor la deja leer (Access-Control-Allow-Origin...) */
+    if (r > 0 && en_marcha.guion < 0 && en_marcha.otro && !cors_deja(jp.cab, js_origen(o) ? o : NULL, !jp.sin_galletas)) {
+      http_suelta(&jp);
+      js_rechaza("CORS: el servidor de otro origen no deja leer la respuesta (Access-Control-Allow-Origin)");
+      return;
+    }
     if (r > 0 && (jp.estado == 301 || jp.estado == 302 || jp.estado == 303 || jp.estado == 307 || jp.estado == 308)
         && http_cabecera(&jp, "Location") && en_marcha.redirs < 10) {
       const char *l = http_cabecera(&jp, "Location");
@@ -1313,12 +1371,13 @@ void js_avanza(void) {
       for (k = 0; l[k] && l[k] != '\r' && l[k] != '\n' && k < 1022; k++) loc[k] = l[k];
       loc[k] = 0;
       nueva = url_absoluta(en_marcha.url, loc);
+      k = jp.estado;
       http_suelta(&jp);
       if (nueva) {
         free(en_marcha.url);
         en_marcha.url = nueva;
         en_marcha.redirs++;
-        if (jp.estado != 307 && jp.estado != 308) {
+        if (k != 307 && k != 308) {          /* (el estado, de antes de soltar jp) */
           en_marcha.post = 0;
           free(en_marcha.metodo); en_marcha.metodo = copia("GET", -1);
         }

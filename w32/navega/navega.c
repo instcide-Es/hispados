@@ -13,6 +13,7 @@
  * ============================================================================= */
 #include "nav.h"
 #include "dom.h"                 /* [JS] */
+#include "cors.h"
 
 /* ---- lo justo de USER32, GDI32 y KERNEL32 ---- */
 typedef struct { int left, top, right, bottom; } RECT;
@@ -707,25 +708,9 @@ static void pagina_inicio(void) {
   pagina_propia("about:inicio", h);
 }
 /* ¿son del mismo sitio? (para SameSite: lo mismo de los dos últimos
- * trozos del nombre del servidor, «clicgest.es») */
-static const char *sitio_de(const char *u, int *n) {
-  const char *a = strstr(u, "://"), *f, *p1 = NULL, *p2 = NULL, *q;
-  *n = 0;
-  if (!a) return NULL;
-  a += 3;
-  for (f = a; *f && *f != '/' && *f != ':' && *f != '?' && *f != '#'; f++) ;
-  for (q = a; q < f; q++) if (*q == '.') { p2 = p1; p1 = q; }
-  if (p2) a = p2 + 1;
-  *n = f - a;
-  return a;
-}
-int nav_cruzada(const char *de, const char *a) {
-  int n1, n2;
-  const char *s1, *s2;
-  if (!de || _strnicmp(de, "http", 4)) return 0;
-  s1 = sitio_de(de, &n1); s2 = sitio_de(a, &n2);
-  return !s1 || !s2 || n1 != n2 || _strnicmp(s1, s2, n1);
-}
+ * trozos del nombre del servidor, «clicgest.es»): cors.h, el mismo que el
+ * del Navegador completo (w32/surf/red_http.c) */
+int nav_cruzada(const char *de, const char *a) { return cors_cruzada(de, a); }
 static void ir2(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo, const char *tipo, const char *origen);
 static void ir(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo) { ir2(url, post, cuerpo, n_cuerpo, modo, NULL, NULL); }
 static void ir2(const char *url, int post, char *cuerpo, u32 n_cuerpo, int modo, const char *tipo, const char *origen) {

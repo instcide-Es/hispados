@@ -16,6 +16,7 @@ REM SOLO-MEDIO]
 MENUITEM=NORMAL,Normal
 MENUITEM=JUEGOS,Juegos (memoria expandida EMS y la mayor memoria libre)
 MENUITEM=PRUEBA,Prueba del equipo y del sonido (guarda un informe)
+MENUITEM=JUEGOSSE,Juegos sin EMS (más memoria libre; para los que no piden EMS)
 MENUDEFAULT=NORMAL,5
 
 [common]
@@ -61,6 +62,18 @@ REM que la BIOS deja libre en E000-EFFF. Si un juego que busca una pantalla
 REM monocromo se cuelga, añada X=B000-B7FF a la línea de HSPEMM. Para probar
 REM más zonas: I=E000-EFFF (si después algo falla al arrancar, quítelo; F5
 REM arranca en limpio).
+
+[juegosse]
+REM ---- Juegos sin EMS: lo mismo que «Juegos», pero HSPEMM sin el marco de
+REM página de la memoria expandida (NOEMS). Esos 64 KB pasan a ser memoria
+REM superior, y ahí caben el controlador de sonido y los demás: en un equipo
+REM con HD Audio o AC'97, unos 56 KB más de memoria convencional. Sigue
+REM habiendo VCPI (DOS/4GW: Doom, Duke Nukem 3D...) y la Sound Blaster
+REM emulada; lo que no hay es EMS: los juegos que la piden, con «Juegos». ----
+DEVICE=A:\HISPADOS\HSPEMM.SYS NOEMS
+DOS=HIGH,UMB
+DEVICEHIGH=A:\HISPADOS\HSPCD.SYS
+DEVICEHIGH=A:\HISPADOS\HSPUSB.SYS
 
 [prueba]
 REM ---- Prueba del equipo y del sonido: sin controladores de sonido ni

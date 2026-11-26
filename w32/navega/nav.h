@@ -146,6 +146,7 @@ typedef struct {
   char tipo_cuerpo[96];  /* el Content-Type del POST ("": de formulario) */
   int cruzada;           /* la pide una página de otro sitio (SameSite) */
   int sub;               /* es una imagen de la página, no la página */
+  int sin_galletas;      /* [JS] ni se mandan ni se guardan galletas (fetch a otro origen sin credentials) */
   u32 max;               /* lo más que se acepta (0: 4 MB) */
   FILE *disco;           /* una descarga: el cuerpo va a este archivo, no a la memoria */
   int decidido;          /* (el Navegador ya ha mirado las cabeceras) */

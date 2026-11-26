@@ -4,7 +4,7 @@
 # 1.2 con comprobación del certificado), desde dos programas de consola, contra
 # un servidor de pruebas en el anfitrión (tests/tools/nav_servidor.py: QEMU lo
 # ve en 10.0.2.2) con certificados hechos aquí (tests/tools/nav_certs.sh); su
-# raíz solo se le da al sistema en la prueba (RAIZ.CER junto al programa).
+# raíz solo se le da al sistema en la prueba (RAIZ.CER en AUTORID\, junto al programa).
 #  - REDPRUE: DHCP, ARP, una descarga de 150 KB por TCP (suma de los octetos),
 #    conexión rechazada, y lo mismo sin bloqueo con select.
 #  - HTTPS.EXE: redirecciones; descarga cifrada (ECDSA y RSA) con su suma; la
@@ -44,7 +44,8 @@ disco_b() {
   dd if=/dev/zero of=$T/b.img bs=1474560 count=1 2> /dev/null
   mformat -i $T/b.img -f 1440 ::
   for f in HW32.COM MSVCRT.DLL WSOCK32.DLL HSPTLS.DLL HTTPS.EXE REDPRUE.EXE; do mcopy -i $T/b.img $B/$f ::; done
-  mcopy -i $T/b.img $T/RAIZ.CER ::
+  mmd -i $T/b.img ::AUTORID
+  mcopy -i $T/b.img $T/RAIZ.CER ::AUTORID/      # (las autoridades de más, en AUTORID\)
 }
 # corre NOMBRE TARJETA TIEMPO «s|orden»...
 corre() {
@@ -122,7 +123,7 @@ check uno "SIGUE-VIVO"
 grep -qF "GET /archivo.bin | - |  | Hispa-486 (HTTPS.EXE)" $T/pedidos.log && ok "el servidor ha visto a HTTPS.EXE" || ko "el servidor no ha visto a HTTPS.EXE"
 echo "-- con una NE2000 y sin la raíz de pruebas --"
 disco_b
-mdel -i $T/b.img ::RAIZ.CER
+mdel -i $T/b.img ::AUTORID/RAIZ.CER
 corre dos ne2k_pci 60 '2|A:\HISPADOS\HSPDPMI' '2|A:\HISPADOS\HSPRED' \
   "9|${H}REDPRUE.EXE 10.0.2.2 $P /archivo.bin" \
   "6|${H}HTTPS.EXE /N https://10.0.2.2:$((P+1))/" \
