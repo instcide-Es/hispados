@@ -57,6 +57,13 @@ bash tests/tools/lector_deverdad.sh $R $P
 reabre() { printf '[Centro]\r\nReabrir=A:\\HISPADOS\\PROGS\\LECTOR.HVP %s\r\n' "$1" > $T/CENTRO.INI
            mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI; }
 mete() { local f; for f in "$@"; do mcopy -o -i $T/f.img $f :: || ko "no cabe $f en el disquete de la prueba"; done; }
+# (0.9.31) el disquete de la prueba se quedaba sin sitio para los PDF grandes
+# (FILTROS, FOTOS, los escaneos): fuera lo que el Lector no usa (los demás
+# módulos y las órdenes que no se teclean aquí), como hace Presentaciones
+sitio() { local f; for f in PROGS/PINTURA.HVP PROGS/ARCHIVOS.HVP PROGS/MEZCLAD.HVP PROGS/SONIDOS.HVP PROGS/TERMINAL.HVP \
+    PROGS/CUENTAS.HVP PROGS/TECLADO.HVP HSPSND.COM HSPEMM.SYS PARTIR.COM HSPRED.COM DESCARGA.COM CONSOLA.COM REVISAR.COM \
+    VELOCIDA.COM HSPJOY.COM CONFRED.COM PING.COM INSTALAR.COM PROTECTO.COM HSPCD.SYS XCOPIAR.COM; do
+    mdel -i $T/f.img ::HISPADOS/$f 2>/dev/null; done; }
 puntos() { python3 tests/tools/lector_puntos.py "$@" || fail=1; }
 pie() { chk $T/$1.ppm busca 46 551 56 559 0 6 "$2"; }           # el pie de la ventana
 avisa() { chk $T/$1.ppm busca 46 106 56 114 13 8 "$2"; }         # la franja del aviso, en granate
@@ -80,7 +87,7 @@ fi
 
 if [[ $SOLO == *A* ]]; then
 echo "== Lector A: una factura; ampliar y reducir; pasar de página =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/FACTURA.PDF $P/FUENTES.PDF
 reabre 'A:\FACTURA.PDF'
 { arranca
@@ -174,7 +181,7 @@ fi
 
 if [[ $SOLO == *B* ]]; then
 echo "== Lector B: abrir con el diálogo; buscar por todo el documento; la rueda =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/LARGO.PDF
 { arranca_rueda
   shot v0
@@ -216,7 +223,7 @@ fi
 
 if [[ $SOLO == *C* ]]; then
 echo "== Lector C: guardar el texto en un .TXT; imprimirlo =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/CARTA.PDF $P/FUENTES.PDF
 reabre 'A:\CARTA.PDF'
 rm -f $T/prn.txt
@@ -282,7 +289,7 @@ fi
 
 if [[ $SOLO == *D* ]]; then
 echo "== Lector D: lo que no sabe, lo dice =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/CIFRADO.PDF $P/NOSABE.PDF $P/NOPDF.PDF $P/CORTADO.PDF $P/SOLOCAB.PDF $P/BUCLE.PDF $P/CIFRA15.PDF
 reabre 'A:\CIFRADO.PDF'
 abre() { tecla ctrl-a; sleep 1.2; escribe "$1"; tecla ret; sleep ${2:-2.5}; }
@@ -340,7 +347,7 @@ fi
 if [[ $SOLO == *E* ]]; then
 echo "== Lector E: PDF de verdad (Chrome, LibreOffice, Ghostscript, qpdf) =="
 if ls $R/*.PDF > /dev/null 2>&1; then
-prepara $HVP
+prepara $HVP; sitio
 for f in CHROME LIBREOFF GS QPDF; do [ -f $R/$f.PDF ] && mete $R/$f.PDF; done
 PRIMERO=$(cd $R; ls CHROME.PDF LIBREOFF.PDF GS.PDF QPDF.PDF 2>/dev/null | head -1)
 reabre "A:\\$PRIMERO"
@@ -384,7 +391,7 @@ fi
 
 if [[ $SOLO == *F* ]]; then
 echo "== Lector F: gráficos, texto girado, formularios, codificaciones, filtros, PDF 1.5 =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/GRAFICOS.PDF $P/CODIF.PDF $P/FILTROS.PDF $P/MODERNO.PDF $P/INCREMEN.PDF $P/ESPACIOS.PDF
 reabre 'A:\GRAFICOS.PDF'
 abre() { tecla ctrl-a; sleep 1.2; escribe "$1"; tecla ret; sleep ${2:-2.5}; }
@@ -430,7 +437,7 @@ fi
 
 if [[ $SOLO == *G* ]]; then
 echo "== Lector G: imágenes, máscaras y recortes =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/IMAGENES.PDF $P/RECORTES.PDF
 reabre 'A:\IMAGENES.PDF'
 { arranca
@@ -455,7 +462,7 @@ fi
 
 if [[ $SOLO == *H* ]]; then
 echo "== Lector H: las JPEG: bloques lisos, transparencia y las que no se saben =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/JPEG.PDF $P/JPEGNO.PDF $P/MASCARAS.PDF
 reabre 'A:\JPEG.PDF'
 abre() { tecla ctrl-a; sleep 1.2; escribe "$1"; tecla ret; sleep ${2:-2.5}; }
@@ -493,7 +500,7 @@ muestra k1 lector_jpeg; muestra k2 lector_mascaras; muestra n4 lector_jpeg_no
 echo "== Lector H: fotos JPEG de verdad y páginas escaneadas =="
 F=$T/fotos
 if python3 tests/tools/lector_fotos.py haz $F > $T/fotos.txt 2>&1; then
-prepara $HVP
+prepara $HVP; sitio
 mete $F/FOTOS.PDF
 reabre 'A:\FOTOS.PDF'
 { arranca
@@ -510,7 +517,7 @@ muestra m1 lector_fotos; muestra m2 lector_fotos_entera; muestra m3 lector_fotos
 # una página A4 escaneada a 150 ppp: está en la segunda página (el archivo ya
 # está en memoria); se mide desde que se pide hasta que se ve su marca negra
 for cual in G C; do
-  prepara $HVP
+  prepara $HVP; sitio
   mete $F/ESCAN$cual.PDF
   reabre "A:\\ESCAN$cual.PDF"
   { arranca
@@ -554,7 +561,7 @@ fi
 
 if [[ $SOLO == *I* ]]; then
 echo "== Lector I: imprimir como se ve (una etiqueta con código de barras; el documento entero) =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/ETIQUETA.PDF
 reabre 'A:\ETIQUETA.PDF'
 rm -f $T/lpt.bin
@@ -580,7 +587,7 @@ fi
 
 if [[ $SOLO == *K* ]]; then
 echo "== Lector K: el botón secundario (el menú contextual) =="
-prepara $HVP
+prepara $HVP; sitio
 mete $P/FACTURA.PDF
 reabre 'A:\FACTURA.PDF'
 { arranca
