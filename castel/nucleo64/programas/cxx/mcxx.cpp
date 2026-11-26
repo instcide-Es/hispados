@@ -12,6 +12,7 @@
  * números (to_string, stod, iostream con coma flotante), regex, los hilos
  * (std::thread a cientos, mutex, condition_variable con wait_for, atomic,
  * future y async), chrono y shared_ptr, weak_ptr y unique_ptr. */
+#include <sys/auxv.h>
 #include <iostream>
 #include <sstream>
 #include <fstream>
@@ -88,7 +89,8 @@ template <typename T> static T suma(const std::vector<T> &v) { return std::accum
 
 int main()
 {
-	std::printf("MCXX: C++17 con la libstdc++ y musl (cxx.sh)\n");
+	/* [etapa 10 c] con el compilador cruzado: estático, o dinámico (MCXXD) */
+	std::printf("MCXX: C++17 con la libstdc++ y musl (cxx.sh, %s)\n", getauxval(AT_BASE) ? "din\xc3\xa1mico: ld-musl, libstdc++.so.6 y libgcc_s.so.1" : "est\xc3\xa1tico");
 	std::fflush(stdout);
 	/* lo global */
 	MIRA(global_.v == 1234, "el constructor de lo global, antes de main");

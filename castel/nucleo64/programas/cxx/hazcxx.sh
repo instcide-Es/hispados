@@ -1,8 +1,8 @@
 #!/bin/bash
 # Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 # nucleo64/programas/cxx/hazcxx.sh - Hispa-64, etapa 10 (docs/64/HISPA-64.md,
-# sección 16): los programas de C++ y de la letra, con cxx.sh (la libstdc++
-# del sistema con musl), en la carpeta SALIDA:
+# sección 16): los programas de C++ y de la letra, con cxx.sh ([etapa 10 c]
+# el compilador cruzado, con la libstdc++ compilada para musl), en SALIDA:
 #   MCXX        la prueba de C++17 (mcxx.cpp): excepciones, RTTI,
 #               contenedores, flujos, regex, cientos de hilos, thread_local...
 #   MTEXTO      HarfBuzz sobre FreeType (mtexto.c), con DEJAVU.TTF
@@ -14,17 +14,34 @@
 # vez (libfreetype.a y libharfbuzz.a), de uno en uno; e ICU (terceros/icu,
 # en C++: libicu.a, common, i18n y stubdata), un archivo cada vez, solo lo
 # que ha cambiado.
-# Uso: hazcxx.sh SALIDA   (dice en la última línea los que ha hecho; sin g++
-# o sin las cabeceras de la libstdc++, ninguno)
+#   MCXXD       [etapa 10 c] MCXX dinámico, con libstdc++.so.6 y libgcc_s.so.1
+# Uso: hazcxx.sh SALIDA   (dice en la última línea los que ha hecho; [etapa
+# 10 c] sin el compilador cruzado, build/cruzado de hazgcc.sh, ninguno)
 set -e
 AQUI=$(cd "$(dirname "$0")" && pwd)
 R=$(cd "$AQUI/../../../.." && pwd)
 B=$R/build
 S=$1
 [ -n "$S" ] || { echo "uso: hazcxx.sh SALIDA" >&2; exit 2; }
-command -v g++ > /dev/null || { echo "hechos: (sin g++)"; exit 0; }
+# [etapa 10 c] con el compilador cruzado (cxx.sh; sin él, nada)
+ID=$("$AQUI/cxx.sh" --version 2> /dev/null | head -1) || { echo "hechos: (sin el compilador cruzado: hazgcc.sh)"; exit 0; }
+CR=${HISPA64_CRUZADO:-$B/cruzado}
+TIRA=strip
+[ -x "$CR/bin/x86_64-hispa64-musl-strip" ] && TIRA=$CR/bin/x86_64-hispa64-musl-strip
+# (lo de C++ ya compilado con otro compilador, otra vez)
+for o in "$B/harfbuzz-obj" "$B/icu-obj"; do
+  if [ -d "$o" ] && [ "$(cat "$o/.compilador" 2> /dev/null)" != "$ID" ]; then rm -rf "$o"; fi
+done
 "$AQUI/cxx.sh" -std=c++17 -O2 -Wall -o "$S/MCXX" "$AQUI/mcxx.cpp"
-strip --strip-unneeded "$S/MCXX"
+$TIRA --strip-unneeded "$S/MCXX"
+# [etapa 10 c] C++ dinámico: MCXXD, la misma prueba con libstdc++.so.6 y
+# libgcc_s.so.1 (en Hispa-64, en /lib: la unidad en memoria), con ld-musl
+if [ -f "$CR/x86_64-hispa64-linux-musl/lib64/libstdc++.so.6" ]; then
+  "$AQUI/cxx.sh" -dinamico -std=c++17 -O2 -Wall -o "$S/MCXXD" "$AQUI/mcxx.cpp"
+  $TIRA --strip-unneeded "$S/MCXXD"
+  cp -L "$CR/x86_64-hispa64-linux-musl/lib64/libstdc++.so.6" "$CR/x86_64-hispa64-linux-musl/lib64/libgcc_s.so.1" "$S/"
+  DIN=" MCXXD libstdc++.so.6 libgcc_s.so.1"
+fi
 # FreeType (los módulos de siempre, uno por archivo)
 FT=$R/terceros/freetype
 LF=$B/freetype-obj/libfreetype.a
@@ -47,16 +64,18 @@ if [ ! -f "$LH" ] || [ "$HB/LEEME.txt" -nt "$LH" ]; then
   "$AQUI/cxx.sh" -std=c++17 -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -DHAVE_FREETYPE -DHAVE_PTHREAD -I"$FT/include" \
     -c "$HB/src/harfbuzz.cc" -o "$B/harfbuzz-obj/harfbuzz.o"
   ar rcs "$LH" "$B/harfbuzz-obj/harfbuzz.o"
+  echo "$ID" > "$B/harfbuzz-obj/.compilador"
 fi
 "$AQUI/cxx.sh" -x c -O2 -Wall -I"$FT/include" -I"$HB/src" -c "$AQUI/mtexto.c" -o "$B/harfbuzz-obj/mtexto.o" 2> /dev/null
 "$AQUI/cxx.sh" -o "$S/MTEXTO" "$B/harfbuzz-obj/mtexto.o" "$LH" "$LF"
-strip --strip-unneeded "$S/MTEXTO"
+$TIRA --strip-unneeded "$S/MTEXTO"
 cp "$R/terceros/dejavu/DejaVuSans.ttf" "$S/DEJAVU.TTF"
 # [etapa 10 b] ICU: common, i18n y stubdata (los datos van aparte, en
 # icudt77l.dat); un archivo cada vez, solo lo que ha cambiado
 IC=$R/terceros/icu/source
 OI=$B/icu-obj
 mkdir -p "$OI"
+echo "$ID" > "$OI/.compilador"
 IF="-std=c++17 -O2 -fno-stack-protector -DU_STATIC_IMPLEMENTATION -DU_ATTRIBUTE_DEPRECATED= -DU_CHARSET_IS_UTF8=1 -DU_USING_ICU_NAMESPACE=0 -DU_HAVE_STRTOD_L=0 -I$IC/common"
 cambio=0
 for d in common i18n stubdata; do
@@ -72,6 +91,6 @@ for d in common i18n stubdata; do
 done
 if [ $cambio = 1 ] || [ ! -f "$OI/libicu.a" ]; then rm -f "$OI/libicu.a"; ar rcs "$OI/libicu.a" "$OI"/*.o; fi
 nice "$AQUI/cxx.sh" -std=c++17 -O2 -Wall -Wno-unused-function -DU_STATIC_IMPLEMENTATION -DU_USING_ICU_NAMESPACE=0 -I"$IC/common" -I"$IC/i18n" -o "$S/MICU" "$AQUI/micu.cpp" "$OI/libicu.a"
-strip --strip-unneeded "$S/MICU"
+$TIRA --strip-unneeded "$S/MICU"
 cp "$R/terceros/icu/data/icudt77l.dat" "$S/icudt77l.dat"
-echo "hechos: MCXX MTEXTO DEJAVU.TTF MICU icudt77l.dat"
+echo "hechos: MCXX${DIN:-} MTEXTO DEJAVU.TTF MICU icudt77l.dat"
