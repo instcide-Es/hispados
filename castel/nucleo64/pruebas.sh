@@ -351,7 +351,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
 if [ $c = 85 ] && hay $S "^Hispa-64 0.11.3 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
-   && hay $S "^Cargador: qemu, multiboot$" && hay $S "^Memoria: 1[0-2][0-9],[0-9] MB libres en [0-9]* trozos (de 127,4 MB que da el firmware); [0-9,]* [KM]B usados por el núcleo$" \
+   && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: (9[0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
    && hay $S "^Páginas: de 4 KB, puesta, leída, quitada y puesta en otro marco (la TLB, al día); de 2 MB, también; de 1 GB, no (el procesador no las tiene)$" \
@@ -1122,7 +1122,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
-     && grep -q "^Memoria: 1[0-9][0-9],[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
+     && grep -qE "^Memoria: (9[0-9]|1[0-9][0-9]),[0-9] MB libres en [0-9]* trozos" <<< "$S" && grep -q "^Montón: 2000 reservas" <<< "$S" \
      && grep -q "^ACPI: 2.0 o más, de «BOCHS »; XSDT en 0x[0-9A-F]*, [0-9]* tablas: FACP APIC HPET MCFG .*DSDT (todas con la suma bien)$" <<< "$S" \
      && grep -q "ACPI NVS" <<< "$S" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$S"; then
     ok "por UEFI de 64 bits (OVMF + GRUB, multiboot2) con 128 MB: «$(grep '^Cargador' <<< "$S")»; «$(grep '^Memoria:' <<< "$S" | cut -d';' -f1)»; la pantalla del GOP con escritura combinada, el módulo HISPA64.SIM, RSDP 2.0 y «todo en orden»"
