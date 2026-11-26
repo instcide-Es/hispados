@@ -879,6 +879,27 @@ La configuración que se consigue (por DHCP o de `RED.INI`) se guarda en
 `CONFRED /RENOVAR` o reiniciar. La concesión de DHCP no se renueva sola (en
 casa suele ser de un día o más): `CONFRED /RENOVAR`.
 
+## Con el driver de DOS de su tarjeta (en lugar de HSPRED)
+
+CONFRED, PING, DESCARGAR, CONSOLA y ACTUALIZAR hablan con la tarjeta por la
+especificación de los *packet drivers* de FTP Software (buscan «PKT DRVR» de
+INT 60h a 80h), así que **cualquier *packet driver* de DOS vale en lugar de
+HSPRED**: el del disquete del fabricante de la tarjeta o uno de los libres de
+Crynwr (el paquete `crynwr` de FreeDOS). Se carga antes, como en MS-DOS:
+
+```
+NE2000 0x60 3 0x300        (NE2000 ISA: INT, IRQ y puerto)
+PCNTPK INT=0x60            (AMD PCnet PCI)
+CONFRED
+```
+
+Con HSPEMM también se pueden cargar arriba (`LH NE2000 ...`): los de tarjetas
+PCI que hacen el DMA ellas mismas (PCNTPK) piden la dirección física por VDS,
+que HSPEMM tiene (docs/HSPEMM.md, «VDS»). Sin la configuración compartida de
+HSPRED, CONFRED la pide por DHCP (o la lee de `RED.INI`) cada vez. Probado con
+NE2000 y PCNTPK de Crynwr en QEMU (`tests/run_pktdrv_terceros_tests.sh`, con
+`CRYNWR=carpeta`: los drivers no van en Hispa-DOS).
+
 ## API
 
 ### HSPRED: controlador de paquetes («packet driver», especificación de FTP Software 1.09)

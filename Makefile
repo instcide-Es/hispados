@@ -99,6 +99,9 @@ $(B)/SBVGA.COM: tests/progs/sbvga.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 $(B)/XMSTEST.COM: tests/progs/xmstest.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
+# [VDS] la prueba de los Virtual DMA Services de HSPEMM (tests/run_vds_tests.sh)
+$(B)/VDSTEST.COM: tests/progs/vdstest.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 # el mapa E820 con huecos y lo que lo comprueba (tests/run_xmshueco_tests.sh)
 $(B)/E820SIM.SYS: tests/progs/e820sim.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -1241,7 +1244,7 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 cd cd486 paq paq486 h8086 $(B)/ACTPRUEB.COM $(B)/FIRMATST.COM nucprogs emmprogs joyprogs nesprogs smsprogs snesprogs mdprogs $(HVPJ) $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
+TEST_DEPS = $(IMG) $(B)/VDSTEST.COM usb usb486 cd cd486 paq paq486 h8086 $(B)/ACTPRUEB.COM $(B)/FIRMATST.COM nucprogs emmprogs joyprogs nesprogs smsprogs snesprogs mdprogs $(HVPJ) $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
 
 para-pruebas: $(TEST_DEPS)
 # los disquetes de Hispa-8086 (run_reinicio_silencio_tests.sh los arranca)
