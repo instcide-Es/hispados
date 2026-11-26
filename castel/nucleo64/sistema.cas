@@ -1176,8 +1176,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.2")
-        pon_texto(dirección(t[0]), 195, "etapa 10 b (curl e ICU)")
+        pon_texto(dirección(t[0]), 130, "0.11.3")
+        pon_texto(dirección(t[0]), 195, "etapa 10 c (IPv6 y C++)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
