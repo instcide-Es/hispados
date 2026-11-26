@@ -1088,8 +1088,8 @@ else ko "etapa 6, el intérprete no hace lo que debe (código $c): $(sed -n '/^O
 # (con KVM: el procesador de verdad falla en el iretq, en el anillo 0; con
 # TCG, QEMU deja pasar el iretq y el fallo llega ya en el anillo 3, al
 # ejecutar en esa dirección: también se cierra el programa, por el otro camino)
-K7=""; M7="^El programa MBUCLE (proceso [0-9]*) ha querido volver con unos registros que no valen (CS, SS o RIP de su marco): se cierra (SIGSEGV).$"
-if [ -w /dev/kvm ]; then K7="-enable-kvm"; else M7="$M7|^El programa MBUCLE (proceso [0-9]*) ha intentado ejecutar en la dirección 0x8000000000000000"; fi
+K7=""; M7="^El programa MBUCLE \(proceso [0-9]*\) ha querido volver con unos registros que no valen \(CS, SS o RIP de su marco\): se cierra \(SIGSEGV\)\.$"
+if [ -w /dev/kvm ]; then K7="-enable-kvm"; else M7="$M7|^El programa MBUCLE \(proceso [0-9]*\) ha intentado ejecutar en la dirección 0x8000000000000000"; fi
 LINEA7="apagar sinpruebas escribir ordenes prueba=salida" con_interprete "$T/e7s.txt" 'MBUCLE{intro}{indicador}eco sigue{intro}{indicador}salir{intro}' $K7; c=$?
 v=$(serie "$T/e7s.txt")
 if [ $c = 85 ] && grep -qE "$M7" <<< "$v" \
