@@ -159,8 +159,13 @@ start:
 .nos2:
         call write_tables
         jc ioerr
-        mov ah, 0x0D                ; el núcleo vuelve a montar la unidad
+        mov ah, 0x0D                ; búferes fuera; un disquete se vuelve a montar
         int 0x21
+        cmp byte [fixed], 0         ; un disco duro: que el núcleo vuelva a
+        je .nore                    ; mirar los discos (AX=336Ah, propia)
+        mov ax, 0x336A
+        int 0x21
+.nore:
         mov si, msg_done
         call puts
         cmp byte [opt_s], 0

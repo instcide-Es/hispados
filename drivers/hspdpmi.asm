@@ -83,6 +83,7 @@ NCB         equ 16                  ; callbacks de modo real
 NHOOK       equ 19                  ; vectores que se reflejan de real a protegido
 RM_STACK    equ 0x0C00              ; pila de modo real del servidor
 RM_CHUNK    equ 0x0180              ; lo que se reserva por nivel
+RM_MAXW     equ 64                  ; palabras de pila que se copian como mucho (0300h)
 MAXLEVEL    equ 100
 
 ; ---- marco de registros en la pila de anillo 0 (BP -> marco) ----
@@ -1509,6 +1510,18 @@ hook_ret:       ; BP -> marco; encima: ESP0 anterior, rm_free, vector, SI, DX
 ;  Callbacks de modo real (0303h)
 ; =============================================================================
 cb_entry:
+        ; un callback de un cliente que ya no está (la rutina de ratón de
+        ; INT 33h/0Ch que queda puesta tras salir un juego): se vuelve sin
+        ; más (RETF, lo habitual), en vez de saltar a modo protegido con
+        ; una entrada ya libre
+        push bx
+        mov bx, sp
+        mov bx, [ss:bx+2]
+        sub bx, cb_stubs+3
+        shl bx, 2                   ; (4 octetos por stub, 16 por entrada)
+        cmp byte [cs:cb_tab+bx], 0  ; (cleanup lo pone a 0 al salir)
+        pop bx
+        je .dead
         pushf
         cli
         pushad
@@ -1520,6 +1533,9 @@ cb_entry:
         mov si, sp
         mov bx, cb_pm
         jmp go_pm
+.dead:
+        add sp, 2                   ; la vuelta al stub
+        retf
 
 cb_pm:
         movzx ebx, dx
@@ -2601,6 +2617,17 @@ kill_client:
         mov bx, .rm
         jmp go_rm
 .rm:
+        ; el 8259: fin de lo que quede en servicio (ocho EOI no específicos
+        ; en cada uno; de más no hacen nada). Siempre: muerto en mitad de su
+        ; manejador de una IRQ (por una excepción o con Ctrl+Alt+Fin), ese
+        ; manejador ya no da el EOI y el teclado o el reloj se quedaban
+        ; muertos al volver a DOS
+        mov cx, 8
+.eoi:
+        mov al, 0x20
+        out 0xA0, al
+        out 0x20, al
+        loop .eoi
         cmp byte [kb_killed], 0     ; [SB-VGA2] antes de abrir las
         je .si                      ; interrupciones: la SB callada y los
         call kb_rmstop              ; vectores y el 8259 como antes del programa
@@ -3119,14 +3146,8 @@ kb_rmstop:
         inc ah
         cmp ah, 0xB9
         jb .fm
-        ; el 8259: lo que quede en servicio (los manejadores que no van a
-        ; volver), y sus máscaras
-        mov cx, 8
-.eoi:
-        mov al, 0x20
-        out 0xA0, al
-        out 0x20, al
-        loop .eoi
+        ; el 8259: sus máscaras (el fin de lo que quedaba en servicio ya lo
+        ; ha dado kill_client)
         mov ax, [pic_save]
         out 0x21, al
         mov al, ah
@@ -3148,13 +3169,18 @@ kb_rmclean:
         int 0x21
         add dl, 'A' - 1
         mov [kb_path], dl
-        mov [kb_path2], dl
         mov dx, kb_path
         mov ah, 0x3C
         xor cx, cx
         int 0x21
         jnc .ok
-        mov dx, kb_path2
+        mov si, kb_path + 11        ; sin \HISPADOS: «X:\CUELGUE.TXT»
+        mov di, kb_path + 2
+        mov cx, 13
+        cld
+        rep movsb
+        mov dx, kb_path
+        xor cx, cx
         mov ah, 0x3C
         xor cx, cx
         int 0x21
@@ -3179,10 +3205,12 @@ kb_rmclean:
         popa
         ret
 kb_path     db "A:\HISPADOS\CUELGUE.TXT", 0
-kb_path2    db "A:\CUELGUE.TXT", 0
 m_kb0       db 13, 10, "HSPDPMI: Ctrl+Alt+Fin. Estado:", 13, 10, 0
-m_kbP       db " (en modo prot.) en ", 0
-m_kbR       db " (en V86) en ", 0
+; (las colas iguales, compartidas: m_kblx3 y m_exc3 son el final de estas)
+m_kbP       db " (en modo prot.)"
+m_kblx3     db " en ", 0
+m_kbR       db " (en V86"
+m_exc3      db ") en ", 0
 m_kbefl     db " EFL ", 0
 m_kblpm     db 13, 10, " pila bloqueada ", 0
 m_kbrm      db ", real ", 0
@@ -3193,7 +3221,6 @@ m_kbexc     db "; excep. ", 0
 m_kbio      db "; E/S ", 0
 m_kblx      db 13, 10, " excepción ", 0
 m_kblx2     db "h cód. ", 0
-m_kblx3     db " en ", 0
 m_kbend     db 13, 10, " (en CUELGUE.TXT)", 0
 
 ; copiar la cadena SI (acabada en 0) a ES:DI
@@ -4388,12 +4415,21 @@ sim:
         call cli_esdi
         mov bl, [bp+CF_EBX]
         mov cx, [bp+CF_ECX]
+        ; con SS:SP = 0 se usa la pila del servidor (RM_CHUNK octetos por
+        ; nivel): copiar 2·CX octetos sin límite pisaba cb_tab y rm_old. La
+        ; norma DPMI garantiza 30 palabras; aquí, hasta RM_MAXW (si no, 8021h)
+        cmp cx, RM_MAXW + 1         ; (AL, el modo, no se toca)
+        jnc .big
         call rm_call
-        push ds
-        pop es
         jnc .r
         mov ax, 0x8012
+        jmp .r
+.big:
+        mov ax, 0x8021
+        stc
 .r:
+        push ds
+        pop es
         ret
 
 ; ---- 0303h/0304h: callbacks de modo real ----
@@ -5210,7 +5246,6 @@ sbpm_v86io:
 ; ---- textos residentes ----
 m_exc       db 13, 10, "HSPDPMI: excepción ", 0
 m_exc2      db "h (", 0
-m_exc3      db ") en ", 0
 m_exc4      db ", código de error ", 0
 m_regs      db 13, 10, "EAX=", 0, " EBX=", 0, " ECX=", 0, " EDX=", 0
             db 13, 10, "ESI=", 0, " EDI=", 0, " EBP=", 0, " ESP=", 0

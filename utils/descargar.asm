@@ -172,6 +172,20 @@ start:
         mov ah, 0x3E
         int 0x21
         mov word [fh], 0
+        ; ya entera: fuera el de antes y el temporal a su nombre
+        mov dx, archivo
+        mov ax, 0x4301
+        xor cx, cx
+        int 0x21
+        mov ah, 0x41
+        int 0x21
+        mov dx, tmparch
+        mov di, archivo
+        push ds
+        pop es
+        mov ah, 0x56
+        int 0x21
+        mov byte [creado], 0
         call crlf
         mov si, m_guardado
         call puts
@@ -660,8 +674,11 @@ cabeceras:
         mov byte [h_estado], 2
         ret
 .bien:
-        ; crear el archivo
-        mov dx, archivo
+        ; crear el archivo: primero uno temporal (el nombre con .$$$); el que
+        ; hubiera con ese nombre solo se sustituye cuando la descarga ha
+        ; llegado entera (antes, si se cortaba la red, se perdía)
+        call nombre_tmp
+        mov dx, tmparch
         xor cx, cx
         mov ah, 0x3C
         int 0x21
@@ -806,11 +823,39 @@ borrar_arch:
         mov ah, 0x3E
         int 0x21
 .b:
-        mov dx, archivo
+        mov dx, tmparch
         mov ah, 0x41
         int 0x21
         mov byte [creado], 0
 .r:
+        ret
+
+; tmparch = archivo con la extensión .$$$ (en su misma carpeta)
+nombre_tmp:
+        mov si, archivo
+        mov di, tmparch
+        xor bx, bx                  ; BX = su «.» (0: sin extensión)
+.c:
+        lodsb
+        mov [di], al
+        cmp al, '.'
+        jne .s
+        mov bx, di
+.s:
+        cmp al, '\'
+        jne .s2
+        xor bx, bx
+.s2:
+        inc di
+        test al, al
+        jnz .c
+        dec di
+        test bx, bx
+        jz .p
+        mov di, bx
+.p:
+        mov dword [di], '.$$$'
+        mov byte [di+4], 0
         ret
 
 %include "util.inc"
@@ -877,6 +922,7 @@ nueva_url   resb 256
 host        resb 128
 ruta        resb 256
 archivo     resb 260
+tmparch     resb 264
 arch_dado   resb 1
 puerto      resw 1
 srv_ip      resd 1

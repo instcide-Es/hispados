@@ -558,6 +558,13 @@ f_info:
         retf
 
 f_play:
+        ; frecuencia 0 (un WAV con la cabecera mal): el remuestreo no
+        ; avanzaría nunca en los datos y se quedaba colgado para siempre
+        test dx, dx
+        jnz .hz
+        stc
+        retf
+.hz:
         pushad
         push ds
         push es

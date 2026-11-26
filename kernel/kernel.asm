@@ -262,7 +262,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
-INIT_ORG        equ 0xEFC0          ; .init, al arrancar (ver «Reparto de KSEG al arrancar»)
+INIT_ORG        equ 0xF0A0          ; .init, al arrancar (ver «Reparto de KSEG al arrancar»)
         section .low
 start:
         jmp short .go
@@ -2172,7 +2172,9 @@ mn_comma:
 cfg_menu:
         mov byte [mn_attr], 0x07
         mov word [mn_blk], s_menu
-.again:
+        mov byte [mn_hops], 16      ; submenús seguidos como mucho (uno que
+.again:                             ; se apunta a sí mismo, con su cuenta
+                                    ; atrás, no acababa nunca)
         call mn_parse
         mov word [mn_chosen], s_none
         cmp word [mn_n], 0
@@ -2188,7 +2190,9 @@ cfg_menu:
         test al, al
         jz .flat
         mov [mn_blk], bx            ; un submenú
-        jmp .again
+        dec byte [mn_hops]
+        jnz .again
+        mov word [mn_chosen], s_none ; (sin las líneas del propio menú)
 .flat:
         call cfg_flatten
 .r:
@@ -2770,6 +2774,7 @@ mn_tmo      dw 0
 mn_t0       dw 0
 mn_blk      dw 0
 mn_chosen   dw 0
+mn_hops     db 0
 mn_cur      dw 0
 mn_curt     dw 0
 mn_curf     dw 0
@@ -4518,6 +4523,11 @@ mount:
         dec cx
         test cx, ax
         jnz .bad
+        ; grupos de 64 KB (128 sectores, FAT16 de NT/2000/XP): los octetos
+        ; por grupo no caben en D_BPC (16 bits) y las divisiones de leer y
+        ; escribir fallarían; MS-DOS 6.22 tampoco los monta
+        cmp ax, 64
+        ja .bad
         mov [cur_drv+D_SPCW], ax
         mov cx, ax
         shl cx, 4
@@ -4567,10 +4577,27 @@ mount:
         jz .bad
         cmp eax, 65524
         ja .bad
-        mov [cur_drv+D_NCLUS], eax
-        cmp eax, 4085
-        jb .f12
+        cmp eax, 4085               ; (el tipo, por los del BPB)
+        jb .t12
         or byte [cur_drv+D_FLAGS], DF_FAT16
+.t12:
+        ; que la FAT tenga sitio para todos: si el BPB dice más grupos de
+        ; los que caben en ella, no se monta (sus entradas caerían en la
+        ; raíz o en los datos)
+        lea ecx, [eax+2]
+        test byte [cur_drv+D_FLAGS], DF_FAT16
+        jz .c12
+        add ecx, ecx                ; FAT16: 2 octetos por grupo
+        jmp .cc
+.c12:
+        lea ecx, [ecx+ecx*2]        ; FAT12: 1,5
+        shr ecx, 1
+.cc:
+        mov edx, [cur_drv+D_SPF]
+        shl edx, 9
+        cmp ecx, edx
+        ja .bad
+        mov [cur_drv+D_NCLUS], eax
         jmp .f12
         ; ---- FAT32 (MS-DOS 7.1): sin sectores por FAT de 16 bits. La FAT
         ; mide [+24h] sectores, la raíz es una cadena de clústeres que
@@ -8839,6 +8866,53 @@ sft_cache_bad:
         mov byte [di+SFT_CIXH], 0xFF
         ret
 
+; DI = SFT de un fichero recién escrito o recortado: las otras SFT abiertas
+; sobre la misma entrada de directorio toman su primer clúster, tamaño,
+; fecha y hora (y olvidan su clúster en caché). Antes cada una seguía con lo
+; suyo: al cerrar ganaba la última (tamaño viejo encima del nuevo) y, en un
+; fichero vacío, cada handle reservaba su propia cadena (grupos perdidos).
+sft_sync:
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .rr
+        pushad
+        mov eax, [di+SFT_DSEC]
+        cmp eax, 0xFFFFFFFF
+        je .r
+        mov dl, [di+SFT_DIDX]
+        mov bh, [di+SFT_DRV]
+        mov si, sft_table
+        xor bl, bl
+.l:
+        call sft_same
+        jc .r
+        cmp si, di
+        je .n
+        push di
+        push si
+        lea si, [di+SFT_CLUS]       ; primer clúster, hora, fecha y tamaño
+        pop di                      ; (0Bh-14h, seguidos)
+        push di
+        add di, SFT_CLUS
+        mov cx, SFT_SIZE + 4 - SFT_CLUS
+        push es
+        push ds
+        pop es
+        rep movsb
+        pop es
+        pop si
+        pop di
+        mov cx, [di+SFT_CLUSH]
+        mov [si+SFT_CLUSH], cx
+        mov word [si+SFT_CIX], 0xFFFF
+        mov byte [si+SFT_CIXH], 0xFF
+.n:
+        call sft_step
+        jmp .l
+.r:
+        popad
+.rr:
+        ret
+
 ; DI = SFT, EAX = índice de clúster dentro del fichero -> EAX = clúster
 sft_seek_clus:
         push ebx
@@ -8951,6 +9025,29 @@ sft_fill_file:
         mov [di+SFT_TIME], ax
         mov ax, [fentry+24]
         mov [di+SFT_DATE], ax
+        ; si ya estaba abierto y escrito por otra SFT, lo de esa manda (su
+        ; tamaño y su cadena van por delante de la entrada del disco)
+        test byte [cur_drv+D_FLAGS], DF_ISO
+        jnz .r
+        pushad
+        mov eax, [di+SFT_DSEC]
+        mov dl, [di+SFT_DIDX]
+        mov bh, [di+SFT_DRV]
+        mov si, sft_table
+        xor bl, bl
+.al:
+        call sft_same
+        jc .na
+        cmp si, di
+        jne .got
+        call sft_step
+        jmp .al
+.got:
+        mov di, si
+        call sft_sync
+.na:
+        popad
+.r:
         ret
 
 ; DI = SFT de un fichero cuya unidad se acaba de seleccionar -> CF si el
@@ -9837,6 +9934,14 @@ file_write:
         jmp .out
 .same:
         call sft_touch
+        ; un fichero no pasa de 4 GB - 1 (FAT32): lo que no cabe no se
+        ; escribe (antes la posición daba la vuelta y se escribía al principio)
+        mov eax, [di+SFT_POS]
+        movzx ecx, word [fr_left]
+        add ecx, eax
+        jnc .loop
+        not eax                     ; = FFFFFFFFh - posición (< CX)
+        mov [fr_left], ax
 .loop:
         cmp word [fr_left], 0
         je .out
@@ -9905,6 +10010,10 @@ file_write:
         jbe .out
         call sft_trim
 .out:
+        cmp word [fr_done], 0
+        je .out2
+        call sft_sync
+.out2:
         mov ax, [fr_done]
         pop si
         pop dx
@@ -9944,6 +10053,7 @@ file_truncate:
 .full:
         call sft_trim               ; disco lleno: se queda como estaba
 .r:
+        call sft_sync
         popad
         ret
 
@@ -10028,6 +10138,21 @@ create_file:
         jne .exists
         test byte [fentry+11], 0x19
         jnz .acc
+        ; abierto por otro handle: vaciarlo dejaría a ese handle leyendo (o
+        ; escribiendo) grupos ya libres; MS-DOS con SHARE lo niega (20h).
+        ; Las aperturas por FCB del mismo proceso sin cerrar (lo normal en
+        ; los programas de FCB) se sueltan antes, como recicla MS-DOS.
+        call fcb_drop_open
+        jnc .nodrop
+        mov eax, [w_dir]            ; soltar pudo reescribir la entrada
+        xor cx, cx
+        mov si, w_name
+        mov dl, 0x16
+        call find_entry
+        jc .new
+.nodrop:
+        call file_is_open
+        jc .shr
         ; vaciar el fichero existente
         call fent_clus
         call fat_free_chain
@@ -10079,6 +10204,10 @@ create_file:
         mov ax, E_EXISTS
         stc
         ret
+.shr:
+        mov ax, E_SHARE
+        stc
+        ret
 .acc:
         mov ax, E_ACCESS
         stc
@@ -10088,53 +10217,98 @@ create_file:
         stc
         ret
 
-; ¿alguien tiene abierto el fichero de la entrada CX de [w_dir] (unidad
-; seleccionada)? -> CF si sí. Borrarlo o moverlo entonces rompería el disco:
-; sus clústeres pasarían a otro fichero y al cerrar se reescribiría una
-; entrada de directorio que ya no es suya. Con SHARE, MS-DOS lo niega.
-file_is_open:
-        push si
-        push eax
-        push bx
-        push edx
-        mov eax, [w_dir]
-        call dir_ident              ; EAX = su sector, DL = entrada
-        jc .no
-        mov si, sft_table
-        xor bl, bl
-.l:
+; siguiente SFT de fichero abierta sobre la entrada de directorio EAX/DL
+; (sector y número) de la unidad BH, desde SI (su número, BL) incluida ->
+; CF=0 y SI, BL la que es; CF=1 si no hay más. sft_step pasa a la siguiente.
+sft_same:
+        cmp bl, NSFT
+        jae .no
         cmp byte [si+SFT_REF], 0
         je .n
         cmp byte [si+SFT_TYPE], T_FILE
         jne .n
-        mov bh, [sel_drv]
         cmp bh, [si+SFT_DRV]
         jne .n
         cmp eax, [si+SFT_DSEC]
         jne .n
         cmp dl, [si+SFT_DIDX]
         jne .n
-        pop edx
-        pop bx
-        pop eax
-        pop si
-        stc
+        clc
         ret
 .n:
+        call sft_step
+        jmp sft_same
+.no:
+        stc
+        ret
+sft_step:
         add si, SFT_LEN
         inc bl
         cmp bl, SFT_N1
-        jne .nb
+        jne .r
         add si, 6
-.nb:
-        cmp bl, NSFT
-        jb .l
+.r:
+        ret
+
+; la entrada CX de [w_dir] (unidad seleccionada) -> EAX/DL/BH para sft_same,
+; SI = sft_table, BL = 0; CF si no se puede identificar
+same_start:
+        mov eax, [w_dir]
+        call dir_ident              ; EAX = su sector, DL = entrada
+        mov bh, [sel_drv]
+        mov si, sft_table
+        mov bl, 0                   ; (sin tocar CF)
+        ret
+
+; soltar las SFT abiertas por FCB por el proceso actual sobre la entrada CX
+; de [w_dir] (unidad seleccionada) -> CF si se ha soltado alguna
+fcb_drop_open:
+        pushad
+        call same_start
+        jc .no
+        xor bp, bp                  ; BP = soltadas
+.l:
+        call sft_same
+        jc .e
+        test byte [si+SFT_FLAGS], 2
+        jz .n
+        mov cx, [cur_psp]
+        cmp cx, [si+SFT_PSP]
+        jne .n
+        pushad
+        mov di, si
+        mov byte [di+SFT_REF], 1
+        call sft_release
+        popad
+        inc bp
+.n:
+        call sft_step
+        jmp .l
+.e:
+        cmp bp, 1                   ; CF si BP > 0
+        cmc
+        jmp .r
 .no:
-        pop edx
-        pop bx
-        pop eax
-        pop si
         clc
+.r:
+        popad
+        ret
+
+; ¿alguien tiene abierto el fichero de la entrada CX de [w_dir] (unidad
+; seleccionada)? -> CF si sí. Borrarlo o moverlo entonces rompería el disco:
+; sus clústeres pasarían a otro fichero y al cerrar se reescribiría una
+; entrada de directorio que ya no es suya. Con SHARE, MS-DOS lo niega.
+file_is_open:
+        pushad
+        call same_start
+        jc .no
+        call sft_same
+        cmc                         ; encontrada: CF=1
+        jmp .r
+.no:
+        clc
+.r:
+        popad
         ret
 
 ; w_name sirve para crear: no está vacío ni lleva comodines -> CF si no
@@ -11030,7 +11204,36 @@ fn_0c:
         jmp fn_06
 
 ; ---- unidades ----
+; ---- 0Dh: restaurar disco. Como en MS-DOS, solo vacía los búferes (y
+; olvida las copias en memoria: los extraíbles se vuelven a leer en el
+; siguiente acceso); las carpetas actuales se conservan. Muchos programas
+; la llaman tras escribir. Volver a mirar los discos y las particiones
+; (FDISK, FORMAT) es la función propia AX=336Ah (disk_rescan).
 fn_0d:
+        call fat_flush
+        call fsinfo_flush
+        mov dword [cache_lba], 0xFFFFFFFF
+        mov dword [fatc_lba], 0xFFFFFFFF
+        mov si, drv_tab
+        mov cx, NDRV
+.l:
+        test byte [si+D_FLAGS], DF_FIXED
+        jnz .n
+        and byte [si+D_FLAGS], ~(DF_MOUNTED | DF_ISO)
+.n:
+        add si, DRV_LEN
+        loop .l
+        test byte [cur_drv+D_FLAGS], DF_FIXED
+        jnz .r
+        and byte [cur_drv+D_FLAGS], ~(DF_MOUNTED | DF_ISO)
+.r:
+        ret
+
+; volver a mirar los discos (lo que hacía antes 0Dh): las unidades y sus
+; particiones de nuevo, y las carpetas actuales de C: en adelante, a la raíz
+disk_rescan:
+        call fat_flush
+        call fsinfo_flush
         call drives_scan
         push es
         push ds
@@ -11040,6 +11243,7 @@ fn_0d:
         xor al, al
         rep stosb
         pop es
+        call cds_all
         ret
 fn_0e:
         mov al, [F_DL]
@@ -11786,6 +11990,14 @@ fn_33:
         je .letras
         cmp al, 0x69
         je .quees
+        cmp al, 0x6A
+        je .rescan
+        ret
+        ; AX=336Ah (propia): volver a mirar los discos y las particiones
+        ; (FDISK, FORMAT). Devuelve BX = 'HD' (en un DOS sin ella, BX igual)
+.rescan:
+        call disk_rescan
+        mov word [F_BX], 'HD'
         ret
 .get:
         mov al, [break_flag]
@@ -12169,10 +12381,35 @@ fn_29:
         ret
 
 ; ---- directorios ----
+; ¿la carpeta de npath cabe como carpeta actual? Como en MS-DOS, 63 letras
+; como mucho (sin «C:\»): es lo que cabe en el búfer de 64 de 47h y en la
+; CDS (antes se dejaba hasta 65 y 47h desbordaba en 2 octetos el búfer del
+; programa) -> CF y AX = 3 si no
+npath_dir_ok:
+        push si
+        mov si, npath
+.l:
+        cmp byte [si], 0
+        je .e
+        inc si
+        jmp .l
+.e:
+        cmp si, npath + 63
+        pop si
+        ja .bad
+        clc
+        ret
+.bad:
+        mov ax, E_NOPATH
+        stc
+        ret
+
 fn_3b:
         mov es, [F_DS]
         mov si, [F_DX]
         call resolve_dir
+        jc ret_err
+        call npath_dir_ok
         jc ret_err
         mov [cur_clus], ax
         push ds
@@ -12978,6 +13215,8 @@ fn_39:
         mov si, [F_DX]
         call normalize
         jc ret_err
+        call npath_dir_ok
+        jc ret_err
         call iso_deny
         jc ret_err
         call walk
@@ -13286,6 +13525,11 @@ fn_55:
         jae .ni
         imul bx, bx, SFT_LEN
         SFT_GAP bx
+        test byte [sft_table+bx+SFT_MODE], 0x80 ; abierto «sin heredar» (bit
+        jz .ih                      ; 7 de 3Dh): el hijo no lo tiene
+        mov byte [es:di], 0xFF
+        jmp .ni
+.ih:
         inc byte [sft_table+bx+SFT_REF]
 .ni:
         inc di
@@ -14084,6 +14328,8 @@ fn_4b:
         call file_read
         pop cx
         jc .ioerr
+        cmp ax, 4                   ; .EXE truncado: sin la reubicación entera
+        jb .ioerr                   ; (antes se usaba la anterior)
         mov ax, [ex_rel+2]
         add ax, [ex_load]
         mov es, ax
@@ -14289,6 +14535,9 @@ exec_overlay:
         mov di, ex_sft
         call file_read
         pop cx
+        jc .trunc
+        cmp ax, 4                   ; .EXE truncado
+        jb .trunc
         mov ax, [ex_rel+2]
         add ax, [ov_seg]
         mov es, ax
@@ -14299,6 +14548,9 @@ exec_overlay:
         jmp .rl
 .done:
         ret
+.trunc:
+        mov ax, E_FORMAT
+        jmp ret_err
 .nf:
         mov ax, E_NOFILE
         jmp ret_err
@@ -14431,6 +14683,11 @@ build_psp:
         jae .ni
         imul bx, bx, SFT_LEN
         SFT_GAP bx
+        test byte [sft_table+bx+SFT_MODE], 0x80 ; abierto «sin heredar» (bit
+        jz .ih                      ; 7 de 3Dh): el hijo no lo tiene
+        mov byte [es:di], 0xFF
+        jmp .ni
+.ih:
         inc byte [sft_table+bx+SFT_REF]
 .ni:
         inc di
@@ -14778,7 +15035,8 @@ fcb_read_recs:
         mov cx, ax
         mov [fcb_want], cx
         les bx, [dta_off]
-        call file_read
+        xor al, al
+        call fcb_xfer
         mov [fcb_got], ax
         ; registros completos y relleno del último
         xor dx, dx
@@ -14807,6 +15065,30 @@ fcb_read_recs:
 .r:
         ret
 
+; E/S de un FCB según lo que haya abierto: DI = SFT, ES:BX = búfer, CX =
+; octetos, AL = 0 leer / 1 escribir -> AX = octetos. Un FCB abierto sobre
+; CON, PRN, AUX o NUL va a su dispositivo (antes iba siempre al disco de la
+; SFT: la unidad A:)
+fcb_xfer:
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .nf
+        test al, al
+        jnz .fw
+        jmp file_read
+.fw:
+        jmp file_write
+.nf:
+        ; un dispositivo (también CON y NUL: SFT_SIZE lleva su cabecera)
+        push dx
+        mov edx, [di+SFT_SIZE]
+        mov [dc_hdr], edx
+        mov dx, es
+        shl al, 2
+        add al, 4                   ; 4 leer, 8 escribir
+        call dev_rw
+        pop dx
+        ret
+
 ; DI = SFT, EAX = registro, CX = registros -> escribir desde la DTA
 ; -> AL = 0 bien, 1 disco lleno; DX = registros escritos
 fcb_write_recs:
@@ -14822,9 +15104,12 @@ fcb_write_recs:
         mov cx, ax
         les bx, [dta_off]
         push cx
-        call file_write
+        mov al, 1
+        call fcb_xfer
         pop cx
         mov [fcb_got], ax
+        cmp byte [di+SFT_TYPE], T_FILE
+        jne .nosz                   ; (un dispositivo no tiene tamaño)
         ; tamaño en el FCB
         push es
         mov es, [F_DS]
@@ -14832,6 +15117,8 @@ fcb_write_recs:
         mov edx, [di+SFT_SIZE]
         mov [es:bx+0x10], edx
         pop es
+.nosz:
+        mov ax, [fcb_got]
         xor dx, dx
         div word [fcb_rs]
         mov dx, ax
@@ -15519,6 +15806,21 @@ abs_io:
         jnz .b32
         call es_reserva             ; [LETRAS] ni la C: reservada (es todo
         je .b32                     ; el disco: se prepara con PARTIR)
+        ; una unidad sin montar todavía (nadie la ha usado) no tiene aún
+        ; DF_FAT32: se monta antes (si no tiene sistema de ficheros, sigue
+        ; valiendo; los disquetes no son FAT32)
+        test byte [cur_drv+D_FLAGS], DF_MOUNTED
+        jnz .mnt
+        cmp byte [sel_drv], 2
+        jb .mnt
+        pushad
+        push es
+        call mount
+        pop es
+        popad
+        test byte [cur_drv+D_FLAGS], DF_FAT32
+        jnz .b32
+.mnt:
         cmp cx, 0xFFFF
         jne .short
         mov eax, [es:bx]
@@ -16514,6 +16816,12 @@ low_end:
 ;   IMG_END = EE20h, .init = 0F28h (3.880 octetos)
 ;   MARGEN_IMG  = INIT_ORG - (IMG_END + 64)  = 352 octetos
 ;   MARGEN_INIT = 10000h - (INIT_ORG + .init) = 280 octetos
+; Medido otra vez el 25/11/2026 (arreglos de la auditoría: crear un archivo
+; abierto, 0Dh y 336Ah, FCB en dispositivos, handles sobre el mismo archivo,
+; 4 GB en FAT32, INT 25h/26h en FAT32 sin montar, carpetas de 63 letras):
+;   IMG_END = F040h, .init = 0F32h; INIT_ORG de EFC0h a F0A0h
+;   MARGEN_IMG  = 32 octetos, MARGEN_INIT = 46 octetos (no queda más sitio:
+;   lo próximo, adelgazar)
 ; Si una de las dos comprobaciones falla, se puede mover INIT_ORG (en
 ; múltiplos de 16) mientras la otra tenga sitio; si no lo tiene ninguna, hay
 ; que adelgazar el núcleo de verdad.

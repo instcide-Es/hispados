@@ -496,12 +496,12 @@ f14:
         ret
 ; 0Fh: proporción mickeys/puntos
 f0f:
-        test cx, cx
-        jz .y
+        test cx, cx                 ; (0 o negativa: no vale, se divide por
+        jle .y                      ; ella en cada movimiento)
         mov [ratx], cx
 .y:
         test dx, dx
-        jz .r
+        jle .r
         mov [raty], dx
 .r:
         ret
@@ -533,6 +533,16 @@ f17:
         pop es
         pop ds
         pop cx
+        ; un estado que no viene de 16h (o estropeado): la proporción a 0
+        ; dividía por cero en la siguiente IRQ 12
+        cmp word [ratx], 0
+        jg .rx
+        mov word [ratx], 8
+.rx:
+        cmp word [raty], 0
+        jg .ry
+        mov word [raty], 16
+.ry:
         cmp word [cflag], 0
         jne .r
         call show_now

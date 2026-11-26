@@ -89,6 +89,7 @@ range:
         movzx ecx, word [bx+0x12]
         mov edx, eax
         add edx, ecx
+        jc .bad                     ; (FFFFFFxxh + cuenta daba la vuelta)
         movzx esi, word [cs:nsec]
         cmp edx, esi
         ja .bad

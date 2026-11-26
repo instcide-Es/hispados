@@ -408,8 +408,20 @@ interrupt:
         pop dx
         pop eax
 %endif
+        ; como en la ruta de INT 13h: que no dé la vuelta ni pase del final
+        ; del disco (con una BPB más grande que la memoria, la suma podía
+        ; dar la vuelta y escribir en el MBR)
         add eax, [cs:part_start]
+        jc .range
         mov [cs:rw_lba], eax
+        cmp dword [cs:i13_total], 0 ; (capacidad sin leer: no se sabe)
+        je .rw2
+        movzx ecx, word [bx+0x12]
+        add ecx, eax
+        jc .range
+        cmp ecx, [cs:i13_total]
+        ja .range
+.rw2:
         mov cx, [bx+0x12]
         mov [cs:rw_left], cx
         mov ax, [bx+0x0E]
@@ -425,6 +437,10 @@ interrupt:
         sub ax, [cs:rw_left]
         mov [bx+0x12], ax
         mov word [bx+3], 0x810C     ; error general
+        jmp .out
+.range:
+        mov word [bx+0x12], 0
+        mov word [bx+3], 0x8108     ; sector no encontrado
         jmp .out
 
 ; leer (rw_dir = 1) o escribir rw_left sectores desde rw_lba en rw_seg:rw_off
@@ -2089,6 +2105,13 @@ scsi_once:
         mov bx, CSW_BUF
         call zone
         mov di, bx
+        ; borrado antes: una memoria que no manda nada (0 octetos) no puede
+        ; dejar pasar el CSW de la orden anterior por bueno
+        xor eax, eax
+        mov [cs:di], eax
+        mov [cs:di+4], eax
+        mov [cs:di+8], eax
+        mov byte [cs:di+12], 0xFF
         call phys
         mov ebx, eax
         mov cx, 13
@@ -2097,6 +2120,27 @@ scsi_once:
         jc .r
         cmp dword [cs:di], 0x53425355       ; "USBS"
         jne .bad                            ; (sc_tr = 1)
+        mov eax, [cs:tag]                   ; el de esta orden
+        cmp [cs:di+4], eax
+        jne .bad
+        ; leer o escribir sectores: residuo 0 (que hayan llegado enteros);
+        ; si no, el búfer tendría datos viejos (la FAT de antes) por buenos
+        cmp dword [cs:di+8], 0
+        je .res
+        push si
+        mov si, rw_ops
+.op:
+        mov al, [cs:si]
+        test al, al
+        jz .op9
+        inc si
+        cmp al, [cs:scsi_cb]
+        jne .op
+        pop si
+        jmp .bad
+.op9:
+        pop si
+.res:
         mov byte [cs:sc_tr], 0
         cmp byte [cs:di+12], 1
         je .bad                             ; la orden ha fallado: no es del transporte
@@ -2109,6 +2153,7 @@ scsi_once:
         pop di
         pop bx
         ret
+rw_ops      db 0x28, 0x2A, 0xA8, 0xAA, 0x88, 0x8A, 0x08, 0x0A, 0 ; leer/escribir
 sc_tr       db 0                            ; ha fallado el transporte: hay que recuperar
 sc_dir      db 0
 sc_len      dd 0
@@ -5769,6 +5814,8 @@ parse_config:
 .o:
         mov di, [cs:si+4]
         and di, 0x7FF
+        jz .n                       ; wMaxPacketSize 0: no vale (en UHCI,
+                                    ; trozos de 0 octetos sin fin)
         mov al, [cs:si+3]
         and al, 3
         cmp byte [ifk], 1

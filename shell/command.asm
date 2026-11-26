@@ -5337,6 +5337,18 @@ is_dir:
 
 ; SI, DI = rutas -> CF=1 (y aviso) si son el mismo fichero
 same_file:
+        call same_path
+        jnc .r
+        push si
+        mov si, msg_self
+        call puts
+        pop si
+        stc
+.r:
+        ret
+
+; SI, DI = rutas -> CF=1 si son el mismo fichero (sin aviso)
+same_path:
         push si
         push di
         push di
@@ -5357,8 +5369,6 @@ same_file:
         inc di
         test al, al
         jnz .c
-        mov si, msg_self
-        call puts
         pop di
         pop si
         stc
@@ -5619,6 +5629,37 @@ do_copy:
         call to11
         jmp .nd4
 .nd3:
+        ; COPY *.TXT TODO.TXT: si el comodín pasa por TODO.TXT y no es el
+        ; primero, al crearlo se perdería antes de copiarlo: no se hace nada.
+        ; Si es el primero, se le añaden los demás (como MS-DOS).
+        cmp byte [c_wild], 0
+        je .nd4
+        cmp byte [c_dstdir], 0
+        jne .nd4
+        call set_dta
+        mov dx, c_src
+        xor cx, cx
+        mov ah, 0x4E
+        int 0x21
+        jc .nd4
+        mov byte [c_first], 1
+.pre:
+        mov si, c_pre
+        mov bx, dta+0x1E
+        mov di, c_spath
+        call join_path
+        mov si, c_spath
+        mov di, c_dst
+        call same_path
+        jnc .pre2
+        cmp byte [c_first], 0
+        je .lost
+.pre2:
+        mov byte [c_first], 0
+        call set_dta
+        mov ah, 0x4F
+        int 0x21
+        jnc .pre
 .nd4:
         call set_dta
         mov dx, c_src
@@ -5697,8 +5738,19 @@ do_copy:
         jne .append
         mov si, c_spath
         mov di, c_dst
+        cmp byte [c_wild], 0
+        je .tf1
+        ; con comodín, el primero es el destino: se le añaden los demás
+        call same_path
+        jnc .tf2
+        mov dx, c_dst
+        call open_append
+        jc .cerr
+        jmp .next
+.tf1:
         call same_file
         jc .next
+.tf2:
         mov dx, c_dst
         call copy_ask
         jc .summary
@@ -5710,6 +5762,11 @@ do_copy:
         mov [c_dh], ax
         mov byte [c_open], 1
 .append:
+        ; el comodín llega al destino que se está escribiendo: se salta
+        mov si, c_spath
+        mov di, c_dst
+        call same_path
+        jc .next
         call copy_one
 .next:
         call set_dta
@@ -5717,6 +5774,10 @@ do_copy:
         int 0x21
         jnc .loop
         jmp .close
+.lost:
+        mov si, msg_dstsrc
+        call puts
+        jmp .summary
 .cerr:
         mov si, msg_cantcreate
         call puts
@@ -5854,8 +5915,81 @@ mask_name:
         mov di, m_new
         jmp from11
 
+; DX = archivo -> abierto para escribir al final: c_dh, c_open, c_count
+open_append:
+        mov ax, 0x3D02
+        int 0x21
+        jc .r
+        mov [c_dh], ax
+        mov bx, ax
+        mov ax, 0x4202
+        xor cx, cx
+        xor dx, dx
+        int 0x21
+        mov byte [c_open], 1
+        inc dword [c_count]
+        clc
+.r:
+        ret
+
+; ¿alguna parte de A+B[+C] es el destino? -> AL = 0 ninguna, 1 la primera,
+; 2 otra (entonces no se puede: se perdería al crear el destino)
+concat_dst:
+        mov si, c_src
+        mov byte [c_first], 1
+        xor bl, bl
+.p:
+        mov di, c_spath
+.c:
+        lodsb
+        cmp al, '+'
+        je .e
+        test al, al
+        je .e
+        stosb
+        jmp .c
+.e:
+        mov byte [di], 0
+        push ax
+        cmp byte [c_spath], 0
+        je .n
+        push si
+        mov si, c_spath
+        mov di, c_dst
+        call same_path
+        pop si
+        jnc .n
+        mov bl, 2
+        cmp byte [c_first], 0
+        je .n
+        mov bl, 1
+.n:
+        mov byte [c_first], 0
+        pop ax
+        test al, al
+        jz .r
+        cmp bl, 2
+        jne .p
+.r:
+        mov al, bl
+        ret
+
 ; COPY A+B[+C] [destino]: unir ficheros (sin destino, se añade a A)
 do_concat:
+        cmp byte [c_nodst], 0
+        jne .cd0
+        call concat_dst
+        cmp al, 2
+        jne .cd1
+        mov si, msg_dstsrc
+        call puts
+        mov dword [c_count], 0
+        jmp .sum
+.cd1:
+        cmp al, 1                   ; COPY A+B A: como sin destino, añadir a A
+        jne .cd0
+        mov byte [c_nodst], 1
+.cd0:
         mov si, c_src
         mov di, c_spath
         mov byte [c_first], 1
@@ -5881,17 +6015,8 @@ do_concat:
         je .newdst
         ; sin destino: abrir la primera parte y añadir al final
         mov dx, c_spath
-        mov ax, 0x3D02
-        int 0x21
+        call open_append
         jc .err
-        mov [c_dh], ax
-        mov bx, ax
-        mov ax, 0x4202
-        xor cx, cx
-        xor dx, dx
-        int 0x21
-        mov byte [c_open], 1
-        inc dword [c_count]
         jmp .more
 .newdst:
         mov dx, c_dst
@@ -6589,6 +6714,7 @@ do_pause:
 
 msg_redir   db "Error al crear el archivo", 13, 10, 0
 msg_self    db "No se puede copiar un archivo sobre sí mismo", 13, 10, 0
+msg_dstsrc  db "El destino es también uno de los orígenes (y no el primero): se perdería al crearlo. No se copia nada.", 13, 10, 0
 msg_cantcreate db "No se puede crear el destino", 13, 10, 0
 msg_cmany   db "Demasiados parámetros", 13, 10, 0
 msg_over1   db "¿Sobrescribir ", 0
@@ -6784,6 +6910,28 @@ env_set:
         mov [es_val], di
         call env_find
         jc .add
+        ; antes de borrar la entrada vieja, ¿cabe la nueva en su lugar? Si
+        ; no, se queda la vieja (antes se borraba y luego no cabía: PATH
+        ; podía desaparecer)
+        mov si, [es_val]
+        cmp byte [si], 0
+        je .del
+        push di
+        mov si, di
+.ol:
+        inc si
+        cmp byte [es:si-1], 0
+        jne .ol
+        sub si, di                  ; SI = lo que ocupa la vieja
+        push si
+        call .endp                  ; DI = final del entorno
+        pop si
+        sub di, si
+        call .need
+        pop di
+        cmp bx, [env_size]
+        ja .full
+.del:
         ; borrar la entrada existente
         mov si, di
 .sk:
@@ -6809,27 +6957,9 @@ env_set:
         mov si, [es_val]
         cmp byte [si], 0
         je .done
-        ; final del entorno
-        mov es, [0x2C]
-        xor di, di
-.e:
-        cmp byte [es:di], 0
-        je .gotend
-.e2:
-        inc di
-        cmp byte [es:di-1], 0
-        jne .e2
-        jmp .e
-.gotend:
+        call .endp
         ; ¿cabe?
-        mov si, [es_name]
-        call strlen
-        mov bx, cx
-        mov si, [es_val]
-        call strlen
-        add bx, cx
-        add bx, 3
-        add bx, di
+        call .need
         cmp bx, [env_size]
         ja .full
         mov si, [es_name]
@@ -6858,6 +6988,31 @@ env_set:
         pop es
         mov si, msg_envfull
         jmp puts
+; ES:DI = el final del entorno (el cero que lo cierra)
+.endp:
+        mov es, [0x2C]
+        xor di, di
+.e:
+        cmp byte [es:di], 0
+        je .ee
+.e2:
+        inc di
+        cmp byte [es:di-1], 0
+        jne .e2
+        jmp .e
+.ee:
+        ret
+; BX = DI + lo que ocupa «nombre=valor» con sus dos ceros
+.need:
+        mov si, [es_name]
+        call strlen
+        mov bx, cx
+        mov si, [es_val]
+        call strlen
+        add bx, cx
+        add bx, 3
+        add bx, di
+        ret
 
 ; SI -> CX = longitud
 strlen:
@@ -7060,40 +7215,31 @@ start_batch:
 batch_read:
         mov [br_pos], eax
         push bx
+        push ebp
         lea dx, [bx+BC_NAME]
         mov ax, 0x3D00
         int 0x21
         jc .eofp
+        mov [br_h], ax
         mov bx, ax
         mov dx, [br_pos]
         mov cx, [br_pos+2]
         mov ax, 0x4200
         int 0x21
-        mov dx, rbuf
-        mov cx, BLINE
-        mov ah, 0x3F
-        int 0x21
-        jnc .rd
-        xor ax, ax
-.rd:
-        push ax
-        mov ah, 0x3E
-        int 0x21
-        pop ax
-        pop bx
+        call .read
         test ax, ax
-        jz .eof
+        jz .eofc
         mov cx, ax
         mov si, rbuf
         mov di, bline
-        xor dx, dx
+        xor ebp, ebp                ; EBP = octetos de la línea (con CR LF)
         cmp byte [si], 0x1A
-        je .eof
+        je .eofc
 .l:
-        jcxz .done
+        jcxz .more
         lodsb
         dec cx
-        inc dx
+        inc ebp
         cmp al, 13
         je .cr
         cmp al, 10
@@ -7104,24 +7250,68 @@ batch_read:
         jae .l
         stosb
         jmp .l
+        ; se acaba lo leído sin fin de línea: una línea de más de BLINE
+        ; letras. Como MS-DOS, lo que sobra se descarta hasta el LF (antes se
+        ; ejecutaba como otra orden: «REM ...» + 196 letras + « DEL ...»)
+.more:
+        cmp word [br_got], BLINE    ; leído de menos: fin del archivo
+        jb .done
+        call .read
+        test ax, ax
+        jz .done
+        mov cx, ax
+        mov si, rbuf
+        jmp .l
 .cr:
-        jcxz .done
+        jcxz .crm
         cmp byte [si], 10
         jne .done
-        inc dx
+        inc ebp
+        jmp .done
+.crm:
+        ; CR al final de lo leído: ¿el LF viene en lo siguiente?
+        cmp word [br_got], BLINE
+        jb .done
+        call .read
+        test ax, ax
+        jz .done
+        cmp byte [rbuf], 10
+        jne .done
+        inc ebp
         jmp .done
 .z:
-        dec dx
+        dec ebp
 .done:
         mov byte [di], 0
-        movzx eax, dx
+        mov bx, [br_h]
+        mov ah, 0x3E
+        int 0x21
+        mov eax, ebp
         add eax, [br_pos]
+        pop ebp
+        pop bx
         clc
         ret
+.eofc:
+        mov bx, [br_h]
+        mov ah, 0x3E
+        int 0x21
 .eofp:
+        pop ebp
         pop bx
-.eof:
         stc
+        ret
+; leer lo siguiente del lote en rbuf -> AX = octetos (0 si error)
+.read:
+        mov bx, [br_h]
+        mov dx, rbuf
+        mov cx, BLINE
+        mov ah, 0x3F
+        int 0x21
+        jnc .rd
+        xor ax, ax
+.rd:
+        mov [br_got], ax
         ret
 
 ; siguiente línea del lote -> eline; CF si no hay nada que ejecutar
@@ -7636,9 +7826,12 @@ do_if:
         call skip_sp
         call parse_dec
         jc .syn
+        test dl, dl                 ; 256 o más: nunca (antes valía módulo
+        jnz .el0                    ; 256: IF ERRORLEVEL 256 era como 0)
         cmp [errlvl], al
         mov al, 1
         jae .res
+.el0:
         xor al, al
         jmp .res
 .ex:
@@ -7740,6 +7933,7 @@ parse_u16:
 parse_dec:
         xor ax, ax
         xor cx, cx
+        xor dx, dx                  ; DL = 1 si pasa de 255
 .l:
         mov bl, [si]
         sub bl, '0'
@@ -7748,7 +7942,9 @@ parse_dec:
         ja .e
         mov bh, 10
         mul bh
+        or dl, ah
         add al, bl
+        adc dl, 0
         inc si
         inc cx
         jmp .l
@@ -8389,6 +8585,8 @@ if_not      resb 1
 es_name     resw 1
 es_val      resw 1
 br_pos      resd 1
+br_h        resw 1
+br_got      resw 1
 sname       resb 64
 pbuf        resb 258
 vname       resb 64
