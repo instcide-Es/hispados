@@ -10,7 +10,7 @@ cueste un año.
 
 Este documento es el plan: lo que se quiere, las decisiones de arquitectura con su
 porqué, y las etapas, cada una con lo que se verá funcionar y cómo se prueba. Las
-**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 20: la 10 c, la última, con IPv6 y el compilador cruzado).
+**etapas 0 a 9 están hechas** (secciones 6 a 15), y la **10** y la **11**, en su base (secciones 16 a 21: la 10 d, la última, con los sockets de Unix y la memoria compartida por descriptor, lo primero que pide el navegador).
 
 ---
 
@@ -267,7 +267,7 @@ y la Wi-Fi son lo que más puede alargarlo.
 | 7 | musl, POSIX, herramientas de compilar cruzado | **hecha (24/11)** | — |
 | 8 | Gráficos: compositor, ventanas, ratón, oficina | **hecha (24/11)** | — |
 | 9 | Red por cable, TCP/IP, TLS; Wi-Fi en paralelo | **hecha (25/11)** (la Wi-Fi, en paralelo: 3–5 meses) | — |
-| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). Queda el navegador mismo: lo que pide, en la sección 20 | (8–12 sem.) |
+| 10 | Navegador moderno (Ladybird o WebKit) | **la base, hecha (25/11)**: C++, la letra (FreeType y HarfBuzz), TCP de hoy; y lo que quedaba de la 9 (sección 16). **La base de la 10 b, hecha (25/11)**: curl 8.14.1 con BearSSL (la orden y libcurl, con «multi») e ICU 77.1 (con sus datos filtrados), readlink (sección 19). **La 10 c, hecha (26/11)**: una referencia al descriptor durante cada llamada, la causa de fondo de lo lento con varios procesadores (la TLB: la cuarentena del montón) y de los cortes del sonido, el compilador cruzado (GCC 14.3 con la libstdc++ para musl; C++ dinámico), **IPv6** (SLAAC, ND, ICMPv6, AF_INET6) y lo de la auditoría (sección 20). **La 10 d, hecha (26/11)**: los sockets de Unix (AF_UNIX, con SCM_RIGHTS y SCM_CREDENTIALS), `memfd_create` con sus sellos, un programa de C++23 que se habla con otro como los de Ladybird, el vigilante, el HPET de 32 bits y H4 y H11 de la auditoría (sección 21). Queda el navegador mismo: lo que pide, en las secciones 20 y 21 | (8–12 sem.) |
 | 11 | Impresión IPP, sonido HDA, energía (suspender, batería) | **la base, hecha (25/11)**: el planificador, TCP con congestión, la INTx, el tiempo de procesador y **el sonido (HD Audio, /dev/dsp)** (sección 17). **La 11 b, hecha (25/11)**: el tic estable (la calibración del APIC), **ACPICA en el núcleo** (la batería, el cable, el EC, apagar por `_S5`, el `_CRS` de los enlaces de los `_PRT`), el brillo y HWP (sección 18). Quedan suspender, los P-states sin HWP, IPP y la mezcla del sonido | (en paralelo) |
 | 12 | Instalar en el disco, actualizar, cuentas | 3–4 sem. | (en paralelo) |
 | 13 | (opcional) Cargador UEFI propio, Secure Boot; UEFI de 32 bits | 3–4 sem. | — |
@@ -3849,3 +3849,184 @@ Windows y WSL). No se empieza todavía.
 - De la 11 b, sin tocar: suspender (S3), los P-states sin HWP, los GPE y la
   SCI, `_SRS`, IPP y la mezcla del sonido.
 - La etapa 14 (NVIDIA): sin empezar.
+
+## 21. La etapa 10 d, hecha (26/11/2026): los sockets de Unix, la memoria compartida por descriptor y el vigilante
+
+### Las decisiones
+
+- **Por qué la 10 d**: es lo primero de la lista de la sección 20 («lo que
+  pide Ladybird sin ventana»): Ladybird es de varios procesos (el navegador,
+  WebContent, RequestServer, ImageDecoder) que se hablan por **sockets de
+  Unix**, se pasan **descriptores** y comparten los mapas de bits por
+  **memoria con descriptor** (Core::AnonymousBuffer: `memfd_create`,
+  `ftruncate` y `mmap MAP_SHARED`).
+- **Los sockets de Unix, un módulo propio** (`unix64.cas`, la clase de
+  archivo abierto 17, `F_UNIX`), no dentro de Red64: no tienen nada de la
+  pila de red. Sistema reparte cada llamada (41 a 55 y 288) por la clase del
+  descriptor; `socket(AF_UNIX, ...)` y `socketpair` (53, antes EOPNOTSUPP) los
+  hace Unix64. SOCK_STREAM, SOCK_DGRAM y SOCK_SEQPACKET, como Linux.
+- **Una cola de mensajes por socket** (la del que recibe): cada envío es un
+  mensaje (los de flujo, de hasta 64 KB cada uno), con quien lo manda (pid,
+  uid y gid: SCM_CREDENTIALS), su nombre (para recvfrom) y los descriptores que
+  viajan con él. En los de flujo se leen seguidos, pero un mensaje con
+  descriptores no se junta con lo de antes y la lectura se para después de
+  él, como Linux (así los descriptores llegan con su mensaje: LibIPC cuenta
+  con eso). Lo que cabe en cada cola: 256 KB (contando 256 octetos por
+  mensaje) y, en los de datagramas, 64 mensajes; poll da POLLOUT con la
+  mitad libre (como `unix_writable` de Linux: el que espera a POLLOUT no
+  vuelve para escribir un poco y quedarse otra vez sin sitio).
+- **Un solo mutex para todos los sockets de Unix**: el otro extremo puede
+  soltarse en cualquier momento (otro proceso lo cierra), y con el mutex
+  tomado nadie se suelta mientras se mira; lo del programa se copia antes de
+  tomarlo (al mandar) o después de soltarlo (al recibir), a un búfer del
+  núcleo. Las esperas, en Sondeo64 (como la red): poll, select y epoll los
+  ven con `listo_unix`.
+- **Pasar descriptores (SCM_RIGHTS)**: al mandar, cada descriptor se toma
+  (`toma_fd`, el de la 10 c) y se apunta su clase, su objeto y su
+  O_NONBLOCK con una referencia más (`Procesos.otro_fd_obj`, nueva: como
+  dup); al recibir, cada uno es un número nuevo del programa (con
+  MSG_CMSG_CLOEXEC, FD_CLOEXEC). Si no caben en el búfer de control, los de
+  más se cierran y se da MSG_CTRUNC (en CMSG_SPACE de uno caben dos, por el
+  relleno hasta 8: igual que Linux). Al soltar un socket con mensajes en su
+  cola, sus descriptores se cierran **sin el mutex** (cerrar uno puede soltar
+  otro socket de Unix). Hasta 253 por mensaje (SCM_MAX_FD).
+- **Los nombres**: bind a una ruta (relativa: desde la carpeta actual), a un
+  nombre abstracto (el primer octeto, 0) o el automático (bind con solo la
+  familia: «\0» y cinco cifras). **La ruta no crea un archivo en el disco**:
+  es un nombre del núcleo; `stat` lo ve como S_IFSOCK, `unlink` lo quita (el
+  socket sigue, con su nombre para getsockname) y se suelta al cerrarlo. Es
+  lo que usan los programas (unlink antes de bind) sin tocar los discos, que
+  casi siempre son de solo leer. connect a una ruta que no está: ENOENT; a un
+  abstracto que no está, o a uno que no escucha: ECONNREFUSED, como Linux.
+- **SO_PEERCRED** (el pid del otro al conectar o al hacer el socketpair),
+  SO_PASSCRED, SO_TYPE, SO_DOMAIN, SO_PROTOCOL, SO_ERROR, SO_ACCEPTCONN,
+  SO_SNDBUF y SO_RCVBUF, SO_RCVTIMEO y SO_SNDTIMEO; FIONREAD, FIONBIO,
+  TIOCOUTQ; shutdown (el otro ve el final, o EPIPE); EPIPE con SIGPIPE salvo
+  con MSG_NOSIGNAL; si un extremo se va con lo suyo sin leer, el otro recibe
+  ECONNRESET una vez (como Linux).
+- **`memfd_create` es la memoria de /dev/shm sin nombre** (Disp64, etapa 8):
+  ya tenía `ftruncate`, `mmap MAP_SHARED` de verdad (las mismas físicas en
+  cada proceso, con su cuenta en Espacios) y soltarse cuando nadie la tiene
+  abierta ni puesta. memfd_create (319) hace una ya «borrada» (sin entrada en
+  la tabla de nombres: no cuenta para sus 64). Con sus **sellos**
+  (`F_ADD_SEALS`, `F_GET_SEALS`: SHRINK y GROW en ftruncate, WRITE y
+  FUTURE_WRITE en un mmap de escribir; sin MFD_ALLOW_SEALING, ya sellada con
+  F_SEAL_SEAL). Se pasa a otro proceso por SCM_RIGHTS como cualquier
+  descriptor.
+- **El cuelgue de la 0.11.3 en VirtualBox con 4 procesadores** («Despertar
+  en bucle», con la BIOS y con UEFI; con 1 procesador, bien): no ha salido en
+  QEMU en 290 arranques (KVM con 4 y 8 procesadores; con 4 procesadores en 1
+  o 2 núcleos del anfitrión, que es lo que hace VirtualBox en un equipo
+  cargado; PIIX sin HPET y sin x2APIC, como VirtualBox; y TCG). Lo que se ha
+  hecho, en vez de adivinar:
+  - **el vigilante** (Hilos64.vigila, desde el tic del procesador 0, que mira
+    a los demás, y del 1, que mira al 0, cada medio segundo): un procesador
+    en marcha cuyo tic no se mueve en 5 s se ha quedado con las
+    interrupciones quitadas; se le manda un NMI y Excep64 dice, en la
+    pantalla, «El vigilante: este procesador lleva 5 s sin atender su tic» y
+    la función y quién la ha llamado (antes, el sistema se quedaba quieto sin
+    decir nada). Uno ocioso con hilos en su cola 2 s seguidos sin cambiar de
+    hilo (un aviso de replanificar perdido): se dice entre paréntesis y se le
+    avisa otra vez. Y la hora del núcleo que va hacia atrás, también se dice.
+    Con `prueba=vigilante` (un hilo que quita las interrupciones y da
+    vueltas), en la batería;
+  - **despertar con límite**: `Hilos64.despierta` esperaba sin fin a que el
+    hilo despertado dejase su procesador; si en 5 s no lo deja, se para y lo
+    dice (el hilo y el procesador);
+  - **el HPET de 32 bits** se leía como si fuese de 64: a los 5 minutos (a
+    14,3 MHz) la hora volvía atrás y los que dormían (también el hilo que
+    pinta la pantalla) no despertaban. Ahora se suma como el reloj de ACPI.
+    `hpet32` en la línea de órdenes lo hace pasar por ahí (y pone el
+    contador a 4 s de dar la vuelta): en la batería, con 4 procesadores.
+  Lo que diga en VirtualBox el vigilante (o que ya no se cuelgue) dirá la
+  causa; la imagen va en `Pendientes/VirtualBox/Hispa-64-etapa-10c-arreglo/`.
+- **De la auditoría (sección 20, «lo que queda»)**: **H11** (FUTEX_WAKE
+  despertaba después de soltar el cerrojo del cubo: uno al que ya había
+  despertado su plazo podía volver, acabar y soltarse entre medias, y
+  `despierta` tocaba un hilo suelto; ahora con el cerrojo tomado, como
+  Sondeo64 y REQUEUE) y **H4** (el hilo que sale, si no es el último, deja el
+  espacio del programa y lo suyo del proceso antes de salir de la lista y
+  con el cerrojo; antes, entre medias, el último podía destruir el espacio
+  que aún tenía en su CR3 y soltar el proceso). Con su prueba de carrera
+  (MUNIX). H3 ya lo arregló la 10 c (`toma_fd`); H12 y H13, abajo.
+- **El menú Inicio** del escritorio: «Consola (salir a las órdenes)» (lo
+  que antes decía «Salir del escritorio»: deja el intérprete). Y `ayuda` de
+  ORDENES dice dónde guardar (la «/» es de solo leer: con «escritura en los
+  discos», la partición de pruebas del disco, `/sata0p2` en VirtualBox).
+- Hispa-64 **0.11.4** (uname: «etapa 10 d (AF_UNIX y memfd)»).
+
+### Qué hace
+
+| Archivo | Qué |
+|---|---|
+| `unix64.cas` | los sockets de Unix: socket, socketpair, bind, listen, connect, accept, send/recv y sus formas, SCM_RIGHTS y SCM_CREDENTIALS, las opciones, ioctl, poll |
+| `sistema.cas` | el reparto por la clase (`es_unix`), memfd_create (319), F_ADD_SEALS y F_GET_SEALS, unlink y stat de la ruta de un socket, readv/writev de una vez |
+| `procesos.cas` | `otro_fd_obj`; H4 en `sal_hilo` |
+| `disp64.cas` | `memfd_crea`, `sellos_shm`, los sellos en ftruncate y mmap |
+| `futex64.cas` | H11 |
+| `hilos64.cas`, `excep64.cas`, `porcpu64.cas` | el vigilante, despertar con límite |
+| `reloj64.cas` | el HPET de 32 bits; `hpet32` |
+| `prsmp64.cas` | `prueba=vigilante` |
+| `programas/musl/munix.c` | MUNIX: 76 pruebas (también en Linux: las mismas) |
+| `programas/cxx/mipc.cpp` | MIPC (C++23): dos procesos como los de Ladybird |
+| `programas/ventanas/ventanas.c`, `programas/ordenes.c` | la consola en el menú Inicio; dónde guardar en `ayuda` |
+
+Lo que dicen (q35, 4 procesadores, con KVM):
+
+```
+MUNIX: los sockets de Unix (AF_UNIX) y memfd_create; estático
+  socketpair de flujo, datagramas y SOCK_SEQPACKET: MSG_PEEK, MSG_TRUNC, FIONREAD, el final, EPIPE y SIGPIPE
+  O_NONBLOCK: EAGAIN al leer y con la cola llena (240 KB); poll y epoll (EPOLLIN, EPOLLRDHUP, EPOLLHUP)
+  bind a una ruta (stat: S_IFSOCK, EADDRINUSE, unlink), listen, connect, accept, SO_PEERCRED; abstracto y automático; sendto y recvfrom
+  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados
+  dos hilos: 10.000 mensajes de ida y vuelta en 1187 ms; 4 MB por un socket de flujo, la suma bien
+  carreras: 40 rondas de futex con plazo contra FUTEX_WAKE y 30 procesos que acaban con sus hilos saliendo a la vez
+MUNIX: todo bien (76 pruebas)
+MIPC: dos procesos que se hablan como los de Ladybird (C++23, 14.3.0)
+  posix_spawn con el socket en el 3 y SOCKET_TAKEOVER; mensajes de LibIPC con SCM_RIGHTS, desde un hilo que manda y un bucle con poll
+  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en 36 ms
+MIPC: todo bien (8 pruebas)
+```
+
+MIPC hace lo que hace Ladybird al arrancar WebContent: un socketpair de
+flujo, `posix_spawn` del otro con su extremo en el descriptor 3
+(`posix_spawn_file_actions_adddup2`) y `SOCKET_TAKEOVER=WebContent:3` en el
+entorno (LibCore); los mensajes con la forma de LibIPC (el largo, el número
+y lo suyo, con los descriptores por SCM_RIGHTS) mandados desde un hilo con su
+cola, su mutex y su condición (IPC::TransportSocket), y leídos en un bucle
+con poll del socket y de un eventfd (Core::EventLoop); dos mapas de bits de
+256 x 256 hechos con memfd (Core::AnonymousBuffer), pasados una vez, en los
+que el otro proceso pinta 60 cuadros por turno y dice su suma, que el
+primero mira en su memoria (la misma).
+
+### Cómo se ha probado
+
+- MUNIX y MIPC, en Linux (las mismas 76 y 8) y en Hispa-64 en cada arranque
+  con musl (`nucleo64/pruebas.sh`, etapa 7: por multiboot y por UEFI, con 1
+  y 4 procesadores y -cpu max); después, ni un socket de Unix (`mal` si
+  queda alguno), ni memoria compartida, ni memoria ni montón perdidos.
+- `prueba=vigilante` con 4 procesadores: el NMI, «El vigilante: ...», en
+  `PrSmp64.atascado` y quién la llamó; `hpet32` con 4 procesadores, el
+  contador dando la vuelta a los 4 s: todo en orden y el vigilante, callado.
+- El cuelgue de VirtualBox: 290 arranques sin él (arriba); las imágenes, por
+  UEFI desde el .vdi y por la BIOS desde el CD, con 4 procesadores: todo en
+  orden y el escritorio.
+- La batería: abajo (las cifras, al acabar).
+
+### Lo que queda (y más adelante)
+
+- **El navegador**: lo siguiente de la lista de la sección 20 (`readlink
+  /proc/self/exe` ya va; `pthread_setname_np`, `sched_getaffinity` con el
+  número de verdad), CMake y Ninja con el archivo de «toolchain» para el
+  compilador cruzado, las bibliotecas (Skia, libjpeg-turbo, libpng, libwebp,
+  woff2, simdutf, fast_float, SQLite, libxml2) y Ladybird sin ventana.
+- **Los sockets de Unix**: la ruta de bind en el disco de verdad (hoy, un
+  nombre del núcleo); el recolector de ciclos (un socket que viaja en su
+  propia cola no se suelta nunca: Linux tiene `unix_gc`); SO_PEERSEC y
+  SCM_PIDFD (no los pide Ladybird); read y write de un memfd (solo mmap).
+- **Un sitio donde escribir siempre**: `/tmp` en memoria (hoy, la
+  partición de pruebas con «escritura en los discos»).
+- **De la auditoría**: H12 (un hilo que migra a mitad de un aviso de
+  vaciar la TLB) y H13 (vfork: el hijo con sus regiones y el padre con las
+  suyas sobre las mismas tablas).
+- **VirtualBox**: lo que diga el vigilante en el equipo de Carlos.
