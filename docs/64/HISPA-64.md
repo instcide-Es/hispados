@@ -3949,10 +3949,25 @@ Windows y WSL). No se empieza todavía.
   con el cerrojo; antes, entre medias, el último podía destruir el espacio
   que aún tenía en su CR3 y soltar el proceso). Con su prueba de carrera
   (MUNIX). H3 ya lo arregló la 10 c (`toma_fd`); H12 y H13, abajo.
+- **`/tmp`, de escribir siempre** (lo pidió Carlos: `curl -o` en la «/» daba
+  «Read-only file system»): un disco en memoria (Discos64, la clase
+  `D_MEM`, «tmp»: 32 MB de sectores de 512) con su FAT16 hecha al arrancar
+  (8.179 cúmulos de 4 KB, 512 entradas en la raíz), que el VFS monta en
+  `/tmp` como cualquier volumen y por el que pasa la caché de bloques como
+  por los demás. Sus páginas, solo las que se escriben (leer lo no escrito da
+  ceros); lo guardado cuenta como suyo en las cuentas de la memoria de las
+  pruebas. Se pierde al apagar. `sintmp` lo quita.
+- **La plantilla de los registros de los programas** (los de x87, SSE y AVX
+  al empezar) se hacía con xsave sobre un bloque del montón sin poner a
+  cero: xsave no escribe los octetos 528 a 575 de la cabecera, y lo que
+  traía el bloque pasaba a cada programa nuevo; su xrstor daba #GP y el
+  núcleo se paraba en `pon_fpu` (con `sinpruebas` y xsave: KVM con -cpu
+  host, y en VirtualBox también). Ahora, a cero antes (como `nuevo_fpu`
+  desde la etapa 9).
 - **El menú Inicio** del escritorio: «Consola (salir a las órdenes)» (lo
   que antes decía «Salir del escritorio»: deja el intérprete). Y `ayuda` de
-  ORDENES dice dónde guardar (la «/» es de solo leer: con «escritura en los
-  discos», la partición de pruebas del disco, `/sata0p2` en VirtualBox).
+  ORDENES dice dónde guardar (`/tmp`, o, para que quede, con «escritura en
+  los discos», la partición de pruebas del disco, `/sata0p2` en VirtualBox).
 - Hispa-64 **0.11.4** (uname: «etapa 10 d (AF_UNIX y memfd)»).
 
 ### Qué hace
@@ -3967,7 +3982,9 @@ Windows y WSL). No se empieza todavía.
 | `hilos64.cas`, `excep64.cas`, `porcpu64.cas` | el vigilante, despertar con límite |
 | `reloj64.cas` | el HPET de 32 bits; `hpet32` |
 | `prsmp64.cas` | `prueba=vigilante` |
-| `programas/musl/munix.c` | MUNIX: 76 pruebas (también en Linux: las mismas) |
+| `discos64.cas`, `prdisc64.cas` | el disco en memoria de `/tmp` (`crea_tmp`, `mem_es`) |
+| `procesos.cas` (`prepara_procesos`) | la plantilla de los registros, a cero |
+| `programas/musl/munix.c` | MUNIX: 77 pruebas (también en Linux: las mismas) |
 | `programas/cxx/mipc.cpp` | MIPC (C++23): dos procesos como los de Ladybird |
 | `programas/ventanas/ventanas.c`, `programas/ordenes.c` | la consola en el menú Inicio; dónde guardar en `ayuda` |
 
@@ -3981,7 +3998,8 @@ MUNIX: los sockets de Unix (AF_UNIX) y memfd_create; estático
   SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados
   dos hilos: 10.000 mensajes de ida y vuelta en 1187 ms; 4 MB por un socket de flujo, la suma bien
   carreras: 40 rondas de futex con plazo contra FUTEX_WAKE y 30 procesos que acaban con sus hilos saliendo a la vez
-MUNIX: todo bien (76 pruebas)
+  /tmp: 100 KB escritos, leídos y borrados
+MUNIX: todo bien (77 pruebas)
 MIPC: dos procesos que se hablan como los de Ladybird (C++23, 14.3.0)
   posix_spawn con el socket en el 3 y SOCKET_TAKEOVER; mensajes de LibIPC con SCM_RIGHTS, desde un hilo que manda y un bucle con poll
   dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en 36 ms
@@ -4001,7 +4019,7 @@ primero mira en su memoria (la misma).
 
 ### Cómo se ha probado
 
-- MUNIX y MIPC, en Linux (las mismas 76 y 8) y en Hispa-64 en cada arranque
+- MUNIX y MIPC, en Linux (las mismas 77 y 8) y en Hispa-64 en cada arranque
   con musl (`nucleo64/pruebas.sh`, etapa 7: por multiboot y por UEFI, con 1
   y 4 procesadores y -cpu max); después, ni un socket de Unix (`mal` si
   queda alguno), ni memoria compartida, ni memoria ni montón perdidos.
@@ -4024,8 +4042,8 @@ primero mira en su memoria (la misma).
   nombre del núcleo); el recolector de ciclos (un socket que viaja en su
   propia cola no se suelta nunca: Linux tiene `unix_gc`); SO_PEERSEC y
   SCM_PIDFD (no los pide Ladybird); read y write de un memfd (solo mmap).
-- **Un sitio donde escribir siempre**: `/tmp` en memoria (hoy, la
-  partición de pruebas con «escritura en los discos»).
+- **`/tmp`**: devolver las páginas de lo que se borra (hoy se quedan hasta
+  apagar: FAT no dice qué cúmulos quedan libres al disco de abajo).
 - **De la auditoría**: H12 (un hilo que migra a mitad de un aviso de
   vaciar la TLB) y H13 (vfork: el hijo con sus regiones y el padre con las
   suyas sobre las mismas tablas).
