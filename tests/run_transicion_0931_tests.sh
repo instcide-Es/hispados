@@ -137,7 +137,10 @@ echo "-- 2) el ACTUALIZAR de la 0.9.30, con la lista firmada --"
       -netdev user,id=n0 -device $NIC,netdev=n0 > $T/l2 2>&1
 txt $T/l2
 part $T/l2.txt "=ACT=" "=FIN2=" > $T/s2
-check $T/s2 "$VER: actualizaciones firmadas."
+case "$VIEJA" in   # cada gama, su sección
+  *486*) check $T/s2 "Hispa-486 $VER: actualizaciones firmadas." ;;
+  *) check $T/s2 "Novedades $VER: actualizaciones firmadas." ;;
+esac
 check $T/s2 "Descargando el paquete"
 check $T/s2 "Actualizado a $VER"
 checkn $T/s2 "no es válido"
