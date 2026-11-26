@@ -77,6 +77,7 @@ módulo Procesos
     público constante R_ARCHIVO = 2             ; [etapa 7] (reg_ext) de un archivo
     público constante F_CONSOLA = 1             ; las clases de archivo abierto
     público constante F_ARCHIVO = 2             ; [etapa 5] uno del VFS (Vfs64.Abierto)
+    público constante MAX_APL = 32              ; [etapa 10 c] los cierres aplazados a la vez (toma_fd)
     público constante F_APARTADO = 98           ; [etapa 10 b] apartado mientras se abre lo suyo (aparta_fd)
     público constante PILA_PROG = 0x800000           ; 8 MB de pila
     público constante MÍNIMO = 0x10000          ; nada por debajo de 64 KB (el puntero nulo)
@@ -178,6 +179,16 @@ módulo Procesos
         cpu_u, cpu_s, hijos_u, hijos_s: nat64
         itv, itv_int: arreglo [2] de nat64
         itv_pend: nat64
+        ; [etapa 10 c] las llamadas que están usando cada descriptor (toma_fd y
+        ; deja_fd, con fd_cerrojo) y su generación (sube cada vez que el
+        ; número se cierra o se le pone otra cosa); y los aplazados: lo de un
+        ; descriptor cerrado mientras alguna llamada lo usaba, que se suelta
+        ; cuando acaba la última (fget y fput de Linux)
+        fd_uso: arreglo [MAX_FD] de nat32
+        fd_gen: arreglo [MAX_FD] de nat32
+        apl_n: nat64
+        apl_fd, apl_gen, apl_clase, apl_usos: arreglo [MAX_APL] de nat32
+        apl_obj: arreglo [MAX_APL] de nat64
     fin
 
     ; [etapa 7] lo que arranca un hilo nuevo (clone con CLONE_THREAD)
@@ -198,6 +209,7 @@ módulo Procesos
     público variable al_futex: nat64            ; [etapa 7] Futex64.despierta(p, dir, n) (CLONE_CHILD_CLEARTID)
     variable quietos: Espera                    ; [etapa 7] los que duermen hasta una señal (pause, sigsuspend, nanosleep)
     público variable señales_entregadas, hilos_creados: nat64
+    público variable cierres_aplazados: nat64   ; [etapa 10 c] los close que ha acabado deja_fd
     ; [etapa 6] la tabla de los procesos (los vivos y los zombis), para wait4,
     ; los huérfanos y Ctrl+C
     público constante MAX_PROC = 256
@@ -668,7 +680,13 @@ módulo Procesos
             p.fd_obj[i] := 0
             p.fd_cloexec[i] := 0
             p.fd_nobloq[i] := 0
+            p.fd_uso[i] := 0
             i := i + 1
+        fin
+        ; ([etapa 10 c] lo aplazado de llamadas que ya no acabarán)
+        mientras p.apl_n > 0 hacer
+            p.apl_n := p.apl_n - 1
+            cierra_fd_obj(p.apl_clase[nat32(p.apl_n)], p.apl_obj[nat32(p.apl_n)])
         fin
     fin
 
@@ -2048,6 +2066,7 @@ módulo Procesos
         fin
         q.h_cerrojo := 0
         q.fd_cerrojo := 0
+        q.apl_n := 0                    ; ([etapa 10 c] los aplazados son del padre)
         q.s_pend := 0
         q.saliendo := 0
         q.solo := 0
@@ -2281,6 +2300,7 @@ módulo Procesos
         i := 0
         mientras i < MAX_FD hacer
             ; ([etapa 10 b] lo que otro hilo del padre estaba abriendo, no)
+            q.fd_uso[i] := 0                ; ([etapa 10 c] las llamadas en curso son del padre)
             si q.fd_clase[i] = F_APARTADO entonces
                 q.fd_clase[i] := 0
                 q.fd_obj[i] := 0
@@ -2370,6 +2390,92 @@ módulo Procesos
     público función llena_fd(p: puntero a Proceso, fd: ent32, clase: nat32, obj: nat64)
         p.fd_obj[nat32(fd)] := obj               ; (en x86, dos escrituras no se adelantan una a otra)
         p.fd_clase[nat32(fd)] := clase
+    fin
+
+    ; [etapa 10 c] una llamada que va a usar el descriptor fd (read, write,
+    ; recv, accept, ioctl...): falso si no está abierto; gen, su generación.
+    ; Mientras dure, cerrarlo desde otro hilo (close, o dup2 encima) no
+    ; suelta lo suyo: queda aplazado (quita_fd) y lo suelta deja_fd al acabar
+    ; la última que lo usaba, como fget y fput de Linux (antes, un close a
+    ; mitad de un read soltaba el objeto debajo). El número queda libre en el
+    ; acto, como en Linux.
+    público función toma_fd(p: puntero a Proceso, fd: nat64, ref gen: nat32): bool
+        variable b: nat64
+        variable bien: bool
+        si fd >= MAX_FD entonces devolver falso fin
+        b := toma(dirección(p.fd_cerrojo))
+        bien := p.fd_clase[nat32(fd)] <> 0 y p.fd_clase[nat32(fd)] <> F_APARTADO
+        si bien entonces
+            p.fd_uso[nat32(fd)] := p.fd_uso[nat32(fd)] + 1
+            gen := p.fd_gen[nat32(fd)]
+        fin
+        suelta(dirección(p.fd_cerrojo), b)
+        devolver bien
+    fin
+
+    ; [etapa 10 c] acaba la llamada que usaba fd (de la generación gen): si
+    ; lo han cerrado entretanto y era la última, se suelta lo suyo ahora
+    público función deja_fd(p: puntero a Proceso, fd: nat64, gen: nat32)
+        variable b, ob_: nat64
+        variable c, k: nat32
+        c := 0
+        ob_ := 0
+        b := toma(dirección(p.fd_cerrojo))
+        si p.fd_gen[nat32(fd)] = gen entonces
+            si p.fd_uso[nat32(fd)] > 0 entonces p.fd_uso[nat32(fd)] := p.fd_uso[nat32(fd)] - 1 fin
+        sino
+            k := 0
+            mientras nat64(k) < p.apl_n hacer
+                si p.apl_fd[k] = nat32(fd) y p.apl_gen[k] = gen entonces
+                    p.apl_usos[k] := p.apl_usos[k] - 1
+                    si p.apl_usos[k] = 0 entonces
+                        c := p.apl_clase[k]
+                        ob_ := p.apl_obj[k]
+                        ; (el último, a su sitio)
+                        p.apl_n := p.apl_n - 1
+                        p.apl_fd[k] := p.apl_fd[nat32(p.apl_n)]
+                        p.apl_gen[k] := p.apl_gen[nat32(p.apl_n)]
+                        p.apl_clase[k] := p.apl_clase[nat32(p.apl_n)]
+                        p.apl_obj[k] := p.apl_obj[nat32(p.apl_n)]
+                        p.apl_usos[k] := p.apl_usos[nat32(p.apl_n)]
+                        cierres_aplazados := cierres_aplazados + 1
+                    fin
+                    romper
+                fin
+                k := k + 1
+            fin
+        fin
+        suelta(dirección(p.fd_cerrojo), b)
+        si c <> 0 entonces cierra_fd_obj(c, ob_) fin
+    fin
+
+    ; [etapa 10 c] (con fd_cerrojo tomado) vacía el número fd, que está
+    ; abierto: devuelve en c y ob_ lo que hay que soltar (c = 0: nada, lo
+    ; suelta la última llamada que lo usa); falso si no cabe otro aplazado
+    ; (quien llama cede el procesador y vuelve a probar)
+    público función quita_fd(p: puntero a Proceso, fd: nat32, ref c: nat32, ref ob_: nat64): bool
+        variable k: nat32
+        c := p.fd_clase[fd]
+        ob_ := p.fd_obj[fd]
+        si p.fd_uso[fd] > 0 entonces
+            si p.apl_n >= MAX_APL entonces devolver falso fin
+            k := nat32(p.apl_n)
+            p.apl_fd[k] := fd
+            p.apl_gen[k] := p.fd_gen[fd]
+            p.apl_clase[k] := c
+            p.apl_obj[k] := ob_
+            p.apl_usos[k] := p.fd_uso[fd]
+            p.apl_n := p.apl_n + 1
+            c := 0
+            ob_ := 0
+        fin
+        p.fd_uso[fd] := 0
+        p.fd_gen[fd] := p.fd_gen[fd] + 1
+        p.fd_clase[fd] := 0
+        p.fd_obj[fd] := 0
+        p.fd_nobloq[fd] := 0
+        p.fd_cloexec[fd] := 0
+        devolver cierto
     fin
 
     público función otro_fd(q: puntero a Proceso, i: nat32)

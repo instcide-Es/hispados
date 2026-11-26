@@ -7,7 +7,10 @@
  * pthread_cond_timedwait, y los registros de AVX de cada hilo intactos
  * aunque cambien de procesador. [etapa 10 b] Y 8 hilos que abren y cierran
  * descriptores a la vez (sockets, eventfd, tuberías, /etc/hosts): ninguno
- * repetido (antes, dos hilos se podían llevar el mismo). Estático (MHILOS) y
+ * repetido (antes, dos hilos se podían llevar el mismo). [etapa 10 c] Y
+ * cerrar una tubería mientras otro hilo está leyendo de ella: lo suyo no se
+ * suelta hasta que acaba el read (que lee lo que se escribe después), el
+ * número da EBADF y se puede usar enseguida (dup2), como en Linux. Estático (MHILOS) y
  * dinámico (MHILOSD). */
 #include "comun.h"
 #include <stdlib.h>
@@ -21,6 +24,8 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/eventfd.h>
+#include <signal.h>
+#include <string.h>
 
 #define N 8
 #define VUELTAS 2000
@@ -69,6 +74,24 @@ static void *descriptores(void *a)
 		suelta_fd(s, k);
 	}
 	return 0;
+}
+
+/* [etapa 10 c] un hilo que lee de una tubería que otro cierra a la vez */
+static int tl[2];
+static volatile long leído_r = -2;
+static char leído_b[8];
+static void *lector(void *a)
+{
+	(void)a;
+	leído_r = read(tl[0], leído_b, sizeof leído_b);
+	return 0;
+}
+
+static long ms_desde(struct timespec *t0)
+{
+	struct timespec t1;
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	return (t1.tv_sec - t0->tv_sec) * 1000 + (t1.tv_nsec - t0->tv_nsec) / 1000000;
 }
 
 static void *suma(void *a)
@@ -220,10 +243,45 @@ int main(void)
 	MIRA(j == ETIMEDOUT && total >= 40 && total < 1000, "pthread_cond_timedwait: ETIMEDOUT a su hora");
 	printf("  pthread_cond_timedwait de 50 ms: ETIMEDOUT en %ld ms\n", total);
 	/* [etapa 10 b] los descriptores, a la vez */
+	clock_gettime(CLOCK_MONOTONIC, &t0);
 	for (i = 0; i < N; i++) pthread_create(&h[i], 0, descriptores, (void *)i);
 	for (i = 0; i < N; i++) pthread_join(h[i], 0);
+	total = ms_desde(&t0);
 	MIRA(fd_repetidos == 0 && fd_fallos == 0 && fd_hechos == N * FD_VUELTAS * 5, "8 hilos que abren y cierran descriptores a la vez: ninguno repetido");
-	printf("  descriptores: 8 hilos abren y cierran a la vez %d (sockets, eventfd, tuberías y /etc/hosts): %d repetidos, %d fallos\n", fd_hechos, fd_repetidos, fd_fallos);
+	printf("  descriptores: 8 hilos abren y cierran a la vez %d (sockets, eventfd, tuberías y /etc/hosts): %d repetidos, %d fallos, en %ld ms\n", fd_hechos, fd_repetidos, fd_fallos, total);
+	/* [etapa 10 c] cerrar una tubería mientras otro hilo lee de ella */
+	{
+		int r_cierra, r_lee, e_lee, r_dup, e_dup, otro, r_esc, e_esc;
+		signal(SIGPIPE, SIG_IGN);
+		MIRA(pipe(tl) == 0, "la tubería del lector");
+		pthread_create(&s, 0, lector, 0);
+		usleep(100000);                         /* (el lector, ya dentro de read) */
+		r_cierra = close(tl[0]);
+		errno = 0;
+		r_lee = read(tl[0], leído_b, 1);
+		e_lee = errno;
+		otro = open("/etc/hosts", O_RDONLY);
+		errno = 0;
+		r_dup = dup2(otro, tl[0]);              /* (el número, libre ya: como en Linux) */
+		e_dup = errno;
+		usleep(20000);
+		MIRA(leído_r == -2, "el lector sigue esperando tras el close (y el dup2 sobre su número)");
+		MIRA(write(tl[1], "hola", 4) == 4, "lo escrito tras el close llega al lector");
+		pthread_join(s, 0);
+		errno = 0;
+		r_esc = write(tl[1], "x", 1);           /* (el lector, ya suelto: EPIPE) */
+		e_esc = errno;
+		MIRA(r_cierra == 0 && r_lee == -1 && e_lee == EBADF, "el descriptor cerrado da EBADF a las llamadas nuevas");
+		MIRA(r_dup == tl[0], "dup2 sobre el número cerrado vale enseguida");
+		(void)e_dup;
+		MIRA(leído_r == 4 && memcmp(leído_b, "hola", 4) == 0, "el read de antes del close acaba bien (4 octetos, «hola»)");
+		MIRA(r_esc == -1 && e_esc == EPIPE, "al acabar el read se suelta (escribir da EPIPE)");
+		{ char c1; MIRA(read(tl[0], &c1, 1) == 1, "y el número es ya lo del dup2 (/etc/hosts)"); }
+		close(tl[0]);
+		close(otro);
+		close(tl[1]);
+		printf("  cerrar mientras otro hilo lee: EBADF, dup2 encima, el read acaba con «%.4s» y luego EPIPE\n", leído_b);
+	}
 	/* AVX */
 	if (__builtin_cpu_supports("avx")) {
 		for (i = 0; i < N; i++) pthread_create(&h[i], 0, avx, (void *)i);

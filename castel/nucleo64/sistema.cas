@@ -106,6 +106,18 @@ módulo Sistema
         devolver p.fd_clase[nat32(fd)] <> 0 y p.fd_clase[nat32(fd)] <> F_APARTADO
     fin
 
+    ; [etapa 10 c] ¿la llamada n usa el descriptor de su primer argumento?
+    ; (Procesos.toma_fd: mientras dura, cerrarlo no suelta lo suyo)
+    función con_fd(n: nat64): bool
+        según n
+            caso 0, 1, 5, 8, 16, 17, 18, 19, 20, 32, 33, 292, 72, 74, 75, 77, 81, 217: devolver cierto
+            caso 42, 43, 288, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55: devolver cierto
+            caso 232, 281, 233, 286, 287: devolver cierto
+            caso 257, 258, 262, 263, 264, 267, 269: devolver cierto       ; (las *at: su carpeta, si es un descriptor)
+            si no: devolver falso
+        fin
+    fin
+
     ; ---- la consola [etapa 6: Tty64, que pasa lo de UTF-8 a la página 437] ----
     ; write a la consola: n octetos desde v (del programa), de 512 en 512
     función escribe_consola(p: puntero a Proceso, v: nat64, n: nat64): ent64
@@ -407,14 +419,19 @@ módulo Sistema
             suelta(dirección(p.fd_cerrojo), b)
             devolver EBADF
         fin
-        c := p.fd_clase[nat32(fd)]
-        ob_ := p.fd_obj[nat32(fd)]
-        p.fd_clase[nat32(fd)] := 0
-        p.fd_obj[nat32(fd)] := 0
-        p.fd_nobloq[nat32(fd)] := 0
-        p.fd_cloexec[nat32(fd)] := 0
+        ; ([etapa 10 c] si otro hilo está en una llamada con él, lo suelta
+        ; él al acabar: Procesos.quita_fd y deja_fd)
+        mientras no quita_fd(p, nat32(fd), c, ob_) hacer
+            suelta(dirección(p.fd_cerrojo), b)
+            cede()
+            b := toma(dirección(p.fd_cerrojo))
+            si no fd_bien(p, fd) entonces
+                suelta(dirección(p.fd_cerrojo), b)
+                devolver EBADF
+            fin
+        fin
         suelta(dirección(p.fd_cerrojo), b)
-        cierra_fd_obj(c, ob_)
+        si c <> 0 entonces cierra_fd_obj(c, ob_) fin
         devolver 0
     fin
 
@@ -1197,7 +1214,19 @@ módulo Sistema
     ; ---- [etapa 6] poll y select ----
     ; lo que está listo de fd de lo pedido en ev (las marcas de poll: POLLIN 1,
     ; POLLOUT 4, POLLRDNORM 0x40, POLLWRNORM 0x100; POLLNVAL 0x20 si no está abierto)
+    ; [etapa 10 c] con el descriptor tomado mientras se mira (otro hilo lo
+    ; puede cerrar a la vez: Procesos.toma_fd)
     función listo_de(p: puntero a Proceso, fd: ent64, ev: nat32): nat32
+        variable r, gen: nat32
+        si fd < 0 entonces devolver 0 fin
+        gen := 0
+        si no toma_fd(p, nat64(fd), gen) entonces devolver 0x20 fin
+        r := listo_de_(p, fd, ev)
+        deja_fd(p, nat64(fd), gen)
+        devolver r
+    fin
+
+    función listo_de_(p: puntero a Proceso, fd: ent64, ev: nat32): nat32
         si fd < 0 entonces devolver 0 fin
         si no fd_bien(p, nat64(fd)) entonces devolver 0x20 fin
         si p.fd_clase[nat32(fd)] = F_CONSOLA entonces
@@ -1783,6 +1812,8 @@ módulo Sistema
         variable h: puntero a Hilo
         variable n, a1, a2, a3, a4, a5, a6, lím, iret: nat64
         variable r: ent64
+        variable usa: bool
+        variable gen: nat32
         p := mío()
         h := actual()
         n := l64(m + 112)
@@ -1794,6 +1825,11 @@ módulo Sistema
         a6 := l64(m + 48)
         iret := 0
         suma_atómica(dirección(llamadas), 1)
+        ; [etapa 10 c] el descriptor, tomado mientras dura (si lo es: si no,
+        ; la llamada da su error como siempre)
+        usa := falso
+        gen := 0
+        si con_fd(n) entonces usa := toma_fd(p, a1, gen) fin
         según n
             caso 0: r := lee(p, a1, a2, a3, -1)
             caso 1: r := escribe(p, a1, a2, a3, -1)
@@ -2006,6 +2042,7 @@ módulo Sistema
                 si a5 <> 0 entonces r := EINVAL sino r := renombra_(p, ent64(a1), a2, ent64(a3), a4) fin
             si no: r := desconocida(p, n)
         fin
+        si usa entonces deja_fd(p, a1, gen) fin
         p64(m + 112, nat64(r))
         ; (las marcas_ que puede devolver sysret: las de las cuentas, con IF)
         p64(m + 136, (l64(m + 136) yb 0xCD5) ob 0x202)
