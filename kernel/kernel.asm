@@ -262,7 +262,7 @@ ISO_DL          equ 13              ; extensión, tamaño, unidad, último uso
 %assign HOFF HOFF + %2
 %endmacro
 HMA_SIG         equ 0x21534F44      ; primeros octetos de la HMA con el DOS dentro
-INIT_ORG        equ 0xF0A0          ; .init, al arrancar (ver «Reparto de KSEG al arrancar»)
+INIT_ORG        equ 0xF0C0          ; .init, al arrancar (ver «Reparto de KSEG al arrancar»)
         section .low
 start:
         jmp short .go
@@ -3899,7 +3899,11 @@ cfg_device_do:
         pop di
         pop es
         mov [dreq+0x16], al
+        mov eax, [dc_hdr]
+        mov [ld_hdr], eax
         call dev_call
+        mov eax, [ld_hdr]           ; (su INIT puede llamar a otro driver,
+        mov [dc_hdr], eax           ; como NE2000.DOS a PROTMAN$ por IOCTL)
         test word [dreq+3], 0x8000
         jnz .initerr
         ; memoria usada hasta la dirección de corte
@@ -8523,12 +8527,29 @@ walk:
         mov dl, 0x16
         call find_entry
         pop si
-        jc .nf
+        jc .dev
         test byte [fentry+11], 0x10
         jz .nf
         call dir_clus
         mov [w_dir], eax
         jmp .comp
+; \DEV\NOMBRE: como en MS-DOS, la carpeta «DEV» de la raíz (si no existe de
+; verdad) es la de los dispositivos: «\DEV\PROTMAN$» es PROTMAN$ (los
+; drivers NDIS 2 de Microsoft abren así el gestor de protocolos). Solo si lo
+; que sigue es el último trozo y es un dispositivo.
+.dev:
+        cmp si, npath+4             ; el primer trozo, de 3 letras...
+        jne .nf
+        cmp word [w_name], 'DE'     ; ...«DEV»
+        jne .nf
+        cmp byte [w_name+2], 'V'
+        jne .nf
+        mov di, w_name
+        call to11
+        cmp byte [si], 0
+        jne .nf
+        call check_device
+        jnc .nf
 .last:
         mov byte [w_has], 1
 .ok:
@@ -16184,12 +16205,16 @@ l_int15:
 
 ; salidas: el código llama aquí (CALL/JMP lejano a KSEG) y a la vuelta se
 ; comprueba A20 antes de volver a él
+; Como MS-DOS, la estrategia y la interrupción se llaman con DS = el segmento
+; del driver (y ES:BX en la petición): hay drivers que leen sus datos con DS
+; sin cargarlo (PROTMAN.DOS de NDIS 2)
 l_devcall:
+        mov ds, [cs:dc_far+2]
         call far [cs:dc_far]
         mov ax, KSEG
-        mov ds, ax
         mov es, ax
         mov bx, dreq
+        mov ds, [cs:dc_far+2]
         call far [cs:dc_far2]
         call a20_gate
         retf
@@ -16660,6 +16685,7 @@ inst_end    resw 1
 ext_tab     resb 9*4
 dreq        resb 32
 dreq_sav    resb 32
+ld_hdr      resd 1
 cfg_key     resb 16
 dpath       resb 84
 ipath       resb 84
@@ -16822,6 +16848,8 @@ low_end:
 ;   IMG_END = F040h, .init = 0F32h; INIT_ORG de EFC0h a F0A0h
 ;   MARGEN_IMG  = 32 octetos, MARGEN_INIT = 46 octetos (no queda más sitio:
 ;   lo próximo, adelgazar)
+;   27/11/2026 (drivers NDIS 2: \DEV\, DS del driver, dc_hdr tras INIT):
+;   INIT_ORG de F0A0h a F0C0h; ya no cabe nada más sin adelgazar
 ; Si una de las dos comprobaciones falla, se puede mover INIT_ORG (en
 ; múltiplos de 16) mientras la otra tenga sitio; si no lo tiene ninguna, hay
 ; que adelgazar el núcleo de verdad.
