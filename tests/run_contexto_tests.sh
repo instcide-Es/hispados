@@ -191,7 +191,11 @@ mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
   tecla o; sleep 1.5
   aparca
   shot f6
-  clic 756 13; sleep 1; tecla ret; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 1.5
+  # [0.9.31] el Bloc tiene texto sin guardar: «se perderán. ¿Continuar?»
+  # (auditoría 386, alto 6; antes Intro en «Salir» no preguntaba): Aceptar
+  shot salir_bloc
+  tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
   mon quit
 } | run 300

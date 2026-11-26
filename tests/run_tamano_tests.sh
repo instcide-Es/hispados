@@ -140,7 +140,11 @@ mcopy -o -i $T/f.img $T/CENTRO.INI ::HISPADOS/CENTRO.INI
   for i in 1 2 3 4 5; do clic 660 420; done
   aparca
   shot c3
-  clic 756 13; sleep 1; tecla ret; sleep 2.5
+  clic 756 13; sleep 1; tecla ret; sleep 1.5
+  # [0.9.31] el Bloc tiene texto sin guardar: «se perderán. ¿Continuar?»
+  # (auditoría 386, alto 6; antes Intro en «Salir» no preguntaba): Aceptar
+  shot salir_bloc
+  tecla ret; sleep 2.5
   send 'ECHO SIGUE-VIVO'
   mon quit
 } | run 240
@@ -196,6 +200,8 @@ chk $T/c1.ppm titulo 150 90 activa "Bloc de notas - (sin nombre)" texto 156 138 
 chk $T/c2.ppm texto 164 138 0 9 fina "bcdefghi" px 200 420 6 "Inicio: el pulgar, a la izquierda" \
   px 640 420 15 "Inicio: la pista, a la derecha"
 chk $T/c3.ppm texto 156 138 0 9 fina "klmnopqr" px 200 420 15 "cinco flechas: el pulgar se ha movido"
+# -- [0.9.31] al salir con el Bloc sin guardar, se pregunta (alto 6) --
+chk $T/salir_bloc.ppm titulo 206 234 activa "Salir de Hispa Ventanas"
 check "SIGUE-VIVO"
 checkn "HSPDPMI: excepción"
 n=$(grep -c "Hispa Ventanas ha terminado." $T/log.txt)
