@@ -314,7 +314,7 @@ módulo Entradas
             jz E64_arreglo_mal
             call rax
         E64_arreglo_mal:
-            ud2
+            db 0x0F, 0x0B               ; ud2 (sin al_salida_mala: no debe pasar)
         ; ---- una entrada por vector ----
         E64_v0:
             push rax
