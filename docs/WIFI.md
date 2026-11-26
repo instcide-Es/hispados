@@ -591,6 +591,18 @@ Lo que hace Hispa-Pentium (rama hpmini-radio):
   mentira con `WIFISIM.TXT` «RFKILL=n» y la WMI de mentira
   `tests/acpi/hpwmi-qemu.asl`) y 4 sexies (`build/acpi_sim -hpradio` con el
   AML de verdad del HP Mini, `tests/acpi/hp-mini-5103/`).
+- **Probado en el HP Mini 2 de verdad (26/11/2026)**: RADIOHP.TXT dice al
+  arrancar «radio 0: Wi-Fi 14E4:4727, estado 06h: apagada... APAGADA CON LA
+  TECLA DEL WI-FI» (la BIOS no la deja encender por programa: es la tecla,
+  por hardware); Carlos pulsó F12, se encendió la luz azul y encontró las
+  redes. En WIFI.LOG, al montar el núcleo 802.11 (812h), salía «bus0:
+  Timeout waiting for register 0x0804!»: es `bcma_core_disable`, que espera
+  a que RESET_ST (0x0804) baje a 0 antes de poner el núcleo en reset; el
+  núcleo lo había dejado en marcha la BIOS con operaciones a medias (con la
+  radio apagada por la patilla, más). Linux da el mismo aviso en estos
+  equipos (el código es el de bcma, igual) y sigue: el reset lo corta. Desde
+  la 0.8.13 WIFI.LOG lo dice como aviso en español («aviso (inocuo, como en
+  Linux): el núcleo 812 tenía operaciones a medias...»), no como error.
 
 ### MacBook Air 2012 (A1466), BCM43224 de Apple (106B:00E9)
 

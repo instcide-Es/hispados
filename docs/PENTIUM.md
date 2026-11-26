@@ -4721,7 +4721,9 @@ chacha20-poly1305: sección 14 quinquies) con otra forma de entrar.
 
 **Para Carlos, en 4 pasos:**
 
-1. Menú Inicio › Sistema › **«Dejar entrar a Claude»** (o su icono del tapiz).
+1. Menú Inicio › Sistema › **«Dejar entrar a Claude»** (o su icono del tapiz;
+   desde la base 0.8.13, también Configuración › Red › «Dejar entrar a
+   Claude...»).
    Si el usuario no es administrador, pide el nombre y la contraseña de uno.
 2. La ventana enseña un **código de 6 cifras** grande, lo que le queda (60 s),
    la IP del equipo, la de Tailscale si la hay, el puerto (2323) y la huella
@@ -4776,7 +4778,7 @@ sabe también hablar con la CONSOLA de 386/486 (`consola486`).
   llegue hasta el EOF (en sshd.c, sin el intérprete; los permisos, los del
   administrador).
 - **El registro**: `C:\HISPA\REMOTA.LOG` (la regla de permisos.cas, del núcleo
-  de la base siguiente; con la base 0.8.12, que no la tiene, va a
+  de la base 0.8.13; con la base 0.8.12, que no la tiene, va a
   `C:\HISPA\SSH\REMOTA.LOG`): cuándo se abre y se cierra, quién entra (el
   nombre, la IP y el cliente), lo que hace, cuánto está, los códigos malos, los
   caducados y los echados. Las cuatro últimas cosas se ven en la ventana.
@@ -4837,7 +4839,10 @@ ventana.
 `ssh` 0.9 (SSHD.BIN con la consola remota y `\HISPA\MENU\REMOTA.MNU`, pide
 `red >= 0.8.12.1`) y `red` 0.8.12.1 (el cortafuegos con el 2323). Los dos son
 del sistema: llegan con «Actualizar todo». La regla de REMOTA.LOG en
-`\HISPA` (permisos.cas) va en el núcleo y saldrá con la base siguiente.
+`\HISPA` (permisos.cas) va en el núcleo: sale con la base 0.8.13, que trae
+también el botón **«Dejar entrar a Claude...»** en Configuración › Red (el
+Panel de control, PANEL.BIN: lanza `SSHD /REMOTA`, como el acceso del menú
+Inicio; sin el paquete `ssh` 0.9 lo dice).
 
 ## 14 bis. Hispa-Pentium se compila a sí mismo (CASTEL32)
 
