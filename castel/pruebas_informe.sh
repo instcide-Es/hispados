@@ -159,7 +159,7 @@ PY
   tr -d '\r' < $Y/a.sal > $Y/a.txt
   S=$Y/a.txt
   mira "entra Biblio2 (un usuario normal) y DISPOSIT /ENVIAR /SI enseña lo que se va a mandar: la versión y los paquetes, el equipo (SMBIOS), el procesador, lo que falla con su ficha y sus líneas de los registros, y la lista entera" \
-    "^Entra Biblio2 (sin contraseña)\.$" "^==== Lo que se va a mandar (exactamente esto) ====$" "^Hispa-Pentium: informe de los dispositivos que fallan$" "^Hispa-Pentium: 0\.8\.12 (instalado en el disco)$" \
+    "^Entra Biblio2 (sin contraseña)\.$" "^==== Lo que se va a mandar (exactamente esto) ====$" "^Hispa-Pentium: informe de los dispositivos que fallan$" "^Hispa-Pentium: ${VERSION_BASE//./\\.} (instalado en el disco)$" \
     "^Paquetes: base 0\.8\.12, equipo 0\.9\.6$" "^Equipo (SMBIOS; sin el número de serie ni el UUID):$" "^  Fabricante: Hispa-Pruebas$" "^  Modelo: Portatil-X1$" "^  Familia: Familia-X$" \
     "^  Placa: Placas-SA PL-9 " "^  BIOS: BIOS-SA, versión 2\.3, del 01/02/2020$" "^Procesador: " "^Resumen: [0-9]* dispositivos; " "^== Lo que falla: [1-9][0-9]* ==$" \
     "^-- \[!\]  QEMU USB Tablet  \[0627:0001\]$" "^       Controlador intentado: ninguno (Hispa-Pentium no tiene uno para él)$" "^       Identificador: USB 0627:0001$" \

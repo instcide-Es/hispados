@@ -32,13 +32,21 @@ EFI_PLAT=${EFI_PLAT# }
 [ -n "${SIN_UEFI:-}" ] && EFI_PLAT=      # (para las pruebas: la imagen de antes, solo BIOS)
 EFI_MODULOS="normal configfile part_msdos part_gpt fat iso9660 multiboot2 efi_gop efi_uga video_fb videoinfo read echo test loadenv search search_fs_uuid sleep ls cat reboot halt efifwsetup lsmmap lspci lsacpi lsefisystab cpuid"
 
+# (0.8.13) los que haya de EFI_MODULOS: el GRUB de Ubuntu 26.04 ya no trae
+# efi_uga (la pantalla UGA de los Mac viejos); sin él, grub-mkimage fallaba y
+# con él el GRUB.CFG lo pide con «insmod efi_uga», que, si no está, no pasa nada
+efi_modulos() {
+  local m
+  for m in $EFI_MODULOS; do [ -f /usr/lib/grub/$1/$m.mod ] && printf '%s ' $m; done
+}
+
 haz_efi() {
   local d=$1/EFI/BOOT p n
   mkdir -p "$d"
   for p in $EFI_PLAT; do
     case $p in x86_64-efi) n=BOOTX64.EFI ;; i386-efi) n=BOOTIA32.EFI ;; esac
     # shellcheck disable=SC2086
-    grub-mkimage -O $p -o "$d/$n" -p /boot/grub $EFI_MODULOS || return 1
+    grub-mkimage -O $p -o "$d/$n" -p /boot/grub $(efi_modulos $p) || return 1
   done
 }
 
@@ -65,7 +73,7 @@ instala_efi() {
   for p in $EFI_PLAT; do
     case $p in x86_64-efi) n=BOOTX64.EFI ;; i386-efi) n=BOOTIA32.EFI ;; esac
     # shellcheck disable=SC2086
-    grub-mkimage -O $p -o "$1/EFI/$n" -p /HISPA -c "$1/EFI/inicio.cfg" $EFI_MODULOS || return 1
+    grub-mkimage -O $p -o "$1/EFI/$n" -p /HISPA -c "$1/EFI/inicio.cfg" $(efi_modulos $p) || return 1
     INSTALA="$INSTALA  module /INSTALA/EFI/$n $n
 "
     printf '%s=EFI\\BOOT\r\n' $n >> "$1/CARPETAS.TXT"
