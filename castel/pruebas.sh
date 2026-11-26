@@ -5912,6 +5912,72 @@ mira "(SIN-ADMIN) y REDWIFI /ESTADO (lo mismo que la ventana): qué tarjeta no s
   "^No se ha podido usar la tarjeta Broadcom 14E4:4727\.$" "^  El diagnóstico está en [A-Z]:.WIFI.LOG: páseselo a quien le ayude\.$"
 if saca $Wf/k5.img WIFI.LOG $Wf/k5.log && grep -aq "FIN DEL DIAGN" $Wf/k5.log && ! grep -aq "clave de prueba" $Wf/k5.log; then ok "(SIN-ADMIN) y WIFI.LOG, en el disco, con el diagnóstico (y sin contraseñas)"
 else ko "(SIN-ADMIN) WIFI.LOG no lleva el diagnóstico"; fi
+# 4 quinquies. (HPRADIO) el HP Mini 5103 n.º 2: la BCM4313 con la radio APAGADA
+# por la patilla W_DISABLE# de la tarjeta (la tecla del Wi-Fi; WIFISIM.TXT
+# «RFKILL=14»: las 14 primeras miradas al bit RFD de phydebug), con ACPI.BIN y
+# la WMI de HP de mentira (tests/acpi/hpwmi-qemu.aml: el Wi-Fi apagado «por
+# programa»). ACPI.BIN pide a la BIOS que lo encienda (consulta 1Bh, como
+# hp-wmi de Linux); WIFI.BIN lo copia a WIFI.LOG («HP:»), dice en la ventana
+# que se pulse la tecla, mira la patilla cada segundo y, al soltarse, enciende
+# la radio sin reiniciar ni volver a cargar nada, y conecta
+if bash $AQUI/../acpi/pentium/hacer.sh $Wf/ACPI.BIN > $Wf/acpi_hacer.txt 2>&1; then
+cp $Wf/d.img $Wf/k6.img
+printf 'RFKILL=14\r\n' > $Wf/WIFISIM.TXT
+mcopy -o -i $Wf/k6.img $Wf/WIFISIM4313.BIN ::WIFI.BIN && mcopy -o -i $Wf/k6.img $Wf/RED.INI :: && mcopy -o -i $Wf/k6.img $Wf/WIFISIM.TXT :: \
+  && mcopy -o -i $Wf/k6.img $Wf/ACPI.BIN ::    # (con disco, el núcleo lanza el ACPI.BIN de C:)
+MEMORIA=64 ESCRIBE=1 DISCO=$Wf/k6.img ARRANQUE=ordenes MODULOS=$Wf/ACPI.BIN QEMU_MAS="-acpitable file=$AQUI/../tests/acpi/hpwmi-qemu.aml" \
+  $AQUI/nucleo32/probar.sh "" ":pausa 4" "redwifi /estado" ":pausa 3" "redwifi /estado" ":hasta 40 1 se enciende la radio" ":pausa 6" "redwifi /estado" \
+  "redwifi /conectar HispaPrueba" "clave de prueba" ":pausa 2" "ping -n 3 192.168.77.1" ":pausa 4" > $Wf/k6.sal 2>&1
+tr -d '\r' < $Wf/k6.sal > $Wf/k6.txt
+S=$Wf/k6.txt
+mira "(HPRADIO) ACPI.BIN encuentra la WMI de HP (PNP0C14, el GUID de la BIOS de HP, WMAA) y lee la tabla de las radios: el Wi-Fi (14E4:4727) apagado por programa" \
+  "^ACPI: (HPRADIO) WMI de HP (GUID 5FB7F034-...-3D44E2C707E4) en WMAA" "^ACPI: (HPRADIO) al arrancar: la BIOS dice 2 radios" \
+  "^ACPI: (HPRADIO)   radio 0: Wi-Fi, bus 1, 14E4:4727 (subsistema 103C:1483), numero 0, estado 0Ch: apagada, APAGADA POR PROGRAMA, la BIOS la deja, la tecla la deja$" \
+  "^ACPI: (HPRADIO)   radio 1: Bluetooth, .*estado 0Fh: ENCENDIDA"
+mira "(HPRADIO) y le pide a la BIOS que lo encienda (1Bh, escribir 01 00 00 01), como «rfkill unblock» con hp-wmi: la BIOS lo enciende" \
+  "^ACPI: (HPRADIO) el Wi-Fi esta apagado por programa (le falta el 02h): se pide a la BIOS que lo encienda (consulta 1Bh, escribir 01 00 00 01)$" \
+  "^ACPI: (HPRADIO)   radio 0: Wi-Fi, .*estado 0Fh: ENCENDIDA, el sistema la deja" "^ACPI: (HPRADIO) la BIOS lo ha encendido (por programa)$"
+mira "(HPRADIO) WIFI.BIN: la radio, apagada por la patilla W_DISABLE#: no se rinde (el controlador se queda montado) y dice lo que intenta" \
+  "DE PRUEBAS: la patilla W_DISABLE# de la tarjeta, activa" "^wifi: Radio (al encender): bit RFD de phydebug = 1" \
+  "apagada por la patilla W_DISABLE# de la tarjeta (-10)$" "^wifi: Lo que se intenta: (1) en los HP, ACPI.BIN pide a la BIOS"
+mira "(HPRADIO) y copia lo de ACPI.BIN (RADIOHP.TXT) a WIFI.LOG, con «HP:» delante" "^wifi: HP: WMI de HP (GUID 5FB7F034" "^wifi: HP: la BIOS lo ha encendido (por programa)$"
+mira "(HPRADIO) la ventana (REDWIFI /ESTADO) dice que se pulse la tecla del Wi-Fi, no «No se ha podido usar la tarjeta»" \
+  "pulse la tecla del Wi-Fi del equipo (la de la antena)\.$"
+mira "(HPRADIO) al soltarse la patilla (la tecla), la radio se enciende sola, sin reiniciar: PHY LCN, calibraciones, y busca" \
+  "wifi: La patilla W_DISABLE# dice ahora ENCENDIDA (a los [0-9]* s): se enciende la radio$" "^wifi: Radio (al soltarse): bit RFD de phydebug = 0 (encendida)" \
+  "^wifi: PASO 3 de 3 hecho: radio en marcha" "^wifi: El Wi-Fi, en marcha despu"
+mira "(HPRADIO) y con ella: WPA2, DHCP y tres PING sin perder ninguno" "^wifi: 802\.11: CONECTADO a «HispaPrueba»$" \
+  "red: DHCP: IP 192\.168\.77\.10" "^    Paquetes: enviados = 3, recibidos = 3, perdidos = 0"
+if grep -q "No se ha podido usar la tarjeta" $S; then ko "(HPRADIO) la ventana ha dicho «No se ha podido usar la tarjeta» con la radio solo apagada"
+else ok "(HPRADIO) ni una vez «No se ha podido usar la tarjeta» (la radio solo estaba apagada)"; fi
+if saca $Wf/k6.img WIFI.LOG $Wf/k6.log && grep -aq "HP: WMI de HP" $Wf/k6.log && grep -aq "dice ahora ENCENDIDA" $Wf/k6.log && grep -aq "patilla W_DISABLE# de la tarjeta" $Wf/k6.log; then
+  ok "(HPRADIO) y WIFI.LOG, en el disco, con lo de la BIOS de HP, la patilla y cuándo se ha encendido"
+else ko "(HPRADIO) WIFI.LOG no lleva lo de la radio apagada"; fi
+else ko "(HPRADIO) acpi/pentium/hacer.sh no hace ACPI.BIN: $(tail -n 1 $Wf/acpi_hacer.txt)"; fi
+# 4 sexies. (HPRADIO) lo mismo de ACPI.BIN contra el AML de VERDAD del HP Mini
+# 5103 (sus tablas, tests/acpi/hp-mini-5103/; build/acpi_sim): \_SB.WMID.WMAA
+# -> WHCM -> WGWS (la tabla de las radios en la memoria de la BIOS, WLDA:
+# aquí, la que se pone con -m) y, para encender, WSWS (la llamada a la BIOS:
+# SMI EA75h por el puerto B2h, que en el simulado no hace nada)
+H=$AQUI/../tests/acpi/hp-mini-5103
+WL=7D8F4E1B   # WLDA (HPD2 + 3)
+pk() { local d=$1; shift; for v in "$@"; do printf -- '-m %X %s ' $((0x$WL + d)) $v; d=$((d + 1)); done; }
+if make -s -C $AQUI/.. build/acpi_sim > $Wf/acpisim_make.txt 2>&1; then
+  # shellcheck disable=SC2046
+  ( cd $AQUI/.. && timeout 120 build/acpi_sim -n 1 -o 38 -osi 0 $(for f in $H/*.BIN; do printf -- '-t %s ' $f; done) -e $H/escenario.txt \
+      $(pk 7 01) $(pk 16 00 01 E4 14 27 47 3C 10 83 14 00 0C) -hpradio ) 2>&1 | tr -d '\r' > $Wf/hpsim.txt
+  S=$Wf/hpsim.txt
+  mira "(HPRADIO) con el AML de verdad del HP Mini 5103: la WMI de HP es \\_SB.WMID, WMAA, y la tabla de las radios (WGWS/WLDA) se lee" \
+    "^ACPI: (HPRADIO) WMI de HP (GUID 5FB7F034-...-3D44E2C707E4) en WMAA" "^ACPI: (HPRADIO) al arrancar: la BIOS dice 1 radios (128 octetos)$" \
+    "^ACPI: (HPRADIO)   radio 0: Wi-Fi, bus 1, 14E4:4727 (subsistema 103C:1483), numero 0, estado 0Ch"
+  # (la BIOS simulada no tiene SMM: la SMI EA75h no cambia EBX, que WFDA
+  # devuelve como código: 2, el que le puso SSMI; en el equipo lo pone la BIOS)
+  mira "(HPRADIO) y pedir que encienda el Wi-Fi pasa por WSWS (SSMI EA75h, WFDA) sin errores de ACPICA; la BIOS simulada (sin SMM) no hace nada" \
+    "^ACPI: (HPRADIO) el Wi-Fi esta apagado por programa" "^ACPI: (HPRADIO) WMAA (consulta 1Bh, orden 2): la BIOS dice 2 " \
+    "^ACPI: (HPRADIO) despues de pedirlo: la BIOS dice 1 radios" "^ACPI: (HPRADIO) la BIOS NO lo ha encendido$" "ACPICA: 0 avisos o errores"
+  if grep -q "AE_\(AML\|NOT\|BAD\|ERROR\|TYPE\)\|ACPI Error\|ACPI Exception\|orden 1): la BIOS dice" $S; then ko "(HPRADIO) ACPICA se queja con el AML del HP Mini:"; grep "AE_\|ACPI Error\|ACPI Exception\|la BIOS dice [0-9]* (" $S | head -5 | sed 's/^/        /'
+  else ok "(HPRADIO) ni un error de ACPICA ni de la BIOS con el AML del HP Mini"; fi
+else ko "(HPRADIO) no se hace build/acpi_sim: $(tail -n 2 $Wf/acpisim_make.txt)"; fi
 # 4 bis. (seguridad) una red ABIERTA falsa con el nombre de la WPA2 (WifiSimulada=GEMELA:
 # en el canal 1, se ve antes): se conecta a la WPA2, la lista enseña las dos
 # por separado, la abierta no se usa ni rebaja la recordada, y al arrancar

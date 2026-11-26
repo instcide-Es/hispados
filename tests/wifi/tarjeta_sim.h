@@ -9,5 +9,6 @@ extern u32 tsim_lcn_canales;	/* (BCM4313) los canales que ha programado el PHY L
 extern u32 tsim_lcn_cal[4];	/* (BCM4313) esperas de calibración: TX IQ/LO, IQ, RCAL, temperatura */
 extern int tsim_canal;		/* el canal en que está la radio (lo dice quien la lleva; en la BCM4313, el
 				 * que programa el PHY LCN: lo pone el modelo) */
+extern int tsim_rfd;		/* (HPRADIO) las miradas al bit RFD de phydebug que dirán «apagada» */
 extern u32 tsim_tx, tsim_rx, tsim_tx_malas, tsim_accesos;
 #endif

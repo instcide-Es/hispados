@@ -34,6 +34,8 @@
 #include "../../castel/nucleo32/termo/termo_acpi.h"	/* (TERMO) */
 
 int tarea_quieta(void);
+void hp_radio_borra(void);	/* (HPRADIO) hpradio.c */
+void hp_radio(int solo_ver);
 u32 mq_mide_tsc(void);
 extern u32 mq_puestos;
 
@@ -1127,6 +1129,9 @@ int servicio_principal(void)
 		mq_traza = al_archivo && !tiene(args, "acpisintraza");	/* (TERMO) \ACPIESC.TXT */
 	}
 	detalle = tiene(args, "acpidetalle") != 0;
+	/* (HPRADIO) RADIOHP.TXT del arranque de antes, fuera */
+	if (!tiene(args, "sinhpradio"))
+		hp_radio_borra();
 	if ((p = tiene(args, "acpicada=")) != 0)
 		for (cada = 0; *p >= '0' && *p <= '9'; p++)
 			cada = cada * 10 + *p - '0';
@@ -1178,8 +1183,12 @@ int servicio_principal(void)
 		n = nucleo_llamada(LL_PASO, 0);
 		if (!preparado && tarea_quieta()) {
 			preparado = 1;
-			if (apm.fase != FASE_ERROR || mq_rsdp())
+			if (apm.fase != FASE_ERROR || mq_rsdp()) {
 				prepara_energia();
+				/* (HPRADIO) los HP: el Wi-Fi, encendido por la BIOS (WMI 1Bh) */
+				if (!tiene(args, "sinhpradio"))
+					hp_radio(tiene(args, "hpradiosolover") != 0);
+			}
 			reg("ACPI: SMBIOS en %08Xh\n", mq_smbios());	/* (UEFI) */
 			reg("ACPI: el núcleo ha puesto a la vista %u KB de memoria física\n", mq_puestos >> 10);
 			/* (I2CHID) los touchpads HID sobre I2C, para el núcleo (llamada 159) */

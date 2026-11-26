@@ -628,6 +628,69 @@ static void brcm_lcn_resumen(void)
 	       c->txiqlocal_fi0, c->txiqlocal_fq0, (s16)c->rxiqcal_coeff_a0, (s16)c->rxiqcal_coeff_b0);
 }
 
+/* (HPRADIO) ¿la radio está apagada «por hardware»? Lo mismo que mira
+ * brcmsmac (brcms_c_check_radio_disabled: el bit RFD, 1 << 16, del registro
+ * phydebug, 158h, del núcleo 802.11), que es la patilla RF_DISABLE del chip:
+ * en una tarjeta Mini PCI Express, la W_DISABLE# (la 20) del conector, que
+ * mueve el equipo (en los HP, la BIOS, con la tecla del Wi-Fi). Lo que
+ * Linux mira cada segundo mientras está apagada (rfkill_poll). 1 apagada,
+ * 0 encendida, -1 sin tarjeta montada. */
+int brcm_radio_apagada(void)
+{
+	struct brcms_info *wl;
+
+	if (!equipo)
+		return -1;
+	wl = equipo->priv;
+	return brcms_c_check_radio_disabled(wl->wlc) ? 1 : 0;
+}
+
+/* (HPRADIO) para WIFI.LOG: el bit RFD y las patillas GPIO del chip (por si
+ * en alguna placa el apagado llega por una de ellas, y para comparar los
+ * dos HP Mini), sin tocar nada */
+void brcm_mira_patilla(const char *cuando)
+{
+	struct brcms_info *wl;
+	struct bcma_drv_cc *cc;
+	int a;
+
+	if (!equipo)
+		return;
+	wl = equipo->priv;
+	a = brcms_c_check_radio_disabled(wl->wlc);
+	cc = &wl->wlc->hw->d11core->bus->drv_cc;
+	hl_log(2, "Radio (%s): bit RFD de phydebug = %d (%s); GPIO del chip: entrada %08X, salida %08X, salidas activas %08X\n",
+	       cuando, a, a ? "la patilla W_DISABLE# de la tarjeta dice APAGADA" : "encendida",
+	       bcma_cc_read32(cc, BCMA_CC_GPIOIN), bcma_cc_read32(cc, BCMA_CC_GPIOOUT), bcma_cc_read32(cc, BCMA_CC_GPIOOUTEN));
+}
+
+/* (HPRADIO) la luz del Wi-Fi: en los HP (el Mini 5103) la enciende la
+ * tarjeta, por una de sus patillas GPIO, la que dice la SPROM (ledbh0-3: el
+ * comportamiento 3 es «la radio», con 80h, encendida a nivel bajo), como
+ * brcms_led_register de Linux (led.c, con el GPIO de bcma): sin esto, la
+ * luz se queda naranja o roja aunque la radio vaya. Solo si la SPROM la dice. */
+static void brcm_luz(int encendida)
+{
+	struct brcms_info *wl = equipo->priv;
+	struct bcma_bus *bus = wl->wlc->hw->d11core->bus;
+	const u8 leds[4] = { bus->sprom.gpio0, bus->sprom.gpio1, bus->sprom.gpio2, bus->sprom.gpio3 };
+	int i;
+
+	for (i = 0; i < 4; i++)
+		if (leds[i] != 0xff && (leds[i] & 0x7f) == 3)
+			break;
+	if (i == 4) {
+		hl_log(2, "Luz del Wi-Fi: la SPROM no dice que ninguna patilla GPIO de la tarjeta lleve la luz de la radio (ledbh0-3 = %02X %02X %02X %02X): no se toca\n",
+		       leds[0], leds[1], leds[2], leds[3]);
+		return;
+	}
+	bcma_chipco_gpio_control(&bus->drv_cc, BIT(i), 0);
+	bcma_chipco_gpio_outen(&bus->drv_cc, BIT(i), BIT(i));
+	bcma_chipco_gpio_out(&bus->drv_cc, BIT(i), (!!encendida ^ !!(leds[i] & 0x80)) ? BIT(i) : 0);
+	hl_log(2, "Luz del Wi-Fi: la de la patilla GPIO %d de la tarjeta (ledbh%d = %02X%s), %s\n", i, i, leds[i],
+	       leds[i] & 0x80 ? ", a nivel bajo" : "", encendida ? "ENCENDIDA (blanca o azul)" : "apagada");
+}
+
 /* Paso 3: encender (microcódigo, PHY y radio), modo estación, canal 1. */
 int brcm_enciende(void)
 {
@@ -648,6 +711,7 @@ int brcm_enciende(void)
 	equipo->conf.long_frame_max_tx_count = 4;
 	err = equipo->ops->start(equipo);
 	if (err == -ERFKILL) {
+		brcm_mira_patilla("al encender");
 		hl_log(0, "la radio está APAGADA por el interruptor o el botón del Wi-Fi del equipo: enciéndalo y vuelva a cargar HSPWIFI\n");
 		return -10;
 	}
@@ -685,6 +749,7 @@ int brcm_enciende(void)
 		       wl->wlc->ucode_rev >> 16, wl->wlc->ucode_rev & 0xffff, equipo->conf.power_level);
 	}
 	brcm_lcn_resumen();
+	brcm_luz(1);
 	hl_log(2, "Radio encendida en el canal 1\n");
 	return 0;
 }

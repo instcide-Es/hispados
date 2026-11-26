@@ -57,6 +57,11 @@
 # (RTL8723BS) Con PRUEBA_WIFI_SDIO=1, la del Wi-Fi por SDIO de las tabletas: sus
 # tres entradas primero (sin ACPI, con ACPI —aprende \SDIO.TXT— y las órdenes)
 # y un RED.INI con Registro=SI (RED.LOG) y Preferir=WIFI.
+# (HPRADIO) Con PRUEBA_WIFI_RADIO=1, la del Wi-Fi con la radio apagada por la
+# tecla (el HP Mini 5103 n.º 2): sus tres entradas primero (el escritorio con
+# ACPI, que pide a la BIOS de HP que encienda el Wi-Fi; las órdenes; y solo
+# mirar, «hpradiosolover»), todas con «fichaequipo» (las tablas ACPI, sin MSDM
+# ni SLIC, en X:\EQUIPO), y un RED.INI con Registro=SI y Preferir=WIFI.
 # (0.8.12) Las entradas con ACPI de las dos llevan «fichaequipo»: ACPI.BIN deja
 # la ficha técnica en X:\EQUIPO (las tablas ACPI y PCI.TXT) y en ACPI.TXT los
 # aparatos de las I2C (la pantalla táctil y el acelerómetro).
@@ -118,7 +123,7 @@ if [ -n "${TERMO:-}" ]; then
 fi
 cp $W/f/* $W/m/
 # (RTL8723BS) la memoria de prueba del Wi-Fi por SDIO: RED.LOG y el Wi-Fi primero
-[ -n "${PRUEBA_WIFI_SDIO:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
+[ -n "${PRUEBA_WIFI_SDIO:-}${PRUEBA_WIFI_RADIO:-}" ] && printf 'Registro=SI\r\nPreferir=WIFI\r\n' > $W/m/RED.INI
 [ -n "${TERMO:-}" ] && cp -r $W/termo $W/m/TERMO
 # lo que solo es para instalar (los textos del sistema instalado, lo que va a
 # otra carpeta y el arranque del disco), en \INSTALA
@@ -243,6 +248,11 @@ G
       menu_efi "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred fichaequipo" "$M2" auto
       menu_efi "${W3}Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred" "$M2" auto
     fi
+    if [ -n "${PRUEBA_WIFI_RADIO:-}" ]; then
+      menu_efi "1. Wi-Fi con la radio apagada: el escritorio (pide a la BIOS de HP que lo encienda)" ESCRIT8.BIN "escritorio $N conred fichaequipo" "$M2" auto
+      menu_efi "2. Wi-Fi con la radio apagada: el interprete de ordenes (texto: REDWIFI /ESTADO)" SEMILLA.BIN "ordenes $N conred fichaequipo" "$M2" auto
+      menu_efi "3. Wi-Fi con la radio apagada: el escritorio, sin pedirle nada a la BIOS (solo mirar)" ESCRIT8.BIN "escritorio $N conred fichaequipo hpradiosolover" "$M2" auto
+    fi
     menu_efi "Hispa-Pentium 0.8 (UEFI): el escritorio (la medida de la pantalla, o la elegida en Configuracion)" ESCRIT8.BIN "escritorio $N" "$M2" auto '  if [ "$modo" = auto ]; then
     set gfxpayload=auto
   elif [ -n "$modo" ]; then
@@ -321,6 +331,11 @@ G
     entrada "${W1}Wi-Fi (Realtek por SDIO), SIN ACPI: el escritorio" ESCRIT8.BIN "escritorio $N sinacpi conred"
     entrada "${W2}Wi-Fi, CON ACPI: aprende la controladora y como se enciende (puede congelarse)" ESCRIT8.BIN "escritorio $N conred fichaequipo"
     entrada "${W3}Wi-Fi, SIN ACPI: el interprete de ordenes (texto: REDWIFI /REDES...)" SEMILLA.BIN "ordenes $N sinacpi conred"
+  fi
+  if [ -n "${PRUEBA_WIFI_RADIO:-}" ]; then
+    entrada "1. Wi-Fi con la radio apagada: el escritorio (pide a la BIOS de HP que lo encienda)" ESCRIT8.BIN "escritorio $N conred fichaequipo"
+    entrada "2. Wi-Fi con la radio apagada: el interprete de ordenes (texto: REDWIFI /ESTADO)" SEMILLA.BIN "ordenes $N conred fichaequipo"
+    entrada "3. Wi-Fi con la radio apagada: el escritorio, sin pedirle nada a la BIOS (solo mirar)" ESCRIT8.BIN "escritorio $N conred fichaequipo hpradiosolover"
   fi
   # [EDID] la primera, con la medida de PANTALLA.ENV si la hay (y lo dice
   # antes de arrancar); «a la medida», con «amedida» (el núcleo sabe así

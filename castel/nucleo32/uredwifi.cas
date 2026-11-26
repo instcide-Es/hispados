@@ -248,6 +248,9 @@ módulo UredWifi
         dd[0] := nat32(dirección(nom[0]))
         si no hay_servicio entonces
             copiar(destino, "Wi-Fi: no está en marcha (no hay tarjeta Wi-Fi, o se usa solo el cable).")
+        sino si est.radio = 0 y est.aviso[0] <> 0 entonces
+            ; (HPRADIO) la radio apagada por la tecla del Wi-Fi: lo que dice WIFI.BIN
+            copiar_hasta(destino, dirección(est.aviso[0]), 160)
         sino si est.radio = 0 entonces
             ; (0.8.11, SIN-ADMIN) cuál, y dónde está el diagnóstico (línea_detalle)
             dd[0] := nat32(dirección(est.tarjeta[0]))
