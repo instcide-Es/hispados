@@ -52,10 +52,13 @@
 ;        (TERMO-FUERTE, 0.8.12) EBX = 1 con ECX bit 1: la carga «fuerte» en
 ;        los demás procesadores (SSE2, abajo; solo si el núcleo ha encendido
 ;        el SSE2); EBX = 8: la coma flotante del núcleo (100h más Tareas.sse:
-;        1 FXSAVE, 2 SSE, 4 SSE2; un núcleo de antes da 0); en la tabla de
+;        1 FXSAVE, 2 SSE, 4 SSE2; un núcleo de antes da 0; desde la 1.2.1, más
+;        200h: sabe de tareas de fondo, EBX = 9); en la tabla de
 ;        EBX = 4, el cuarto número es la carga pedida (1 fuerte) y, de cada
 ;        procesador, +28 su CR0 al llegar (CD y NW: la caché) con el bit 31
 ;        si hace la fuerte
+;        (TERMO 1.2.1) EBX = 9: la tarea que llama, «de fondo» (Tareas: solo
+;        corre si no hay otra lista; la carga, TERMO.BIN /CARGA) -> 200h
 ;        En la 220, también (Intel de Nehalem en adelante) 3F8h, 3F9h, 3FAh,
 ;        3FCh, 3FDh y 3FEh: lo que lleva el paquete y el núcleo en C3, C6 y C7;
 ;        34h (MSR_SMI_COUNT: los SMI del firmware que ha atendido); 179h,
@@ -1212,7 +1215,16 @@ módulo Termo
                 ; (Tareas.sse: 1 FXSAVE, 2 SSE, 4 SSE2), con 100h (un núcleo
                 ; de antes de la 0.8.12 da 0: sin carga en marcha, esto le
                 ; llega como «¿sigue la carga?»)
-                si a = 8 entonces devolver 0x100 ob Tareas.sse fin
+                ; (TERMO 1.2.1) con 200h: este núcleo sabe de tareas de fondo (la 9)
+                si a = 8 entonces devolver 0x300 ob Tareas.sse fin
+                ; (TERMO 1.2.1) 9: la tarea que llama (la carga, TERMO.BIN
+                ; /CARGA), de fondo: solo corre cuando no hay otra lista (el
+                ; Termómetro, la memoria USB, la red y el escritorio, antes).
+                ; Da 200h (un núcleo de antes da 0 o 1: «¿sigue la carga?»)
+                si a = 9 entonces
+                    Tareas.pon_de_fondo(cierto)
+                    devolver 0x200
+                fin
                 si a = 1 entonces
                     carga := b yb 1
                     ; (TERMO-FUERTE) ECX bit 1: la carga fuerte (SSE2) en los

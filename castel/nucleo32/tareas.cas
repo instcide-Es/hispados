@@ -97,6 +97,11 @@ módulo Tareas
         ; día lo que dice el catálogo firmado (la llamada 200, 6): puede escribir
         ; en la zona del sistema, como el de un administrador. No se hereda
         firmada: bool
+        ; (TERMO 1.2.1) de fondo: solo corre cuando no hay ninguna otra lista
+        ; (la carga del Termómetro, TERMO.BIN /CARGA: con la de la 1.2, en
+        ; un turno de 10 ms cada vez que otra tarea esperaba, el Termómetro,
+        ; la memoria USB y los servicios iban a saltos). No se hereda
+        de_fondo: bool
     fin
 
     público tipo Cola = estructura
@@ -245,6 +250,22 @@ módulo Tareas
     ; -------------------------------------------------------------------------
     ;  El cambio de tarea
     ; -------------------------------------------------------------------------
+    ; (TERMO 1.2.1) la siguiente de las listas: la primera que no sea de
+    ; fondo; si todas lo son, la primera (entre ellas, por turno)
+    función sacar_lista(): puntero a Tarea
+        variable t: puntero a Tarea
+        t := listas.primera
+        mientras t <> nulo y t.de_fondo hacer t := t.sig fin
+        si t = nulo entonces devolver sacar(listas) fin
+        quitar(listas, t)
+        devolver t
+    fin
+
+    ; (TERMO 1.2.1) la que corre pasa a ser de fondo (o deja de serlo)
+    público función pon_de_fondo(sí_: bool)
+        si actual <> nulo entonces actual.de_fondo := sí_ fin
+    fin
+
     ; guarda el marco de la que corre, la deja en la cola si sigue lista, y
     ; elige la siguiente: su pila del anillo 0 (para el TSS), su directorio y
     ; su marco, que es lo que devuelve. (Con las interrupciones tapadas.)
@@ -255,7 +276,7 @@ módulo Tareas
             actual.estado := LISTA
             si actual <> ociosa entonces meter(listas, actual) fin
         fin
-        t := sacar(listas)
+        t := sacar_lista()
         si t = nulo entonces t := ociosa fin
         t.estado := CORRIENDO
         t.turnos := t.turnos + 1
@@ -601,6 +622,7 @@ módulo Tareas
         t.uid_hijo := 0
         t.remota := falso
         t.firmada := falso                      ; (SIN-ADMIN)
+        t.de_fondo := falso                     ; (TERMO 1.2.1)
         t.líder := nulo                         ; (JUEGOS)
         t.hilo_id := t.id
         t.teb := 0
