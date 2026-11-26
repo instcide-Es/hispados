@@ -2059,7 +2059,7 @@ else ko "con el EHCI y sus compañeras, la memoria no queda bien"; fi
 # 7 ter. una UHCI sola (un PC de antes), con la memoria en ella (a velocidad plena): leer y escribir
 cp $P/d16.img $N/uhci.img
 ESCRIBE=1 MODULOS= ARRANQUE="ordenes escritura" QEMU_MAS="-device piix3-usb-uhci,id=u -drive id=mu,file=$N/uhci.img,format=raw,if=none -device usb-storage,bus=u.0,port=1,drive=mu" \
-  $AQUI/nucleo32/probar.sh "" "copy textos\\largo.txt copia.txt" escribe :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera :espera salir disco apagar > $N/uhci.sal 2>&1
+  $AQUI/nucleo32/probar.sh "" "copy textos\\largo.txt copia.txt" escribe ":hasta 180 1 todo queda como estaba" ":pausa 1" salir disco apagar > $N/uhci.sal 2>&1
 S=$N/uhci.sal
 mira "UHCI: una memoria USB a velocidad plena (cada paquete, un TD; la alternancia, llevada aquí): se lee y se escribe" \
   "^usb: controladora UHCI 8086:7020, 2 puertos$" "velocidad plena, en el puerto 1 (UHCI); almacenamiento$" "^ *1 archivo(s) copiado(s)\.$" \
