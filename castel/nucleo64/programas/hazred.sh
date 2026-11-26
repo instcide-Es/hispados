@@ -9,6 +9,7 @@
 #   NTP        la hora por SNTP
 #   ECO        el eco por TCP (servidor y cliente)
 #   MRED       la prueba de las llamadas de red (por 127.0.0.1)
+#   MRED6      [etapa 10 c] la de IPv6 (por ::1; con «red NOMBRE PUERTO», con la red)
 # BearSSL se compila una vez en build/bearssl-obj (un gcc por archivo, sin
 # make -j; solo lo que ha cambiado). Nada se instala en el sistema.
 # Uso: hazred.sh SALIDA   (dice en la última línea los que ha hecho)
@@ -47,7 +48,8 @@ nice "$M" $CF -I"$R/terceros/bearssl/inc" -I"$R/w32/tls" -o "$S/DESCARGA" "$P/de
 nice "$M" $CF -o "$S/NTP" "$P/ntp.c"
 nice "$M" $CF -o "$S/ECO" "$P/eco.c"
 nice "$M" $CF -pthread -o "$S/MRED" "$P/mred.c"
-for f in PING IFCONFIG DESCARGA NTP ECO MRED; do
+nice "$M" $CF -pthread -o "$S/MRED6" "$P/mred6.c"        # [etapa 10 c] IPv6
+for f in PING IFCONFIG DESCARGA NTP ECO MRED MRED6; do
   strip --strip-unneeded "$S/$f"
 done
-echo "hechos: PING IFCONFIG DESCARGA NTP ECO MRED"
+echo "hechos: PING IFCONFIG DESCARGA NTP ECO MRED MRED6"

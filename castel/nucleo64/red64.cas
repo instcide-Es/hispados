@@ -106,14 +106,32 @@ módulo Red64
     fin
 
     ; ---- las direcciones (struct sockaddr_in: familia, puerto, IP) ----
+    ; ([etapa 10 c] y struct sockaddr_in6: familia 10, puerto, flujo, los 16
+    ; octetos y el ámbito; ip, su ficha (Redcom64.ficha_de), la de IPv4 si es
+    ; ::ffff:a.b.c.d, o 0 si es ::)
     función lee_dir(p: puntero a Proceso, v: nat64, l: nat64, ref ip: nat32, ref puerto: nat32, ref fam: nat32): ent64
-        variable a: arreglo [16] de byte
+        variable a: arreglo [28] de byte
+        variable d: nat64
         si l < 2 entonces devolver EINVAL fin
-        ceros_k(nat64(dirección(a[0])), 16)
-        si l > 16 entonces l := 16 fin
+        ceros_k(nat64(dirección(a[0])), 28)
+        si l > 28 entonces l := 28 fin
         si no copia_de(p, nat64(dirección(a[0])), v, l) entonces devolver EFAULT fin
         fam := nat32(a[0]) ob (nat32(a[1]) << 8)
         si fam = 0 entonces devolver 0 fin                       ; AF_UNSPEC
+        si fam = 10 entonces
+            si l < 24 entonces devolver EINVAL fin
+            puerto := (nat32(a[2]) << 8) ob nat32(a[3])
+            d := nat64(dirección(a[8]))
+            si m64(d) = 0 y m64(d + 8) = 0 entonces
+                ip := 0
+            sino si m64(d) = 0 y m32(d + 8) = 0xFFFF0000 entonces
+                ip := be32(d + 12)                              ; ::ffff:a.b.c.d, la de IPv4
+            sino
+                ip := ficha_de(d)
+                si ip = 0 entonces devolver EADDRNOTAVAIL fin
+            fin
+            devolver 0
+        fin
         si fam <> 2 entonces devolver EAFNOSUPPORT fin
         si l < 8 entonces devolver EINVAL fin
         puerto := (nat32(a[2]) << 8) ob nat32(a[3])
@@ -122,11 +140,33 @@ módulo Red64
     fin
 
     ; escribe la dirección (y su largo en lv, si se da) como hace Linux: hasta lo que quepa
-    función da_dir(p: puntero a Proceso, v: nat64, lv: nat64, ip: nat32, puerto: nat32): ent64
-        variable a: arreglo [16] de byte
+    ; ([etapa 10 c] dom 10: struct sockaddr_in6, de 28 octetos; las de IPv4, como ::ffff:a.b.c.d)
+    función da_dir(p: puntero a Proceso, v: nat64, lv: nat64, ip: nat32, puerto: nat32, dom: nat32): ent64
+        variable a: arreglo [28] de byte
         variable l: nat32
         si v = 0 o lv = 0 entonces devolver 0 fin
         si no copia_de(p, nat64(dirección(l)), lv, 4) entonces devolver EFAULT fin
+        si dom = 10 entonces
+            ceros_k(nat64(dirección(a[0])), 28)
+            a[0] := 10
+            a[2] := byte(puerto >> 8)
+            a[3] := byte(puerto yb 0xFF)
+            si es_ficha(ip) entonces
+                copia_k(nat64(dirección(a[8])), dir_de(ip), 16)
+            sino si ip <> 0 entonces
+                a[18] := 0xFF
+                a[19] := 0xFF
+                pon_be32(nat64(dirección(a[20])), ip)
+            fin
+            si ent32(l) < 0 entonces devolver EINVAL fin
+            si l > 28 entonces l := 28 fin
+            si l > 0 entonces
+                si no copia_a(p, v, nat64(dirección(a[0])), nat64(l)) entonces devolver EFAULT fin
+            fin
+            l := 28
+            si no copia_a(p, lv, nat64(dirección(l)), 4) entonces devolver EFAULT fin
+            devolver 0
+        fin
         ceros_k(nat64(dirección(a[0])), 16)
         a[0] := 2
         a[2] := byte(puerto >> 8)
@@ -145,12 +185,36 @@ módulo Red64
         devolver 0
     fin
 
+    ; [etapa 10 c] ¿vale la familia fam (de lee_dir) con la IP ip para el socket s?
+    función fam_bien(s: puntero a Sock, fam: nat32, ip: nat32): bool
+        si s.dom = 10 entonces
+            si fam <> 10 entonces devolver falso fin
+            si s.v6solo <> 0 y ip <> 0 y no es_ficha(ip) entonces devolver falso fin
+            devolver cierto
+        fin
+        devolver fam = 2 y no es_ficha(ip)
+    fin
+
+    ; [etapa 10 c] la IP de «a ninguna» de connect y send: 127.0.0.1, o ::1
+    función bucle_de(s: puntero a Sock): nat32
+        si s.dom = 10 entonces devolver lo6 fin
+        devolver ip4(127, 0, 0, 1)
+    fin
+
     ; ¿es una IP de aquí (o ninguna)?
     función ip_local(ip: nat32): bool
         devolver ip = 0 o ifz_de_ip(ip) <> 0xFFFFFFFF
     fin
 
     ; ¿está el puerto en uso? (con SO_REUSEADDR, los que están acabando no cuentan)
+    ; [etapa 10 c] ¿pueden querer lo mismo? (uno de IPv4 y otro de IPv6 con IPV6_V6ONLY, no)
+    función se_cruzan(a: puntero a Sock, b: puntero a Sock): bool
+        si a.dom = b.dom entonces devolver cierto fin
+        si a.dom = 10 y a.v6solo <> 0 entonces devolver falso fin
+        si b.dom = 10 y b.v6solo <> 0 entonces devolver falso fin
+        devolver cierto
+    fin
+
     función ocupado(s: puntero a Sock, ip: nat32, puerto: nat32): bool
         variable i: nat32
         variable ot: puntero a Sock
@@ -158,7 +222,7 @@ módulo Red64
         mientras i < MAX_SOCK hacer
             si socks[i] <> 0 y socks[i] <> nat64(s) entonces
                 ot := sock(i)
-                si ot.tipo_ = s.tipo_ y ot.proto = s.proto y ot.l_puerto = puerto y (ot.marcas yb M_LIGADO <> 0 o ot.estado <> T_CERRADO) y (ot.l_ip = 0 o ip = 0 o ot.l_ip = ip) entonces
+                si ot.tipo_ = s.tipo_ y ot.proto = s.proto y ot.l_puerto = puerto y (ot.marcas yb M_LIGADO <> 0 o ot.estado <> T_CERRADO) y (ot.l_ip = 0 o ip = 0 o ot.l_ip = ip) y se_cruzan(s, ot) entonces
                     ; (con SO_REUSEADDR, como Linux: estorba solo uno que escucha, o uno
                     ; atado sin conectar; los que están acabando o conectados, no)
                     si s.marcas yb M_REUSE = 0 entonces devolver cierto fin
@@ -188,18 +252,20 @@ módulo Red64
         variable t: nat32
         variable fd: ent32
         variable s: puntero a Sock
-        si dom = 10 o dom = 1 o dom = 16 o dom = 17 entonces devolver EAFNOSUPPORT fin     ; AF_INET6, AF_UNIX, AF_NETLINK, AF_PACKET
-        si dom <> 2 entonces devolver EAFNOSUPPORT fin
+        si dom = 1 o dom = 16 o dom = 17 entonces devolver EAFNOSUPPORT fin     ; AF_UNIX, AF_NETLINK, AF_PACKET
+        si dom <> 2 y dom <> 10 entonces devolver EAFNOSUPPORT fin           ; ([etapa 10 c] AF_INET6, sí)
+        si dom = 10 y sin_ipv6 entonces devolver EAFNOSUPPORT fin
         t := nat32(tipo_ yb 0xF)
         si tipo_ yb (nob nat64(0xF ob SOCK_NONBLOCK ob SOCK_CLOEXEC)) <> 0 entonces devolver EINVAL fin
         si t = S_STREAM entonces
             si proto <> 0 y proto <> 6 entonces devolver EPROTONOSUPPORT fin
             proto := 6
         sino si t = S_DGRAM entonces
-            si proto <> 0 y proto <> 17 y proto <> 1 entonces devolver EPROTONOSUPPORT fin
+            si proto <> 0 y proto <> 17 y proto <> 1 y proto <> 58 entonces devolver EPROTONOSUPPORT fin
+            si (dom = 10 y proto = 1) o (dom = 2 y proto = 58) entonces devolver EPROTONOSUPPORT fin
             si proto = 0 entonces proto := 17 fin
         sino si t = S_RAW entonces
-            si proto <> 1 entonces devolver EPROTONOSUPPORT fin
+            si proto <> 1 o dom <> 2 entonces devolver EPROTONOSUPPORT fin
         sino
             devolver ESOCKTNOSUPPORT
         fin
@@ -213,6 +279,7 @@ módulo Red64
             devolver ENOMEM
         fin
         s.refs := 1
+        s.dom := nat32(dom)
         p.fd_nobloq[nat32(fd)] := 0
         si tipo_ yb SOCK_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 fin
         p.fd_cloexec[nat32(fd)] := 0
@@ -252,7 +319,10 @@ módulo Red64
         pt := 0
         err := lee_dir(p, v, l, ip, pt, fam)
         si err < 0 entonces devolver err fin
-        si fam <> 2 y no (fam = 0 y ip = 0) entonces devolver EAFNOSUPPORT fin
+        si no fam_bien(s, fam, ip) y no (fam = 0 y ip = 0) entonces
+            si s.dom = 10 y fam = 10 entonces devolver EINVAL fin           ; (::ffff: con IPV6_V6ONLY)
+            devolver EAFNOSUPPORT
+        fin
         bloquea()
         si s.marcas yb M_LIGADO <> 0 entonces
             err := EINVAL
@@ -339,7 +409,7 @@ módulo Red64
         llena_fd(p, nfd, F_SOCKET, nat64(c))
         suma_atómica(dirección(sockets_abiertos), 1)
         si v <> 0 entonces
-            err := da_dir(p, v, lv, c.r_ip, c.r_puerto)
+            err := da_dir(p, v, lv, c.r_ip, c.r_puerto, c.dom)
             si err < 0 entonces devolver err fin
         fin
         devolver ent64(nfd)
@@ -365,7 +435,12 @@ módulo Red64
                 s.r_ip := 0
                 s.r_puerto := 0
             sino
-                si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
+                si no fam_bien(s, fam, ip) entonces
+                    suelta_()
+                    si s.dom = 10 y fam = 10 entonces devolver ENETUNREACH fin
+                    devolver EAFNOSUPPORT
+                fin
+                si ip = 0 entonces ip := bucle_de(s) fin
                 yo_ := ip_para(ip)
                 si yo_ = 0 entonces
                     err := ENETUNREACH
@@ -382,8 +457,11 @@ módulo Red64
             suelta_()
             devolver err
         fin
-        si fam <> 2 entonces devolver EAFNOSUPPORT fin
-        si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
+        si no fam_bien(s, fam, ip) entonces
+            si s.dom = 10 y fam = 10 entonces devolver ENETUNREACH fin
+            devolver EAFNOSUPPORT
+        fin
+        si ip = 0 entonces ip := bucle_de(s) fin
         bloquea()
         si s.estado = T_SYN_ENVIADO entonces
             suelta_()
@@ -458,8 +536,8 @@ módulo Red64
                 ip := s.r_ip
                 pt := s.r_puerto
             fin
-            si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
-            si n > MTU - 28 entonces devolver EMSGSIZE fin
+            si ip = 0 entonces ip := bucle_de(s) fin
+            si n > MTU - 28 - extra_ip(ip) entonces devolver EMSGSIZE fin
             si s.proto <> 17 y n < 8 entonces devolver EINVAL fin
             si n > 0 entonces
                 si no copia_de(p, nat64(dirección(k[0])), v, n) entonces devolver EFAULT fin
@@ -478,6 +556,22 @@ módulo Red64
                 sino si s.proto = 17 entonces
                     bien := udp_envía(yo_, s.l_puerto, ip, pt, nat64(dirección(k[0])), nat32(n))
                     si no bien entonces err := ENETUNREACH fin
+                sino si s.proto = 58 y s.tipo_ = S_DGRAM entonces
+                    ; [etapa 10 c] un ping socket de ICMPv6 (128): la suma, con la cabecera falsa
+                    si k[0] <> 128 o yo_ = 0 entonces
+                        si yo_ = 0 entonces err := ENETUNREACH sino err := EINVAL fin
+                    sino
+                        id := s.l_puerto
+                        k[4] := byte(id >> 8)
+                        k[5] := byte(id yb 0xFF)
+                        k[2] := 0
+                        k[3] := 0
+                        id := plegar(suma(nat64(dirección(k[0])), n, suma_falsa(yo_, ip, 58, nat32(n))))
+                        k[2] := byte(id >> 8)
+                        k[3] := byte(id yb 0xFF)
+                        bien := ip_envía(yo_, ip, 58, nat64(dirección(k[0])), nat32(n), s.ttl)
+                        si no bien entonces err := ENETUNREACH fin
+                    fin
                 sino si s.proto = 1 y s.tipo_ = S_DGRAM entonces
                     ; un ping socket: el identificador es su «puerto», y la suma la pone el núcleo
                     si k[0] <> 8 entonces
@@ -705,7 +799,7 @@ módulo Red64
             pt := 0
             err := lee_dir(p, va, la, ip, pt, fam)
             si err < 0 entonces devolver err fin
-            si fam <> 2 entonces devolver EAFNOSUPPORT fin
+            si no fam_bien(s, fam, ip) entonces devolver EAFNOSUPPORT fin
             devolver envía(p, fd, s, v, n, marcas_, cierto, ip, pt)
         fin
         devolver envía(p, fd, s, v, n, marcas_, falso, 0, 0)
@@ -720,7 +814,7 @@ módulo Red64
         si s = nulo entonces devolver err fin
         r := recibe(p, fd, s, v, n, marcas_, ip, pt, trunc)
         si r >= 0 y va <> 0 entonces
-            err := da_dir(p, va, lva, ip, pt)
+            err := da_dir(p, va, lva, ip, pt, s.dom)
             si err < 0 entonces devolver err fin
         fin
         devolver r
@@ -811,7 +905,7 @@ módulo Red64
         si va <> 0 entonces
             err := lee_dir(p, va, la, ip, pt, fam)
             si err < 0 entonces devolver err fin
-            si fam <> 2 entonces devolver EAFNOSUPPORT fin
+            si no fam_bien(s, fam, ip) entonces devolver EAFNOSUPPORT fin
             dada := cierto
         fin
         si no dada entonces
@@ -819,8 +913,8 @@ módulo Red64
             ip := s.r_ip
             pt := s.r_puerto
         fin
-        si ip = 0 entonces ip := ip4(127, 0, 0, 1) fin
-        si n > MTU - 28 entonces devolver EMSGSIZE fin
+        si ip = 0 entonces ip := bucle_de(s) fin
+        si n > MTU - 28 - extra_ip(ip) entonces devolver EMSGSIZE fin
         bloquea()
         err := liga_si_no(s)
         si err = 0 entonces
@@ -828,6 +922,16 @@ módulo Red64
             si yo_ = 0 entonces yo_ := ip_para(ip) fin
             si s.proto = 17 entonces
                 bien := udp_envía(yo_, s.l_puerto, ip, pt, nat64(k), nat32(n))
+            sino si s.proto = 58 y s.tipo_ = S_DGRAM y n >= 8 y k[0] = 128 y yo_ <> 0 entonces
+                id := s.l_puerto
+                k[4] := byte(id >> 8)
+                k[5] := byte(id yb 0xFF)
+                k[2] := 0
+                k[3] := 0
+                id := plegar(suma(nat64(k), n, suma_falsa(yo_, ip, 58, nat32(n))))
+                k[2] := byte(id >> 8)
+                k[3] := byte(id yb 0xFF)
+                bien := ip_envía(yo_, ip, 58, nat64(k), nat32(n), s.ttl)
             sino si s.proto = 1 y s.tipo_ = S_DGRAM y n >= 8 y k[0] = 8 entonces
                 id := s.l_puerto
                 k[4] := byte(id >> 8)
@@ -908,7 +1012,7 @@ módulo Red64
         si r < 0 entonces devolver r fin
         total := r
         si mh[0] <> 0 entonces
-            err := da_dir(p, mh[0], vm + 8, ip, pt)
+            err := da_dir(p, mh[0], vm + 8, ip, pt, s.dom)
             si err < 0 entonces devolver err fin
         fin
         ; (sin datos de control; y las marcas: MSG_TRUNC)
@@ -1026,7 +1130,7 @@ módulo Red64
             si ip = 0 y s.marcas yb M_CONECTADO <> 0 entonces ip := ip_para(s.r_ip) fin
         fin
         suelta_()
-        devolver da_dir(p, v, lv, ip, pt)
+        devolver da_dir(p, v, lv, ip, pt, s.dom)
     fin
 
     ; ---- las opciones ----
@@ -1106,6 +1210,24 @@ módulo Red64
             fin
             devolver 0
         fin
+        ; [etapa 10 c] IPPROTO_IPV6
+        si nivel = 41 entonces
+            err := entero_de(p, v, l, x)
+            si err < 0 entonces devolver err fin
+            si s.dom <> 10 entonces devolver ENOPROTOOPT fin
+            según nat16(nombre)
+                caso 26:                                            ; IPV6_V6ONLY
+                    s.v6solo := 0
+                    si x <> 0 entonces s.v6solo := 1 fin
+                caso 16:                                            ; IPV6_UNICAST_HOPS
+                    si x = 0xFFFFFFFF entonces x := 64 fin
+                    si x < 1 o x > 255 entonces devolver EINVAL fin
+                    s.ttl := x
+                caso 17, 18, 19, 20, 49, 50, 23, 25, 67: x := 0     ; (MULTICAST_*, RECVPKTINFO, MTU_DISCOVER, RECVERR, TCLASS...: se aceptan)
+                si no: devolver ENOPROTOOPT
+            fin
+            devolver 0
+        fin
         si nivel = 17 o nivel = 1 o nivel = 255 entonces devolver 0 fin
         devolver ENOPROTOOPT
     fin
@@ -1143,7 +1265,7 @@ módulo Red64
                 caso 9: si s.marcas yb M_KEEPALIVE <> 0 entonces x := 1 fin
                 caso 30: si s.estado = T_ESCUCHA entonces x := 1 fin
                 caso 38: x := s.proto
-                caso 39: x := 2
+                caso 39: x := s.dom                                 ; SO_DOMAIN ([etapa 10 c] 2 o 10)
                 caso 13, 10, 5, 1: x := 0
                 si no: devolver ENOPROTOOPT
             fin
@@ -1161,6 +1283,14 @@ módulo Red64
                 caso 2: x := s.ttl
                 caso 14: x := MTU                                   ; IP_MTU
                 caso 1, 10: x := 0
+                si no: devolver ENOPROTOOPT
+            fin
+        sino si nivel = 41 y s.dom = 10 entonces             ; [etapa 10 c]
+            según nat16(nombre)
+                caso 26: x := s.v6solo                              ; IPV6_V6ONLY
+                caso 16: x := s.ttl                                 ; IPV6_UNICAST_HOPS
+                caso 24: x := MTU                                   ; IPV6_MTU
+                caso 67: x := 0                                     ; IPV6_TCLASS
                 si no: devolver ENOPROTOOPT
             fin
         sino
@@ -1402,6 +1532,24 @@ módulo Red64
         fin
     fin
 
+    ; [etapa 10 c] una de IPv6, entera (los ocho grupos en hexadecimal, sin acortar)
+    función pon_ip6(ref e: Escrito, d: nat64)
+        variable i, g, k: nat32
+        variable t: puntero a byte
+        t := "0123456789abcdef"
+        i := 0
+        mientras i < 8 hacer
+            si i > 0 entonces pon_c(e, ':') fin
+            g := be16(d + nat64(i) * 2)
+            k := 0
+            mientras k < 4 hacer
+                pon_c(e, nat32(t[(g >> ((3 - k) * 4)) yb 15]))
+                k := k + 1
+            fin
+            i := i + 1
+        fin
+    fin
+
     función pon_ip(ref e: Escrito, ip: nat32)
         pon_n(e, nat64(ip >> 24), 0)
         pon_c(e, '.')
@@ -1463,6 +1611,12 @@ módulo Red64
                 si f.ip <> 0 y f.dns2 <> 0 entonces
                     pon(e, "nameserver ")
                     pon_ip(e, f.dns2)
+                    pon_c(e, 10)
+                fin
+                ; ([etapa 10 c] el de IPv6 del anuncio del router, si no hay de IPv4)
+                si f.dns = 0 y f.dns6 <> 0 entonces
+                    pon(e, "nameserver ")
+                    pon_ip6(e, dir_de(f.dns6))
                     pon_c(e, 10)
                 fin
                 i := i + 1

@@ -48,6 +48,14 @@ módulo Redcom64
         pci: nat32
         interrupciones: nat64
         rx_paq, tx_paq, rx_oct, tx_oct, rx_err, tx_err, rx_tirados: nat64
+        ; [etapa 10 c] IPv6: la de enlace (fe80::, de la MAC) y la de SLAAC
+        ; (el prefijo de /64 del anuncio del router y lo mismo detrás), el
+        ; router, el DNS (RDNSS, RFC 8106): fichas (es_ficha); el prefijo; las
+        ; solicitudes de router mandadas y cuándo la siguiente
+        ip6_ll, ip6_gl, puerta6, dns6: nat32
+        pref6: arreglo [16] de byte
+        pref6_n, mtu6, rs_veces: nat32
+        rs_próximo, ra_veces: nat64
     fin
 
     público variable ifzs: arreglo [MAX_IFZ] de Ifz
@@ -137,6 +145,9 @@ módulo Redcom64
         cwnd, ssthresh: nat64
         recover, retx_alto, en_recup, sb_n: nat32
         sb_ini, sb_fin: arreglo [MAX_SB] de nat32
+        ; [etapa 10 c] la familia del socket (2, AF_INET; 10, AF_INET6: las
+        ; de IPv4 se le dan como ::ffff:a.b.c.d) e IPV6_V6ONLY
+        dom, v6solo: nat32
     fin
 
     público variable socks: arreglo [MAX_SOCK] de nat64
@@ -406,6 +417,160 @@ módulo Redcom64
         t[1] := h[c yb 15]
         t[2] := 0
         escribir(dirección(t[0]))
+    fin
+
+    ; ---- [etapa 10 c] las direcciones de IPv6, por su ficha ----
+    ; Una dirección de IPv6 (16 octetos) se guarda una vez en esta tabla y
+    ; los sockets, TCP, UDP y las colas de los datagramas llevan su ficha, un
+    ; número de 32 bits del 240.0.0.0/8 (de la «clase E» de IPv4, que no se
+    ; usa en ninguna red): así, todo lo que ya sabía de direcciones de 32
+    ; bits (buscar la conexión, el puerto, la suma de la cabecera falsa)
+    ; vale para las dos, con un solo camino. Las de las interfaces, fijas;
+    ; las demás se reciclan, la más vieja, cuando ningún socket la usa y
+    ; lleva un minuto sin verse.
+    público constante FICHA = 0xF0000000
+    público constante MAX_D6 = 1024
+    constante D6_VIEJA = 60000000000            ; (ns) lo que tiene que llevar sin verse para reciclarla
+    variable d6: arreglo [MAX_D6] de arreglo [16] de byte
+    variable d6_uso: arreglo [MAX_D6] de nat64
+    variable d6_fija: arreglo [MAX_D6] de byte
+    variable d6_n: nat32
+    variable d6_cerrojo: nat64
+    público variable d6_recicladas, d6_sin_sitio: nat64
+
+    público función es_ficha(ip: nat32): bool
+        devolver ip >> 24 = 0xF0 y (ip yb 0xFFFFFF) < MAX_D6
+    fin
+
+    ; los 16 octetos de la ficha f
+    público función dir_de(f: nat32): nat64
+        devolver nat64(dirección(d6[f yb 0xFFFFFF][0]))
+    fin
+
+    función usada(f: nat32): bool
+        variable i: nat32
+        variable s: puntero a Sock
+        i := 0
+        mientras i < MAX_SOCK hacer
+            si socks[i] <> 0 entonces
+                s := sock(i)
+                si s.l_ip = f o s.r_ip = f entonces devolver cierto fin
+            fin
+            i := i + 1
+        fin
+        devolver falso
+    fin
+
+    ; la ficha de los 16 octetos de d (la que ya tenía, o una nueva); 0 si no cabe
+    público función ficha_de(d: nat64): nat32
+        variable b, ahora, viejo: nat64
+        variable k, cand: nat32
+        variable a0, a1: nat64
+        a0 := m64(d)
+        a1 := m64(d + 8)
+        ahora := ahora_ns()
+        b := toma(dirección(d6_cerrojo))
+        k := 0
+        mientras k < d6_n hacer
+            si m64(nat64(dirección(d6[k][0]))) = a0 y m64(nat64(dirección(d6[k][0])) + 8) = a1 entonces
+                d6_uso[k] := ahora
+                suelta(dirección(d6_cerrojo), b)
+                devolver FICHA + k
+            fin
+            k := k + 1
+        fin
+        si d6_n < MAX_D6 entonces
+            k := d6_n
+            d6_n := d6_n + 1
+        sino
+            ; (la más vieja que no sea fija ni la use nadie)
+            cand := 0xFFFFFFFF
+            viejo := nob nat64(0)
+            k := 0
+            mientras k < MAX_D6 hacer
+                si d6_fija[k] = 0 y ahora - d6_uso[k] > D6_VIEJA y d6_uso[k] < viejo y no usada(FICHA + k) entonces
+                    viejo := d6_uso[k]
+                    cand := k
+                fin
+                k := k + 1
+            fin
+            si cand = 0xFFFFFFFF entonces
+                d6_sin_sitio := d6_sin_sitio + 1
+                suelta(dirección(d6_cerrojo), b)
+                devolver 0
+            fin
+            k := cand
+            d6_recicladas := d6_recicladas + 1
+        fin
+        copia_k(nat64(dirección(d6[k][0])), d, 16)
+        d6_uso[k] := ahora
+        d6_fija[k] := 0
+        suelta(dirección(d6_cerrojo), b)
+        devolver FICHA + k
+    fin
+
+    ; (las de las interfaces) que no se recicle
+    público función fija_ficha(f: nat32)
+        si es_ficha(f) entonces d6_fija[f yb 0xFFFFFF] := 1 fin
+    fin
+
+    ; ¿son iguales los 16 octetos de a y b?
+    público función iguales16(a: nat64, b: nat64): bool
+        devolver m64(a) = m64(b) y m64(a + 8) = m64(b + 8)
+    fin
+
+    ; escribe la dirección de IPv6 de d (con «::» en el tramo de ceros más largo, RFC 5952)
+    público función escribe_ip6(d: nat64)
+        variable i, ini, largo, mi, ml: nat32
+        variable g: arreglo [8] de nat32
+        i := 0
+        mientras i < 8 hacer
+            g[i] := be16(d + nat64(i) * 2)
+            i := i + 1
+        fin
+        mi := 8
+        ml := 1
+        i := 0
+        mientras i < 8 hacer
+            si g[i] = 0 entonces
+                ini := i
+                mientras i < 8 y g[i] = 0 hacer i := i + 1 fin
+                largo := i - ini
+                si largo > ml entonces
+                    ml := largo
+                    mi := ini
+                fin
+            sino
+                i := i + 1
+            fin
+        fin
+        i := 0
+        mientras i < 8 hacer
+            si i = mi entonces
+                escribir("::")
+                i := i + ml
+            sino
+                si i > 0 y i <> mi + ml entonces escribir(":") fin
+                escribe_hex16(g[i])
+                i := i + 1
+            fin
+        fin
+    fin
+
+    función escribe_hex16(v: nat32)
+        variable c: arreglo [5] de byte
+        variable n, k: nat32
+        variable t: puntero a byte
+        t := "0123456789abcdef"
+        n := 0
+        si v >= 0x1000 entonces n := 4 sino si v >= 0x100 entonces n := 3 sino si v >= 0x10 entonces n := 2 sino n := 1 fin
+        k := 0
+        mientras k < n hacer
+            c[k] := t[(v >> ((n - 1 - k) * 4)) yb 15]
+            k := k + 1
+        fin
+        c[n] := 0
+        escribir(dirección(c[0]))
     fin
 
 fin Redcom64.

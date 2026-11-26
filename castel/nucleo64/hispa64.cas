@@ -732,6 +732,7 @@ módulo Hispa64
         variable h: arreglo [210] de byte
         valor_de("ip=", dirección(v[0]))
         valor_de("hosts=", dirección(h[0]))
+        Ip64.sin_ipv6 := tiene("sinipv6")          ; [etapa 10 c]
         si tiene("sinred") entonces
             ; ([etapa 11] con «lo»: los programas que usan 127.0.0.1 siguen yendo)
             escribir("(sinred: sin las tarjetas de red; solo «lo», 127.0.0.1)\n")

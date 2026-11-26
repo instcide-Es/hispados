@@ -209,7 +209,7 @@ módulo Tcp64
         si f yb F_SYN <> 0 entonces
             pon_m8(u + 20, 2)
             pon_m8(u + 21, 4)
-            pon_be16(u + 22, MTU - 40)
+            pon_be16(u + 22, MTU - 40 - extra_ip(s.r_ip))      ; ([etapa 10 c] con IPv6, 20 menos)
             k := 24
             si s.escala_rx <> 0 o f = F_SYN entonces
                 pon_m8(u + k, 1)
@@ -586,7 +586,7 @@ módulo Tcp64
     fin
 
     ; la MSS de las opciones de un SYN
-    función mss_de(d: nat64, lh: nat32): nat32
+    función mss_de(d: nat64, lh: nat32, ip: nat32): nat32
         variable i, op, l, m: nat32
         m := 536
         i := 20
@@ -603,7 +603,7 @@ módulo Tcp64
             si op = 2 y l = 4 entonces m := be16(d + i + 2) fin
             i := i + l
         fin
-        si m > MTU - 40 entonces m := MTU - 40 fin
+        si m > MTU - 40 - extra_ip(ip) entonces m := MTU - 40 - extra_ip(ip) fin
         si m < 64 entonces m := 64 fin
         devolver m
     fin
@@ -619,7 +619,7 @@ módulo Tcp64
                 s := sock(i)
                 si s.tipo_ = S_STREAM y s.l_puerto = a_p entonces
                     si s.estado <> T_ESCUCHA y s.estado <> T_CERRADO y s.r_ip = de y s.r_puerto = de_p y s.l_ip = a entonces devolver s fin
-                    si s.estado = T_ESCUCHA y (s.l_ip = 0 o s.l_ip = a) entonces esc := s fin
+                    si s.estado = T_ESCUCHA y (s.l_ip = 0 o s.l_ip = a) y de_su_familia(s, a) entonces esc := s fin
                 fin
             fin
             i := i + 1
@@ -810,6 +810,8 @@ módulo Tcp64
             devolver
         fin
         c.l_ip := a
+        c.dom := esc.dom                        ; [etapa 10 c]
+        c.v6solo := esc.v6solo
         c.l_puerto := esc.l_puerto
         c.r_ip := de
         c.r_puerto := be16(d)
@@ -824,7 +826,7 @@ módulo Tcp64
         c.snd_wnd := be16(d + 14)
         c.snd_wl1 := c.irs
         c.snd_wl2 := c.iss
-        c.mss := mss_de(d, lh)
+        c.mss := mss_de(d, lh, de)
         ; [etapa 10] la escala y SACK, si los pide
         opciones_syn(d, lh, esc_, sack_)
         si esc_ <> 0xFF entonces
@@ -929,7 +931,7 @@ módulo Tcp64
                 s.snd_wnd := wnd
                 s.snd_wl1 := seq
                 s.snd_wl2 := ack
-                s.mss := mss_de(d, lh)
+                s.mss := mss_de(d, lh, s.r_ip)
                 ; [etapa 10] ¿ha contestado a la escala y a SACK?
                 opciones_syn(d, lh, esc_, sack_)
                 si esc_ <> 0xFF entonces

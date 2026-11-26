@@ -104,9 +104,9 @@ módulo PrRed64
         escribir("Red: ", n_ifz - 1, " tarjetas")
         pon_color(7, 0)
         si n_ifz > 1 entonces
-            escribir(" (y «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP), los sockets de POSIX\n")
+            escribir(" (y «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP; IPv6 con ICMPv6, ND y SLAAC), los sockets de POSIX\n")
         sino
-            escribir(" (solo «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP), los sockets de POSIX\n")
+            escribir(" (solo «lo», 127.0.0.1); TCP/IP en el núcleo (ARP, IPv4, ICMP, UDP, TCP, DHCP; IPv6 con ICMPv6, ND y SLAAC), los sockets de POSIX\n")
         fin
         escribir("  el azar: ChaCha20")
         si con_hw entonces escribir(" con RDSEED/RDRAND") sino escribir(" con los tiempos (sin RDRAND ni RDSEED)") fin

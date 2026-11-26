@@ -7,6 +7,9 @@
 #       HTTP/1.1: ARCHIVO en cualquier ruta, con Content-Length; /trozos, lo
 #       mismo con «Transfer-Encoding: chunked»; /redir, 302 a /; /redir5 y
 #       /redir6, 5 y 6 redirecciones seguidas; /no, 404
+#   servidores.py http6 PUERTO ARCHIVO
+#       [etapa 10 c] lo mismo, por IPv6 (en ::1: QEMU lleva ahí lo que el
+#       invitado manda a fec0::2)
 #   servidores.py https PUERTO ARCHIVO CERT.pem CLAVE.pem
 #       lo mismo, con TLS
 #   servidores.py ntp PUERTO DESFASE_S
@@ -16,7 +19,8 @@
 #       eco por TCP (cada conexión, en un hilo)
 #   servidores.py dns PUERTO IP [DIRECCIÓN]
 #       DNS por UDP (solo para las pruebas): los nombres que acaban en
-#       «.prueba» son IP (A); los demás, NXDOMAIN; AAAA, sin respuestas.
+#       «.prueba» son IP (A); los demás, NXDOMAIN; AAAA, sin respuestas;
+#       [etapa 10 c] los que acaban en «6.prueba», solo AAAA: fec0::2.
 #       Escucha en DIRECCIÓN (127.0.0.1 por omisión: QEMU lleva ahí lo que
 #       el invitado manda a 10.0.2.2)
 #   servidores.py certs CARPETA NOMBRE [ec|rsa]
@@ -51,7 +55,11 @@ def para_solo():
     t.start()
 
 
-def http(puerto, archivo, cert=None, clave=None):
+class Servidor6(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+
+def http(puerto, archivo, cert=None, clave=None, seis=False):
     with open(archivo, "rb") as f:
         datos = f.read()
 
@@ -99,7 +107,7 @@ def http(puerto, archivo, cert=None, clave=None):
                 self.wfile.write(datos)
             self.wfile.flush()
 
-    s = ThreadingHTTPServer(("0.0.0.0", puerto), Pedido)
+    s = Servidor6(("::1", puerto), Pedido) if seis else ThreadingHTTPServer(("0.0.0.0", puerto), Pedido)
     s.daemon_threads = True
     if cert:
         c = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -177,9 +185,13 @@ def dns(puerto, ip, dirección="127.0.0.1"):
         pregunta = q[12:i + 4]
         nombre = ".".join(partes).lower()
         bien = nombre.endswith(".prueba")
-        resp = q[:2] + struct.pack(">HHHHH", 0x8180 if bien else 0x8183, 1, 1 if bien and tipo == 1 else 0, 0, 0) + pregunta
-        if bien and tipo == 1:
+        seis = nombre.endswith("6.prueba")
+        da = bien and ((tipo == 1 and not seis) or (tipo == 28 and seis))
+        resp = q[:2] + struct.pack(">HHHHH", 0x8180 if bien else 0x8183, 1, 1 if da else 0, 0, 0) + pregunta
+        if da and tipo == 1:
             resp += struct.pack(">HHHIH", 0xC00C, 1, 1, 60, 4) + a
+        elif da:
+            resp += struct.pack(">HHHIH", 0xC00C, 28, 1, 60, 16) + socket.inet_pton(socket.AF_INET6, "fec0::2")
         s.sendto(resp, de)
 
 
@@ -244,6 +256,8 @@ def main(a):
     try:
         if len(a) >= 3 and a[0] == "http":
             return http(int(a[1]), a[2])
+        if len(a) >= 3 and a[0] == "http6":
+            return http(int(a[1]), a[2], seis=True)
         if len(a) >= 5 and a[0] == "https":
             return http(int(a[1]), a[2], a[3], a[4])
         if len(a) >= 3 and a[0] == "ntp":
@@ -256,7 +270,7 @@ def main(a):
             return certs(a[1], a[2], a[3] if len(a) >= 4 else "ec")
     except subprocess.CalledProcessError as e:
         sys.exit("servidores.py: openssl falla: %s" % e.stderr.decode(errors="replace").strip())
-    sys.exit("uso: servidores.py http PUERTO ARCHIVO | https PUERTO ARCHIVO CERT.pem CLAVE.pem |\n"
+    sys.exit("uso: servidores.py http PUERTO ARCHIVO | http6 PUERTO ARCHIVO | https PUERTO ARCHIVO CERT.pem CLAVE.pem |\n"
              "     ntp PUERTO DESFASE_S | eco PUERTO | dns PUERTO IP [DIRECCIÓN] | certs CARPETA NOMBRE [ec|rsa]")
 
 

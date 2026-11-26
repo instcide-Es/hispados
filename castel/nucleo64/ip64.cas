@@ -23,6 +23,9 @@ módulo Ip64
     constante DIFUSIÓN = 0xFFFFFFFF
     constante ETH_IP = 0x0800
     constante ETH_ARP = 0x0806
+    constante ETH_IP6 = 0x86DD                  ; [etapa 10 c]
+    constante MAX_ND = 32                       ; [etapa 10 c] los vecinos de IPv6 (ND)
+    constante NO_IFZ = 0xFFFFFFFF
     ; los estados de DHCP
     constante D_NADA = 0
     constante D_DESCUBRE = 1
@@ -62,6 +65,21 @@ módulo Ip64
     variable próximo_enlace: nat64
     variable puerto_sig: nat32
     público variable sin_dhcp: bool
+    ; [etapa 10 c] IPv6: los vecinos (ND, RFC 4861: su dirección, la MAC y el
+    ; paquete que espera a saberla), la trama de IPv6 que se está haciendo,
+    ; la ficha de ::1 y lo que se cuenta
+    tipo Vecino6 = estructura
+        dir: arreglo [16] de byte
+        ifz_n, estado, intentos, pend_n: nat32
+        mac: arreglo [8] de byte
+        cuándo: nat64
+    fin
+    variable vecinos6: arreglo [MAX_ND] de Vecino6
+    variable pendientes6: arreglo [MAX_ND] de arreglo [TRAMA] de byte
+    variable trama6: arreglo [TRAMA + 64] de byte
+    público variable lo6: nat32                 ; la ficha de ::1
+    público variable sin_ipv6: bool             ; «sinipv6» en la línea de órdenes
+    público variable ip6_rx, ip6_tx, ip6_malos, icmp6_rx, icmp6_tx, nd_rx, nd_tx, ra_rx, rs_tx: nat64
     público variable dice_dhcp: bool            ; decir por la consola lo que da DHCP
 
     ; ---- las tarjetas, sea cual sea ----
@@ -119,6 +137,7 @@ módulo Ip64
             x.velocidad := v
             escribir("Red: ", dirección(x.nombre[0]), ": enlace a ", v, " Mbit/s\n")
             si x.con_dhcp <> 0 y not_sin_dhcp() entonces dhcp_empieza(i) fin
+            si no sin_ipv6 entonces ip6_arriba(i) fin  ; [etapa 10 c] la de enlace y pedir el anuncio del router
             Sondeo64.avisa()
         sino si no e y x.enlace <> 0 entonces
             x.enlace := 0
@@ -135,6 +154,7 @@ módulo Ip64
     ; ¿es una IP de este equipo? (la interfaz, o 0xFFFFFFFF)
     público función ifz_de_ip(ip: nat32): nat32
         variable i: nat32
+        si es_ficha(ip) entonces devolver ifz_de_ip6(ip) fin
         si ip >> 24 = 127 entonces devolver 0 fin
         i := 1
         mientras i < n_ifz hacer
@@ -148,6 +168,7 @@ módulo Ip64
     público función ruta(a: nat32, ref salto: nat32): nat32
         variable i: nat32
         variable x: puntero a Ifz
+        si es_ficha(a) entonces devolver ruta6(a, salto) fin
         salto := a
         si a >> 24 = 127 o ifz_de_ip(a) <> 0xFFFFFFFF entonces devolver 0 fin
         i := 1
@@ -171,6 +192,7 @@ módulo Ip64
     ; la IP propia con la que se sale hacia «a» (0 si no hay)
     público función ip_para(a: nat32): nat32
         variable s, i: nat32
+        si es_ficha(a) entonces devolver ip6_para(a) fin
         i := ruta(a, s)
         si i = 0xFFFFFFFF entonces devolver 0 fin
         si i = 0 entonces
@@ -349,6 +371,7 @@ módulo Ip64
     público función ip_envía(de: nat32, a: nat32, proto: nat32, d: nat64, n: nat32, ttl: nat32): bool
         variable i, salto: nat32
         variable p: nat64
+        si es_ficha(a) entonces devolver ip6_envía(de, a, proto, d, n, ttl) fin      ; [etapa 10 c]
         si n + 20 > MTU entonces devolver falso fin
         i := ruta(a, salto)
         si i = 0xFFFFFFFF entonces devolver falso fin
@@ -402,6 +425,8 @@ módulo Ip64
 
     ; la suma de la cabecera falsa (UDP y TCP)
     público función suma_falsa(de: nat32, a: nat32, proto: nat32, n: nat32): nat64
+        ; ([etapa 10 c] la de IPv6: las dos direcciones enteras, el largo y el protocolo, RFC 8200)
+        si es_ficha(de) o es_ficha(a) entonces devolver suma(dir_de(de), 16, suma(dir_de(a), 16, nat64(proto) + nat64(n))) fin
         devolver nat64(de >> 16) + nat64(de yb 0xFFFF) + nat64(a >> 16) + nat64(a yb 0xFFFF) + nat64(proto) + nat64(n)
     fin
 
@@ -409,7 +434,7 @@ módulo Ip64
     público función udp_envía(de: nat32, de_p: nat32, a: nat32, a_p: nat32, d: nat64, n: nat32): bool
         variable u: nat64
         variable s: nat32
-        si n + 28 > MTU entonces devolver falso fin
+        si n + 28 + extra_ip(a) > MTU entonces devolver falso fin
         u := sitio_datos()
         si d <> u + 8 entonces copia_k(u + 8, d, nat64(n)) fin
         si de = 0 entonces de := ip_para(a) fin
@@ -422,6 +447,19 @@ módulo Ip64
         pon_be16(u + 6, s)
         udp_tx := udp_tx + 1
         devolver ip_envía(de, a, 17, u, n + 8, 0)
+    fin
+
+    ; [etapa 10 c] lo que la cabecera de IP de «a» tiene de más que la de IPv4 (20 en IPv6)
+    público función extra_ip(a: nat32): nat32
+        si es_ficha(a) entonces devolver 20 fin
+        devolver 0
+    fin
+
+    ; [etapa 10 c] ¿le vale al socket s lo que llega a «a»? (los de IPv4, solo
+    ; lo de IPv4; los de IPv6, lo suyo y, sin IPV6_V6ONLY, lo de IPv4 también)
+    público función de_su_familia(s: puntero a Sock, a: nat32): bool
+        si es_ficha(a) entonces devolver s.dom = 10 fin
+        devolver s.dom <> 10 o s.v6solo = 0
     fin
 
     ; ---- los sockets que miran UDP e ICMP ----
@@ -446,7 +484,7 @@ módulo Ip64
         mientras i < MAX_SOCK hacer
             si socks[i] <> 0 entonces
                 s := sock(i)
-                si s.tipo_ = S_DGRAM y s.proto = proto y s.l_puerto = a_p y (s.l_ip = 0 o s.l_ip = a o a = DIFUSIÓN) entonces
+                si s.tipo_ = S_DGRAM y s.proto = proto y s.l_puerto = a_p y (s.l_ip = 0 o s.l_ip = a o a = DIFUSIÓN) y de_su_familia(s, a) entonces
                     si s.marcas yb M_CONECTADO = 0 o (s.r_ip = de y (proto = 1 o s.r_puerto = de_p)) entonces devolver s fin
                 fin
             fin
@@ -473,6 +511,12 @@ módulo Ip64
     ; (de UDP) «puerto inalcanzable» a quien mandó lo de h (la cabecera de IP y 8 más)
     función inalcanzable(h: nat64, lh: nat32, de: nat32, a: nat32)
         variable c: arreglo [64] de byte
+        si es_ficha(a) entonces
+            ; ([etapa 10 c] ICMPv6: destino inalcanzable, puerto inalcanzable)
+            copia_k(nat64(dirección(c[0])), h, 48)
+            icmp6_envía(a, de, 1, 4, 0, nat64(dirección(c[0])), 48, 0)
+            devolver
+        fin
         si a = DIFUSIÓN o a >> 28 = 0xE entonces devolver fin
         copia_k(nat64(dirección(c[0])), h, nat64(lh + 8))
         icmp_envía(a, de, 3, 3, 0, nat64(dirección(c[0])), lh + 8)
@@ -612,6 +656,610 @@ módulo Ip64
             entra_arp(i, d, n)
         sino si t = ETH_IP entonces
             entra_ip(i, d + 14, n - 14)
+        sino si t = ETH_IP6 y no sin_ipv6 entonces
+            entra_ip6(i, d + 14, n - 14)            ; [etapa 10 c]
+        fin
+    fin
+
+    ; =====================================================================
+    ; [etapa 10 c] IPv6 (RFC 8200), ICMPv6 (RFC 4443), los vecinos (ND, RFC
+    ; 4861) y SLAAC (RFC 4862): la dirección de enlace (fe80:: y el
+    ; identificador de la MAC, EUI-64) en cuanto hay enlace; se pide el
+    ; anuncio del router (RS, tres veces, de 4 en 4 s) y con su prefijo de
+    ; /64 (y la marca A) la dirección de SLAAC; el router (si su vida no es
+    ; 0) y el DNS (RDNSS). Las direcciones, por su ficha (Redcom64.ficha_de);
+    ; UDP y TCP van por el mismo camino que con IPv4 (entra_udp, al_tcp_entra
+    ; y udp_envía/ip_envía, que mira si «a» es una ficha). Sin trozos ni DAD
+    ; (se da por buena la dirección: sección 20).
+    ; =====================================================================
+
+    ; ¿fe80::/10?
+    función de_enlace(d: nat64): bool
+        devolver m8(d) = 0xFE y (m8(d + 1) yb 0xC0) = 0x80
+    fin
+
+    función multidifusión(d: nat64): bool
+        devolver m8(d) = 0xFF
+    fin
+
+    ; la de «solicitud de vecino» de d (ff02::1:ffXX:XXXX), en t
+    función solicitada(d: nat64, t: nat64)
+        ceros_k(t, 16)
+        pon_m8(t, 0xFF)
+        pon_m8(t + 1, 0x02)
+        pon_m8(t + 11, 1)
+        pon_m8(t + 12, 0xFF)
+        copia_k(t + 13, d + 13, 3)
+    fin
+
+    ; el identificador de interfaz (EUI-64 modificado) de la MAC de x, en t (8 octetos)
+    función eui64(x: puntero a Ifz, t: nat64)
+        pon_m8(t, nat32(x.mac[0]) xob 2)
+        pon_m8(t + 1, nat32(x.mac[1]))
+        pon_m8(t + 2, nat32(x.mac[2]))
+        pon_m8(t + 3, 0xFF)
+        pon_m8(t + 4, 0xFE)
+        pon_m8(t + 5, nat32(x.mac[3]))
+        pon_m8(t + 6, nat32(x.mac[4]))
+        pon_m8(t + 7, nat32(x.mac[5]))
+    fin
+
+    ; ¿es la ficha f de este equipo? (la interfaz, o NO_IFZ; ::1, la 0)
+    función ifz_de_ip6(f: nat32): nat32
+        variable i: nat32
+        si f = lo6 entonces devolver 0 fin
+        i := 1
+        mientras i < n_ifz hacer
+            si ifz(i).ip6_ll <> 0 y (ifz(i).ip6_ll = f o ifz(i).ip6_gl = f) entonces devolver i fin
+            i := i + 1
+        fin
+        devolver NO_IFZ
+    fin
+
+    ; ¿es d (16 octetos) de x, o de su multidifusión? (ff02::1, la solicitada de las suyas)
+    función para_mí6(x: puntero a Ifz, d: nat64): bool
+        variable t: nat64
+        si x.ip6_ll = 0 entonces devolver falso fin
+        si iguales16(d, dir_de(x.ip6_ll)) entonces devolver cierto fin
+        si x.ip6_gl <> 0 y iguales16(d, dir_de(x.ip6_gl)) entonces devolver cierto fin
+        si multidifusión(d) y m8(d + 1) = 0x02 entonces
+            si m64(d) = 0x2FF y m64(d + 8) = 0x0100000000000000 entonces devolver cierto fin     ; ff02::1
+            si m8(d + 11) = 1 y m8(d + 12) = 0xFF entonces
+                t := dir_de(x.ip6_ll)
+                si m8(d + 13) = m8(t + 13) y m8(d + 14) = m8(t + 14) y m8(d + 15) = m8(t + 15) entonces devolver cierto fin
+                si x.ip6_gl <> 0 entonces
+                    t := dir_de(x.ip6_gl)
+                    si m8(d + 13) = m8(t + 13) y m8(d + 14) = m8(t + 14) y m8(d + 15) = m8(t + 15) entonces devolver cierto fin
+                fin
+            fin
+        fin
+        devolver falso
+    fin
+
+    ; por dónde sale la ficha a: la interfaz (o NO_IFZ) y el siguiente salto (otra ficha)
+    función ruta6(a: nat32, ref salto: nat32): nat32
+        variable i: nat32
+        variable x: puntero a Ifz
+        variable d: nat64
+        salto := a
+        si sin_ipv6 entonces devolver NO_IFZ fin
+        si ifz_de_ip6(a) <> NO_IFZ entonces devolver 0 fin
+        d := dir_de(a)
+        i := 1
+        mientras i < n_ifz hacer
+            x := ifz(i)
+            si x.enlace <> 0 y x.ip6_ll <> 0 entonces
+                si de_enlace(d) o multidifusión(d) entonces devolver i fin
+                si x.ip6_gl <> 0 y m64(d) = m64(nat64(dirección(x.pref6[0]))) entonces devolver i fin
+            fin
+            i := i + 1
+        fin
+        i := 1
+        mientras i < n_ifz hacer
+            x := ifz(i)
+            si x.enlace <> 0 y x.puerta6 <> 0 entonces
+                salto := x.puerta6
+                devolver i
+            fin
+            i := i + 1
+        fin
+        devolver NO_IFZ
+    fin
+
+    ; la ficha propia con la que se sale hacia a (0 si no se llega)
+    función ip6_para(a: nat32): nat32
+        variable s, i: nat32
+        variable x: puntero a Ifz
+        i := ruta6(a, s)
+        si i = NO_IFZ entonces devolver 0 fin
+        si i = 0 entonces devolver a fin
+        x := ifz(i)
+        si de_enlace(dir_de(a)) o multidifusión(dir_de(a)) o x.ip6_gl = 0 entonces devolver x.ip6_ll fin
+        devolver x.ip6_gl
+    fin
+
+    ; ---- los vecinos ----
+    función busca_nd(d: nat64, i: nat32): nat32
+        variable k: nat32
+        k := 0
+        mientras k < MAX_ND hacer
+            si vecinos6[k].estado <> 0 y vecinos6[k].ifz_n = i y iguales16(nat64(dirección(vecinos6[k].dir[0])), d) entonces devolver k fin
+            k := k + 1
+        fin
+        devolver NO_IFZ
+    fin
+
+    función hueco_nd(): nat32
+        variable k, viejo: nat32
+        k := 0
+        mientras k < MAX_ND hacer
+            si vecinos6[k].estado = 0 entonces devolver k fin
+            k := k + 1
+        fin
+        viejo := 0
+        k := 1
+        mientras k < MAX_ND hacer
+            si vecinos6[k].cuándo < vecinos6[viejo].cuándo entonces viejo := k fin
+            k := k + 1
+        fin
+        devolver viejo
+    fin
+
+    ; apunta (o pone al día) la MAC de d por i; si alguien esperaba, sale lo suyo
+    función sabe_nd(i: nat32, d: nat64, mac: nat64, crear: bool)
+        variable k: nat32
+        variable v: puntero a Vecino6
+        k := busca_nd(d, i)
+        si k = NO_IFZ entonces
+            si no crear entonces devolver fin
+            k := hueco_nd()
+            vecinos6[k].estado := 0
+            vecinos6[k].pend_n := 0
+        fin
+        v := dirección(vecinos6[k])
+        copia_k(nat64(dirección(v.dir[0])), d, 16)
+        v.ifz_n := i
+        copia_k(nat64(dirección(v.mac[0])), mac, 6)
+        v.cuándo := ahora_ns()
+        v.intentos := 0
+        si v.estado = 1 y v.pend_n > 0 entonces
+            v.estado := 2
+            sale_eth(i, ETH_IP6, nat64(dirección(v.mac[0])), nat64(dirección(pendientes6[k][0])), v.pend_n)
+            v.pend_n := 0
+        fin
+        v.estado := 2
+    fin
+
+    ; ---- enviar ----
+    ; el paquete de IPv6 de p (n octetos, con su cabecera) hacia «sig» (16 octetos) por i
+    función sale6(i: nat32, sig: nat64, p: nat64, n: nat32): bool
+        variable k: nat32
+        variable v: puntero a Vecino6
+        variable mac: arreglo [8] de byte
+        si i = 0 entonces devolver sale_ip(0, 0, p, n) fin       ; («lo»: a la cola)
+        si multidifusión(sig) entonces
+            mac[0] := 0x33
+            mac[1] := 0x33
+            copia_k(nat64(dirección(mac[2])), sig + 12, 4)
+            sale_eth(i, ETH_IP6, nat64(dirección(mac[0])), p, n)
+            devolver cierto
+        fin
+        k := busca_nd(sig, i)
+        si k <> NO_IFZ y vecinos6[k].estado = 2 entonces
+            sale_eth(i, ETH_IP6, nat64(dirección(vecinos6[k].mac[0])), p, n)
+            devolver cierto
+        fin
+        ; sin su MAC: el paquete espera (el último) y se pregunta (NS)
+        si k = NO_IFZ entonces
+            k := hueco_nd()
+            v := dirección(vecinos6[k])
+            copia_k(nat64(dirección(v.dir[0])), sig, 16)
+            v.ifz_n := i
+            v.intentos := 0
+            v.estado := 1
+        fin
+        v := dirección(vecinos6[k])
+        v.cuándo := ahora_ns()
+        copia_k(nat64(dirección(pendientes6[k][0])), p, nat64(n))
+        v.pend_n := n
+        v.intentos := v.intentos + 1
+        manda_ns(i, nat64(dirección(v.dir[0])))
+        devolver cierto
+    fin
+
+    ; manda a la ficha a (desde la ficha de; 0: la propia) lo de d (n octetos)
+    ; con la cabecera siguiente nh (17, 6, 58); hop: 0, 64
+    función ip6_envía(de: nat32, a: nat32, nh: nat32, d: nat64, n: nat32, hop: nat32): bool
+        variable i, salto: nat32
+        variable p: nat64
+        si n + 40 > MTU entonces devolver falso fin
+        i := ruta6(a, salto)
+        si i = NO_IFZ entonces devolver falso fin
+        si de = 0 entonces
+            si i = 0 entonces de := a sino de := ip6_para(a) fin
+        fin
+        si de = 0 entonces devolver falso fin
+        si hop = 0 entonces hop := 64 fin
+        p := nat64(dirección(trama6[14]))
+        si d <> p + 40 entonces copia_k(p + 40, d, nat64(n)) fin
+        pon_be32(p, 0x60000000)
+        pon_be16(p + 4, n)
+        pon_m8(p + 6, nh)
+        pon_m8(p + 7, hop)
+        copia_k(p + 8, dir_de(de), 16)
+        copia_k(p + 24, dir_de(a), 16)
+        ip6_tx := ip6_tx + 1
+        devolver sale6(i, dir_de(salto), p, n + 40)
+    fin
+
+    ; ICMPv6: tipo, código, los 4 octetos de después de la suma (resto) y el cuerpo d (n)
+    función icmp6_envía(de: nat32, a: nat32, tipo_: nat32, código: nat32, resto: nat32, d: nat64, n: nat32, hop: nat32): bool
+        variable u: nat64
+        si de = 0 entonces de := ip6_para(a) fin
+        si de = 0 entonces devolver falso fin
+        si n + 48 > MTU entonces n := MTU - 48 fin
+        u := sitio_datos()
+        si d <> u + 8 entonces copia_k(u + 8, d, nat64(n)) fin
+        pon_m8(u, tipo_)
+        pon_m8(u + 1, código)
+        pon_be16(u + 2, 0)
+        pon_be32(u + 4, resto)
+        pon_be16(u + 2, plegar(suma(u, nat64(n) + 8, suma_falsa(de, a, 58, n + 8))))
+        icmp6_tx := icmp6_tx + 1
+        devolver ip6_envía(de, a, 58, u, n + 8, hop)
+    fin
+
+    ; una ficha de los 16 octetos de d, para mandar (las de multidifusión también)
+    función ficha_tmp(d: nat64): nat32
+        devolver ficha_de(d)
+    fin
+
+    ; NS (135): ¿quién tiene «objetivo»? A su dirección solicitada, con la MAC propia
+    función manda_ns(i: nat32, objetivo: nat64)
+        variable x: puntero a Ifz
+        variable c: arreglo [32] de byte
+        variable t: arreglo [16] de byte
+        variable a: nat32
+        x := ifz(i)
+        si x.ip6_ll = 0 entonces devolver fin
+        ceros_k(nat64(dirección(c[0])), 32)
+        copia_k(nat64(dirección(c[0])), objetivo, 16)
+        c[16] := 1                              ; (la opción: la MAC de quien pregunta)
+        c[17] := 1
+        copia_k(nat64(dirección(c[18])), nat64(dirección(x.mac[0])), 6)
+        solicitada(objetivo, nat64(dirección(t[0])))
+        a := ficha_tmp(nat64(dirección(t[0])))
+        si a = 0 entonces devolver fin
+        nd_tx := nd_tx + 1
+        icmp6_envía(x.ip6_ll, a, 135, 0, 0, nat64(dirección(c[0])), 24, 255)
+    fin
+
+    ; RS (133): a ff02::2, con la MAC propia
+    función manda_rs(i: nat32)
+        variable x: puntero a Ifz
+        variable c: arreglo [8] de byte
+        variable t: arreglo [16] de byte
+        variable a: nat32
+        x := ifz(i)
+        si x.ip6_ll = 0 entonces devolver fin
+        ceros_k(nat64(dirección(t[0])), 16)
+        t[0] := 0xFF
+        t[1] := 0x02
+        t[15] := 2
+        a := ficha_tmp(nat64(dirección(t[0])))
+        si a = 0 entonces devolver fin
+        c[0] := 1
+        c[1] := 1
+        copia_k(nat64(dirección(c[2])), nat64(dirección(x.mac[0])), 6)
+        rs_tx := rs_tx + 1
+        icmp6_envía(x.ip6_ll, a, 133, 0, 0, nat64(dirección(c[0])), 8, 255)
+    fin
+
+    ; con enlace: la dirección de enlace (si aún no la tiene) y, otra vez, a pedir el anuncio del router
+    función ip6_arriba(i: nat32)
+        variable x: puntero a Ifz
+        variable t: arreglo [16] de byte
+        x := ifz(i)
+        si x.ip6_ll = 0 entonces
+            ceros_k(nat64(dirección(t[0])), 16)
+            t[0] := 0xFE
+            t[1] := 0x80
+            eui64(x, nat64(dirección(t[8])))
+            x.ip6_ll := ficha_de(nat64(dirección(t[0])))
+            fija_ficha(x.ip6_ll)
+            x.mtu6 := MTU
+        fin
+        x.rs_veces := 0
+        x.rs_próximo := ahora_ns()
+    fin
+
+    ; cada medio segundo: los RS que tocan, los NS que no han tenido respuesta
+    función nd_tic()
+        variable i, k: nat32
+        variable x: puntero a Ifz
+        variable v: puntero a Vecino6
+        variable ahora: nat64
+        ahora := ahora_ns()
+        i := 1
+        mientras i < n_ifz hacer
+            x := ifz(i)
+            si x.enlace <> 0 y x.ip6_ll <> 0 y x.ip6_gl = 0 y x.rs_veces < 3 y ahora >= x.rs_próximo entonces
+                x.rs_veces := x.rs_veces + 1
+                x.rs_próximo := ahora + 4000000000
+                manda_rs(i)
+            fin
+            i := i + 1
+        fin
+        k := 0
+        mientras k < MAX_ND hacer
+            v := dirección(vecinos6[k])
+            si v.estado = 1 y ahora - v.cuándo > 1000000000 entonces
+                si v.intentos >= 3 entonces
+                    v.estado := 0
+                    v.pend_n := 0
+                sino
+                    v.intentos := v.intentos + 1
+                    v.cuándo := ahora
+                    manda_ns(v.ifz_n, nat64(dirección(v.dir[0])))
+                fin
+            sino si v.estado = 2 y ahora - v.cuándo > 600000000000 entonces
+                v.estado := 0
+            fin
+            k := k + 1
+        fin
+    fin
+
+    ; la opción de ND de tipo t en las opciones [op, op + n) (su sitio, o 0)
+    función opción_nd(op: nat64, n: nat32, t: nat32): nat64
+        variable k, l: nat32
+        k := 0
+        mientras k + 8 <= n hacer
+            l := m8(op + nat64(k) + 1) * 8
+            si l = 0 entonces devolver 0 fin
+            si m8(op + nat64(k)) = t y k + l <= n entonces devolver op + nat64(k) fin
+            k := k + l
+        fin
+        devolver 0
+    fin
+
+    ; RA (134): el prefijo (SLAAC), el router, el MTU y el DNS
+    función entra_ra(i: nat32, src: nat64, d: nat64, n: nat32)
+        variable x: puntero a Ifz
+        variable op, k, l: nat32
+        variable q: nat64
+        variable t: arreglo [16] de byte
+        variable nueva: bool
+        x := ifz(i)
+        si n < 16 o x.ip6_ll = 0 entonces devolver fin
+        ra_rx := ra_rx + 1
+        x.ra_veces := x.ra_veces + 1
+        nueva := falso
+        op := 16
+        mientras op + 8 <= n hacer
+            q := d + nat64(op)
+            l := m8(q + 1) * 8
+            si l = 0 o op + l > n entonces romper fin
+            k := m8(q)
+            si k = 1 y l >= 8 entonces
+                sabe_nd(i, src, q + 2, cierto)                  ; (la MAC del router)
+            sino si k = 3 y l = 32 y m8(q + 2) = 64 y (m8(q + 3) yb 0x40) <> 0 y be32(q + 4) <> 0 entonces
+                ; el prefijo, con la marca A: la dirección es él y el identificador de la MAC
+                copia_k(nat64(dirección(t[0])), q + 16, 8)
+                eui64(x, nat64(dirección(t[8])))
+                si x.ip6_gl = 0 o no iguales16(dir_de(x.ip6_gl), nat64(dirección(t[0]))) entonces
+                    x.ip6_gl := ficha_de(nat64(dirección(t[0])))
+                    fija_ficha(x.ip6_gl)
+                    copia_k(nat64(dirección(x.pref6[0])), q + 16, 16)
+                    x.pref6_n := 64
+                    nueva := cierto
+                fin
+            sino si k = 5 y l = 8 entonces
+                si be32(q + 4) >= 1280 y be32(q + 4) <= MTU entonces x.mtu6 := be32(q + 4) fin
+            sino si k = 25 y l >= 24 y be32(q + 4) <> 0 entonces
+                si x.dns6 = 0 o no iguales16(dir_de(x.dns6), q + 8) entonces
+                    x.dns6 := ficha_de(q + 8)
+                    fija_ficha(x.dns6)
+                    nueva := cierto
+                fin
+            fin
+            op := op + l
+        fin
+        ; el router, si su vida no es 0
+        si be16(d + 6) <> 0 entonces
+            si x.puerta6 = 0 o no iguales16(dir_de(x.puerta6), src) entonces
+                x.puerta6 := ficha_de(src)
+                fija_ficha(x.puerta6)
+                nueva := cierto
+            fin
+        fin
+        si nueva entonces
+            cambios := cambios + 1
+            si dice_dhcp entonces
+                escribir("Red: ", dirección(x.nombre[0]), ": IPv6 ")
+                si x.ip6_gl <> 0 entonces
+                    escribe_ip6(dir_de(x.ip6_gl))
+                    escribir("/64 (SLAAC)")
+                fin
+                escribir(", de enlace ")
+                escribe_ip6(dir_de(x.ip6_ll))
+                si x.puerta6 <> 0 entonces
+                    escribir(", router ")
+                    escribe_ip6(dir_de(x.puerta6))
+                fin
+                si x.dns6 <> 0 entonces
+                    escribir(", DNS ")
+                    escribe_ip6(dir_de(x.dns6))
+                fin
+                escribir("\n")
+            fin
+            Sondeo64.avisa()
+        fin
+    fin
+
+    ; NS (135) a nosotros: se contesta (NA, 136) con la MAC propia
+    función entra_ns(i: nat32, src: nat64, dst: nat64, d: nat64, n: nat32)
+        variable x: puntero a Ifz
+        variable op: nat64
+        variable c: arreglo [32] de byte
+        variable t: arreglo [16] de byte
+        variable yo_, a: nat32
+        variable sol: bool
+        x := ifz(i)
+        si n < 24 entonces devolver fin
+        nd_rx := nd_rx + 1
+        si x.ip6_ll = 0 entonces devolver fin
+        yo_ := 0
+        si iguales16(d + 8, dir_de(x.ip6_ll)) entonces yo_ := x.ip6_ll fin
+        si x.ip6_gl <> 0 y iguales16(d + 8, dir_de(x.ip6_gl)) entonces yo_ := x.ip6_gl fin
+        si yo_ = 0 entonces devolver fin
+        ; (quien pregunta, y su MAC, si la da)
+        sol := m64(src) <> 0 o m64(src + 8) <> 0
+        op := opción_nd(d + 24, n - 24, 1)
+        si sol y op <> 0 entonces sabe_nd(i, src, op + 2, cierto) fin
+        ceros_k(nat64(dirección(c[0])), 32)
+        copia_k(nat64(dirección(c[0])), d + 8, 16)
+        c[16] := 2                              ; (la opción: la MAC de quien contesta)
+        c[17] := 1
+        copia_k(nat64(dirección(c[18])), nat64(dirección(x.mac[0])), 6)
+        si sol entonces
+            a := ficha_de(src)
+        sino
+            ; (de ::, la detección de duplicados: a ff02::1)
+            ceros_k(nat64(dirección(t[0])), 16)
+            t[0] := 0xFF
+            t[1] := 0x02
+            t[15] := 1
+            a := ficha_de(nat64(dirección(t[0])))
+        fin
+        si a = 0 entonces devolver fin
+        nd_tx := nd_tx + 1
+        si sol entonces
+            icmp6_envía(yo_, a, 136, 0, 0x60000000, nat64(dirección(c[0])), 24, 255)      ; S y O
+        sino
+            icmp6_envía(yo_, a, 136, 0, 0x20000000, nat64(dirección(c[0])), 24, 255)      ; O
+        fin
+    fin
+
+    ; ---- ICMPv6: lo que llega ----
+    función entra_icmp6(i: nat32, h: nat64, src: nat64, dst: nat64, d: nat64, n: nat32, hop: nat32)
+        variable t, id, de, a, k: nat32
+        variable s: puntero a Sock
+        variable cu, op: nat64
+        si n < 8 entonces devolver fin
+        si plegar(suma(d, nat64(n), suma(src, 16, suma(dst, 16, 58 + nat64(n))))) <> 0 entonces
+            ip6_malos := ip6_malos + 1
+            devolver
+        fin
+        icmp6_rx := icmp6_rx + 1
+        t := m8(d)
+        si t = 134 y i > 0 entonces
+            si hop = 255 y de_enlace(src) entonces entra_ra(i, src, d, n) fin
+            devolver
+        fin
+        si t = 135 y i > 0 entonces
+            si hop = 255 entonces entra_ns(i, src, dst, d, n) fin
+            devolver
+        fin
+        si t = 136 y i > 0 entonces
+            si hop = 255 y n >= 24 entonces
+                nd_rx := nd_rx + 1
+                op := opción_nd(d + 24, n - 24, 2)
+                si op <> 0 entonces sabe_nd(i, d + 8, op + 2, falso) fin
+            fin
+            devolver
+        fin
+        si t = 133 entonces devolver fin                     ; (RS: no somos router)
+        de := ficha_de(src)
+        si de = 0 entonces devolver fin
+        si t = 128 entonces
+            ; un ping: se contesta con lo mismo (a uno de multidifusión, desde la de enlace)
+            si multidifusión(dst) entonces
+                si i = 0 entonces devolver fin
+                a := ifz(i).ip6_ll
+            sino
+                a := ficha_de(dst)
+            fin
+            si a = 0 entonces devolver fin
+            cu := sitio_datos() + 8
+            copia_k(cu, d + 8, nat64(n) - 8)
+            icmp6_envía(a, de, 129, 0, be32(d + 4), cu, n - 8, 0)
+        sino si t = 129 entonces
+            ; la respuesta a un ping: al «ping socket» de ICMPv6 de ese identificador
+            si multidifusión(dst) entonces devolver fin
+            a := ficha_de(dst)
+            id := be16(d + 4)
+            s := sock_dgram(58, a, id, de, 0)
+            si s <> nulo entonces a_socket(s, de, 0, d, n) fin
+        sino si t = 1 y n >= 8 + 40 + 4 entonces
+            ; inalcanzable: a TCP (la conexión) o al socket UDP conectado
+            cu := d + 8
+            si m8(cu + 6) = 6 y al_tcp_inalcanzable <> 0 entonces
+                a := ficha_de(cu + 24)
+                llama3(al_tcp_inalcanzable, nat64(a), nat64(be16(cu + 40)), nat64(be16(cu + 42)))
+            sino si m8(cu + 6) = 17 entonces
+                a := ficha_de(cu + 24)
+                k := ficha_de(cu + 8)
+                s := sock_dgram(17, k, be16(cu + 40), a, be16(cu + 42))
+                si s <> nulo y s.marcas yb M_CONECTADO <> 0 entonces s.error := -111 fin      ; ECONNREFUSED
+            fin
+        fin
+    fin
+
+    ; ---- IPv6: lo que llega ----
+    función entra_ip6(i: nat32, h: nat64, n: nat32)
+        variable pl, nh, hop, l, de, a, e: nat32
+        variable d, src, dst: nat64
+        si n < 40 o m8(h) >> 4 <> 6 entonces
+            ip6_malos := ip6_malos + 1
+            devolver
+        fin
+        pl := be16(h + 4)
+        si 40 + pl > n entonces
+            ip6_malos := ip6_malos + 1
+            devolver
+        fin
+        nh := m8(h + 6)
+        hop := m8(h + 7)
+        src := h + 8
+        dst := h + 24
+        si i > 0 y no para_mí6(ifz(i), dst) entonces devolver fin
+        si multidifusión(src) entonces devolver fin
+        d := h + 40
+        l := pl
+        ; las cabeceras de extensión de salto a salto (0) y de destino (60), saltadas; los trozos (44), no
+        e := 0
+        mientras (nh = 0 o nh = 60) y e < 4 hacer
+            si l < 8 entonces devolver fin
+            si l < (m8(d + 1) + 1) * 8 entonces devolver fin
+            nh := m8(d)
+            l := l - (m8(d + 1) + 1) * 8
+            d := d + nat64((m8(d + 1) + 1) * 8)
+            e := e + 1
+        fin
+        si nh = 44 entonces
+            ip_trozos := ip_trozos + 1
+            devolver
+        fin
+        ip6_rx := ip6_rx + 1
+        si nh = 58 entonces
+            entra_icmp6(i, h, src, dst, d, l, hop)
+            devolver
+        fin
+        si multidifusión(dst) entonces devolver fin
+        de := ficha_de(src)
+        a := ficha_de(dst)
+        si de = 0 o a = 0 entonces devolver fin
+        si nh = 17 entonces
+            entra_udp(i, h, 40, de, a, d, l)
+        sino si nh = 6 entonces
+            si al_tcp_entra <> 0 entonces
+                ent_ifz := i
+                ent_de := de
+                ent_a := a
+                ent_d := d
+                ent_n := nat64(l)
+                llama0(al_tcp_entra)
+            fin
         fin
     fin
 
@@ -1002,7 +1650,7 @@ módulo Ip64
             lo_n := lo_n - 1
             ifz(0).rx_paq := ifz(0).rx_paq + 1
             ifz(0).rx_oct := ifz(0).rx_oct + l
-            entra_ip(0, nat64(dirección(recibida[0])), l)
+            si m8(nat64(dirección(recibida[0]))) >> 4 = 6 entonces entra_ip6(0, nat64(dirección(recibida[0])), l) sino entra_ip(0, nat64(dirección(recibida[0])), l) fin
             k := k + 1
             algo := cierto
         fin
@@ -1017,6 +1665,7 @@ módulo Ip64
                 i := i + 1
             fin
             arp_tic()
+            si no sin_ipv6 entonces nd_tic() fin      ; [etapa 10 c]
         fin
         i := 1
         mientras i < n_ifz hacer
@@ -1138,6 +1787,11 @@ módulo Ip64
             si fija[0] <> 0 entonces ip_fija(fija) fin
         fin
         ip_id := azar32()
+        ; [etapa 10 c] ::1
+        ceros_k(nat64(dirección(trama6[0])), 16)
+        trama6[15] := 1
+        lo6 := ficha_de(nat64(dirección(trama6[0])))
+        fija_ficha(lo6)
         lo_cola := nat64(reserva(nat64(LO_N) * TRAMA))
         hilo_red := crea(nat64(dirección(hilo_de_red)), 0, "red", INTERACTIVO, CUALQUIERA)
         red_va := hilo_red <> nulo

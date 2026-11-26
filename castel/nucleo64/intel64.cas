@@ -304,7 +304,7 @@ módulo Intel64
         w(t, RDTR, 0)
         w(t, RADV, 0)
         t.rx_sig := 0
-        w(t, RCTL, 0x04008002)                  ; EN, BAM, SECRC (y BSIZE 00: 2048)
+        w(t, RCTL, 0x04008012)                  ; EN, MPE ([etapa 10 c] toda la multidifusión: la de IPv6), BAM, SECRC (y BSIZE 00: 2048)
         ; enviar
         w(t, TDBAL, nat32(t.tx_anillo yb 0xFFFFFFFF))
         w(t, TDBAH, nat32(t.tx_anillo >> 32))
