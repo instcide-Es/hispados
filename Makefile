@@ -1241,9 +1241,12 @@ $(B)/ACCJUEGO.COM: tests/progs/accjuego.asm | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
 
 # Lo que necesitan las pruebas (también lo usa tools/pruebas_pc.sh).
-TEST_DEPS = $(IMG) usb usb486 cd cd486 paq paq486 $(B)/ACTPRUEB.COM $(B)/FIRMATST.COM nucprogs emmprogs joyprogs nesprogs smsprogs snesprogs mdprogs $(HVPJ) $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
+TEST_DEPS = $(IMG) usb usb486 cd cd486 paq paq486 h8086 $(B)/ACTPRUEB.COM $(B)/FIRMATST.COM nucprogs emmprogs joyprogs nesprogs smsprogs snesprogs mdprogs $(HVPJ) $(B)/LANZTEST.COM $(B)/ACCJUEGO.COM $(B)/prueba_wifi $(B)/chip_sim $(B)/HSPWSIM.BIN $(ACPI) $(B)/acpi_sim $(B)/CMOSW.COM $(B)/VTDON.COM $(B)/PITIDO.COM $(B)/HDAVIVO.COM
 
 para-pruebas: $(TEST_DEPS)
+# los disquetes de Hispa-8086 (run_reinicio_silencio_tests.sh los arranca)
+h8086:
+	$(MAKE) -C h8086
 
 test: $(TEST_DEPS)
 	tests/run_tests.sh $(IMG)
@@ -1460,4 +1463,4 @@ clean:
 	rm -rf $(B)
 
 PHONY_CD = cd cd486
-.PHONY: all usb usb486 $(PHONY_CD) fondo486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs mdprogs
+.PHONY: h8086 all usb usb486 $(PHONY_CD) fondo486 paq paq486 run run-hdd test para-pruebas clean nucprogs emmprogs joyprogs nesprogs smsprogs mdprogs
