@@ -63,7 +63,7 @@ módulo PorCpu64
         ; [etapa 10 d] el vigilante (Hilos64.vigila): sus tics la última vez
         ; que se miró, y cuántas veces seguidas sin moverse; y cuántas veces
         ; seguidas ocioso con hilos en su cola
-        vigía_tics, vigía_quieto, vigía_ocioso: nat64
+        vigía_tics, vigía_quieto, vigía_ocioso, vigía_cambios: nat64
     fin
 
     variable bsp: Cpu alineado 64           ; (en su línea de la caché)

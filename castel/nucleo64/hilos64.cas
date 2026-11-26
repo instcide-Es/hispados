@@ -1000,7 +1000,11 @@ módulo Hilos64
                     motivo_nmi := "El vigilante: este procesador lleva 5 s sin atender su tic (las interrupciones quitadas: un cerrojo o una espera que no acaba). Lo que hacía:"
                     ipi(oc.apic, 0x4400)
                 fin
-                si oc.ocioso <> 0 y cola_n[k] > 0 entonces oc.vigía_ocioso := oc.vigía_ocioso + 1 sino oc.vigía_ocioso := 0 fin
+                ; (sin cambiar de hilo entre una mirada y otra: uno al que se
+                ; acaba de dar un hilo en este mismo tic, con el aviso aún de
+                ; camino, no cuenta)
+                si oc.ocioso <> 0 y cola_n[k] > 0 y oc.cambios = oc.vigía_cambios entonces oc.vigía_ocioso := oc.vigía_ocioso + 1 sino oc.vigía_ocioso := 0 fin
+                oc.vigía_cambios := oc.cambios
                 si oc.vigía_ocioso >= 4 entonces
                     oc.vigía_ocioso := 0
                     vigilante_avisos := vigilante_avisos + 1
