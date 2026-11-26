@@ -6,3 +6,6 @@ contact_links:
   - name: Guía para colaborar
     url: https://github.com/instcide-Es/hispados/blob/hispados-0.9/CONTRIBUTING.md
     about: Cómo preparar el entorno, las normas y por dónde empezar.
+  - name: Avisar de un fallo de seguridad (en privado)
+    url: https://github.com/instcide-Es/hispados/security/advisories/new
+    about: No lo cuentes en una issue pública; así nos llega solo a nosotros (SECURITY.md).
