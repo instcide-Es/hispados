@@ -333,6 +333,19 @@ cam_bomba:
 .r:
         ret
 
+; [0.9.31] deja acabar la campanita antes de algo que para el bucle del
+; sistema un rato (guardar en el disco: guardar.inc): mientras se escribe,
+; cam_bomba no le da trozos a la tarjeta y la campanita salía cortada o
+; alargada (run_sonidos_tests.sh, AC'97 y HD Audio). Lo que tarda: lo que le
+; quede (0,3 s como mucho; cam_bomba la para a los 40 tics)
+cam_acabar:
+        cmp dword [cam_pos], 0
+        je .r
+        call cam_bomba
+        jmp cam_acabar
+.r:
+        ret
+
 ; ECX=octetos -> EAX=puntero EDX=mango; CF=1 si no hay memoria
 mem_bloque:
         push ebx

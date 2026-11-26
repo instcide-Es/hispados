@@ -116,6 +116,9 @@ gua_renombra:
 %endif
 
 gua_crear:
+%ifndef GUA_PROPIOS
+        call cam_acabar             ; (la campanita, entera antes del disco)
+%endif
         push ecx
         push edx
         push esi
