@@ -1151,7 +1151,7 @@ módulo Unix64
     ; descriptores que llegan (quien llama los pone o los cierra); cpid, cuid,
     ; cgid, quien lo manda (el primero)
     función recibe(p: puntero a Proceso, fd: nat64, u: puntero a Unix, k: nat64, n: nat64, marcas_: nat64, ref real: nat64, de: puntero a byte, ref dl: nat64, ref fds: nat64, ref n_fd: nat64, ref cpid: nat64, ref cuid: nat64, ref cgid: nat64): ent64
-        variable g, lím, hecho, c, cur, i: nat64
+        variable g, lím, hecho, c, cur, i, antes: nat64
         variable m: puntero a Msj
         variable r: ent64
         variable fin_, tomó: bool
@@ -1182,6 +1182,7 @@ módulo Unix64
                     fin
                 fin
                 si u.tipo_ = S_STREAM entonces
+                    antes := hecho
                     cur := u.primero
                     mientras cur <> 0 y hecho < n hacer
                         m := mj(cur)
@@ -1215,7 +1216,9 @@ módulo Unix64
                     suelta_u()
                     Sondeo64.avisa()
                     ; (MSG_WAITALL: a por más, si no se ha llenado ni han llegado descriptores)
-                    si marcas_ yb MSG_WAITALL <> 0 y marcas_ yb MSG_PEEK = 0 y hecho < n y fds = 0 entonces seguir fin
+                    ; (y si en esta vuelta se ha leído algo: si lo siguiente trae
+                    ; descriptores y ya se tenía algo, se para ahí)
+                    si marcas_ yb MSG_WAITALL <> 0 y marcas_ yb MSG_PEEK = 0 y hecho < n y fds = 0 y hecho > antes entonces seguir fin
                     devolver ent64(hecho)
                 fin
                 ; un datagrama (o un mensaje de SOCK_SEQPACKET), entero
