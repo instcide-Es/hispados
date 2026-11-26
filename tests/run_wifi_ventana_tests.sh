@@ -77,11 +77,17 @@ qemu() {   # qemu S plazo [opciones de QEMU]
 }
 mkimg() {   # mkimg S: la imagen con sitio para el núcleo del Wi-Fi (400 KB)
   cp "$IMG" $T/$1.img
-  for f in HISPA.WAV AUDICION.COM HSPSND.COM EQUIPO.COM HSPUSB.SYS; do mdel -i $T/$1.img ::HISPADOS/$f 2>/dev/null; done
+  # (0.9.31: HSPWIFI.BIN pasa de 572 a 619 KB con lo del Wi-Fi de Hispa-Pentium:
+  # fuera también lo que esta prueba no usa)
+  for f in HISPA.WAV AUDICION.COM HSPSND.COM EQUIPO.COM HSPUSB.SYS ACTUALIZ.COM INSTALAR.COM PARTIR.COM \
+           HSPEMM.SYS CONSOLA.COM REVISAR.COM; do mdel -i $T/$1.img ::HISPADOS/$f 2>/dev/null; done
   mdeltree -i $T/$1.img ::HISPADOS/JUEGOS 2>/dev/null
   printf 'DEVICE=A:\\HISPADOS\\HSPXMS.SYS\r\nDOS=HIGH\r\nFILES=30\r\n' > $T/CONFIG.SYS
   mcopy -o -i $T/$1.img $T/CONFIG.SYS ::CONFIG.SYS
-  mcopy -o -i $T/$1.img $B/HSPWIFI.COM $B/WIFI.COM $B/HSPWIFI.BIN ::HISPADOS/
+  # si no cabe, la prueba no vale: se para aquí (antes seguía con «Disk full»
+  # y daba 42 fallos de pantalla que no eran del Wi-Fi)
+  mcopy -o -i $T/$1.img $B/HSPWIFI.COM $B/WIFI.COM $B/HSPWIFI.BIN ::HISPADOS/ \
+    || { echo "  FAIL no cabe el Wi-Fi en el disquete de la prueba ($1): se para"; exit 1; }
 }
 # En 800x600 sin batería: el altavoz en x = 732, el icono de red en 692..708,
 # y = 576..590 (la barra, de 572 a 599). La ventanita del Wi-Fi: 364x311 en

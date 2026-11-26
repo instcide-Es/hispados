@@ -78,7 +78,7 @@ fi
 ok=0; fail=0
 for r in build/pc/*.rc; do
   n=${r%.rc}
-  o=$(grep -c '  OK ' $n.log); f=$(grep -c 'FAIL' $n.log)
+  o=$(grep -c '  OK ' $n.log); f=$(grep -cE '^[[:space:]]*FAIL' $n.log)  # (no «0 FAIL» de los resúmenes)
   ok=$((ok + o)); fail=$((fail + f))
   if [ "$f" -gt 0 ] || [ "$(cut -d' ' -f1 $r)" != 0 ]; then
     echo "  FALLA: $(cut -d' ' -f2- $r) ($o OK, $f FAIL)"

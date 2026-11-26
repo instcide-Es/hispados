@@ -152,8 +152,9 @@ mal:
 
 /* ---------------------------------------------------------------- WOFF2 */
 
-/* las 63 etiquetas que se dicen con un número (apartado 4.1, tabla de tags) */
-static const char etiquetas[63][4] = {
+/* las 63 etiquetas que se dicen con un número (apartado 4.1, tabla de tags);
+ * [5]: con el 0 del final, que no se usa (GCC 15 no deja recortarlo) */
+static const char etiquetas[63][5] = {
   "cmap", "head", "hhea", "hmtx", "maxp", "name", "OS/2", "post", "cvt ", "fpgm", "glyf", "loca", "prep",
   "CFF ", "VORG", "EBDT", "EBLC", "gasp", "hdmx", "kern", "LTSH", "PCLT", "VDMX", "vhea", "vmtx", "BASE",
   "GDEF", "GPOS", "GSUB", "EBSC", "JSTF", "MATH", "CBDT", "CBLC", "COLR", "CPAL", "SVG ", "sbix", "acnt",
