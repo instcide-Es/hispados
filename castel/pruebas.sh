@@ -5941,8 +5941,10 @@ mira "al arrancar otra vez, con la falsa al lado, se conecta sola a la WPA2" "Se
   "802.11: conectando con «HispaPrueba» (\.\.\.:00:01" "^Conectado a «HispaPrueba»$"
 if grep -q "conectando con «HispaPrueba» (\.\.\.:00:04" $S; then ko "al arrancar, se ha ido a la abierta falsa"; else ok "y ni lo intenta con la falsa"; fi
 # 5. el escritorio: el icono (con el aspa, sin conectar), la ventana del Wi-Fi, la contraseña con asteriscos, conectar; Configuración
+# ((0.8.12) los 8 s, desde que el escritorio está en marcha, no desde que
+# arranca QEMU: con la máquina cargada, a los 8 s aún no estaba y el clic iba a nadie)
 cp $Wf/d.img $Wf/v.img
-CAPTURAS=$G MEMORIA=64 DISCO=$Wf/v.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":pausa 8" ":captura wf1" ":clic 720 583" ":pausa 4" ":captura wf2" \
+CAPTURAS=$G MEMORIA=64 DISCO=$Wf/v.img ARRANQUE="escritorio conred" MODULOS= $AQUI/nucleo32/probar.sh "" ":hasta 120 1 escritorio: paso: en marcha" ":pausa 8" ":captura wf1" ":clic 720 583" ":pausa 4" ":captura wf2" \
   ":clic 300 187" ":pausa 1" ":clic 227 347" ":escribe clave de prueba" ":pausa 1" ":captura wf3" ":clic 150 397" ":pausa 8" ":captura wf4" > $Wf/esc.sal 2>&1
 S=$Wf/esc.sal
 mira "el escritorio: RED.BIN y WIFI.BIN en marcha; un clic en el icono de la red abre la ventana del Wi-Fi (REDWIFI.BIN), y se conecta desde ella" \
