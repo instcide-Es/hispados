@@ -4287,8 +4287,26 @@ media_check:
         call dev_call
         test word [dreq+3], 0x8000
         jnz .done
-        cmp byte [dreq+0x0E], 0xFF  ; FFh cambiado, 0 no se sabe, 1 igual
+        cmp byte [dreq+0x0E], 1     ; FFh cambiado, 0 no se sabe, 1 igual
+        je .done
+        cmp byte [dreq+0x0E], 0     ; «no se sabe», como en MS-DOS: cambiado
+        jne .bb                     ; si no hay nada a medio escribir (SRDISK
+        cmp byte [fat_dirty], 0     ; lo dice así al cambiar de tamaño)
         jne .done
+.bb:
+        ; cambiado: como en MS-DOS, se le piden las medidas del disco nuevo
+        ; (orden 2, BUILD BPB; con el búfer de sector) y se apunta la BPB que da
+        mov byte [dreq+2], 2
+        mov word [dreq+0x0E], secbuf
+        mov [dreq+0x10], ds
+        mov dword [cache_lba], 0xFFFFFFFF
+        call dev_call
+        test word [dreq+3], 0x8000
+        jnz .changed
+        mov eax, [dreq+0x12]
+        test eax, eax
+        jz .changed
+        mov [cur_drv+D_BPBPTR], eax
 .changed:
         ; puede haber cambiado: fuera las cachés y se vuelve a leer el disco.
         ; Si el número de serie del volumen es el mismo, es el mismo disco
@@ -16205,16 +16223,17 @@ l_int15:
 
 ; salidas: el código llama aquí (CALL/JMP lejano a KSEG) y a la vuelta se
 ; comprueba A20 antes de volver a él
-; Como MS-DOS, la estrategia y la interrupción se llaman con DS = el segmento
-; del driver (y ES:BX en la petición): hay drivers que leen sus datos con DS
-; sin cargarlo (PROTMAN.DOS de NDIS 2)
+; Como MS-DOS, la estrategia y la interrupción se llaman con ES:BX en la
+; petición y DS:SI en la cabecera del driver: hay drivers que leen sus datos
+; con DS sin cargarlo (PROTMAN.DOS de NDIS 2) y los comprimidos con UPX (SRDISK
+; de FreeDOS) copian en DS al descomprimirse. dev_call repone DS al volver.
 l_devcall:
-        mov ds, [cs:dc_far+2]
+        lds si, [cs:dc_hdr]
         call far [cs:dc_far]
         mov ax, KSEG
         mov es, ax
         mov bx, dreq
-        mov ds, [cs:dc_far+2]
+        lds si, [cs:dc_hdr]
         call far [cs:dc_far2]
         call a20_gate
         retf
