@@ -1314,17 +1314,19 @@ PY
   raton8 300 33; boton8 1; raton8 400 83; raton8 500 133; boton8 0; paso8 "movida a (240, 148)" 10
   sleep 1; foto8 movida
   teclas8 '{esc}'; paso8 "ventana fuera «Notas" 15
-  # el menú Inicio con el ratón, y Pluma desde él
+  # el menú Inicio con el ratón, y Pluma desde él ([etapa 10 d] el título que
+  # dice VENTANAS al verla puede ser ya el del documento, «Documento1 - Pluma»:
+  # lo pone Pluma enseguida, y depende de quién llegue antes)
   raton8 50 783 clic; paso8 "menú Inicio abierto" 10
   sleep 1; foto8 inicio
-  raton8 100 615 clic; paso8 "ventana nueva «Pluma»" 60; paso8 "^pluma: lista" 30
+  raton8 100 615 clic; paso8 "ventana nueva «\(.* - \)\?Pluma»" 60; paso8 "^pluma: lista" 30
   sleep 2
   teclas8 'Carta de prueba: ñandú y pingüino.{ctrl-g}'; paso8 "^pluma: cuadro «Guardar como»" 20
   sleep 1; teclas8 'carta{intro}'; paso8 "^pluma: guardado C:.DOCUMENT.carta.PLU" 20
   sleep 1; foto8 pluma
   teclas8 '{alt-f4}'; paso8 "^pluma: adiós" 20
   # Cuentas, con una fórmula
-  raton8 50 783 clic; sleep 0.5; raton8 100 655 clic; paso8 "ventana nueva «Cuentas»" 60; paso8 "^cuentas: lista" 30
+  raton8 50 783 clic; sleep 0.5; raton8 100 655 clic; paso8 "ventana nueva «\(.* - \)\?Cuentas»" 60; paso8 "^cuentas: lista" 30
   sleep 2
   teclas8 '12{intro}30{intro}=A1*A2+1{intro}'; sleep 2; foto8 cuentas
   teclas8 '{ctrl-g}'; paso8 "^cuentas: cuadro «Guardar como»" 20

@@ -558,11 +558,27 @@ módulo Hispa64
         fin
     fin
 
+    ; (pruebas5) v detrás de lo que ya hay en l (de 240 octetos). [etapa 10 d]
+    ; En una función aparte: dentro de pruebas5, un «je» quedaba a 127
+    ; octetos justos y NASM y ensambla.py lo sacaban de distinto tamaño (los
+    ; dos, núcleos buenos: NASM, largo; ensambla.py, corto)
+    función añade_arg(l: puntero a byte, v: puntero a byte)
+        variable i, j: nat32
+        i := 0
+        mientras l[i] <> 0 hacer i := i + 1 fin
+        j := 0
+        mientras v[j] <> 0 y i < 238 hacer
+            l[i] := v[j]
+            i := i + 1
+            j := j + 1
+        fin
+        l[i] := 0
+    fin
+
     ; [etapa 5] las pruebas de los discos y de los archivos (después de las de los programas)
     función pruebas5()
         variable v: arreglo [210] de byte
         variable l: arreglo [240] de byte
-        variable i, j: nat32
         l[0] := 0
         valor_de("dir=", dirección(v[0]))
         si v[0] = 0 entonces
@@ -571,17 +587,7 @@ módulo Hispa64
         sino
             copia_texto(dirección(l[0]), "ARCHIVOS dir ", 240)
         fin
-        si l[0] <> 0 entonces
-            i := 0
-            mientras l[i] <> 0 hacer i := i + 1 fin
-            j := 0
-            mientras v[j] <> 0 y i < 238 hacer
-                l[i] := v[j]
-                i := i + 1
-                j := j + 1
-            fin
-            l[i] := 0
-        fin
+        si l[0] <> 0 entonces añade_arg(dirección(l[0]), dirección(v[0])) fin
         si tiene("sinpruebas") o no tic_va entonces
             pruebas_discos(falso, nulo)
         sino
