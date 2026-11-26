@@ -1029,7 +1029,7 @@ demo_hora() {   # TEXTO HH:MM_ANTES HH:MM_DESPUÉS DÍA: ¿dice DEMO la hora de 
 con_interprete() {   # SALIDA TEXTO [opciones de QEMU]: «apagar sinpruebas escribir ordenes»; las teclas, al ver el indicador
   local s=$1 x=$2 q c; shift 2
   rm -f "$s" "$T/mon7.sock"
-  timeout 180 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "apagar sinpruebas escribir ordenes" -display none -serial file:"$s" \
+  timeout 180 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "${LINEA7:-apagar sinpruebas escribir ordenes}" -display none -serial file:"$s" \
     -monitor unix:"$T/mon7.sock",server,nowait $DBG -no-reboot -nic none -m 256 -machine q35 -smp 4 -rtc base=localtime "$@" > /dev/null 2>&1 &
   q=$!
   for _ in $(seq 1 300); do grep -q "^/> " "$s" 2> /dev/null && break; sleep 0.2; done
@@ -1081,6 +1081,16 @@ if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 
    && fsck.fat -n "$T/w7/fat.img" > "$T/w7/fsck.txt" 2>&1; then
   ok "etapa 6, el intérprete ORDENES con las teclas del monitor de QEMU (PS/2, mapa español, $(manda_teclas -n "$TECLAS7" | wc -w) teclas): ver, listar (y DIR), cd, creardir, escribir > archivo, mostrar, copiar (en el disco: fsck.fat bien), ayuda, [etapa 10 c] DEMO (6 por 7 y la hora de Madrid), EROFS, HOLA uno dos, CUENTA 3 (código 30), una que no está, «canción ñandú pingüino àlex a@b#c», Bloq Mayús, Retroceso, las flechas, la historia, Ctrl+U, Ctrl+C (en el indicador y a HIJOS: 130), Ctrl+D; [etapa 7] Lua con un guion y a mano (print(6 * 7)), y Ctrl+C a MBUCLE, que no llama al sistema; salir"
 else ko "etapa 6, el intérprete no hace lo que debe (código $c): $(sed -n '/^ORDENES, el/,$p' <<< "$v" | tr -d '\b' | cut -c1-80 | paste -sd '|' | cut -c1-1500)"; fi
+# [etapa 10 c] la tabla de arreglos: con «prueba=salida», el núcleo pone a
+# MBUCLE un RIP no canónico justo antes de su iretq; ese iretq falla en el
+# anillo 0 y, en vez de pararse el sistema, se cierra el programa (SIGSEGV)
+# y el intérprete sigue
+LINEA7="apagar sinpruebas escribir ordenes prueba=salida" con_interprete "$T/e7s.txt" 'MBUCLE{intro}{indicador}eco sigue{intro}{indicador}salir{intro}'; c=$?
+v=$(serie "$T/e7s.txt")
+if [ $c = 85 ] && grep -q "^El programa MBUCLE (proceso [0-9]*) ha querido volver con unos registros que no valen (CS, SS o RIP de su marco): se cierra (SIGSEGV).$" <<< "$v" \
+   && grep -q "^(MBUCLE se ha cerrado por la señal 11" <<< "$v" && grep -q "^sigue$" <<< "$v" && grep -q "^El intérprete de órdenes ha acabado (código 0).$" <<< "$v"; then
+  ok "etapa 10 c, la tabla de arreglos: el iretq de vuelta a MBUCLE con un RIP no canónico (prueba=salida) cierra el programa (SIGSEGV), sin parar el núcleo; el intérprete sigue"
+else ko "etapa 10 c, la tabla de arreglos no hace lo que debe (código $c): $(grep -E 'MBUCLE|registros que no valen|parado|sigue|intérprete' <<< "$v" | cut -c1-120 | paste -sd '|')"; fi
 # lo mismo por un teclado USB (sin 8042: todo llega por tecla_hid)
 TECLAS7U='echo canción ñandú a@b{intro}{indicador}echo holx{retro}a{intro}{indicador}echo Hola {bloqmayus}abc{bloqmayus}d{intro}{indicador}HOLA uno{intro}{indicador}salir{intro}'
 con_interprete "$T/e7u.txt" "$TECLAS7U" -machine q35,i8042=off -device qemu-xhci,id=xhci -device usb-kbd,bus=xhci.0; c=$?

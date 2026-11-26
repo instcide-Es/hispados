@@ -210,6 +210,7 @@ módulo Procesos
     variable quietos: Espera                    ; [etapa 7] los que duermen hasta una señal (pause, sigsuspend, nanosleep)
     público variable señales_entregadas, hilos_creados: nat64
     público variable cierres_aplazados: nat64   ; [etapa 10 c] los close que ha acabado deja_fd
+    público variable prueba_salida: bool        ; [etapa 10 c] «prueba=salida» (al_volver_)
     ; [etapa 6] la tabla de los procesos (los vivos y los zombis), para wait4,
     ; los huérfanos y Ctrl+C
     público constante MAX_PROC = 256
@@ -812,6 +813,22 @@ módulo Procesos
         termina()
     fin
 
+    ; [etapa 10 c] (Entradas.E64_arreglo) el iretq de vuelta al programa ha
+    ; fallado (un marco de señal con CS, SS o RIP que no valen: lo de
+    ; rt_sigreturn): se cierra el programa con SIGSEGV. No vuelve.
+    función salida_mala()
+        variable h: puntero a Hilo
+        variable p: puntero a Proceso
+        variable b: nat64
+        enciende()
+        h := actual()
+        p := puntero(h.proceso)
+        b := toma_atento(dirección(cerrojo_consola))
+        escribir("El programa ", dirección(p.nombre[0]), " (proceso ", p.id, ") ha querido volver con unos registros que no valen (CS, SS o RIP de su marco): se cierra (SIGSEGV).\n")
+        suelta(dirección(cerrojo_consola), b)
+        sal(0, SIGSEGV)
+    fin
+
     ; el programa que corre acaba (exit_group, o cerrado por la señal): todos
     ; sus hilos (los demás, al volver al anillo 3 o de su llamada al sistema).
     ; No vuelve.
@@ -1407,6 +1424,13 @@ módulo Procesos
             apaga()
         fin
         p := puntero(h.proceso)
+        ; [etapa 10 c] (prueba=salida) a MBUCLE, un RIP no canónico justo antes
+        ; del iretq: lo tiene que cerrar la tabla de arreglos (Entradas), sin
+        ; parar el núcleo
+        si prueba_salida y p.nombre[0] = 'M' y p.nombre[1] = 'B' y p.nombre[2] = 'U' y p.nombre[3] = 'C' entonces
+            p64(m + 120, 0x8000000000000000)
+            devolver
+        fin
         si no hay_señal(p, h) entonces devolver fin
         enciende()
         antes_de_volver(m, falso, 0)
@@ -3047,6 +3071,7 @@ módulo Procesos
             detén_fin()
         fin
         al_fallo_usuario := nat64(dirección(al_fallo_))
+        al_salida_mala := nat64(dirección(salida_mala))     ; [etapa 10 c]
         al_cambiar := nat64(dirección(al_cambiar_))
         al_volver := nat64(dirección(al_volver_))
         ; ([etapa 11] INTERACTIVO: en la 10 iba NORMAL por un fallo del

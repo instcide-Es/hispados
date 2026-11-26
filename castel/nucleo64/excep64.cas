@@ -224,6 +224,18 @@ módulo Excep64
             d := d + 8
         fin
         si n = 14 entonces c2 := cr2() fin
+        ; [etapa 10 c] la tabla de arreglos (como la de Linux): un fallo en
+        ; el iretq de vuelta al programa es del programa: ya con su GS (el
+        ; swapgs de antes del iretq), se pone el del núcleo y se sigue en
+        ; Entradas.E64_arreglo, que lo cierra (antes, el núcleo se paraba)
+        si (n = 13 o n = 12 o n = 11) y (lee64(d) = dir_iret1() o lee64(d) = dir_iret2()) y lee64(d + 8) yb 3 = 0 y al_salida_mala <> 0 entonces
+            ensamblador
+                db 0x0F, 0x01, 0xF8         ; swapgs
+            fin
+            salidas_malas := salidas_malas + 1
+            pon64(d, dir_arreglo())
+            devolver
+        fin
         ; [etapa 4] desde el anillo 3: el marco de verdad está donde diga el
         ; falso (Entradas), y lo explica y lo arregla Procesos
         si lee64(d) = dir_salida() entonces d := lee64(d + 24) fin

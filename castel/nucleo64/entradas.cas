@@ -77,6 +77,26 @@ módulo Entradas
         fin
     fin
 
+    ; [etapa 10 c] los iretq de vuelta al programa (los que pueden fallar
+    ; por lo que ha puesto el programa) y adónde se va si fallan
+    público variable al_salida_mala: nat64      ; f(): cierra el programa (Procesos)
+    público variable salidas_malas: nat64
+    público función dir_iret1(): nat64
+        ensamblador
+            lea rax, [E64_iret1]
+        fin
+    fin
+    público función dir_iret2(): nat64
+        ensamblador
+            lea rax, [E64_iret2]
+        fin
+    fin
+    público función dir_arreglo(): nat64
+        ensamblador
+            lea rax, [E64_arreglo]
+        fin
+    fin
+
     ; lo que se pone en LSTAR
     público función dir_sistema(): nat64
         ensamblador
@@ -205,6 +225,7 @@ módulo Entradas
             pop rcx
             pop rax
             db 0x0F, 0x01, 0xF8         ; swapgs
+        E64_iret1:
             iretq
         ; ---- syscall ----
         E64_sistema:
@@ -280,7 +301,20 @@ módulo Entradas
             pop rcx
             pop rax
             db 0x0F, 0x01, 0xF8                                 ; swapgs
+        E64_iret2:
             iretq
+        ; ---- [etapa 10 c] la «tabla de arreglos»: un iretq al programa que
+        ; falla (un marco de una señal con CS, SS o RIP que no valen) cierra el
+        ; programa y no para el núcleo: Excep64 vuelve aquí, ya con el GS del
+        ; núcleo, en la pila del núcleo de su hilo
+        E64_arreglo:
+            and rsp, -16
+            mov rax, {al_salida_mala}
+            test rax, rax
+            jz E64_arreglo_mal
+            call rax
+        E64_arreglo_mal:
+            ud2
         ; ---- una entrada por vector ----
         E64_v0:
             push rax
