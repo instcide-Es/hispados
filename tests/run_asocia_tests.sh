@@ -153,7 +153,7 @@ echo "== Configuración › Tipos de archivo =="
   send 'VENTANAS' 6
   doble 102 129; sleep 1
   aparca
-  tecla right right right right ret; sleep 2
+  tecla right ret; sleep 2                  # Configuración, el 2.º de Principal (desde la 0.9.22: Hispa-DOS, Configuración y los dos administradores)
   clic 196 332; sleep 1
   clic 373 448; sleep 1.5
   aparca
