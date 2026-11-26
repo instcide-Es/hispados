@@ -1412,6 +1412,45 @@ test: $(TEST_DEPS)
 	tests/run_actualizar_hspred_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas_tests.sh $(IMG)
 	EMM=1 tests/run_ventanas3_tests.sh $(IMG)
+	# las que no estaban en «make test» (26/11/2026: la batería entera, que no se quede ninguna fuera)
+	tests/run_abs25_tests.sh $(IMG)
+	tests/run_asocia_tests.sh $(IMG)
+	tests/run_bajos_nucleo_tests.sh $(IMG)
+	tests/run_copiar_union_tests.sh $(IMG)
+	tests/run_crear_abierto_tests.sh $(IMG)
+	tests/run_datos_tests.sh $(IMG)
+	tests/run_disco0d_tests.sh $(IMG)
+	tests/run_doshand_tests.sh $(IMG)
+	tests/run_dpmilim_tests.sh $(IMG)
+	tests/run_emmlim_tests.sh $(IMG)
+	tests/run_f4gb_tests.sh $(IMG)
+	tests/run_fcbdev_tests.sh $(IMG)
+	tests/run_firma_tests.sh $(IMG)
+	tests/run_gl486_tests.sh $(IMG)
+	tests/run_gl_tests.sh
+	tests/run_glifos_tests.sh $(IMG)
+	tests/run_grupos64k_tests.sh $(IMG)
+	tests/run_https_tests.sh
+	tests/run_jpeg_tests.sh
+	tests/run_lector_tests.sh $(IMG)
+	tests/run_lote_largo_tests.sh $(IMG)
+	tests/run_makefile_tests.sh
+	tests/run_mirador_tests.sh $(IMG)
+	tests/run_navegador_cors_tests.sh
+	tests/run_ortografia_tests.sh
+	tests/run_presenta_tests.sh $(IMG)
+	tests/run_principal_tests.sh $(IMG)
+	tests/run_publica_tests.sh $(IMG)
+	tests/run_rat17_tests.sh $(IMG)
+	tests/run_red32_azar_tests.sh
+	tests/run_reinicio_silencio_tests.sh $(IMG)
+	tests/run_rueda_tests.sh $(IMG)
+	tests/run_ruta63_tests.sh $(IMG)
+	tests/run_snd0_tests.sh $(IMG)
+	tests/run_tareas_tests.sh $(IMG)
+	tests/run_teclas_tests.sh $(IMG)
+	tests/run_tls_tests.sh
+	tests/run_usblba_tests.sh $(IMG)
 
 clean:
 	rm -rf $(B)
