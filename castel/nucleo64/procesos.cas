@@ -789,6 +789,7 @@ módulo Procesos
         variable p: puntero a Proceso
         variable b, queda: nat64
         variable x: nat32
+        variable suelto_: bool
         h := actual()
         p := puntero(h.proceso)
         ; CLONE_CHILD_CLEARTID (pthread_join): un 0 en su tid y FUTEX_WAKE
@@ -797,19 +798,28 @@ módulo Procesos
             si copia_a(p, h.borra_tid, nat64(dirección(x)), 4) y al_futex <> 0 entonces llama3(al_futex, nat64(p), h.borra_tid, 1) fin
             h.borra_tid := 0
         fin
+        ; (auditoría H4) si quedan otros, este deja el espacio del programa y
+        ; lo suyo del proceso ANTES de salir de la lista, con el cerrojo: antes
+        ; salía primero y, entre medias, el último hilo podía destruir el
+        ; espacio (que este aún tenía en su CR3) y soltar el proceso (y este
+        ; escribía en p.hilo de uno ya suelto)
+        suelto_ := falso
         b := toma(dirección(p.h_cerrojo))
+        si p.n_hilos > 1 entonces
+            deja_programa(h)
+            si p.del_núcleo = 0 o nat64(h) <> p.hilo entonces
+                si nat64(h) = p.hilo entonces p.hilo := 0 fin
+                h.proceso := 0
+                suelto_ := cierto
+            fin
+        fin
         queda := quita_hilo(p, h)
         suelta(dirección(p.h_cerrojo), b)
         si queda = 0 entonces
             si p.saliendo <> 0 entonces sal_último(p.código, p.señal) sino sal_último(código, 0) fin
         fin
-        ; quedan otros: solo este
-        deja_programa(h)
-        si p.del_núcleo = 0 o nat64(h) <> p.hilo entonces
-            si nat64(h) = p.hilo entonces p.hilo := 0 fin
-            h.proceso := 0
-            suéltalo(h)
-        fin
+        ; quedan otros: solo este (p ya no se toca)
+        si suelto_ entonces suéltalo(h) fin
         termina()
     fin
 

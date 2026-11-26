@@ -189,13 +189,17 @@ módulo Futex64
             fin
             d := sig
         fin
-        suelta(dirección(cubos[c].cerrojo), b)
-        ; (los despertados ya no tocan su Esperante sin el cerrojo: lo de la lista es suyo)
+        ; (auditoría H11) se despierta con el cerrojo del cubo aún tomado, como
+        ; Sondeo64.avisa y repone: antes se despertaba después de soltarlo, y
+        ; uno al que ya había despertado su plazo o una señal podía ver
+        ; despierto = 1, volver, acabar su hilo y soltarse entre medias:
+        ; despierta() tocaba un Hilo ya liberado
         i := 0
         mientras i < k hacer
             despierta(puntero(lista[i]))
             i := i + 1
         fin
+        suelta(dirección(cubos[c].cerrojo), b)
         suma_atómica(dirección(despertados), hechos)
         devolver hechos
     fin

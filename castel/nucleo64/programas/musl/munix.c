@@ -36,6 +36,12 @@
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <stddef.h>
+#include <sched.h>
+#include <sys/syscall.h>
+#ifndef FUTEX_WAIT_PRIVATE
+#define FUTEX_WAIT_PRIVATE 128
+#define FUTEX_WAKE_PRIVATE 129
+#endif
 #include "comun.h"
 
 static volatile int sigpipes;
@@ -433,6 +439,53 @@ static void hilos(void)
 	       (long)((t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000));
 }
 
+/* ---- [auditoría H4 y H11] las carreras de los cerrojos nuevos ---- */
+static volatile int palabra, parar_c;
+static void *espera_futex(void *x)
+{
+	int i;
+	struct timespec p = { 0, 1000000 };
+	(void)x;
+	for (i = 0; i < 20 && !parar_c; i++) syscall(SYS_futex, &palabra, FUTEX_WAIT_PRIVATE, 0, &p, 0, 0);
+	return NULL;
+}
+
+static void *sale_ya(void *x)
+{
+	(void)x;
+	sched_yield();
+	syscall(SYS_exit, 0);
+	return NULL;
+}
+
+static void carreras(void)
+{
+	int r, i, bien_f = 0, bien_s = 0;
+	for (r = 0; r < 40; r++) {
+		pthread_t h[8];
+		parar_c = 0;
+		for (i = 0; i < 8; i++) pthread_create(&h[i], NULL, espera_futex, NULL);
+		for (i = 0; i < 400; i++) syscall(SYS_futex, &palabra, FUTEX_WAKE_PRIVATE, 8, 0, 0, 0);
+		parar_c = 1;
+		for (i = 0; i < 8; i++) pthread_join(h[i], NULL);
+		bien_f++;
+	}
+	for (r = 0; r < 30; r++) {
+		pid_t h = fork();
+		int st = 0;
+		if (h == 0) {
+			pthread_t t;
+			for (i = 0; i < 8; i++) pthread_create(&t, NULL, sale_ya, NULL);
+			if (r & 1) sched_yield();
+			_exit(7);                      /* exit_group, con los hilos saliendo a la vez */
+		}
+		if (waitpid(h, &st, 0) == h && WIFEXITED(st) && WEXITSTATUS(st) == 7) bien_s++;
+	}
+	MIRA(bien_f == 40, "40 rondas de 8 hilos con FUTEX_WAIT de 1 ms y FUTEX_WAKE a la vez (H11)");
+	MIRA(bien_s == 30, "30 procesos con 8 hilos que salen mientras el proceso acaba (H4)");
+	printf("  carreras: 40 rondas de futex con plazo contra FUTEX_WAKE y 30 procesos que acaban con sus hilos saliendo a la vez\n");
+}
+
 int main(void)
 {
 	setvbuf(stdout, NULL, _IOLBF, 0);
@@ -444,5 +497,6 @@ int main(void)
 	con_nombre();
 	pasar();
 	hilos();
+	carreras();
 	return acaba("MUNIX");
 }
