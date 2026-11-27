@@ -26,6 +26,10 @@
 #  saben: se supone que llega). Cuando ninguna etiqueta cambia de sitio, se ha
 #  acabado. Un «jmp» largo son 3 octetos; un salto condicional largo, el
 #  contrario por encima de un «jmp» (5 octetos).
+#  [10 g, 27/11/2026] Las pasadas de en medio no vuelven a leer la línea que
+#  haría lo mismo que la vez anterior (ver «linea»): con el núcleo de
+#  Hispa-64 (150.000 líneas, 360 pasadas), de 28 minutos a 1; los mismos
+#  octetos.
 #  [CASTEL64] Y, desde el 21/11/2026, «bits 64» (CASTEL64.md §8): el x86-64 que
 #  saca el compilador para «modelo linux64» y «núcleo64» (los registros de 64
 #  bits y r8-r15, el prefijo REX, movsxd, cdqe, cqo, iretq, syscall, dq...),
@@ -107,6 +111,12 @@ class Ensamblador:
         self.lineas = lineas
         self.sim = {}               # etiqueta -> valor (de la pasada anterior, y de esta)
         self.final = False
+        # [10 g] lo que se guarda de cada línea entre pasadas (ver «pasada»)
+        self.traza = None
+        self.partes = [None] * len(lineas)
+        self.memo = [None] * len(lineas)
+        self.usa_pc = self.usa_pos = self.sin_memo = False
+        self.en_fijo = False
 
     def error(self, msg):
         raise ErrorEns(f"línea {self.nl}: {msg}")
@@ -118,6 +128,17 @@ class Ensamblador:
         self.ei = 0
         self.e_sim = False
         self.e_falta = False        # ¿alguna etiqueta que aún no se ha visto?
+        # [10 g] lo de casi siempre, una etiqueta o un número solos: sin
+        # bajar por todos los niveles (lo mismo que haría c_unario)
+        t = s.strip()
+        if t and all(es_de_nombre(ch) for ch in t):
+            self.e = t
+            self.ei = len(t)
+            if 48 <= t[0] <= 57:
+                return self.numero(t), False
+            self.ei = 0
+            v = self.c_unario()
+            return v, self.e_sim
         v = self.c_nivel(0)
         self.c_blancos()
         if self.ei < len(self.e):
@@ -213,12 +234,15 @@ class Ensamblador:
         self.e_sim = True
         if p[0] == 46:                          # .local
             p = self.ambito + p
-        if p not in self.sim:
+        v = self.sim.get(p)
+        if self.traza is not None:
+            self.traza.append((p, v, self.en_fijo))
+        if v is None:
             if self.final:
                 self.error(f"etiqueta sin definir: «{p.decode('utf-8', 'replace')}»")
             self.e_falta = True
             return 0
-        return self.sim[p]
+        return v
 
     def numero(self, p):
         t = p.decode('latin-1').lower()
@@ -848,6 +872,7 @@ class Ensamblador:
             destino = o.v
         else:
             destino, _ = self.cuenta(s)
+        self.usa_pc = True          # [10 g] (lo que sale depende de dónde está)
         if b32:
             d = (destino - (self.pc + 2)) & 0xFFFFFFFF
             llega = d <= 0x7F or d >= 0xFFFFFF80 or self.e_falta
@@ -909,16 +934,31 @@ class Ensamblador:
 
     def fijo(self, s, que):
         """Una cuenta que hay que saber ya (sin etiquetas de más adelante)."""
-        v, _ = self.cuenta(s)
+        self.en_fijo = True         # [10 g] (lo que sale depende de su valor)
+        try:
+            v, _ = self.cuenta(s)
+        finally:
+            self.en_fijo = False
         return v
 
-    def linea(self, ln):
+    def pre_linea(self, ln):
+        """La etiqueta (o None) y lo que sigue, de una línea (sin el comentario)."""
         ln = sin_comentario(ln).strip()
-        # etiqueta
         dos = parte(ln, b':')
         if len(dos) >= 2 and dos[0] and all(es_de_nombre(ch) for ch in dos[0]) \
                 and not (48 <= dos[0][0] <= 57) and dos[0].lower().decode('latin-1') not in RS:
-            nombre = dos[0]
+            return dos[0], ln[len(dos[0]) + 1:].strip()
+        return None, ln
+
+    def linea(self, ln, i=None):
+        if i is None:
+            nombre, ln = self.pre_linea(ln)
+        else:
+            if self.partes[i] is None:
+                self.partes[i] = self.pre_linea(ln)
+            nombre, ln = self.partes[i]
+        # etiqueta
+        if nombre is not None:
             if nombre[0] == 46:
                 nombre = self.ambito + nombre
             else:
@@ -928,9 +968,112 @@ class Ensamblador:
             if self.sim.get(nombre) != self.pc:
                 self.cambio = True
             self.sim[nombre] = self.pc
-            ln = ln[len(dos[0]) + 1:].strip()
         if not ln:
             return
+        if i is None or self.primera or self.final:
+            self.cuerpo(ln)
+            return
+        # [10 g] En las pasadas de en medio no sale nada: solo cuánto ocupa
+        # cada línea. Lo que hace una línea (cuánto avanzan la dirección y la
+        # posición, y «bits» y «absolute» después) depende solo de «bits» y
+        # «absolute» antes, de las etiquetas que lee (y de si están), y, si
+        # lleva un salto o «alignb», de la dirección (de un salto, solo de la
+        # distancia: el destino menos la dirección) y, con «align», de la
+        # posición. Se guarda eso de la última vez; si es lo mismo, se hace
+        # lo mismo sin volver a leer la línea. Así el resultado es el de
+        # siempre, octeto a octeto (la última pasada, la que saca los
+        # octetos, va sin esto), y casi todas las líneas no se leen otra vez.
+        # Y de las etiquetas, solo importa su valor en una cuenta que hay que
+        # saber ya («times», «resb», «align»...: fijo) o en un salto; en lo
+        # demás, como en NASM, un operando con una etiqueta va siempre en la
+        # forma larga (corto, modrm, mov64: «o.sim»): lo que ocupa no depende
+        # de su valor, solo de que esté.
+        m = self.memo[i]
+        if m is not None:
+            bits0, abs0, pc0, pos0, nombres, valores, fijos, dpc, dpos, bits1, abs1 = m
+            if bits0 == self.bits and abs0 == self.absoluto and (pos0 is None or pos0 == self.pos):
+                sim = self.sim
+                bien = True
+                if pc0 is None:
+                    for k, n in enumerate(nombres):
+                        v = sim.get(n)
+                        if (v != valores[k]) if fijos[k] else ((v is None) != (valores[k] is None)):
+                            bien = False
+                            break
+                else:
+                    # (un salto: si llega en corto, como la otra vez —es lo
+                    # único de lo que depende lo que ocupa—; un «call», que
+                    # el destino siga estando: ocupa siempre lo mismo)
+                    llega0, = pc0
+                    if llega0 == 'call':
+                        bien = sim.get(nombres[0]) is not None
+                    elif llega0 is not None:
+                        v = sim.get(nombres[0])
+                        bien = v is not None and self.llega_corto(v) == llega0
+                    else:
+                        bien = False
+                if bien:
+                    self.pc += dpc
+                    self.pos += dpos
+                    self.bits = bits1
+                    self.absoluto = abs1
+                    return
+        self.traza = []
+        self.usa_pc = self.usa_pos = self.sin_memo = False
+        bits0, abs0, pc0, pos0 = self.bits, self.absoluto, self.pc, self.pos
+        self.cuerpo(ln)
+        t = self.traza
+        self.traza = None
+        if self.sin_memo:
+            self.memo[i] = None
+            return
+        nombres = tuple(x[0] for x in t)
+        valores = tuple(x[1] for x in t)
+        fijos = tuple(x[2] for x in t)
+        clave_pc = None
+        if self.usa_pc:
+            # (solo los saltos a una etiqueta, que es lo que más hay; los demás que usan la dirección, siempre otra vez)
+            sal = self.es_salto_simple(ln) if len(t) == 1 and t[0][1] is not None else None
+            if sal == 'call':
+                clave_pc = ('call',)
+            elif sal is not None:
+                clave_pc = (self.llega_corto(t[0][1], pc0, bits0),)
+            else:
+                clave_pc = (None,)
+        self.memo[i] = (bits0, abs0, clave_pc, pos0 if self.usa_pos else None, nombres, valores, fijos,
+                        self.pc - pc0, self.pos - pos0, self.bits, self.absoluto)
+
+    def llega_corto(self, destino, pc=None, bits=None):
+        """¿Llega un salto en dirección pc a destino con un octeto? (lo mismo que mira «salto»)"""
+        if pc is None:
+            pc = self.pc
+        if bits is None:
+            bits = self.bits
+        if bits >= 32:
+            d = (destino - (pc + 2)) & 0xFFFFFFFF
+            return d <= 0x7F or d >= 0xFFFFFF80
+        d = (destino - (pc + 2)) & 0xFFFF
+        return d <= 0x7F or d >= 0xFF80
+
+    def es_salto_simple(self, ln):
+        """Si es «jXX etiqueta» o «call etiqueta» (o con short, near, strict) sin cuentas,
+        el nombre de la instrucción: lo que ocupa solo depende de la distancia (un
+        «call», de nada); si no, None."""
+        k = 0
+        while k < len(ln) and ln[k] not in b' \t':
+            k += 1
+        nem = ln[:k].lower().decode('latin-1')
+        if not (nem in CONDICIONES_J or nem == 'jmp' or nem == 'call' or nem in BUCLES):
+            return None
+        r = ln[k:].strip()
+        for pal in (b'strict', b'short', b'near', b'dword'):
+            if r.lower().startswith(pal + b' ') or r.lower().startswith(pal + b'\t'):
+                r = r[len(pal):].strip()
+        if len(r) > 0 and all(es_de_nombre(ch) for ch in r) and not (48 <= r[0] <= 57):
+            return nem
+        return None
+
+    def cuerpo(self, ln):
         k = 0
         while k < len(ln) and ln[k] not in b' \t':
             k += 1
@@ -972,15 +1115,18 @@ class Ensamblador:
             if self.bits not in (16, 32, 64):
                 self.error("«bits» es 16, 32 o 64")
         elif nem == 'org':
+            self.sin_memo = True
             # [HISPA-64] en 64 bits aunque vaya en «bits 32» (el núcleo de la
             # mitad alta: «org 0xFFFFFFFF80100000» con el arranque de 32 bits)
             b, self.bits = self.bits, 64
             self.pc = self.fijo(resto, nem)
             self.bits = b
         elif nem == 'absolute':
+            self.sin_memo = True
             self.absoluto = True
             self.pc = self.fijo(resto, nem)
         elif nem == 'section':
+            self.sin_memo = True
             # otra sección: sigue en el archivo donde iba (alineada), pero sus
             # direcciones vuelven a contar desde «vstart»
             self.absoluto = False
@@ -997,6 +1143,7 @@ class Ensamblador:
             n = self.fijo(resto, nem)
             if n < 1 or n & (n - 1):
                 self.error("se alinea a una potencia de 2")
+            self.usa_pc = True
             self.reserva((-self.pc) % n)
         elif nem == 'align':
             # «align N, db 0»: ceros hasta que la posición en el archivo sea múltiplo de N
@@ -1008,6 +1155,7 @@ class Ensamblador:
     def alinea(self, n):
         if n < 1 or n & (n - 1):
             self.error("se alinea a una potencia de 2")
+        self.usa_pos = True
         while self.pos % n:
             self.b(0)
 
@@ -1021,7 +1169,7 @@ class Ensamblador:
         self.cambio = False
         for i, ln in enumerate(self.lineas):
             self.nl = i + 1
-            self.linea(ln)
+            self.linea(ln, i)
 
     def ensambla(self):
         self.primera = True
