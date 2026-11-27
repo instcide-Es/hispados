@@ -17,9 +17,19 @@ se apoya (qué se usaba en estas máquinas y qué se echa de menos) está en
 ## Dónde estamos
 
 **Etapas 0 a 4 y 6 hechas, y la 5 casi** (`h8086/`, noviembre de 2026).
-Versión 0.14.
+Versión 0.15.
 
-**Lo nuevo en la 0.14**, para quien lo usa:
+**Lo nuevo en la 0.15**, para quien lo usa: **los controladores de DOS de
+otros**, como en MS-DOS 3.3-5 (docs/DRIVERS-MICROSOFT.md, «Hito 1»). Con
+`DEVICE=` en CONFIG.SYS se cargan los `.SYS` del disquete de una tarjeta o de
+un disco (de carácter y de bloque, también los `.EXE` y los comprimidos con
+UPX); los de discos de quitar y poner saben cuándo se cambia el disco;
+INT 21h 44h (IOCTL) les pasa lo que entienden; un ANSI.SYS puede ser la
+consola; y la red va con el *packet driver* de la tarjeta (probado con el
+NE2000 de Crynwr, NANSI.SYS, SRDISK y CuteMouse de FreeDOS, que no van en
+Hispa-8086). El núcleo sigue por debajo de 16 K (16.334 octetos).
+
+**Lo de la 0.14**, para quien lo usa:
 
 - **El teclado, en español desde el principio.** El disquete arranca ya con
   el teclado español (la ñ, el «;», los acentos...), sin hacer nada; lo

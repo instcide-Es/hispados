@@ -40,7 +40,7 @@ HIST_TAM    equ 384                 ; octetos para las líneas tecleadas antes (
 RUTA_MAX    equ 80
 DIR_MAX     equ 64                  ; letras del directorio de trabajo
 PILA_TAM    equ 768
-VERSION10   equ 14                  ; la versión del núcleo (0.14: el 14)
+VERSION10   equ 15                  ; la versión del núcleo (0.15: el 15)
 FILES_MAX   equ 64                  ; lo más que admite FILES= de CONFIG.SYS
 
 ; el procesador
@@ -1845,7 +1845,7 @@ cpu_detecta:
 ; =============================================================================
 ;  Los textos del núcleo (página 437)
 ; =============================================================================
-m_titulo    db 10, "Hispa-8086 0.14 - de la familia Hispa-DOS", 10
+m_titulo    db 10, "Hispa-8086 0.15 - de la familia Hispa-DOS", 10
             db "Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.", 10, 10, 0
 m_sin_command db "Falta COMMAND.COM: no se puede seguir.", 10, 0
 m_sin_shell db "No se puede lanzar el intérprete de SHELL=: se usa COMMAND.COM.", 10, 0
