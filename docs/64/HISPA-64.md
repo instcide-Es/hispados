@@ -4010,7 +4010,7 @@ MUNIX: los sockets de Unix (AF_UNIX) y memfd_create; estático
   O_NONBLOCK: EAGAIN al leer y con la cola llena (240 KB); poll y epoll (EPOLLIN, EPOLLRDHUP, EPOLLHUP)
   bind a una ruta (stat: S_IFSOCK, EADDRINUSE, unlink), listen, connect, accept, SO_PEERCRED; abstracto y automático; sendto y recvfrom
   SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados
-  dos hilos: 2.000 mensajes de ida y vuelta en 238 ms; 4 MB por un socket de flujo, la suma bien
+  dos hilos: 2.000 mensajes de ida y vuelta en 138 ms; 4 MB por un socket de flujo, la suma bien
   carreras: 40 rondas de futex con plazo contra FUTEX_WAKE y 30 procesos que acaban con sus hilos saliendo a la vez
   /tmp: 100 KB escritos, leídos y borrados
 MUNIX: todo bien (77 pruebas)
@@ -4056,7 +4056,15 @@ primero mira en su memoria (la misma).
   (puede ser ya «Documento1 - Pluma»: depende de quién llegue antes; las
   cuatro de la etapa 8 caían por eso). La segunda, 135 bien y 1 mal: la
   red por USB, con el CMOS a 2 s del reloj en vez de 1 como mucho (el
-  servidor cargado; en la vuelta de antes, bien). La tercera: abajo.
+  servidor cargado; en la vuelta de antes, bien). Y dos vueltas más con
+  cosas de las pruebas, no del núcleo: el CMOS a 2 s otra vez (de 20
+  arranques de la red en cuatro vueltas, 3: se escribe redondeado y se lee
+  truncando; ahora vale de -1 a 2) y el arranque entero con 8 procesadores
+  y TCG, que con MUNIX llegaba al plazo de 150 s (sus 10.000 mensajes de ida
+  y vuelta eran 19 s con TCG: ahora 2.000; y 240 s de plazo). **La última
+  vuelta, entera: 136 bien y 0 mal** (75 minutos, de 02:57 a 04:12 del 27).
+  MUNIX, 2.000 mensajes de ida y vuelta: con KVM, de 123 a 211 ms; con TCG,
+  de 2,5 a 3,7 s.
 
 ### Lo que queda (y más adelante)
 
