@@ -47,6 +47,12 @@ rm -f "$S/hispa64m.asm"
 python3 -I "$AQUI/simbolos.py" "$S/hispa64.map" "$S/HISPA64.SIM"
 # los programas de la unidad en memoria, y sus líneas de module2
 "$AQUI/programas/hazlos.sh" "$S/prog" > /dev/null
+# [etapa 10 g] con WEB=1, también LibJS y Ladybird sin ventana (hazweb.sh: unos
+# 490 MB más en la unidad; el disco, de 1,25 GB; hacen falta 3 GB de memoria)
+if [ "${WEB:-0}" = 1 ]; then
+  "$AQUI/programas/ladybird/hazweb.sh" "$S/prog" > /dev/null
+  rm -f "$S/prog/js"
+fi
 PROGS=$(cd "$S/prog" && ls)
 MODS2=""
 for f in $PROGS; do MODS2="$MODS2  module2 /boot/prog/$f $f
@@ -91,6 +97,7 @@ CFG
     entrada "Hispa-64: sin la red (si se queda al poner en marcha la tarjeta de red)" "sinred"
     entrada "Hispa-64: el USB sin MSI ni MSI-X (si el teclado o el ratón USB no van)" "sinmsix sinmsi"
     entrada "Hispa-64: sin las pruebas de musl (si se queda en ellas)" "sinmusl"
+    [ "${WEB:-0}" = 1 ] && entrada "Hispa-64: con las pruebas de Ladybird al arrancar (LibJS, MJS, unos 3 minutos; y el navegador sin ventana, MWEB)" "ladybird"
     entrada "Hispa-64: sin USB (si se queda al mirar el USB)" "sinusb"
     entrada "Hispa-64: sin touchpad I2C (si se queda al buscarlo)" "sini2c"
     entrada "Hispa-64: prueba del ratón, la tableta y el touchpad (10 s diciendo dónde está el puntero)" "prueba=raton"
@@ -122,9 +129,11 @@ fi
 # el disco: 128 MB, GPT, la partición EFI (80 MB) y la de pruebas (el resto)
 I="$S/hispa64.img"; P="$S/esp.part"; Q="$S/pruebas.part"
 rm -f "$I" "$P" "$Q"
-truncate -s 128M "$I"
-sgdisk -n 1:2048:+80M -t 1:ef00 -c 1:HISPA64 -n 2:0:0 -t 2:0700 -c 2:PRUEBAS "$I" > /dev/null
-SECT=$(( 80 * 2048 ))
+TAM=128; ESP=80
+[ "${WEB:-0}" = 1 ] && { TAM=1280; ESP=1100; }
+truncate -s ${TAM}M "$I"
+sgdisk -n 1:2048:+${ESP}M -t 1:ef00 -c 1:HISPA64 -n 2:0:0 -t 2:0700 -c 2:PRUEBAS "$I" > /dev/null
+SECT=$(( ESP * 2048 ))
 read -r I2 F2 <<< "$(sgdisk -i 2 "$I" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
 mkfs.fat -F 32 -n HISPA64 -C "$P" $(( SECT / 2 )) > /dev/null
 mmd -i "$P" ::EFI ::EFI/BOOT ::boot ::boot/grub

@@ -1070,6 +1070,7 @@ módulo Procesos
         suelta_trozo_fd(base + DESP_REXT, cap * 4)
         suelta_trozo_fd(base + DESP_RARCH, cap * 4)
         p.reg_cap := 0
+        p.n_reg := 0                            ; (y nadie las mira ya: n_reg y fd_cap, a 0)
         i := nat32(p.fd_sitio - 1)
         p.fd_sitio := 0
         p.fd_cap := 0
@@ -1356,6 +1357,10 @@ módulo Procesos
         t0 := tsc()
         si e <> nulo y p.prestado = 0 entonces destruye_espacio(e) fin
         suma_atómica(dirección(tsc_salidas), tsc() - t0)
+        ; [etapa 10 g] sus tablas (descriptores y regiones), ya: ningún hilo
+        ; suyo las usa (cierra_todos ya ha cerrado los descriptores); un zombi
+        ; puede tardar en recogerse, y son 60 KB o más
+        fds_suelta(p)
         p.prestado := 0
         suelta_vfork(p)
         si no nk o nat64(h) <> p.hilo entonces suéltalo(h) fin
@@ -2017,6 +2022,9 @@ módulo Procesos
                             devolver cierto
                         fin
                         abre_mem(p)
+                        ; ([etapa 10 g] antes de cerrarlo, lo del montón que espera
+                        ; en la cuarentena, devuelto: si había, se vuelve a probar)
+                        si vacía_cuarentena_n() > 0 entonces devolver cierto fin
                         b := empieza_aviso(p)
                         escribir("necesita más memoria y no queda: se cierra.\n")
                         suelta(dirección(cerrojo_consola), b)
@@ -2028,6 +2036,7 @@ módulo Procesos
                             devolver cierto
                         fin
                         abre_mem(p)
+                        si vacía_cuarentena_n() > 0 entonces devolver cierto fin      ; ([etapa 10 g] lo mismo)
                         b := empieza_aviso(p)
                         escribir("necesita más memoria (copiar al escribir) y no queda: se cierra.\n")
                         suelta(dirección(cerrojo_consola), b)

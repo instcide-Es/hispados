@@ -231,8 +231,15 @@ módulo Monton64
     ; a los demás procesadores (que vacíen su TLB entera) y, hecho, a la
     ; memoria libre. Sin ningún cerrojo tomado (como Pagina64.avisa_tlb)
     público función vacía_cuarentena()
-        variable b, k, j: nat64
+        vacía_cuarentena_n()
+    fin
+
+    ; [etapa 10 g] lo mismo, y cuántas páginas ha devuelto (sin memoria para un
+    ; programa: antes de cerrarlo, lo de la cuarentena, que puede ser hasta 8 MB)
+    público función vacía_cuarentena_n(): nat64
+        variable b, k, j, total: nat64
         variable f: arreglo [256] de nat64
+        total := 0
         mientras cierto hacer
             b := toma(dirección(cua_cerrojo))
             k := 0
@@ -242,7 +249,8 @@ módulo Monton64
                 k := k + 1
             fin
             suelta(dirección(cua_cerrojo), b)
-            si k = 0 entonces devolver fin
+            si k = 0 entonces devolver total fin
+            total := total + k
             avisa_tlb(0, 1000)                  ; (más de 32: la TLB entera, también lo global)
             cuarentenas := cuarentenas + 1
             j := 0

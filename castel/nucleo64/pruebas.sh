@@ -1795,7 +1795,7 @@ if [ -w /dev/kvm ]; then
     MODS0=$MODS; MODS="$T/HISPA64.SIM"
     for f in MHOLA SALUDO.TXT; do MODS="$MODS,$T/prog/$f"; done
     for f in MJS test-js-runtime MWEB Hub WebContent RequestServer ImageDecoder Compositor SystemProbe; do MODS="$MODS,$T/progweb/$f"; done
-    timeout 900 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "apagar" -display none -serial file:"$T/kvmweb.txt" \
+    timeout 900 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "apagar ladybird" -display none -serial file:"$T/kvmweb.txt" \
       -monitor none $DBG -no-reboot -nic none -m 3072 -enable-kvm -cpu host -machine q35 -smp 4 > /dev/null 2>&1; c=$?
     MODS=$MODS0
     v=$(serie "$T/kvmweb.txt")

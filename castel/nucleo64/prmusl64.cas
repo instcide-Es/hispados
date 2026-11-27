@@ -29,6 +29,7 @@ módulo PrMusl64
 
     público variable fallos7: nat32
     público variable medidas: bool              ; [etapa 10 f] «medidas»: lo que llevan execve, los fallos de página y las llamadas
+    público variable con_ladybird: bool         ; [etapa 10 g] «ladybird»: MJS y MWEB
     público variable ak_todas: bool             ; [etapa 10 e] «ak=todas»: MAK con los 85 grupos de TestAK (si no, 12)
 
     función mal(qué: puntero a byte)
@@ -128,9 +129,10 @@ módulo PrMusl64
         si busca_archivo("MLB") >= 0 entonces corre("MLB", 0) fin
         ; [etapa 10 g] las pruebas de LibJS (test-js-runtime, 48 MB, y MJS con las
         ; pruebas dentro) y el navegador sin ventana (MWEB: el Hub de Ladybird
-        ; con WebContent y los suyos): solo en el arranque de KVM, que los lleva
-        si busca_archivo("MJS") >= 0 entonces corre("MJS", 0) fin
-        si busca_archivo("MWEB") >= 0 entonces corre("MWEB", 0) fin
+        ; con WebContent y los suyos): con «ladybird» (el arranque de KVM de
+        ; pruebas.sh, y la entrada del menú de la imagen con el navegador)
+        si con_ladybird y busca_archivo("MJS") >= 0 entonces corre("MJS", 0) fin
+        si con_ladybird y busca_archivo("MWEB") >= 0 entonces corre("MWEB", 0) fin
         si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
         si busca_archivo("MSONIDO") >= 0 entonces
             corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)

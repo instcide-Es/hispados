@@ -1249,6 +1249,13 @@ módulo Sistema
         fin
         l := arriba(largo)
         si l < largo o l > TOPE entonces devolver ENOMEM fin          ; ([etapa 10 g] hasta todo el espacio, como Linux: LibGC reserva 4 TB sin nada puesto; era 1 TB)
+        ; [etapa 10 g] lo privado de escribir, como hasta ahora, hasta 1 TB (lo
+        ; que pasa, ENOMEM: MEMORIA lo mira con 2 TB), salvo con MAP_NORESERVE
+        ; (0x4000); lo que no se escribe (PROT_NONE, de solo leer), sin límite:
+        ; así se reserva espacio (LibGC, 4 TB). (El «overcommit» heurístico de
+        ; Linux, con el límite en toda la memoria, no deja a las pruebas de
+        ; LibJS ni a RequestServer lo que piden con 3 GB: aquí, el de 1 TB.)
+        si prot yb 2 <> 0 y no compartida y marcas_ yb 0x4000 = 0 y l > nat64(1) << 40 entonces devolver ENOMEM fin
         cierra_mem(p)
         a := 0
         si marcas_ yb 0x10 <> 0 entonces

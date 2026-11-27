@@ -1551,6 +1551,7 @@ módulo Hispa64
         etapa6()
         ; [etapa 7] musl: los programas de C de hoy
         ak_todas := tiene("ak=todas")
+        con_ladybird := tiene("ladybird")      ; [etapa 10 g]
         medidas := tiene("medidas")             ; [etapa 10 f]
         si no tiene("sinpruebas") y no tiene("sinmusl") y tic_va entonces pruebas_musl() fin
         ; [etapa 9] la red
