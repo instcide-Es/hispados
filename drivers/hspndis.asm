@@ -8,15 +8,15 @@
 ;  2.0.1» (1990) y la Ralf Brown's Interrupt List (INT 21h 4402h): sin código
 ;  de nadie.
 ;
-;  Uso (AUTOEXEC.BAT, con PROTMAN.DOS y el MAC en el CONFIG.SYS):
+;  Uso (AUTOEXEC.BAT, con el gestor de protocolos —HSPPMAN.SYS, el nuestro,
+;  u otro PROTMAN$— y el MAC en el CONFIG.SYS):
 ;      HSPNDIS [/P]
 ;  En PROTOCOL.INI, una sección [HSPNDIS] con BINDINGS = <sección del MAC>.
+;  Se queda residente y da en INT 60h la interfaz de packet driver (la que
+;  usan CONFRED, PING, DESCARGAR, CONSOLA y ACTUALIZAR, y los programas de
+;  packet driver de otros). El MAC no se puede soltar: no se descarga.
 ;  /P: prueba: tras unirse, envía una petición ARP a 10.0.2.2 (la puerta de
-;  QEMU) y dice cuántas tramas han llegado (y se queda residente: el MAC
-;  ya no se puede soltar; la versión con INT 60h lo hará bien).
-;
-;  Esta primera versión: registro, unión y la prueba. La interfaz de packet
-;  driver (INT 60h) para HSPRED y la pila de Hispa, en la siguiente.
+;  QEMU) y dice cuántas tramas han llegado.
 ; =============================================================================
         cpu 386
         bits 16

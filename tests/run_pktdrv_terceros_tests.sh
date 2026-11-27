@@ -12,12 +12,13 @@
 # En cada una: el driver dice su MAC; CONFRED (DHCP de QEMU), PING a la
 # puerta, y DESCARGAR de un servidor HTTP propio (150.000 octetos, comparados
 # con mtools); fsck.fat del disquete.
-# Third-party packet drivers (Crynwr, GPL; not in the repository) with the
-# Hispa-DOS TCP/IP stack.
+# Si no se da CRYNWR=, se usa la que baja tests/thirdparty/fetch_drivers.sh.
+# Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set -u
 cd "$(dirname "$0")/.."
 IMG=${1:-build/hispados.img}
 C=${CRYNWR:-}
+[ -z "$C" ] && [ -f tests/thirdparty/dl/crynwr/.ok ] && C=tests/thirdparty/dl/crynwr/DRIVERS/CRYNWR
 [ -z "${RED_NS:-}" ] && echo "== Hispa-DOS: packet drivers de otros (Crynwr) =="
 if [ -z "$C" ] || [ ! -f "$C/NE2000.COM" ] || [ ! -f "$C/PCNTPK.COM" ]; then
   echo "  (sin CRYNWR=carpeta con NE2000.COM y PCNTPK.COM: se salta)"; exit 0

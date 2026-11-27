@@ -424,6 +424,13 @@ $(B)/HSPRED.COM: drivers/hspred.asm lib/redpref.inc lib/wifi_ids.inc | $(B)
 	$(ASM) -l $(B)/gen/HSPRED.lst -o $@ $(B)/gen/$<
 	@# lo residente no puede usar nada de la instalación (se descarta)
 	python3 tools/initcheck.py $(B)/gen/HSPRED.lst init || { rm -f $@; exit 1; }
+# [NDIS 2] la red con el driver NDIS 2 («MAC», el .DOS) de una tarjeta
+# (docs/RED.md, «Con un driver NDIS 2»): nuestro gestor de protocolos
+# (PROTMAN$) y nuestro protocolo, que por arriba es un packet driver
+$(B)/HSPPMAN.SYS: drivers/hsppman.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
+$(B)/HSPNDIS.COM: drivers/hspndis.asm | $(B)
+	$(ASM) -o $@ $(B)/gen/$<
 RED_DEP = lib/red.inc lib/util.inc
 $(B)/CONFRED.COM: utils/confred.asm $(RED_DEP) | $(B)
 	$(ASM) -o $@ $(B)/gen/$<
@@ -463,6 +470,7 @@ $(B)/ACTPRUEB.COM: $(B)/ACTUALIZAR.COM tests/firma/clave_prueba.inc
 	$(NASM) $(NFLAGS) -DCLAVE_PRUEBA -o $@ $(B)/gen/utils/actualizar.asm
 	python3 tools/tam_com.py $@
 RED = $(B)/HSPRED.COM $(B)/CONFRED.COM $(B)/PING.COM $(B)/DESCARGAR.COM $(B)/CONSOLA.COM $(B)/ACTUALIZAR.COM
+NDIS2 = $(B)/HSPPMAN.SYS $(B)/HSPNDIS.COM
 # Wi-Fi de Hispa-486 (docs/WIFI.md): HSPWIFI.COM (residente, packet driver),
 # su núcleo de 32 bits HSPWIFI.BIN (wifi/: la radio Broadcom con los fuentes
 # de brcmsmac y bcma de Linux, 802.11 y WPA2 propios) y la orden WIFI. El
@@ -1133,7 +1141,7 @@ $(B)/BOOTIA32.EFI: $(HBEFI32) hispabios/pe.inc $(HBBIOS32) $(B)/FUENTE16.BIN
 	$(NASM) -f bin -I hispabios/ -I $(B)/ -o $@ hispabios/efi32.asm
 hispabios: $(HBEFI)
 
-usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
+usb dist: $(IMG) $(NDIS2) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(wildcard usb/* floppy/*)
 	$(SIN_VACIOS) $(filter $(B)/%,$^)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py
 
@@ -1146,7 +1154,7 @@ usb dist: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) 
 # «Internet») y la red puesta sola al arrancar (HSPRED y HSPWIFI /AUTO). Todo por tools/mkusb.py (docs/486/HISPA-486.md, «La
 # imagen»). Hacen falta gcc -m32 (los programas en C) y mtools.
 H32EXE = $(B)/WINCALC.EXE $(B)/WINHOLA.EXE $(B)/WINCTL.EXE $(B)/WINMENU.EXE $(B)/WINGUI.EXE $(B)/NAVES.EXE $(GLEXE)
-usb486: $(IMG) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(GLDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
+usb486: $(IMG) $(NDIS2) $(B)/boot16.bin $(B)/mbr.bin $(FILES) $(HBEFI) $(HVPO) $(HVPJ) $(SNESROMS) $(MDROMS) $(PROGSDAT) $(B)/HW32.COM $(B)/MSVCRT.DLL $(WIFI) $(ACPI) $(B)/COMCTL32.DLL $(B)/UCRT.DLL $(DXDLL) $(GLDLL) $(H32EXE) $(INTERNET) $(B)/internet.img w32/navega/NAVEGA.INI w32/navega/LEEME.TXT $(wildcard usb/* floppy/* sistema/486/*)
 	$(SIN_VACIOS) $(filter $(B)/%,$^)
 	HVPA="$(notdir $(HVPA) $(HVPO))" HVPO="$(notdir $(HVPO))" PROGSDAT="$(PROGSDAT)" python3 tools/mkusb.py 486
 
@@ -1259,6 +1267,8 @@ test: $(TEST_DEPS)
 	tests/run_batch_tests.sh $(IMG)
 	tests/run_config_tests.sh $(IMG)
 	tests/run_drivers_otros_tests.sh $(IMG)
+	tests/run_vds_tests.sh $(IMG)
+	tests/run_pktdrv_terceros_tests.sh $(IMG)
 	tests/run_xms_tests.sh $(IMG)
 	tests/run_xmshueco_tests.sh $(IMG)
 	tests/run_hma_tests.sh $(IMG)

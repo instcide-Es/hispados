@@ -900,6 +900,43 @@ HSPRED, CONFRED la pide por DHCP (o la lee de `RED.INI`) cada vez. Probado con
 NE2000 y PCNTPK de Crynwr en QEMU (`tests/run_pktdrv_terceros_tests.sh`, con
 `CRYNWR=carpeta`: los drivers no van en Hispa-DOS).
 
+### Con un driver NDIS 2 (el `.DOS` de la tarjeta)
+
+Muchas tarjetas de los 90 solo traen un driver **NDIS 2** (un «MAC», `*.DOS`,
+el de LAN Manager y Trabajo en Grupo), que va con un gestor de protocolos
+(`PROTMAN$`) y un `PROTOCOL.INI`. Hispa-DOS trae los dos lados que faltan,
+propios y escritos con la especificación pública NDIS 2.0.1 de
+3Com/Microsoft (0.9.32, **primera versión, 0.1**):
+
+- `HSPPMAN.SYS`, el gestor de protocolos: lee `PROTOCOL.INI` (de
+  `/I:carpeta` o de `\LANMAN` en la unidad de arranque) y deja su imagen
+  a los drivers, como el `PROTMAN.DOS` de Microsoft (que también vale).
+- `HSPNDIS.COM`, el protocolo: se une al MAC y por arriba es un *packet
+  driver* en INT 60h, así que CONFRED, PING, DESCARGAR, CONSOLA y ACTUALIZAR
+  van por la tarjeta como con HSPRED.
+
+```
+CONFIG.SYS:    DEVICE=C:\HISPADOS\HSPPMAN.SYS /I:C:\LANMAN
+               DEVICE=C:\LANMAN\NE2000.DOS        (el de la tarjeta)
+PROTOCOL.INI:  [NE2000_NIF]
+                 DRIVERNAME = MS2000$
+                 IOADDRESS = 0x300
+                 INTERRUPT = 3
+               [HSPNDIS]
+                 BINDINGS = NE2000_NIF
+AUTOEXEC.BAT:  C:\HISPADOS\HSPNDIS
+               CONFRED
+```
+
+(Las claves de la sección de la tarjeta son las que diga su disquete.)
+Probado en QEMU, como caja negra, con el `NE2000.DOS` de Trabajo en Grupo
+3.11 (que no va en Hispa-DOS: es de Microsoft): se registra, se une y llegan
+las tramas; ese driver en QEMU solo manda tramas de 60 octetos (no pone el
+largo en la tarjeta: igual en MS-DOS 6.22), así que DHCP con él no se ha
+podido probar en QEMU. Para que estos drivers funcionen, el núcleo entiende
+`\DEV\NOMBRE` (así abre el MAC el gestor) y llama a los drivers con DS:SI en
+su cabecera, como MS-DOS.
+
 ## API
 
 ### HSPRED: controlador de paquetes («packet driver», especificación de FTP Software 1.09)

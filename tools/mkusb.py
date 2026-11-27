@@ -244,6 +244,9 @@ def main(edicion='386'):
                      ('PING.COM', 'PING.COM'), ('DESCARGAR.COM', 'DESCARGA.COM'),
                      ('CONSOLA.COM', 'CONSOLA.COM'), ('ACTUALIZAR.COM', 'ACTUALIZ.COM'),
                      ('RED.INI', 'RED.INI'),
+                     # [NDIS 2] para las tarjetas que solo traen un driver
+                     # NDIS 2 (.DOS): el gestor de protocolos y el protocolo
+                     ('HSPPMAN.SYS', 'HSPPMAN.SYS'), ('HSPNDIS.COM', 'HSPNDIS.COM'),
                      # [HISPA-486] el Wi-Fi (docs/WIFI.md): el residente, su
                      # núcleo de 32 bits, la orden WIFI y el microcódigo de
                      # Broadcom con su licencia (archivos aparte, sin tocar)
