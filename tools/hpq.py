@@ -373,7 +373,10 @@ VERSION_BT = VERSION_0812
 # tareas de fondo del núcleo: la 224 con EBX = 9), paq-grupos (paquetes 1.9 y
 # la rueda en la Calculadora, el Reloj y el Wi-Fi), p4b (mover_quiebre), la
 # regla de REMOTA.LOG en \HISPA (permisos.cas) y «Dejar entrar a Claude...»
-# en Configuración > Red (PANEL.BIN). Suben base y wifi
+# en Configuración > Red (PANEL.BIN); y (27/11) acer-wifi (la RTL8723BS del
+# Acer One 10: la tabla RadioA, las antenas; WIFI.BIN) y pentium-rtl8153 (la
+# red por USB de cable, CDC-ECM: usb.cas y usbmovil.cas en la base, rmovil.cas
+# en RED.BIN). Suben base, wifi y red
 VERSION_0813 = '0.8.13'
 SISTEMA = [
     ('base', VERSION_0813, 'El sistema base: el núcleo, el intérprete de órdenes, los usuarios, el asistente, INSTALAR, el arranque, el Panel de control y la hora por Internet', '', [
@@ -421,7 +424,10 @@ SISTEMA = [
     # (0.8.12) (MÓVIL) el móvil por USB (rmovil.cas: RNDIS y CDC-NCM; con una base de antes, sin él)
     # (REMOTA, 26/11/2026) 0.8.12.1: el cortafuegos deja entrar al puerto 2323 (la
     # consola remota «Dejar entrar a Claude», que solo escucha con su ventana abierta)
-    ('red', '0.8.12.1', 'La red: el servicio de red (RED.BIN; el cable, el Wi-Fi y el móvil por USB), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
+    # (0.8.13) (RTL8153, rama pentium-rtl8153) los adaptadores de red por USB de cable
+    # por CDC-ECM (rmovil.cas: M_ECM; el Realtek RTL8153 en su configuración de ECM,
+    # que elige usb.cas de la base 0.8.13; con una base de antes, sin ellos)
+    ('red', VERSION_0813, 'La red: el servicio de red (RED.BIN; el cable, el Wi-Fi, el móvil y los adaptadores de red por USB), IPCONFIG, PING y DESCARGAR', 'base >= ' + VERSION_085, [
         ('RED.BIN', r'\HISPA\RED.BIN'), ('IPCONFIG.BIN', r'\HISPA\IPCONFIG.BIN'),
         ('PING.BIN', r'\HISPA\PING.BIN'), ('DESCARGA.BIN', r'\HISPA\DESCARGA.BIN')]),
     ('tls', VERSION_CORTES, 'HTTPS: el servicio TLS (TLS.BIN, con BearSSL) y la orden HTTPS', 'base >= 0.8.1, red >= 0.8.1', [
@@ -439,6 +445,8 @@ SISTEMA = [
     # (0.8.11) (SIN-ADMIN) el diagnóstico en WIFI.LOG sin Registro=SI, y la ventana dice dónde está
     # (0.8.12) (MÓVIL) la ventana dice «la red va por el móvil por USB»
     # (0.8.13) (HPMINI-RADIO) la radio apagada por la patilla W_DISABLE#: la mira cada segundo y enciende sola; la tecla del Wi-Fi
+    # (0.8.13) (ACER-WIFI) la RTL8723BS del Acer One 10 ya oye: la tabla RadioA con sus condiciones, las antenas
+    # del EFUSE y la prueba de antenas al encender; WIFI.LOG con la antena y la recepción; \SDIO.TXT también de C:
     ('wifi', VERSION_0813, 'El Wi-Fi: el servicio Wi-Fi (WIFI.BIN: Broadcom BCM43224/43225 y Atheros AR9285), su ventana (REDWIFI) y el microcódigo de Broadcom',
      'base >= ' + VERSION_WIFI + ', red >= ' + VERSION_WIFI, [
         ('WIFI.BIN', r'\HISPA\WIFI.BIN'), ('REDWIFI.BIN', r'\HISPA\REDWIFI.BIN'), ('WIFI.TXT', r'\HISPA\WIFI.TXT'),
