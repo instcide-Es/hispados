@@ -316,10 +316,32 @@ residentes); lo que faltaba era probarlo. Los de terceros se descargan con
 `h8086/prueba/trae_drivers.sh` a `~/.cache/hispa-drivers/descargas` (fuera
 del repositorio).
 
-## Hito 2, empezado: Hispa-386
+## Hito 2, en la 0.9.32: Hispa-386
 
-Rama `dos-drivers` (desde `worktree-v0.1-nucleo`; no toca nada de lo que
-arregla `dos-0931`). En `kernel/kernel.asm`:
+Junta, en la rama `dos-0932`, lo de `dos-drivers` (abajo) y lo de Claude 1
+(rama `drivers-386`, en el PC de Albinyana, informe
+`Drivers/386-2026-11-26.md`):
+
+- **Packet drivers de otros**: la pila de Hispa ya era un cliente normal
+  de la especificación de FTP Software; probado con NE2000.COM y PCNTPK.COM
+  de Crynwr (GPL), también arriba con HSPEMM
+  (`tests/run_pktdrv_terceros_tests.sh`; los baja
+  `tests/thirdparty/fetch_drivers.sh`).
+- **VDS en HSPEMM** (INT 4Bh 8102h-8104h, 810Bh/810Ch y el bit 5 de 40:7Bh):
+  los drivers que hacen DMA ellos mismos (PCNTPK) funcionan cargados arriba
+  (`tests/run_vds_tests.sh`).
+- **NDIS 2**: el núcleo entiende `\DEV\NOMBRE` y deja que el INIT de un
+  driver llame a otro (dc_hdr se guarda alrededor del INIT); `HSPPMAN.SYS`
+  (gestor de protocolos propio) y `HSPNDIS.COM` (protocolo propio, packet
+  driver en INT 60h), 0.1. Probado con el NE2000.DOS de Trabajo en Grupo
+  como caja negra en QEMU, sin que vaya al repositorio (docs/RED.md, «Con un
+  driver NDIS 2»).
+- **Sitio**: con todo junto, la imagen del núcleo se pasaba 64 octetos.
+  Adelgazado 160 sin cambiar lo que hace (`find_wname`, `get_sft_bx`,
+  `dreq_zero`): quedan 64 en la imagen y 40 en `.init`. Las IOCTL de bloque
+  con el controlador (unos 350) siguen sin caber.
+
+Lo de `dos-drivers`, en `kernel/kernel.asm`:
 
 - `l_devcall` llama a la estrategia y a la interrupción con **DS:SI en la
   cabecera del controlador**, como DOS. Con DS en el núcleo, SRDXMS.SYS de
