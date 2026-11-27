@@ -51,7 +51,7 @@ Guardado en PRUEBA.BIN (150.000 octetos).
    `RED.INI`) y la enseña. No hace falta llamarlo antes de las otras: la
    primera orden de red que se use la pide.
 3. `PING nombre|dirección [/N:n] [/T]` y
-   `DESCARGAR [http://]servidor[:puerto]/ruta [archivo]`.
+   `DESCARGAR [/Y] [http://]servidor[:puerto]/ruta [archivo]`.
 
 | Orden | Para qué |
 |---|---|
