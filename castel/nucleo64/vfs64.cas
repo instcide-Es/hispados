@@ -904,6 +904,30 @@ módulo Vfs64
         devolver b
     fin
 
+    ; [etapa 10 e] lo mismo, pero si es de la unidad en memoria, sin copiarlo:
+    ; su dirección en la unidad (prestado: cierto; no se libera). Para execve:
+    ; los programas de la unidad (TestAK, 5 MB, lanza 85 grupos) ya no se
+    ; copian en el montón cada vez (5 MB de reserva y su cuarentena, cada uno)
+    público función vfs_entero_o_unidad(ruta: puntero a byte, ref tam: nat64, ref err: ent64, ref prestado: bool): nat64
+        variable a: puntero a Abierto
+        variable n: puntero a Nodo
+        variable d: nat64
+        prestado := falso
+        tam := 0
+        a := vfs_abre(nulo, ruta, O_RDONLY, err)
+        si a = nulo entonces devolver 0 fin
+        n := nodo(a.nodo)
+        si n.clase = N_ARCHIVO y mm(n.montaje).clase = FS_UNIDAD entonces
+            tam := n.tamaño
+            d := dónde(nat32(n.primero))
+            vfs_cierra(a)
+            prestado := cierto
+            devolver d
+        fin
+        vfs_cierra(a)
+        devolver vfs_entero(ruta, tam, err)
+    fin
+
     ; ---- montar ----
     función nuevo_montaje(ruta: puntero a byte, disco: nat32): nat32
         variable m: nat32

@@ -28,6 +28,7 @@ módulo PrMusl64
     importar Cifras64, Pant64, Es64, Cerrojo, Fisica64, Pagina64, Monton64, Reloj64, Hilos64, Smp64, Entradas, Espacios, Unidad64, Procesos, Sistema, Futex64, Tubos64, Disp64, Redcom64, Hda64, Unix64, Discos64
 
     público variable fallos7: nat32
+    público variable ak_todas: bool             ; [etapa 10 e] «ak=todas»: MAK con los 85 grupos de TestAK (si no, 12)
 
     función mal(qué: puntero a byte)
         fallos7 := fallos7 + 1
@@ -107,6 +108,14 @@ módulo PrMusl64
         ; soltaban (TIME_WAIT) mientras sonaba, un aviso de vaciar la TLB por
         ; cada página de sus búferes (la cuarentena de Monton64 lo arregla)
         si busca_archivo("MICU") >= 0 entonces corre("MICU", 0) fin            ; ICU (con icudt77l.dat)
+        si busca_archivo("MIMG") >= 0 entonces corre("MIMG", 0) fin            ; [etapa 10 e] zlib, libpng, libjpeg-turbo y libwebp
+        si busca_archivo("MLIBS") >= 0 entonces corre("MLIBS", 0) fin          ; [etapa 10 e] las demás bibliotecas que pide Ladybird
+        si busca_archivo("MSKIA") >= 0 entonces corre("MSKIA", 0) fin          ; [etapa 10 e] Skia, con el procesador
+        ; [etapa 10 e] las pruebas de AK de Ladybird (TestAK): 12 grupos; con
+        ; «ak=todas», los 85 (cada grupo es un proceso de 5 MB: con TCG, unos 200 s)
+        si busca_archivo("MAK") >= 0 entonces
+            si ak_todas entonces corre("MAK todas", 0) sino corre("MAK", 0) fin
+        fin
         si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
         si busca_archivo("MSONIDO") >= 0 entonces
             corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)

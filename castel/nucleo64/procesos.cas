@@ -136,6 +136,7 @@ módulo Procesos
         nombre: arreglo [32] de byte
         línea: arreglo [256] de byte
         dir_actual: arreglo [256] de byte       ; [etapa 5] la carpeta actual (chdir), absoluta
+        exe: arreglo [256] de byte              ; [etapa 10 e] la ruta absoluta del programa (/proc/self/exe)
         ; [etapa 6] fork, execve, wait4, las señales mínimas
         padre: nat64                ; el id del padre (0: lo arrancó el núcleo, o es huérfano)
         grupo: nat64                ; el grupo de procesos (setpgid; el de la consola: TIOCSPGRP)
@@ -2229,6 +2230,23 @@ módulo Procesos
         p.fd_clase[2] := F_CONSOLA
         p.dir_actual[0] := '/'
         p.dir_actual[1] := 0
+        ; [etapa 10 e] la ruta del programa: la que se ha dado, o la de la unidad («/» y su nombre)
+        si con_ruta y ruta[0] = '/' entonces
+            j := 0
+            mientras ruta[j] <> 0 y j < 255 hacer
+                p.exe[j] := ruta[j]
+                j := j + 1
+            fin
+            p.exe[j] := 0
+        sino
+            p.exe[0] := '/'
+            j := 0
+            mientras nombre_[j] <> 0 y j < 254 hacer
+                p.exe[j + 1] := nombre_[j]
+                j := j + 1
+            fin
+            p.exe[j + 1] := 0
+        fin
         ; [etapa 6] lo arranca el núcleo, que lo espera (espera_proceso); su grupo, el suyo
         p.del_núcleo := 1
         p.grupo := p.id
@@ -2725,6 +2743,7 @@ módulo Procesos
         variable e, viejo: puntero a Espacio
         variable h: puntero a Hilo
         variable b: nat64
+        variable de_unidad: bool
         t := reserva(LARGO_EXEC)
         si t = nulo entonces devolver -12 fin
         abs := dirección(t[1024])
@@ -2756,7 +2775,7 @@ módulo Procesos
         fin
         envc := nat32(r)
         ; el archivo, entero
-        buf := vfs_entero(abs, tam, err)
+        buf := vfs_entero_o_unidad(abs, tam, err, de_unidad)          ; [etapa 10 e] de la unidad, sin copiar
         si buf = 0 entonces
             libera(t)
             si err = -21 entonces devolver -13 fin           ; EACCES (una carpeta)
@@ -2765,7 +2784,7 @@ módulo Procesos
         ; el programa nuevo, en un proceso de paso (el de verdad sigue intacto)
         q := puntero(nat64(reserva(tamaño(Proceso))))
         si q = nulo entonces
-            libera(puntero(buf))
+            si no de_unidad entonces libera(puntero(buf)) fin
             libera(t)
             devolver -12
         fin
@@ -2773,7 +2792,7 @@ módulo Procesos
         e := crea_espacio()
         si e = nulo entonces
             libera(puntero(nat64(q)))
-            libera(puntero(buf))
+            si no de_unidad entonces libera(puntero(buf)) fin
             libera(t)
             devolver -12
         fin
@@ -2782,7 +2801,7 @@ módulo Procesos
         si no carga_elf(q, buf, tam) entonces r := -8         ; ENOEXEC
         sino si no pon_pila_v(q, textos, argc, envc) entonces r := -7
         fin
-        libera(puntero(buf))
+        si no de_unidad entonces libera(puntero(buf)) fin
         si r < 0 entonces
             destruye_espacio(e)
             libera(puntero(nat64(q)))
@@ -2838,6 +2857,13 @@ módulo Procesos
         h.alt_marcas := 2
         p.s_pend := 0
         libera(puntero(nat64(q)))
+        ; [etapa 10 e] la ruta del programa, absoluta (/proc/self/exe)
+        i := 0
+        mientras abs[i] <> 0 y i < 255 hacer
+            p.exe[i] := abs[i]
+            i := i + 1
+        fin
+        p.exe[i] := 0
         ; el nombre (el último trozo de la ruta, sin la extensión, en mayúsculas) y la línea
         i := 0
         ini := 0

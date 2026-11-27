@@ -31,6 +31,7 @@
 #include <sys/un.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
@@ -495,9 +496,46 @@ static void tmp(void)
 	fd = open("/tmp/munix.dat", O_CREAT | O_TRUNC | O_RDWR, 0644);
 	if (fd >= 0 && write(fd, b, sizeof b) == (ssize_t)sizeof b && lseek(fd, 0, SEEK_SET) == 0
 	    && read(fd, c, sizeof c) == (ssize_t)sizeof c && memcmp(b, c, sizeof b) == 0) ok = 1;
-	if (fd >= 0) close(fd);
+	/* [etapa 10 e] pwritev y preadv (en su sitio, sin mover el archivo),
+	 * pwritev2 y preadv2 (sin marcas; con -1, donde está) y fchown (lo de
+	 * sqlite) */
+	if (fd >= 0) {
+		char x[6] = "añ", y[4] = "ño", z[10];
+		struct iovec v[2] = { { x, 3 }, { y, 3 } }, w[2] = { { z, 2 }, { z + 2, 4 } };
+		off_t antes = lseek(fd, 0, SEEK_CUR);
+		MIRA(pwritev(fd, v, 2, 10) == 6 && lseek(fd, 0, SEEK_CUR) == antes, "pwritev: en su sitio");
+		MIRA(preadv(fd, w, 2, 10) == 6 && memcmp(z, "añño", 6) == 0 && lseek(fd, 0, SEEK_CUR) == antes, "preadv: en su sitio");
+		lseek(fd, 20, SEEK_SET);
+		MIRA(pwritev2(fd, v, 1, -1, 0) == 3 && lseek(fd, 0, SEEK_CUR) == 23 && preadv2(fd, w, 1, 20, 0) == 2 && memcmp(z, "a\xc3", 2) == 0,
+		     "pwritev2 y preadv2");
+		MIRA(fchown(fd, getuid(), getgid()) == 0, "fchown");
+		close(fd);
+	}
+	/* [etapa 10 e] /proc/self/exe y /proc/PID/exe: la ruta absoluta del programa */
+	{
+		char e1[512], e2[512], pp[64];
+		ssize_t n1 = readlink("/proc/self/exe", e1, sizeof e1 - 1), n2;
+		snprintf(pp, sizeof pp, "/proc/%d/exe", (int)getpid());
+		n2 = readlink(pp, e2, sizeof e2 - 1);
+		if (n1 > 0) e1[n1] = 0;
+		if (n2 > 0) e2[n2] = 0;
+		MIRA(n1 >= 6 && e1[0] == '/' && strcmp(e1 + n1 - 6, "/MUNIX") == 0, "readlink de /proc/self/exe");
+		MIRA(n2 == n1 && memcmp(e1, e2, (size_t)n1) == 0, "readlink de /proc/PID/exe");
+	}
+	/* [etapa 10 e] close_range: con CLOSE_RANGE_CLOEXEC, marcados; sin él, cerrados */
+	{
+		int t[2], e = eventfd(0, 0);
+		if (pipe(t) == 0 && e >= 0) {
+			int m = t[0] < t[1] ? t[0] : t[1];
+			if (e < m) m = e;
+			MIRA(syscall(SYS_close_range, (unsigned)m, ~0u, 4) == 0 && (fcntl(t[0], F_GETFD) & FD_CLOEXEC) && (fcntl(e, F_GETFD) & FD_CLOEXEC),
+			     "close_range con CLOSE_RANGE_CLOEXEC");
+			MIRA(syscall(SYS_close_range, (unsigned)m, ~0u, 0) == 0 && fcntl(t[0], F_GETFD) < 0 && fcntl(t[1], F_GETFD) < 0 && fcntl(e, F_GETFD) < 0,
+			     "close_range");
+		} else MIRA(0, "close_range: pipe y eventfd");
+	}
 	MIRA(ok && unlink("/tmp/munix.dat") == 0, "/tmp: escribir 100 KB, leerlos y borrarlos");
-	printf("  /tmp: 100 KB escritos, leídos y borrados\n");
+	printf("  /tmp: 100 KB escritos, leídos y borrados; pwritev, preadv, pwritev2, preadv2 y fchown; /proc/self/exe; close_range\n");
 }
 
 int main(void)

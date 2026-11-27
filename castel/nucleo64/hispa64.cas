@@ -77,7 +77,7 @@ módulo Hispa64
     importar Acpica64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.11.4"
+    constante VERSIÓN = "0.11.5"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 64                  ; (16 hasta la etapa 6)
@@ -1497,6 +1497,7 @@ módulo Hispa64
         pruebas2()
         etapa6()
         ; [etapa 7] musl: los programas de C de hoy
+        ak_todas := tiene("ak=todas")
         si no tiene("sinpruebas") y no tiene("sinmusl") y tic_va entonces pruebas_musl() fin
         ; [etapa 9] la red
         si no tiene("sinpruebas") y no tiene("sinred") y tic_va entonces pruebas_red() fin

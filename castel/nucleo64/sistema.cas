@@ -185,6 +185,7 @@ módulo Sistema
             caso 0, 1, 5, 8, 16, 17, 18, 19, 20, 32, 33, 292, 72, 74, 75, 77, 81, 217: devolver cierto
             caso 42, 43, 288, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55: devolver cierto
             caso 232, 281, 233, 286, 287: devolver cierto
+            caso 93, 295, 296, 327, 328: devolver cierto                   ; [etapa 10 e]
             caso 257, 258, 262, 263, 264, 267, 269: devolver cierto       ; (las *at: su carpeta, si es un descriptor)
             si no: devolver falso
         fin
@@ -365,15 +366,19 @@ módulo Sistema
         devolver ent64(hecho)
     fin
 
-    ; readv y writev
-    función vectores(p: puntero a Proceso, fd: nat64, iov: nat64, cuántos: nat64, escribir_: bool): ent64
+    ; readv y writev; [etapa 10 e] y preadv, pwritev, preadv2 y pwritev2 (en
+    ; «pos»; -1, donde esté el archivo, como readv y writev)
+    función vectores(p: puntero a Proceso, fd: nat64, iov: nat64, cuántos: nat64, escribir_: bool, pos: ent64): ent64
         variable par: arreglo [2] de nat64
         variable i: nat64
         variable total, r: ent64
         si cuántos > 1024 entonces devolver EINVAL fin
         si no fd_bien(p, fd) entonces devolver EBADF fin
         ; [etapa 10 d] los de Unix, de una vez (un datagrama no se parte)
-        si p.fd_clase[nat32(fd)] = F_UNIX entonces devolver vectores_unix(p, fd, iov, cuántos, escribir_) fin
+        si p.fd_clase[nat32(fd)] = F_UNIX entonces
+            si pos >= 0 entonces devolver -29 fin                   ; ESPIPE
+            devolver vectores_unix(p, fd, iov, cuántos, escribir_)
+        fin
         total := 0
         i := 0
         mientras i < cuántos hacer
@@ -381,12 +386,13 @@ módulo Sistema
                 si total = 0 entonces devolver EFAULT fin
                 devolver total
             fin
-            si escribir_ entonces r := escribe(p, fd, par[0], par[1], -1) sino r := lee(p, fd, par[0], par[1], -1) fin
+            si escribir_ entonces r := escribe(p, fd, par[0], par[1], pos) sino r := lee(p, fd, par[0], par[1], pos) fin
             si r < 0 entonces
                 si total = 0 entonces devolver r fin
                 devolver total
             fin
             total := total + r
+            si pos >= 0 entonces pos := pos + r fin
             si nat64(r) < par[1] entonces devolver total fin
             i := i + 1
         fin
@@ -489,6 +495,29 @@ módulo Sistema
         p.fd_nobloq[nat32(fd)] := 0
         llena_fd(p, fd, F_ARCHIVO, nat64(a))
         devolver ent64(fd)
+    fin
+
+    ; [etapa 10 e] close_range (436): los de primero a último (los que haya);
+    ; con CLOSE_RANGE_CLOEXEC (4), solo se marcan; CLOSE_RANGE_UNSHARE (2), sin
+    ; más (la tabla ya es de cada proceso). Lo usa Ladybird (Core::Process) en
+    ; el hijo antes de execve, para no dejarle descriptores que no ha pedido.
+    función cierra_rango(p: puntero a Proceso, primero: nat64, último: nat64, marcas: nat64): ent64
+        variable i: nat64
+        variable b: nat64
+        si marcas > 7 o marcas yb 1 <> 0 o primero > último entonces devolver EINVAL fin
+        si último >= MAX_FD entonces último := MAX_FD - 1 fin
+        i := primero
+        mientras i <= último y i < MAX_FD hacer
+            si marcas yb 4 <> 0 entonces
+                b := toma(dirección(p.fd_cerrojo))
+                si fd_bien(p, i) entonces p.fd_cloexec[nat32(i)] := 1 fin
+                suelta(dirección(p.fd_cerrojo), b)
+            sino si fd_bien(p, i) entonces
+                cierra(p, i)
+            fin
+            i := i + 1
+        fin
+        devolver 0
     fin
 
     función cierra(p: puntero a Proceso, fd: nat64): ent64
@@ -827,6 +856,37 @@ módulo Sistema
         devolver ent64(l)
     fin
 
+    ; [etapa 10 e] ¿es t «/proc/self/exe» o «/proc/PID/exe» con el pid de p?
+    función es_exe_propio(p: puntero a Proceso, t: puntero a byte): bool
+        variable z: puntero a byte
+        variable i, j: nat32
+        variable n: nat64
+        z := "/proc/"
+        i := 0
+        mientras z[i] <> 0 hacer
+            si t[i] <> z[i] entonces devolver falso fin
+            i := i + 1
+        fin
+        si t[i] = 's' y t[i + 1] = 'e' y t[i + 2] = 'l' y t[i + 3] = 'f' entonces
+            i := i + 4
+        sino
+            n := 0
+            j := i
+            mientras t[i] >= '0' y t[i] <= '9' y i < j + 10 hacer
+                n := n * 10 + nat64(t[i] - '0')
+                i := i + 1
+            fin
+            si i = j o n <> p.id entonces devolver falso fin
+        fin
+        z := "/exe"
+        j := 0
+        mientras z[j] <> 0 hacer
+            si t[i + j] <> z[j] entonces devolver falso fin
+            j := j + 1
+        fin
+        devolver t[i + j] = 0
+    fin
+
     ; [etapa 10 b] readlink y readlinkat: en Hispa-64 no hay enlaces
     ; simbólicos, salvo /etc/localtime, que «apunta» a la zona en
     ; /usr/share/zoneinfo (ICU y otros sacan de ahí el nombre de la zona, con
@@ -865,6 +925,17 @@ módulo Sistema
             fin
             si n < nat64(i) entonces i := nat32(n) fin
             si no copia_a(p, v, nat64(dirección(d[0])), nat64(i)) entonces devolver EFAULT fin
+            devolver ent64(i)
+        fin
+        ; [etapa 10 e] /proc/self/exe (y /proc/PID/exe con el suyo): la ruta del
+        ; programa (Ladybird, LibTest y los demás buscan así sus archivos)
+        si es_exe_propio(p, t) entonces
+            libera(t)
+            i := 0
+            mientras p.exe[i] <> 0 y i < 255 hacer i := i + 1 fin
+            si i = 0 entonces devolver ENOENT fin
+            si n < nat64(i) entonces i := nat32(n) fin
+            si no copia_a(p, v, nat64(dirección(p.exe[0])), nat64(i)) entonces devolver EFAULT fin
             devolver ent64(i)
         fin
         ; las carpetas que «hay» en el camino: /etc, /dev, /proc, y las de la zona
@@ -1280,8 +1351,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.4")
-        pon_texto(dirección(t[0]), 195, "etapa 10 d (AF_UNIX y memfd)")
+        pon_texto(dirección(t[0]), 130, "0.11.5")
+        pon_texto(dirección(t[0]), 195, "etapa 10 e (Skia y las imágenes)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -1940,6 +2011,7 @@ módulo Sistema
             caso 1: r := escribe(p, a1, a2, a3, -1)
             caso 2: r := abre(p, -100, a1, a2)
             caso 3: r := cierra(p, a1)
+            caso 436: r := cierra_rango(p, a1, a2, a3)                ; [etapa 10 e] close_range
             caso 4, 6: r := stat_(p, -100, a1, a2, 0)
             caso 5: r := fstat_(p, a1, a2)
             caso 8: r := sitúa(p, a1, ent64(a2), a3)
@@ -2005,8 +2077,20 @@ módulo Sistema
                 si ent64(a4) < 0 entonces r := EINVAL sino r := lee(p, a1, a2, a3, ent64(a4)) fin
             caso 18:
                 si ent64(a4) < 0 entonces r := EINVAL sino r := escribe(p, a1, a2, a3, ent64(a4)) fin
-            caso 19: r := vectores(p, a1, a2, a3, falso)
-            caso 20: r := vectores(p, a1, a2, a3, cierto)
+            caso 19: r := vectores(p, a1, a2, a3, falso, -1)
+            caso 20: r := vectores(p, a1, a2, a3, cierto, -1)
+            ; [etapa 10 e] preadv y pwritev (la posición entera en a4); preadv2 y
+            ; pwritev2, sin marcas (a6; con la posición -1, la del archivo)
+            caso 295, 296:
+                si ent64(a4) < 0 entonces r := EINVAL sino r := vectores(p, a1, a2, a3, n = 296, ent64(a4)) fin
+            caso 327, 328:
+                si a6 <> 0 entonces r := -95                              ; EOPNOTSUPP (RWF_*)
+                sino si ent64(a4) < -1 entonces r := EINVAL
+                sino r := vectores(p, a1, a2, a3, n = 328, ent64(a4)) fin
+            ; [etapa 10 e] fchown: los discos de Hispa-64 no guardan dueños (FAT,
+            ; exFAT): vale, sin cambiar nada, como en un FAT de Linux (lo pide sqlite)
+            caso 93:
+                si no fd_bien(p, a1) entonces r := EBADF sino r := 0 fin
             caso 21: r := con_ruta(p, -100, a1, 3)
             caso 24:
                 cede()

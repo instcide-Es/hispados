@@ -189,6 +189,32 @@ MTX=$(cd "$T/prog" && ./MTEXTO DEJAVU.TTF 2> /dev/null | grep '^  dibujado: ')
 # [etapa 10 b] lo que dice MICU (ICU: el orden, los cortes, los números, las
 # fechas, IDNA...) en Linux: en Hispa-64, las mismas líneas
 MIC=$(cd "$T/prog" && ./MICU 2> /dev/null | grep '^  ')
+# [etapa 10 e] lo que dicen MIMG (las imágenes), MLIBS (las demás bibliotecas
+# de Ladybird) y MSKIA (Skia) en Linux: en Hispa-64, lo mismo (lo de MSKIA que
+# depende del camino de Skia, SSE2, ML3 o ML4, aparte: skia_bien)
+MIM=$(cd "$T/prog" && ./MIMG 2> /dev/null | grep '^  ')
+MLB=$( [ -x "$T/prog/MLIBS" ] && cd "$T/prog" && ./MLIBS 2> /dev/null | grep '^  ')
+MSK=$(cd "$T/prog" && ./MSKIA 2> /dev/null)
+# [etapa 10 e] MAK: 12 grupos de TestAK en cada arranque; los 85 («MAK todas»,
+# con «ak=todas»), en el de KVM
+MAKL=$(cd "$T/prog" && ./MAK 2> /dev/null | grep "^  [0-9]* grupos")
+MAKT=$(cd "$T/prog" && ./MAK todas 2> /dev/null | grep "^  [0-9]* grupos")
+# skia_bien TEXTO: MSKIA en Hispa-64 frente a MSKIA en Linux: las mismas
+# líneas (menos la de lo dibujado y la huella); si el camino es el mismo, lo
+# dibujado igual (el crc32 de los píxeles y del PNG); y la huella (la media de
+# cada cuadro de 16 x 16), como mucho 2 de diferencia en cada color
+skia_bien() {
+  local v=$1 cl cv hl hv
+  [ -n "$MSK" ] || return 1
+  grep -q "^MSKIA: todo bien (" <<< "$MSK" || return 1
+  mismas "$(grep '^  ' <<< "$MSK" | grep -v '^  dibujado\|^  huella')" "$v" || return 1
+  cl=$(grep -o 'el camino: [A-Z0-9]*$' <<< "$MSK"); cv=$(grep '^MSKIA: ' <<< "$v" | grep -o 'el camino: [A-Z0-9]*$' | head -1)
+  [ -n "$cv" ] || return 1
+  if [ "$cl" = "$cv" ]; then grep -qxF -- "$(grep '^  dibujado' <<< "$MSK")" <<< "$v" || return 1; fi
+  hl=$(grep '^  huella: ' <<< "$MSK" | cut -d' ' -f4); hv=$(grep '^  huella: ' <<< "$v" | head -1 | cut -d' ' -f4)
+  [ ${#hl} -gt 100 ] && [ ${#hl} = ${#hv} ] || return 1
+  python3 -I -c 'import sys; a,b=sys.argv[1],sys.argv[2]; sys.exit(0 if max(abs(int(a[i:i+2],16)-int(b[i:i+2],16)) for i in range(0,len(a),2)) <= 2 else 1)' "$hl" "$hv"
+}
 mismas() {   # LÍNEAS TEXTO: ¿están todas las LÍNEAS, tal cual, en TEXTO?
   local l
   [ -n "$1" ] || return 1
@@ -257,7 +283,7 @@ e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
     && grep -q "^Unidad en memoria: 52 archivos: " <<< "$v" \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.4 x86_64$" <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.5 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -298,7 +324,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.4 x86_64 (etapa 10 d (AF_UNIX y memfd))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.5 x86_64 (etapa 10 e (Skia y las imágenes))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -315,9 +341,9 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MDISP: todo bien (" <<< "$v" && grep -q "^Programa «MDISP»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED: todo bien (126 pruebas)$" <<< "$v" && grep -q "^Programa «MRED»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^MRED6: todo bien (25 pruebas)$" <<< "$v" && grep -q "^Programa «MRED6»: acaba con el código 0, como debe" <<< "$v" \
-    && grep -q "^MUNIX: todo bien (77 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MUNIX: todo bien (85 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
-    && grep -q "^  /tmp: 100 KB escritos, leídos y borrados$" <<< "$v" && grep -q "^  /tmp: FAT16 «TMP», 31,9 MB en 8179 cúmulos de 4 KB, .*; de leer y escribir$" <<< "$v" \
+    && grep -q "^  /tmp: 100 KB escritos, leídos y borrados; pwritev, preadv, pwritev2, preadv2 y fchown; /proc/self/exe; close_range$" <<< "$v" && grep -q "^  /tmp: FAT16 «TMP», 31,9 MB en 8179 cúmulos de 4 KB, .*; de leer y escribir$" <<< "$v" \
     && grep -q "^MIPC: todo bien (9 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en " <<< "$v" \
     && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
@@ -327,6 +353,10 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MTEXTO: todo bien (6 pruebas)$" <<< "$v" && [ -n "$MTX" ] && grep -qxF "$MTX" <<< "$v" \
     && grep -q "^MICU: todo bien (28 pruebas)$" <<< "$v" && grep -q "^MICU: la zona del sistema: Europe/Madrid (readlink de /etc/localtime: /usr/share/zoneinfo/Europe/Madrid)$" <<< "$v" && grep -q "^Programa «MICU»: acaba con el código 0, como debe" <<< "$v" && mismas "$MIC" "$v" \
     && grep -q "^MCURL: todo bien (20 pruebas)$" <<< "$v" && grep -q "^Programa «MCURL»: acaba con el código 0, como debe" <<< "$v" \
+    && grep -q "^MIMG: todo bien (16 pruebas)$" <<< "$v" && grep -q "^Programa «MIMG»: acaba con el código 0, como debe" <<< "$v" && mismas "$MIM" "$v" \
+    && { [ -z "$MLB" ] || { grep -q "^MLIBS: todo bien (" <<< "$v" && grep -q "^Programa «MLIBS»: acaba con el código 0, como debe" <<< "$v" && mismas "$MLB" "$v"; }; } \
+    && grep -q "^MSKIA: todo bien (20 pruebas)$" <<< "$v" && grep -q "^Programa «MSKIA»: acaba con el código 0, como debe" <<< "$v" && skia_bien "$v" \
+    && grep -q "^MAK: todo bien (" <<< "$v" && grep -q "^Programa «MAK»: acaba con el código 0, como debe" <<< "$v" && [ -n "$MAKL" ] && [ -n "$MAKT" ] && { grep -qxF "$MAKL" <<< "$v" || grep -qxF "$MAKT" <<< "$v"; } \
     && grep -q "^  hilos: 200 std::thread, thread_local (200 destruidos), condition_variable, async, promise, timed_mutex$" <<< "$v" \
     && [ "$(grep -cE "^Programa «(MHOLA|MHOLAD|MHOLAP) uno dos»: acaba con el código 0, como debe|^Programa «(MHILOS|MHILOSD|MSENALES|MSENALESD|MPROCESOS|MPROCESOSD|MMAPA|MMAPAD)»: acaba con el código 0, como debe|^Programa «LUA /PRUEBA.LUA uno dos»: acaba con el código 0, como debe" <<< "$v")" = 12 ] \
     && grep -q "^Después de musl: 0 procesos, 0 en la tabla, 0 espacios, 0 tablas de programas, 0 tuberías; " <<< "$v" \
@@ -337,7 +367,7 @@ e7_bien() {   # SALIDA N [avx]
 e7_ok() {   # SALIDA N QUÉ [avx]
   local v; v=$(serie "$1")
   if e7_bien "$1" "$2" "${4:-}"; then
-    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY) y [etapa 10 d] los sockets de Unix (MUNIX: 77 pruebas, SCM_RIGHTS, SCM_CREDENTIALS, memfd, las carreras de H4 y H11, /tmp) y el IPC de Ladybird (MIPC: dos procesos, 60 cuadros por memfd), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
+    ok "etapa 7 $3: musl (MHOLA estático, dinámico con ld-musl y libsaludo.so, y PIE; MHILOS, MSENALES, MPROCESOS y MMAPA, estáticos y dinámicos), Lua, [etapa 10] C++ (MCXX: 200 hilos, excepciones, flujos, regex; [etapa 10 c] con el compilador cruzado, estático y dinámico, MCXXD) y la letra (MTEXTO: HarfBuzz y FreeType, lo mismo que en Linux) y [etapa 10 b] ICU (MICU: 28 pruebas, lo mismo que en Linux; la zona, Europe/Madrid, por readlink de /etc/localtime) y libcurl (MCURL: 20 pruebas por 127.0.0.1, 16 a la vez con «multi») y [etapa 10 c] IPv6 (MRED6: TCP, UDP e ICMPv6 por ::1, los dos a la vez e IPV6_V6ONLY) y [etapa 10 d] los sockets de Unix (MUNIX: 85 pruebas, SCM_RIGHTS, SCM_CREDENTIALS, memfd, las carreras de H4 y H11, /tmp) y el IPC de Ladybird (MIPC: dos procesos, 60 cuadros por memfd) y [etapa 10 e] las bibliotecas de Ladybird (MIMG: zlib, libpng, libjpeg-turbo y libwebp; MLIBS: 12 más) y Skia (MSKIA: $(grep -o "el camino: [A-Z0-9]*" <<< "$v" | head -1), lo dibujado como en Linux) y AK de Ladybird (MAK: $(grep -o "^  [0-9]* grupos, [0-9]* casos" <<< "$v" | head -1 | sed "s/^  //") de TestAK), todo bien; $(grep '^Después de musl:' <<< "$v" | cut -d';' -f2 | sed 's/^ //')$( [ "${4:-}" = avx ] && echo '; los registros de AVX de 8 hilos, intactos')"
   else ko "etapa 7 $3 no dice lo que debe: $(grep -E '^Programa «[ML]|^M[A-Z]*: [0-9]* mal|^LUA:|^Después de musl|^  la memoria|MAL|parado' <<< "$v" | cut -c1-110 | paste -sd '|' | cut -c1-1500)"; fi
 }
 e3_dice() {   # SALIDA: lo que dice, para cuando sale mal
@@ -357,7 +387,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.4 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.5 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: (9[0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -1074,7 +1104,7 @@ con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,
 v=$(serie "$T/e7.txt")
 HM1=$(TZ=Europe/Madrid date +%H:%M)
 HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.4, etapa 10 d " <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.5, etapa 10 e " <<< "$v" \
    && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  52 archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
@@ -1134,7 +1164,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   }
   uefi "$T/uefi.txt" -m 128 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.4 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.5 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
@@ -1636,9 +1666,9 @@ else ko "etapa 10, la red por USB en marcha no sale como debe: $(grep -E 'USB: s
 # QEMU, que deja pasar cosas (en la 10, el SS de sysret sin el RPL 3: con KVM
 # en un AMD, #GP en el iretq y el doble fallo después de HOLACAS) ----
 if [ -w /dev/kvm ]; then
-  mb1 apagar "$T/kvm1.txt" 512 -enable-kvm -cpu host -machine q35 -smp 4; c=$?
-  if [ $c = 85 ] && e4_bien "$T/kvm1.txt" 4 && e7_bien "$T/kvm1.txt" 4; then
-    ok "etapa 11, con KVM (-cpu host, q35, 4 procesadores): las etapas 4 y 7 enteras (los programas, musl, C++, la letra, MRED, MSONIDO), todo en orden"
+  mb1 "apagar ak=todas" "$T/kvm1.txt" 512 -enable-kvm -cpu host -machine q35 -smp 4; c=$?
+  if [ $c = 85 ] && e4_bien "$T/kvm1.txt" 4 && e7_bien "$T/kvm1.txt" 4 && grep -qxF "$MAKT" <<< "$(serie "$T/kvm1.txt")"; then
+    ok "etapa 11, con KVM (-cpu host, q35, 4 procesadores): las etapas 4 y 7 enteras (los programas, musl, C++, la letra, MRED, MSONIDO; [etapa 10 e] Skia por su camino de $(serie "$T/kvm1.txt" | grep -o "el camino: [A-Z0-9]*" | head -1 | cut -d" " -f3) y TestAK entero: $(echo "$MAKT" | sed "s/^  //")), todo en orden"
   else ko "etapa 11, con KVM (-cpu host) no sale (código $c): $(e4_dice "$T/kvm1.txt") $(serie "$T/kvm1.txt" | grep -E 'Doble|parado|  MAL' | head -5 | paste -sd '|')"; fi
   # [etapa 11 b] con KVM, el tiempo es el de verdad: aquí cuentan el tic (90 o más de los 100, el
   # temporizador cada 10 ms contra el TSC) y el planificador (etapa 3 entera, el interactivo incluido)
