@@ -856,7 +856,8 @@ módulo Vfs64
     fin
 
     ; [etapa 10 g] symlink: el enlace «ruta» (desde base) que dice «destino»;
-    ; solo en /tmp (en los demás: EPERM, como vfat; en «/», EROFS)
+    ; en /tmp y en «/» mismo (en los demás: EPERM, como vfat; dentro de «/»,
+    ; EROFS)
     público función vfs_symlink(destino: puntero a byte, base: puntero a byte, ruta: puntero a byte): ent64
         variable t, r, d: puntero a byte
         variable último: arreglo [256] de byte
@@ -886,7 +887,17 @@ módulo Vfs64
         err := 0
         dn := carpeta_de(t, dirección(último[0]), m, err)
         si dn <> nulo entonces
-            si mm(m).solo_leer <> 0 entonces
+            ; ([etapa 10 g] y en «/», la unidad en memoria: sus archivos no se
+            ; cambian, pero un enlace va en la tabla, como el «ln -s» de quien
+            ; manda en un Linux: Ladybird busca lo suyo en ../share/Lagom de
+            ; donde está el programa, /share/Lagom, que así puede ir a /tmp)
+            si mm(m).clase = FS_UNIDAD y dn = nodo(mm(m).raíz) entonces
+                n := fs_busca(m, dn, dirección(último[0]))
+                si n <> nulo entonces
+                    err := EEXIST
+                    suelta(n)
+                fin
+            sino si mm(m).solo_leer <> 0 entonces
                 err := EROFS
             sino si no de_memoria(m) entonces
                 err := EPERM
@@ -944,6 +955,66 @@ módulo Vfs64
         fin
         r := -1
         si normaliza_e(base, ruta, t, falso, err) entonces r := vfs_enlace(t, d) fin
+        libera(t)
+        devolver r
+    fin
+
+    ; [etapa 10 g] statfs y fstatfs: la «struct statfs» de Linux x86-64 (120
+    ; octetos) del montaje m: el tipo (la unidad, RAMFS_MAGIC; /tmp, el disco en
+    ; memoria, TMPFS_MAGIC, que es lo que hace; FAT, MSDOS_SUPER_MAGIC; exFAT,
+    ; EXFAT_SUPER_MAGIC), el tamaño de bloque (el del cúmulo), los bloques, los
+    ; libres (si se saben), el largo de un nombre (255) y ST_RDONLY
+    función llena_statfs(m: nat32, k: nat64)
+        variable oc, clase_fs, libres: nat64
+        ceros_k(k, 120)
+        clase_fs := 0x858458F6                          ; RAMFS_MAGIC (la unidad en memoria)
+        si mm(m).clase = FS_FAT entonces clase_fs := 0x4D44 fin            ; MSDOS_SUPER_MAGIC
+        si mm(m).clase = FS_EXFAT entonces clase_fs := 0x2011BAB0 fin      ; EXFAT_SUPER_MAGIC
+        si de_memoria(m) entonces clase_fs := 0x01021994 fin               ; TMPFS_MAGIC
+        oc := mm(m).oct_cúmulo
+        si oc = 0 entonces oc := 4096 fin
+        libres := mm(m).libres
+        si libres = 0xFFFFFFFF o mm(m).clase = FS_UNIDAD entonces libres := 0 fin
+        p64(k, clase_fs)
+        p64(k + 8, oc)                              ; f_bsize
+        p64(k + 16, mm(m).cúmulos)                  ; f_blocks
+        p64(k + 24, libres)                         ; f_bfree
+        p64(k + 32, libres)                         ; f_bavail
+        p64(k + 40, 0)                              ; f_files (no se sabe)
+        p64(k + 48, 0)                              ; f_ffree
+        pon_m32(k + 56, m + 1)                      ; f_fsid
+        p64(k + 64, 255)                            ; f_namelen
+        p64(k + 72, oc)                             ; f_frsize
+        si mm(m).solo_leer <> 0 entonces p64(k + 80, 1) fin           ; f_flags: ST_RDONLY
+    fin
+
+    público función vfs_fstatfs(a: puntero a Abierto, k: nat64): ent64
+        llena_statfs(nodo(a.nodo).montaje, k)
+        devolver 0
+    fin
+
+    público función vfs_statfs(base: puntero a byte, ruta: puntero a byte, k: nat64): ent64
+        variable t: puntero a byte
+        variable n: puntero a Nodo
+        variable m: nat32
+        variable r: ent64
+        t := reserva(LARGO_RUTA)
+        si t = nulo entonces devolver ENOMEM fin
+        si no normaliza_e(base, ruta, t, cierto, r) entonces
+            libera(t)
+            devolver r
+        fin
+        cierra_vfs()
+        fs_error := 0
+        n := camina(t, falso, nulo, m)
+        si n = nulo entonces
+            r := fs_error
+        sino
+            llena_statfs(m, k)
+            suelta(n)
+            r := 0
+        fin
+        abre_vfs()
         libera(t)
         devolver r
     fin

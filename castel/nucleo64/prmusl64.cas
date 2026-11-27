@@ -126,6 +126,11 @@ módulo PrMusl64
         ; Ladybird (TestLB, de 46 MB, con los datos de ICU dentro: solo en el
         ; arranque de KVM, que las lleva en la unidad)
         si busca_archivo("MLB") >= 0 entonces corre("MLB", 0) fin
+        ; [etapa 10 g] las pruebas de LibJS (test-js-runtime, 48 MB, y MJS con las
+        ; pruebas dentro) y el navegador sin ventana (MWEB: el Hub de Ladybird
+        ; con WebContent y los suyos): solo en el arranque de KVM, que los lleva
+        si busca_archivo("MJS") >= 0 entonces corre("MJS", 0) fin
+        si busca_archivo("MWEB") >= 0 entonces corre("MWEB", 0) fin
         si busca_archivo("MCURL") >= 0 entonces corre("MCURL", 0) fin          ; libcurl por 127.0.0.1
         si busca_archivo("MSONIDO") >= 0 entonces
             corre("MSONIDO", 0)                                                 ; [etapa 11] el sonido (/dev/dsp)

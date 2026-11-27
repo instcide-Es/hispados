@@ -20,7 +20,9 @@
  *   - mremap: achicar, crecer en su sitio, EFAULT (sin nada puesto), EINVAL;
  *     y pthread_getattr_np del hilo principal (que mide la pila con mremap);
  *   - F_SETLKW con un abrazo mortal entre dos procesos: EDEADLK;
- *   - sched_getcpu (en Hispa-64 y en Linux, por el vDSO: __vdso_getcpu).
+ *   - sched_getcpu (en Hispa-64 y en Linux, por el vDSO: __vdso_getcpu);
+ *   - flock, statfs y fstatfs, chmod y fchmod, /proc/self/status (lo que
+ *     pidió después el navegador).
  * Al final, «MPOSIX: todo bien (N pruebas)» y código 0. Corre igual en Linux. */
 #define _GNU_SOURCE
 #include <stdlib.h>
@@ -40,6 +42,8 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysinfo.h>
+#include <sys/file.h>
+#include <sys/vfs.h>
 #include <sys/wait.h>
 #include "comun.h"
 
@@ -417,6 +421,44 @@ static int vdso_tiene(const char *n)
 	return 0;
 }
 
+/* [etapa 10 g, 2] lo que pidió después el navegador: flock, statfs y fstatfs,
+ * /proc/self/status (TracerPid), chmod y fchmod */
+static void mas_cosas(void)
+{
+	int fd = open("/tmp/mposix.flock", O_RDWR | O_CREAT | O_TRUNC, 0644);
+	MIRA(fd >= 0 && flock(fd, LOCK_EX) == 0, "flock LOCK_EX");
+	pid_t h = fork();
+	if (h == 0) {
+		int g = open("/tmp/mposix.flock", O_RDWR);
+		int r1 = flock(g, LOCK_EX | LOCK_NB) < 0 && errno == EWOULDBLOCK;
+		int r2 = flock(g, LOCK_SH | LOCK_NB) < 0 && errno == EWOULDBLOCK;
+		struct flock fl = { .l_type = F_WRLCK, .l_whence = SEEK_SET, .l_start = 0, .l_len = 0 };
+		int r3 = fcntl(g, F_SETLK, &fl) == 0;       /* (los de fcntl, aparte) */
+		_exit(r1 && r2 && r3 ? 0 : 1);
+	}
+	int st = 0;
+	waitpid(h, &st, 0);
+	MIRA(WIFEXITED(st) && WEXITSTATUS(st) == 0, "flock de otro: EWOULDBLOCK; y fcntl, aparte");
+	MIRA(flock(fd, LOCK_UN) == 0 && flock(fd, LOCK_SH) == 0 && flock(fd, LOCK_UN) == 0, "LOCK_UN y LOCK_SH");
+	errno = 0;
+	MIRA(flock(fd, 0) < 0 && errno == EINVAL, "flock con una orden que no hay: EINVAL");
+	MIRA(fchmod(fd, 0600) == 0 && chmod("/tmp/mposix.flock", 0644) == 0, "chmod y fchmod");
+	struct statfs sf;
+	MIRA(fstatfs(fd, &sf) == 0 && sf.f_bsize > 0 && sf.f_namelen == 255, "fstatfs");
+	MIRA(statfs("/tmp", &sf) == 0 && sf.f_bsize > 0, "statfs");
+	errno = 0;
+	MIRA(statfs("/no-esta-aqui", &sf) < 0 && errno == ENOENT, "statfs de lo que no hay: ENOENT");
+	close(fd);
+	unlink("/tmp/mposix.flock");
+	char b[2048];
+	int n = 0, t = open("/proc/self/status", O_RDONLY);
+	if (t >= 0) { n = read(t, b, sizeof b - 1); close(t); }
+	if (n < 0) n = 0;
+	b[n] = 0;
+	MIRA(strstr(b, "\nTracerPid:\t0\n") != NULL && strstr(b, "\nThreads:\t1\n") != NULL, "/proc/self/status: TracerPid y Threads");
+	printf("  flock, statfs y fstatfs, chmod, /proc/self/status: bien\n");
+}
+
 static void getcpu_(void)
 {
 	long n = sysconf(_SC_NPROCESSORS_ONLN);
@@ -440,5 +482,6 @@ int main(void)
 	remapeo();
 	abrazo();
 	getcpu_();
+	mas_cosas();
 	return acaba("MPOSIX");
 }

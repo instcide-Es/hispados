@@ -61,6 +61,7 @@ módulo Candados64
         si tabla[i].nodo <> nodo entonces devolver falso fin
         si tabla[i].ini >= b o a >= tabla[i].fin_ entonces devolver falso fin
         si tabla[i].tipo_ = F_RDLCK y t = F_RDLCK entonces devolver falso fin
+        si (tabla[i].ofd = 2) <> (ofd = 2) entonces devolver falso fin       ; ([etapa 10 g] flock y fcntl, cada uno lo suyo)
         devolver tabla[i].dueño <> dueño o tabla[i].ofd <> ofd
     fin
 
@@ -253,6 +254,18 @@ módulo Candados64
         acceso := ab.marcas yb 3
         si t = F_RDLCK y acceso = 1 entonces devolver EBADF fin
         si t = F_WRLCK y acceso = 0 entonces devolver EBADF fin
+        devolver pon_o_espera(p, nodo, dueño, ofd, t, a, b, orden = 7 o orden = 38)
+    fin
+
+    ; [etapa 10 g] poner (o quitar, F_UNLCK) el candado de tipo t en [a, b) del
+    ; nodo, de ese dueño; si estorba otro: con «espera», se espera (una señal:
+    ; repetir o EINTR; un abrazo mortal de POSIX: EDEADLK); sin ella, EAGAIN
+    ; (F_SETLK, F_SETLKW, sus OFD, y flock)
+    función pon_o_espera(p: puntero a Proceso, nodo: nat64, dueño: nat64, ofd: nat32, t: nat32, a: nat64, b: nat64, espera_: bool): ent64
+        variable bf: nat64
+        variable r: ent64
+        variable k, apuntado: ent32
+        variable i: nat32
         bf := sin_ints()
         apuntado := -1
         mientras cierto hacer
@@ -275,9 +288,9 @@ módulo Candados64
                 romper
             fin
             candados_estorbos := candados_estorbos + 1
-            si orden = 6 o orden = 37 o interrumpido(p) entonces
+            si no espera_ o interrumpido(p) entonces
                 suelta_sin(dirección(cerrojo))
-                si orden = 6 o orden = 37 entonces r := -11 sino r := ERESTARTSYS fin     ; EAGAIN, o repetir (EINTR)
+                si no espera_ entonces r := -11 sino r := ERESTARTSYS fin     ; EAGAIN, o repetir (EINTR)
                 romper
             fin
             ; [etapa 10 g] los de POSIX: ¿un abrazo mortal? Si no, apuntado
@@ -313,6 +326,22 @@ módulo Candados64
         devolver r
     fin
 
+
+    ; [etapa 10 g] flock (73): el candado de BSD, de todo el archivo y de lo
+    ; abierto (como un OFD, pero aparte: en Linux no se estorba con los de
+    ; fcntl): LOCK_SH (1), LOCK_EX (2), LOCK_UN (8), y LOCK_NB (4: sin
+    ; esperar, EWOULDBLOCK). Lo usa Ladybird (LibCore, el perfil).
+    público función flock_(p: puntero a Proceso, ab: puntero a Abierto, op: nat64): ent64
+        variable t: nat32
+        según nat32(op yb (nob nat64(4)))
+            caso 1: t := F_RDLCK
+            caso 2: t := F_WRLCK
+            caso 8: t := F_UNLCK
+            si no: devolver EINVAL
+        fin
+        devolver pon_o_espera(p, ab.nodo, nat64(ab), 2, t, 0, SIN_FIN, op yb 4 = 0)
+    fin
+
     ; al cerrar un descriptor de lo abierto ab en el proceso de id «pid»: sus
     ; candados de POSIX en ese archivo, fuera; y, si es el último descriptor
     ; de ab, los OFD de ab
@@ -327,7 +356,7 @@ módulo Candados64
         b := toma(dirección(cerrojo))
         i := 0
         mientras i < MAX_CANDADOS hacer
-            si tabla[i].nodo = ab.nodo y ((tabla[i].ofd = 0 y tabla[i].dueño = pid) o (tabla[i].ofd = 1 y tabla[i].dueño = abv y ab.refs <= 1)) entonces
+            si tabla[i].nodo = ab.nodo y ((tabla[i].ofd = 0 y tabla[i].dueño = pid) o ((tabla[i].ofd = 1 o tabla[i].ofd = 2) y tabla[i].dueño = abv y ab.refs <= 1)) entonces
                 quita_en(i)
                 quitado := cierto
             fin

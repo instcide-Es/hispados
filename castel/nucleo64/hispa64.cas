@@ -78,7 +78,7 @@ módulo Hispa64
     importar Registro64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
-    constante VERSIÓN = "0.11.6"
+    constante VERSIÓN = "0.11.7"
     constante MB1 = 0x2BADB002
     constante MB2 = 0x36D76289
     constante MAX_MÓDULOS = 128                 ; (16 hasta la etapa 6; 64 hasta la 10 e: con los de la 10 f ya eran 65)
@@ -760,6 +760,7 @@ módulo Hispa64
         valor_de("hosts=", dirección(h[0]))
         Ip64.sin_ipv6 := tiene("sinipv6")          ; [etapa 10 c]
         Procesos.prueba_salida := tiene("prueba=salida")     ; [etapa 10 c] la tabla de arreglos
+        Sistema.traza_rutas := tiene("traza=rutas")         ; [etapa 10 g] lo que buscan los programas y no está
         si tiene("sinred") entonces
             ; ([etapa 11] con «lo»: los programas que usan 127.0.0.1 siguen yendo)
             escribir("(sinred: sin las tarjetas de red; solo «lo», 127.0.0.1)\n")

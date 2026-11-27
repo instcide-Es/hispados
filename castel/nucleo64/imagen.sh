@@ -73,7 +73,7 @@ else
   }
   {
     cat <<'CFG'
-# Hispa-64 0.11.6 (etapa 10 f). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+# Hispa-64 0.11.7 (etapa 10 g). Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
 set timeout=5
 set default=0
 serial --unit=0 --speed=115200
@@ -83,7 +83,7 @@ terminal_output console serial
 set gfxpayload=keep
 if cpuid -l; then
 CFG
-    entrada "Hispa-64 0.11.6 (etapa 10 f): el escritorio, con Pluma, Cuentas y Notas (la consola, en el menú Inicio; los discos, solo leer; la red, con IPv6; curl)" "escritorio"
+    entrada "Hispa-64 0.11.7 (etapa 10 g): el escritorio, con Pluma, Cuentas y Notas (la consola, en el menú Inicio; los discos, solo leer; la red, con IPv6; curl)" "escritorio"
     entrada "Hispa-64: el escritorio, guardando en los discos (SOLO en VirtualBox o en discos de prueba)" "escritorio escribir"
     entrada "Hispa-64: el intérprete de órdenes (sin el escritorio; «VENTANAS» lo abre)" ""
     entrada "Hispa-64: con escritura en los discos (SOLO en VirtualBox, en discos de prueba o en memorias USB de prueba)" "escribir"

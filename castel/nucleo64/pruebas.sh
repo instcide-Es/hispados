@@ -130,6 +130,10 @@
 #     redirecciones y HTTPS, con su sha256) y la orden CURL (-L, --cacert,
 #     --resolve, sin la autoridad de prueba, -f con un 404, DNS). MHILOS: 8
 #     hilos que abren y cierran descriptores a la vez (ninguno repetido).
+#   - [etapa 10 g] MPOSIX en cada arranque con musl (los enlaces, 65.536
+#     descriptores, el otro lado cerrado, un memfd grande, madvise, mremap,
+#     EDEADLK, getcpu, flock, statfs); MLB sin pendientes; y con KVM y 3 GB,
+#     LibJS (MJS: test-js-runtime, 8.449 pruebas) y Ladybird sin ventana (MWEB).
 #   - [etapa 10 e] en cada arranque con musl, MIMG (zlib, libpng, libjpeg-turbo y
 #     libwebp), MLIBS (las otras 12 bibliotecas de Ladybird) y MSKIA (Skia):
 #     las mismas líneas que en Linux (lo dibujado por Skia, igual si va por el
@@ -224,6 +228,9 @@ MRS=$( [ -x "$T/prog/MRUST" ] && cd "$T/prog" && ./MRUST uno dos 2> /dev/null | 
 # corre pero no cuenta), lo mismo en Hispa-64
 mkdir -p "$T/proglb"
 "$AQUI/programas/ladybird/hazlb.sh" "$T/proglb" > "$T/proglb.txt" 2>&1 || true
+# [etapa 10 g] LibJS y Ladybird (hazweb.sh: los programas de build/web-obj/sal, MJS y MWEB): su arranque, aparte, con KVM
+mkdir -p "$T/progweb"
+"$AQUI/programas/ladybird/hazweb.sh" "$T/progweb" > "$T/progweb.txt" 2>&1 || true
 MODSK=$MODS
 for f in "$T"/proglb/*; do [ -f "$f" ] && MODSK="$MODSK,$f"; done
 MLBL=$( [ -x "$T/proglb/MLB" ] && cd "$T/proglb" && ./MLB 2> /dev/null | grep '^  ' | grep -v ' ms)\?$' | grep -v ' grupos, ')
@@ -324,7 +331,7 @@ e4_bien() {   # SALIDA N
   local s=$1 n=$2 v; v=$(serie "$s")
   grep -q "^Programas: syscall y sysret (los números de Linux x86-64), swapgs, una pila del núcleo por hilo$" <<< "$v" \
     && [ "$(grep -o "^Unidad en memoria: [0-9]* archivos: " <<< "$v" | grep -o "[0-9]*")" -ge "$(ls "$T/prog" | wc -l)" ] \
-    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.6 x86_64$" <<< "$v" \
+    && grep -q "^  argc = 4: HOLA uno dos tres$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.7 x86_64$" <<< "$v" \
     && grep -q "^  la unidad en memoria: SALUDO.TXT dice «Hola, soy SALUDO.TXT" <<< "$v" && grep -q "^  writev: en tres trozos$" <<< "$v" \
     && grep -q "^HOLA: todo bien (28 pruebas)$" <<< "$v" && grep -q "^Programa «HOLA uno dos tres»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^HOLACAS: todo bien (con acentos de la página 437: «añadir», «canción»)$" <<< "$v" \
@@ -365,7 +372,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MHOLA: hola desde musl (printf); estático$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); dinámico: ld-musl en 0x7f0000000000, el programa en 0x555555554000$" <<< "$v" \
     && grep -q "^MHOLA: hola desde musl (printf); estático de posición libre, en 0x555555554000$" <<< "$v" \
-    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.6 x86_64 (etapa 10 f (Rust, el vDSO y los cerrojos))$" <<< "$v" \
+    && grep -q "^  libsaludo.so: hola (42)$" <<< "$v" && grep -q "^  uname: Hispa-64 0.11.7 x86_64 (etapa 10 g (Ladybird sin ventana))$" <<< "$v" \
     && grep -q "^  procesadores (sched_getaffinity): $n$" <<< "$v" \
     && [ "$(grep -c "^MHOLA: todo bien (" <<< "$v")" = 3 ] && [ "$(grep -c "^MHILOS: todo bien (" <<< "$v")" = 2 ] \
     && [ "$(grep -c "^  8 hilos que suman 2000 veces con un mutex: 16000 (exacto)" <<< "$v")" = 2 ] \
@@ -385,7 +392,7 @@ e7_bien() {   # SALIDA N [avx]
     && grep -q "^MUNIX: todo bien (85 pruebas)$" <<< "$v" && grep -q "^Programa «MUNIX»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  SCM_RIGHTS a otro proceso (una tubería, un eventfd y un memfd hechos después del fork), MSG_CTRUNC; SCM_CREDENTIALS; memfd compartido y sus sellos; 300 pasados$" <<< "$v" \
     && grep -q "^  /tmp: 100 KB escritos, leídos y borrados; pwritev, preadv, pwritev2, preadv2 y fchown; /proc/self/exe; close_range$" <<< "$v" && grep -q "^  /tmp: FAT16 «TMP», 31,9 MB en 8179 cúmulos de 4 KB, .*; de leer y escribir$" <<< "$v" \
-    && { [ -z "$MPX" ] || { grep -q "^MPOSIX: todo bien (96 pruebas)$" <<< "$v" && grep -q "^Programa «MPOSIX»: acaba con el código 0, como debe" <<< "$v" && mismas "$MPX" "$v"; }; } \
+    && { [ -z "$MPX" ] || { grep -q "^MPOSIX: todo bien (105 pruebas)$" <<< "$v" && grep -q "^Programa «MPOSIX»: acaba con el código 0, como debe" <<< "$v" && mismas "$MPX" "$v"; }; } \
     && grep -q "^MIPC: todo bien (9 pruebas)$" <<< "$v" && grep -q "^Programa «MIPC»: acaba con el código 0, como debe" <<< "$v" \
     && grep -q "^  dos mapas de 256 x 256 compartidos (memfd): 60 cuadros pintados por el otro proceso, la suma bien, en " <<< "$v" \
     && [ "$(grep -c "^MCXX: todo bien (35 pruebas)$" <<< "$v")" = 2 ] && grep -q "^Programa «MCXX»: acaba con el código 0, como debe" <<< "$v" \
@@ -434,7 +441,7 @@ pci_igual() {   # SALIDA opciones de QEMU
 }
 mb1 apagar "$T/mb1.txt" 128; c=$?
 S=$T/mb1.txt
-if [ $c = 85 ] && hay $S "^Hispa-64 0.11.6 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
+if [ $c = 85 ] && hay $S "^Hispa-64 0.11.7 ─ Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.$" \
    && hay $S "^Cargador: qemu, multiboot$" && serie $S | grep -qE "^Memoria: ([6-9][0-9]|1[0-2][0-9]),[0-9] MB libres en [0-9]* trozos \(de 127,4 MB que da el firmware\); [0-9,]* [KM]B usados por el núcleo$" \
    && hay $S "^  sin la identidad de abajo: 1 MB ya no está en las tablas$" && hay $S "los nombres de [0-9]* funciones (HISPA64.SIM)$" \
    && hay $S "^El núcleo, en la mitad alta: 0xFFFFFFFF80100000 (código, de solo leer)" && hay $S "^TSS con pilas propias (IST)" \
@@ -1159,7 +1166,7 @@ con_interprete "$T/e7.txt" "$TECLAS7" -drive file="$T/w7/fat.img",if=none,id=s0,
 v=$(serie "$T/e7.txt")
 HM1=$(TZ=Europe/Madrid date +%H:%M)
 HOY=$(LC_ALL=C TZ=Europe/Madrid date +%-d)
-if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.6, etapa 10 f " <<< "$v" \
+if [ $c = 85 ] && grep -q "^ORDENES 1.0, el intérprete de órdenes de Hispa-64 (en Hispa-64 0.11.7, etapa 10 g " <<< "$v" \
    && grep -q "^ *[0-9.]*  HOLA$" <<< "$v" && grep -q "^         <DIR>  sata0/$" <<< "$v" && grep -q "^  $(ls "$T/prog" | wc -l) archivos (" <<< "$v" \
    && [ "$(grep -c "^hola desde el teclado$" <<< "$v")" = 1 ] && grep -q "^            22  copia.txt$" <<< "$v" \
    && grep -q "^/sata0/prueba> " <<< "$v" \
@@ -1221,7 +1228,7 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
   # dos últimos, icudt77l.dat y libstdc++.so.6, se quedaban fuera)
   uefi "$T/uefi.txt" -m 192 -monitor none; c=$?
   S=$(serie "$T/uefi.txt")
-  if [ $c = 85 ] && grep -q "Hispa-64 0.11.6 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
+  if [ $c = 85 ] && grep -q "Hispa-64 0.11.7 ─ Copyright" <<< "$S" && grep -q "^Cargador: GRUB .*, multiboot2, con UEFI de 64 bits$" <<< "$S" \
      && grep -q "^Pantalla: [0-9]* x [0-9]* puntos, 32 bits por punto" <<< "$S" && grep -q "^  consola de [0-9]* x [0-9]* letras" <<< "$S" \
      && grep -q "^  la pantalla, en 0xFFFFC00000000000, con escritura combinada (PAT)$" <<< "$S" \
      && grep -q "^  módulo del cargador: HISPA64.SIM, .*: los nombres de [0-9]* funciones (HISPA64.SIM)$" <<< "$S" \
@@ -1779,6 +1786,25 @@ if [ -w /dev/kvm ]; then
      && serie "$T/kvm1.txt" | grep -qE "^  el reloj del núcleo: (el de KVM \(pvclock, con el TSC; sin dejarlo ir hacia atrás de un procesador a otro\)|el TSC \((invariante|de KVM, estable), sin ir hacia atrás)"; then
     ok "etapa 11, con KVM (-cpu host, q35, 4 procesadores): las etapas 4 y 7 enteras (los programas, musl, C++, la letra, MRED, MSONIDO; [etapa 10 e] Skia por su camino de $(serie "$T/kvm1.txt" | grep -o "el camino: [A-Z0-9]*" | head -1 | cut -d" " -f3) y TestAK entero: $(echo "$MAKT" | sed "s/^  //"), en $(serie "$T/kvm1.txt" | grep -o "^Programa «MAK todas»: acaba con el código 0, como debe (en [0-9]* ms" | grep -o "[0-9]* ms"); [etapa 10 f] las pruebas de LibUnicode, LibURL, LibIPC, LibCrypto y LibGfx de Ladybird: $(serie "$T/kvm1.txt" | grep -o "^  [0-9]* grupos, [0-9]* casos: .*" | tail -1 | sed "s/^  //") (MLB, lo mismo que en Linux); [etapa 10 f] el reloj del núcleo: $(serie "$T/kvm1.txt" | grep "^  el reloj del núcleo: " | cut -d: -f2- | cut -d'(' -f1 | sed 's/^ //;s/ $//'); clock_gettime, $(serie "$T/kvm1.txt" | grep -o 'una lectura, [0-9]* ns por musl' | head -1 | grep -o '[0-9]* ns')), todo en orden"
   else ko "etapa 11, con KVM (-cpu host) no sale (código $c): $(e4_dice "$T/kvm1.txt") $(serie "$T/kvm1.txt" | grep -E 'Doble|parado|  MAL' | head -5 | paste -sd '|')"; fi
+  # [etapa 10 g] LibJS y Ladybird sin ventana (programas/ladybird/hazweb.sh: 454 MB de
+  # programas en la unidad, de ahí los 3 GB): MJS (las 8.452 pruebas de LibJS, con
+  # test-js-runtime; lo mismo que en Linux: 8.449 bien y 3 fallos esperados) y MWEB
+  # (el Hub de Ladybird con --headless=text sobre una página de HTML, CSS y
+  # JavaScript: sus 7 líneas, como en Linux); sin red (https, a mano: el LEEME)
+  if [ -x "$T/progweb/MWEB" ]; then
+    MODS0=$MODS; MODS="$T/HISPA64.SIM"
+    for f in MHOLA SALUDO.TXT; do MODS="$MODS,$T/prog/$f"; done
+    for f in MJS test-js-runtime MWEB Hub WebContent RequestServer ImageDecoder Compositor SystemProbe; do MODS="$MODS,$T/progweb/$f"; done
+    timeout 900 qemu-system-x86_64 -kernel "$T/HISPA64.BIN" -initrd "$MODS" -append "apagar" -display none -serial file:"$T/kvmweb.txt" \
+      -monitor none $DBG -no-reboot -nic none -m 3072 -enable-kvm -cpu host -machine q35 -smp 4 > /dev/null 2>&1; c=$?
+    MODS=$MODS0
+    v=$(serie "$T/kvmweb.txt")
+    if [ $c = 85 ] && grep -q "^MJS: todo bien (8449 pruebas)$" <<< "$v" && grep -q "^  Tests:       3 expected failed, 8449 passed, 8452 total$" <<< "$v" \
+       && grep -q "^Programa «MJS»: acaba con el código 0, como debe" <<< "$v" && grep -q "^MWEB: todo bien (7 líneas)$" <<< "$v" \
+       && grep -q "^Programa «MWEB»: acaba con el código 0, como debe" <<< "$v" && grep -q "^  la memoria: la de antes;" <<< "$v"; then
+      ok "[etapa 10 g] con KVM y 3 GB: LibJS (MJS: $(grep -o "^  Tests: .*" <<< "$v" | sed "s/^  Tests: *//"), en $(grep -o "^  test-js-runtime: acaba con el código 0, en [0-9]* ms" <<< "$v" | grep -o "[0-9]* ms")) y Ladybird sin ventana (MWEB: el Hub con WebContent, RequestServer, ImageDecoder y Compositor; el texto de la página de prueba, 7 de 7 líneas, en $(grep -o "^  Hub --headless=text file:///tmp/web/paginas/prueba.html: acaba con el código 0, en [0-9]* ms" <<< "$v" | grep -o "[0-9]* ms")); después, la memoria, la de antes"
+    else ko "[etapa 10 g] LibJS y Ladybird sin ventana no salen (código $c): $(grep -E "^MJS|^MWEB|^  test-js-runtime|^  falta|^  errores|  MAL|parado" <<< "$v" | head -8 | paste -sd '|')"; fi
+  fi
   # [etapa 11 b] con KVM, el tiempo es el de verdad: aquí cuentan el tic (90 o más de los 100, el
   # temporizador cada 10 ms contra el TSC) y el planificador (etapa 3 entera, el interactivo incluido)
   if [ $c = 85 ] && tics_bien "$T/kvm1.txt" "el HPET" 90 && e3_bien "$T/kvm1.txt" 4; then

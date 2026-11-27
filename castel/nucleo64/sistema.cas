@@ -75,6 +75,7 @@ módulo Sistema
     constante TROZO = 16384                     ; lo que se copia de una vez (read, write, getdents64)
 
     público variable llamadas: nat64            ; cuántas se han atendido
+    público variable traza_rutas: bool          ; [etapa 10 g] «traza=rutas»
     variable época: nat64                       ; los segundos de Unix al arrancar
     variable época_ns: nat64                    ; ahora_ns() entonces
 
@@ -222,6 +223,30 @@ módulo Sistema
     fin
 
     ; una ruta del programa, a un bloque del montón (lo suelta quien llama); nulo y el error
+    ; [etapa 10 g] (traza=rutas) la llamada n con ruta que ha fallado: el
+    ; programa, la llamada, la ruta y el error, por el puerto serie
+    función traza_ruta(p: puntero a Proceso, n: nat64, a1: nat64, a2: nat64, r: ent64)
+        variable t: puntero a byte
+        variable err: ent64
+        variable v: nat64
+        v := 0
+        si n = 2 o n = 4 o n = 6 o n = 21 o n = 89 o n = 80 o n = 59 o n = 83 o n = 84 o n = 87 o n = 82 entonces v := a1 fin
+        si n = 258 o n = 263 entonces v := a2 fin
+        si n = 257 o n = 262 o n = 269 o n = 267 o n = 332 o n = 439 entonces v := a2 fin
+        si n = 9 o n = 25 entonces
+            escribir("[traza] ", dirección(p.nombre[0]), " (", p.id, "): llamada ", n, " (", a1, ", ", a2, " octetos): ", r, "\n")
+            devolver
+        fin
+        si v = 0 entonces
+            escribir("[traza] ", dirección(p.nombre[0]), " (", p.id, "): llamada ", n, ": ", r, "\n")
+            devolver
+        fin
+        t := ruta_de(p, v, err)
+        si t = nulo entonces devolver fin
+        escribir("[traza] ", dirección(p.nombre[0]), " (", p.id, "): llamada ", n, " «", t, "»: ", r, "\n")
+        libera(t)
+    fin
+
     función ruta_de(p: puntero a Proceso, v: nat64, ref err: ent64): puntero a byte
         variable t: puntero a byte
         variable r: ent64
@@ -449,6 +474,22 @@ módulo Sistema
             si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
             si marcas_ yb O_NONBLOCK <> 0 entonces p.fd_nobloq[nat32(fd)] := 1 sino p.fd_nobloq[nat32(fd)] := 0 fin
             llena_fd(p, fd, dc, dob)
+            devolver ent64(fd)
+        fin
+        ; [etapa 10 g] /proc/self/status (y /proc/PID/status con el suyo): lo
+        ; que lee Ladybird (TracerPid, RssAnon, RssShmem), un texto hecho al abrirlo
+        si es_status_propio(p, t) entonces
+            libera(t)
+            fd := fd_libre(p, 0)
+            si fd < 0 entonces devolver EMFILE fin
+            dob := texto_status(p)
+            si dob = 0 entonces
+                devuelve_fd(p, fd)
+                devolver ENOMEM
+            fin
+            si marcas_ yb O_CLOEXEC <> 0 entonces p.fd_cloexec[nat32(fd)] := 1 sino p.fd_cloexec[nat32(fd)] := 0 fin
+            p.fd_nobloq[nat32(fd)] := 0
+            llena_fd(p, fd, F_TEXTO, dob)
             devolver ent64(fd)
         fin
         ; [etapa 9] /dev/urandom, /dev/random y los textos de la red
@@ -924,6 +965,97 @@ módulo Sistema
         devolver t[i + j] = 0
     fin
 
+    ; [etapa 10 g] ¿es t «/proc/self/status» o «/proc/PID/status» con el pid de p?
+    función es_status_propio(p: puntero a Proceso, t: puntero a byte): bool
+        variable z: puntero a byte
+        variable i, j: nat32
+        variable n: nat64
+        z := "/proc/"
+        i := 0
+        mientras z[i] <> 0 hacer
+            si t[i] <> z[i] entonces devolver falso fin
+            i := i + 1
+        fin
+        si t[i] = 's' y t[i + 1] = 'e' y t[i + 2] = 'l' y t[i + 3] = 'f' entonces
+            i := i + 4
+        sino
+            n := 0
+            j := i
+            mientras t[i] >= '0' y t[i] <= '9' y i < j + 10 hacer
+                n := n * 10 + nat64(t[i] - '0')
+                i := i + 1
+            fin
+            si i = j o n <> p.id entonces devolver falso fin
+        fin
+        devolver mismo(dirección(t[i]), "/status")
+    fin
+
+    función pon_txt(d: nat64, ref k: nat64, t: puntero a byte)
+        variable i: nat32
+        i := 0
+        mientras t[i] <> 0 hacer
+            pon_m8(d + k, nat32(t[i]))
+            k := k + 1
+            i := i + 1
+        fin
+    fin
+
+    función pon_num(d: nat64, ref k: nat64, v: nat64)
+        variable c: arreglo [24] de byte
+        variable n: nat32
+        n := 0
+        c[0] := '0'
+        si v = 0 entonces n := 1 fin
+        mientras v > 0 hacer
+            c[n] := byte(nat32(v mod 10) + '0')
+            v := v div 10
+            n := n + 1
+        fin
+        mientras n > 0 hacer
+            n := n - 1
+            pon_m8(d + k, nat32(c[n]))
+            k := k + 1
+        fin
+    fin
+
+    ; el texto de /proc/self/status, como el de Linux (lo que se sabe): el nombre,
+    ; el estado, los pid, TracerPid 0, los hilos y la memoria (RssAnon: las
+    ; páginas puestas de su espacio)
+    función texto_status(p: puntero a Proceso): nat64
+        variable d, k, pág: nat64
+        variable i: nat32
+        variable e: puntero a Espacio
+        d := nat64(reserva(1024))
+        si d = 0 entonces devolver 0 fin
+        k := 0
+        pon_txt(d, k, "Name:\t")
+        i := 0
+        mientras p.nombre[i] <> 0 y i < 15 hacer
+            si p.nombre[i] >= 'A' y p.nombre[i] <= 'Z' entonces pon_m8(d + k, nat32(p.nombre[i]) + 32) sino pon_m8(d + k, nat32(p.nombre[i])) fin
+            k := k + 1
+            i := i + 1
+        fin
+        pon_txt(d, k, "\nUmask:\t0022\nState:\tR (running)\nTgid:\t")
+        pon_num(d, k, p.id)
+        pon_txt(d, k, "\nNgid:\t0\nPid:\t")
+        pon_num(d, k, p.id)
+        pon_txt(d, k, "\nPPid:\t")
+        pon_num(d, k, p.padre)
+        pon_txt(d, k, "\nTracerPid:\t0\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\nFDSize:\t")
+        pon_num(d, k, p.fd_cap)
+        pág := 0
+        e := puntero(p.espacio)
+        si e <> nulo entonces pág := e.páginas fin
+        pon_txt(d, k, "\nVmRSS:\t")
+        pon_num(d, k, pág * 4)
+        pon_txt(d, k, " kB\nRssAnon:\t")
+        pon_num(d, k, pág * 4)
+        pon_txt(d, k, " kB\nRssFile:\t0 kB\nRssShmem:\t0 kB\nVmSwap:\t0 kB\nThreads:\t")
+        pon_num(d, k, p.n_hilos)
+        pon_txt(d, k, "\n")
+        devolver nuevo_texto(d, k)
+    fin
+
     ; [etapa 10 b] readlink y readlinkat: en Hispa-64 no hay enlaces
     ; simbólicos, salvo /etc/localtime, que «apunta» a la zona en
     ; /usr/share/zoneinfo (ICU y otros sacan de ahí el nombre de la zona, con
@@ -1116,7 +1248,7 @@ módulo Sistema
             fin
         fin
         l := arriba(largo)
-        si l < largo o l > nat64(1) << 40 entonces devolver ENOMEM fin
+        si l < largo o l > TOPE entonces devolver ENOMEM fin          ; ([etapa 10 g] hasta todo el espacio, como Linux: LibGC reserva 4 TB sin nada puesto; era 1 TB)
         cierra_mem(p)
         a := 0
         si marcas_ yb 0x10 <> 0 entonces
@@ -1495,8 +1627,8 @@ módulo Sistema
         fin
         pon_texto(dirección(t[0]), 0, "Hispa-64")
         pon_texto(dirección(t[0]), 65, "hispa64")
-        pon_texto(dirección(t[0]), 130, "0.11.6")
-        pon_texto(dirección(t[0]), 195, "etapa 10 f (Rust, el vDSO y los cerrojos)")
+        pon_texto(dirección(t[0]), 130, "0.11.7")
+        pon_texto(dirección(t[0]), 195, "etapa 10 g (Ladybird sin ventana)")
         pon_texto(dirección(t[0]), 260, "x86_64")
         pon_texto(dirección(t[0]), 325, "(none)")
         si no copia_a(p, v, nat64(dirección(t[0])), 390) entonces devolver EFAULT fin
@@ -2087,6 +2219,49 @@ módulo Sistema
         devolver 8
     fin
 
+    ; [etapa 10 g] statfs y fstatfs (Vfs64.llena_statfs: 120 octetos); de lo
+    ; que no es un archivo (sockets, tuberías, la consola...), como Linux da de
+    ; sus seudosistemas: el de la memoria
+    función statfs_(p: puntero a Proceso, ruta: nat64, v: nat64): ent64
+        variable t, base: puntero a byte
+        variable err: ent64
+        variable st: arreglo [15] de nat64
+        t := ruta_de(p, ruta, err)
+        si t = nulo entonces devolver err fin
+        si t[0] = 0 entonces
+            libera(t)
+            devolver ENOENT
+        fin
+        base := nulo
+        si t[0] <> '/' entonces base := dirección(p.dir_actual[0]) fin
+        err := vfs_statfs(base, t, nat64(dirección(st[0])))
+        libera(t)
+        si err < 0 entonces devolver err fin
+        si no copia_a(p, v, nat64(dirección(st[0])), 120) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
+    función fstatfs_(p: puntero a Proceso, fd: nat64, v: nat64): ent64
+        variable st: arreglo [15] de nat64
+        variable i: nat32
+        si no fd_bien(p, fd) entonces devolver EBADF fin
+        si p.fd_clase[nat32(fd)] = F_ARCHIVO entonces
+            vfs_fstatfs(abierto(p, fd), nat64(dirección(st[0])))
+        sino
+            i := 0
+            mientras i < 15 hacer
+                st[i] := 0
+                i := i + 1
+            fin
+            st[0] := 0x01021994                     ; (TMPFS_MAGIC: lo que no es de un disco)
+            st[1] := 4096
+            st[8] := 255
+            st[9] := 4096
+        fin
+        si no copia_a(p, v, nat64(dirección(st[0])), 120) entonces devolver EFAULT fin
+        devolver 0
+    fin
+
     ; [etapa 10 g] getcpu: el procesador en el que va (y el nodo: 0)
     función getcpu_(p: puntero a Proceso, vc: nat64, vn: nat64): ent64
         variable c, n: nat32
@@ -2392,6 +2567,14 @@ módulo Sistema
             caso 204: r := afinidad_(p, a2, a3)
             caso 99: r := sysinfo_(p, a1)
             caso 309: r := getcpu_(p, a1, a2)                  ; [etapa 10 g] getcpu (y __vdso_getcpu, sin llamar)
+            caso 137: r := statfs_(p, a1, a2)                  ; [etapa 10 g] statfs y fstatfs
+            caso 138: r := fstatfs_(p, a1, a2)
+            ; [etapa 10 g] chmod, fchmod y fchmodat: en FAT no hay permisos (como
+            ; vfat montado sin «quiet», que tampoco los guarda): lo que está, 0
+            caso 90: r := con_ruta(p, -100, a1, 3)
+            caso 91:
+                si fd_bien(p, a1) entonces r := 0 sino r := EBADF fin
+            caso 268: r := con_ruta(p, ent64(a1), a2, 3)
             caso 95: r := 18                                 ; umask: 022
             caso 98: r := uso_(p, a1, a2)
             caso 213:
@@ -2403,6 +2586,11 @@ módulo Sistema
             caso 324, 334, 435, 439: r := ENOSYS             ; membarrier, rseq, clone3, faccessat2 (musl se las arregla sin ellas)
             caso 63: r := nombre_(p, a1)
             caso 72: r := fcntl_(p, a1, a2, a3)
+            caso 73:                                          ; [etapa 10 g] flock
+                si no fd_bien(p, a1) entonces r := EBADF
+                sino si p.fd_clase[nat32(a1)] <> F_ARCHIVO entonces r := 0     ; (de lo demás: nada que estorbe)
+                sino r := flock_(p, abierto(p, a1), a2)
+                fin
             caso 74, 75: r := fsync_(p, a1)
             caso 76: r := trunca_ruta(p, a1, ent64(a2))
             caso 77: r := trunca_(p, a1, ent64(a2))
@@ -2446,6 +2634,8 @@ módulo Sistema
             si no: r := desconocida(p, n)
         fin
         si usa entonces deja_fd(p, a1, gen) fin
+        ; [etapa 10 g] «traza=rutas»: lo que un programa busca y no está (para ver qué le falta)
+        si traza_rutas y r < 0 y r <> -11 entonces traza_ruta(p, n, a1, a2, r) fin
         ; [etapa 10 f] cuántas de cada una y cuánto llevan (en cuentas del TSC)
         si n < 512 entonces
             suma_atómica(dirección(llam_n[nat32(n)]), 1)
