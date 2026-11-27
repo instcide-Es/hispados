@@ -1,0 +1,223 @@
+; =============================================================================
+;  registro64.cas - Hispa-64, etapa 10 e (docs/64/HISPA-64.md, sección 22): el
+;  registro del arranque, ARRANQUE.TXT, como el de Hispa-Pentium
+;  (nucleo32/registro.cas): todo lo que el núcleo escribe (la consola y el
+;  puerto serie; también lo de los programas) se apunta además aquí, y se
+;  guarda en un archivo de la memoria USB (o del disco) de la que ha
+;  arrancado, para leerlo en otro equipo: en un equipo de verdad no hay
+;  puerto serie y la pantalla pasa deprisa.
+;
+;  Dónde: el disco que tiene la partición de la que ha arrancado (un FAT con
+;  /boot/HISPA64.BIN); en su partición de pruebas (la que tiene HISPA64.PRB:
+;  la que Windows enseña con su letra) o, si no la hay, en esa misma, en la
+;  raíz: ARRANQUE.TXT, en UTF-8 y con los finales de línea de Windows. Solo
+;  esa partición se deja escribir, el rato de guardarlo (lo demás sigue de
+;  solo leer). Cuándo: con los discos ya vistos (si se queda después, ya hay
+;  algo) y al acabar las pruebas (lo entero). Si hay puerto serie (QEMU,
+;  VirtualBox con él puesto), no hace falta y no se guarda, salvo con
+;  «registro» en la línea de órdenes; con «sinregistro», nunca.
+;  Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.
+; =============================================================================
+módulo Registro64
+
+    importar Es64, Cerrojo, Monton64, Pant64, Nodos64, Discos64, Vfs64, Cifras64
+
+    ; hasta que esté el montón, en «temprano» (32 KB); después, en 1 MB del
+    ; montón (un arranque entero con todas las pruebas: unos 120 KB)
+    constante CABE_TEMPRANO = 32768
+    público constante CABE_REG = 1048576
+    variable temprano: arreglo [CABE_TEMPRANO] de byte
+    variable reg: puntero a byte
+    variable reg_cabe: nat64
+    variable reg_largo: nat64
+    público variable en_pantalla: bool         ; ¿se pasa también a la consola de la pantalla?
+    público variable reg_guardado: puntero a byte   ; dónde se guardó la última vez (o nulo)
+
+    ; de la página 437 de casa (0x80 a 0xFF) a Unicode
+    variable c437: arreglo [128] de nat16 = (
+        0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7, 0x00EA, 0x00EB, 0x00E8, 0x00EF,
+        0x00EE, 0x00EC, 0x00C4, 0x00C5, 0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+        0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192, 0x00E1, 0x00ED, 0x00F3, 0x00FA,
+        0x00F1, 0x00D1, 0x00AA, 0x00BA, 0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+        0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x00C0, 0x00C1, 0x00C2, 0x00C3, 0x2563, 0x2551, 0x2557,
+        0x255D, 0x00C8, 0x00CA, 0x2510, 0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x00CB, 0x00CC,
+        0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x00CD, 0x00CE, 0x00CF, 0x00D2, 0x00D3,
+        0x00D4, 0x00D5, 0x00D9, 0x00DA, 0x00DB, 0x2518, 0x250C, 0x2588, 0x2584, 0x00E3, 0x00F5, 0x2580,
+        0x03B1, 0x00DF, 0x0152, 0x03C0, 0x03A3, 0x0153, 0x00B5, 0x00A9, 0x00AE, 0x0398, 0x03A9, 0x03B4,
+        0x221E, 0x03C6, 0x03B5, 0x2229, 0x2261, 0x00B1, 0x2265, 0x2264, 0x20AC, 0x2026, 0x00F7, 0x2248,
+        0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0)
+
+    ; la letra c, apuntada (con «\r\n» en vez de «\n»; los «\r», fuera) y a la
+    ; pantalla si la hay: la que llama castel_pon_car (C_consola) con cada letra
+    público función apunta_letra(c: nat64)
+        variable i: nat64
+        si reg = nulo entonces
+            reg := dirección(temprano[0])
+            reg_cabe := CABE_TEMPRANO
+        fin
+        si c <> 13 entonces
+            si c = 10 entonces
+                i := suma_atómica(dirección(reg_largo), 2)
+                si i + 2 <= reg_cabe entonces
+                    reg[nat32(i)] := 13
+                    reg[nat32(i + 1)] := 10
+                fin
+            sino
+                i := suma_atómica(dirección(reg_largo), 1)
+                si i < reg_cabe entonces reg[nat32(i)] := byte(c) fin
+            fin
+        fin
+        si en_pantalla entonces consola_letra(c) fin
+    fin
+
+    ; con el montón ya: el registro pasa a 1 MB (con lo de antes). Antes de
+    ; encender los demás procesadores (nadie escribe a la vez)
+    público función agranda_registro()
+        variable g: puntero a byte
+        variable i: nat64
+        g := reserva(CABE_REG)
+        si g = nulo entonces devolver fin
+        si reg = nulo entonces
+            reg := dirección(temprano[0])
+            reg_cabe := CABE_TEMPRANO
+        fin
+        i := 0
+        mientras i < reg_largo y i < reg_cabe hacer
+            g[nat32(i)] := reg[nat32(i)]
+            i := i + 1
+        fin
+        reg := g
+        reg_cabe := CABE_REG
+    fin
+
+    ; ¿hay un puerto serie en 0x3F8? (su registro de prueba, el 7: se lee lo que se escribe)
+    público función hay_serie(): bool
+        variable a, b: nat32
+        sale8(0x3FF, 0x5A)
+        a := entra8(0x3FF)
+        sale8(0x3FF, 0xA5)
+        b := entra8(0x3FF)
+        devolver a = 0x5A y b = 0xA5
+    fin
+
+    función copia_t(d: puntero a byte, s: puntero a byte, n: nat32)
+        variable i: nat32
+        i := 0
+        mientras s[i] <> 0 y i + 1 < n hacer
+            d[i] := s[i]
+            i := i + 1
+        fin
+        d[i] := 0
+    fin
+
+    función añade_t(d: puntero a byte, s: puntero a byte, n: nat32)
+        variable i: nat32
+        i := 0
+        mientras d[i] <> 0 hacer i := i + 1 fin
+        copia_t(dirección(d[i]), s, n - i)
+    fin
+
+    ; ¿está ese archivo (RUTA del montaje m + resto)?
+    función está(m: nat32, resto: puntero a byte): bool
+        variable t: arreglo [96] de byte
+        variable st: arreglo [18] de nat64
+        copia_t(dirección(t[0]), dirección(montajes[m].ruta[0]), 96)
+        añade_t(dirección(t[0]), resto, 96)
+        devolver vfs_stat(nulo, dirección(t[0]), nat64(dirección(st[0]))) = 0
+    fin
+
+    ; el montaje en el que guardarlo (o 0xFFFFFFFF): ver arriba
+    función destino(): nat32
+        variable m, k, arranque: nat32
+        arranque := 0xFFFFFFFF
+        m := 0
+        mientras m < n_montajes y arranque = 0xFFFFFFFF hacer
+            si montajes[m].en_uso <> 0 y montajes[m].clase = FS_FAT y está(m, "/boot/HISPA64.BIN") entonces arranque := m fin
+            m := m + 1
+        fin
+        si arranque = 0xFFFFFFFF entonces devolver arranque fin
+        k := 0
+        mientras k < n_montajes hacer
+            si montajes[k].en_uso <> 0 y montajes[k].clase = FS_FAT y padre_dk(montajes[k].disco) = padre_dk(montajes[arranque].disco) y está(k, "/HISPA64.PRB") entonces devolver k fin
+            k := k + 1
+        fin
+        devolver arranque
+    fin
+
+    ; guárdalo (con «por qué», que va en la última línea); cierto si se ha guardado
+    público función guarda_registro(forzado: bool, por_qué: puntero a byte): bool
+        variable m, d: nat32
+        variable ruta: arreglo [96] de byte
+        variable a: puntero a Abierto
+        variable err, r: ent64
+        variable u: puntero a byte
+        variable n, i, j, l, x: nat64
+        variable antes_sl: nat32
+        variable antes_esc: bool
+        si no forzado y hay_serie() entonces devolver falso fin
+        m := destino()
+        si m = 0xFFFFFFFF entonces devolver falso fin
+        si reg = nulo entonces devolver falso fin
+        l := reg_largo
+        si l > reg_cabe entonces l := reg_cabe fin
+        ; a UTF-8 (cada letra, como mucho 3 octetos), con su marca delante y la línea del final
+        u := reserva(l * 3 + 256)
+        si u = nulo entonces devolver falso fin
+        u[0] := 0xEF
+        u[1] := 0xBB
+        u[2] := 0xBF
+        n := 3
+        i := 0
+        mientras i < l hacer
+            x := nat64(reg[nat32(i)])
+            si x >= 0x80 entonces x := nat64(c437[nat32(x - 0x80)]) fin
+            si x < 0x80 entonces
+                u[n] := byte(x)
+                n := n + 1
+            sino si x < 0x800 entonces
+                u[n] := byte(0xC0 ob (x >> 6))
+                u[n + 1] := byte(0x80 ob (x yb 0x3F))
+                n := n + 2
+            sino
+                u[n] := byte(0xE0 ob (x >> 12))
+                u[n + 1] := byte(0x80 ob ((x >> 6) yb 0x3F))
+                u[n + 2] := byte(0x80 ob (x yb 0x3F))
+                n := n + 3
+            fin
+            i := i + 1
+        fin
+        j := 0
+        mientras por_qué[nat32(j)] <> 0 y j < 200 hacer
+            u[n] := por_qué[nat32(j)]
+            n := n + 1
+            j := j + 1
+        fin
+        u[n] := 13
+        u[n + 1] := 10
+        n := n + 2
+        ; solo esa partición, de escribir, el rato de guardarlo
+        d := montajes[m].disco
+        antes_sl := montajes[m].solo_leer
+        antes_esc := escribible(d)
+        deja_escribir(d, cierto)
+        montajes[m].solo_leer := 0
+        copia_t(dirección(ruta[0]), dirección(montajes[m].ruta[0]), 96)
+        añade_t(dirección(ruta[0]), "/ARRANQUE.TXT", 96)
+        r := -1
+        a := vfs_abre(nulo, dirección(ruta[0]), O_WRONLY ob O_CREAT ob O_TRUNC, err)
+        si a <> nulo entonces
+            r := vfs_escribe(a, 0, nat64(u), n)
+            si vfs_fsync(a) < 0 entonces r := -1 fin
+            vfs_cierra(a)
+        fin
+        montajes[m].solo_leer := antes_sl
+        deja_escribir(d, antes_esc)
+        libera(u)
+        si r = ent64(n) entonces
+            reg_guardado := dirección(montajes[m].ruta[0])
+            devolver cierto
+        fin
+        devolver falso
+    fin
+
+fin Registro64.

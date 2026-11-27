@@ -75,6 +75,7 @@ módulo Hispa64
     importar PrMusl64
     importar Hda64, Disp64
     importar Acpica64
+    importar Registro64
     importar Sondeo64, Chacha64, Hora64, Objet64, Redcom64, Prt64, Intel64, Rtl64, Virtio64, Usbred64, Ip64, Tcp64, Red64, PrRed64
 
     constante VERSIÓN = "0.11.5"
@@ -297,9 +298,11 @@ módulo Hispa64
         fin
     fin
 
+    ; [etapa 10 e] lo que se escribe va a Registro64.apunta_letra (el registro
+    ; del arranque, ARRANQUE.TXT), que lo pasa a la pantalla si en_pantalla
     función pon_consola()
         variable f: nat64
-        f := nat64(dirección(consola_letra))
+        f := nat64(dirección(apunta_letra))
         ensamblador
             mov rax, {f}
             mov [C_consola], rax
@@ -359,8 +362,9 @@ módulo Hispa64
         cambia()
         si hay_fb entonces
             mueve(fb_virt)
-            si hay() entonces pon_consola() fin
+            en_pantalla := hay()
         fin
+        pon_consola()
         prepara_montón()
         ; los nombres de las funciones: el módulo que tenga la forma de HISPA64.SIM
         i := 0
@@ -532,6 +536,17 @@ módulo Hispa64
         prepara_vfs()
         escribir("Archivos (el VFS): ", n_montajes, " montajes\n")
         escribe_montajes()
+        ; [etapa 10 e] el registro, ya (si se queda después, queda esto)
+        registro("(sigue: guardado con los discos ya vistos)")
+    fin
+
+    ; [etapa 10 e] guarda el registro del arranque (ARRANQUE.TXT: Registro64)
+    ; y dice dónde; sin puerto serie, o con «registro»; con «sinregistro», no
+    función registro(última: puntero a byte)
+        si tiene("sinregistro") entonces devolver fin
+        si guarda_registro(tiene("registro"), última) entonces
+            escribir("Registro: lo de arriba, en ARRANQUE.TXT de ", reg_guardado, "\n")
+        fin
     fin
 
     ; el valor de «nombre=valor» de la línea de órdenes, en t (vacío si no está)
@@ -1391,8 +1406,9 @@ módulo Hispa64
         ; tablas del arranque); si no, cuando estén las de verdad
         temprana := hay_fb y fb_dir + nat64(fb_paso) * fb_alto <= nat64(64) << 30
         si temprana entonces
-            si abre(virt(fb_dir), fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces pon_consola() fin
+            si abre(virt(fb_dir), fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces en_pantalla := cierto fin
         fin
+        pon_consola()                   ; ([etapa 10 e] con pantalla o sin ella: el registro)
         pon_color(14, 0)
         escribir("Hispa-64 ", VERSIÓN, " \xC4 Copyright (C) 2026 Carlos Sanz y contribuidores. GPL-2.0 o posterior.\n")
         pon_color(7, 0)
@@ -1432,7 +1448,7 @@ módulo Hispa64
         prepara_cpu()
         unidad()
         si hay_fb y no temprana entonces
-            si abre(fb_virt, fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces pon_consola() fin
+            si abre(fb_virt, fb_ancho, fb_alto, fb_paso, fb_bpp, fb_r, fb_v, fb_a) entonces en_pantalla := cierto fin
         fin
         ; [etapa 8] la pantalla para los programas (/dev/fb0) y los demás dispositivos
         si hay_fb entonces prepara_disp(fb_dir) sino prepara_disp(0) fin
@@ -1475,6 +1491,7 @@ módulo Hispa64
         prueba_páginas()
         prueba_montón(2000, 64)
         si tiene("prueba=monton") entonces prueba_montón(100000, 1000) fin
+        agranda_registro()              ; [etapa 10 e] el registro del arranque, a 1 MB del montón (después de su prueba)
         ; [etapa 3] los demás procesadores y el planificador
         etapa3()
         ; [etapa 11 b] ACPICA, antes de las tarjetas (las rutas de las INTx de los _PRT)
@@ -1505,6 +1522,7 @@ módulo Hispa64
             pon_color(12, 0)
             escribir("Hispa-64 etapa 11: con fallos (los «MAL» de arriba).\n")
             pon_color(7, 0)
+            registro("(el arranque, entero)")         ; [etapa 10 e]
             si apagar_al_fallar entonces
                 al_apagar()
                 devolver 43
@@ -1514,6 +1532,7 @@ módulo Hispa64
             escribir("Hispa-64 etapa 11: todo en orden.\n")
             pon_color(7, 0)
         fin
+        si fallos + fallos_proc + fallos_disco + fallos6 + fallos7 + fallos9 + fallos_acpica = 0 entonces registro("(el arranque, entero)") fin   ; [etapa 10 e]
         al_apagar()
         ; [etapa 6] con «ordenes» (las pruebas): el intérprete, y al salir, se apaga
         si apagar_al_fallar y tiene("ordenes") entonces

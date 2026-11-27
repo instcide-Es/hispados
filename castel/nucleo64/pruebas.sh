@@ -130,6 +130,13 @@
 #     redirecciones y HTTPS, con su sha256) y la orden CURL (-L, --cacert,
 #     --resolve, sin la autoridad de prueba, -f con un 404, DNS). MHILOS: 8
 #     hilos que abren y cierran descriptores a la vez (ninguno repetido).
+#   - [etapa 10 e] en cada arranque con musl, MIMG (zlib, libpng, libjpeg-turbo y
+#     libwebp), MLIBS (las otras 12 bibliotecas de Ladybird) y MSKIA (Skia):
+#     las mismas líneas que en Linux (lo dibujado por Skia, igual si va por el
+#     mismo camino, y su huella, a 2 como mucho, por cualquiera); MAK, 12 grupos
+#     de TestAK (las pruebas de AK de Ladybird), y los 85 en el de KVM
+#     («ak=todas»); MUNIX con preadv, pwritev, fchown, /proc/self/exe y
+#     close_range.
 # Uso: nucleo64/pruebas.sh [CARPETA_DE_TRABAJO]   (unos 8 minutos)
 AQUI=$(cd "$(dirname "$0")" && pwd)
 C=$(dirname "$AQUI")
@@ -1245,6 +1252,29 @@ if [ -f $OVMF_C ] && command -v grub-mkimage > /dev/null && command -v mcopy > /
      && lo_dejado "$T/uefi5/hispa64.img" "$i2" $(( f2 - i2 + 1 )); then
     ok "etapa 5 por UEFI desde SATA (el disco de la imagen): la partición EFI a la vista (BOOTX64.EFI, HISPA64.BIN), HOLACAS arrancado desde ella, la de pruebas escrita; fsck.fat, bien en las dos"
   else ko "etapa 5 por UEFI desde SATA no sale (código $c): $(e5_dice $S) $(fsck_dice)"; fi
+  # [etapa 10 e] el registro del arranque, ARRANQUE.TXT (Registro64): con
+  # «registro» (aquí hay puerto serie; en un equipo sin él, sin pedirlo), en la
+  # partición de pruebas del disco del que arranca; lo mismo que el puerto
+  # serie, en UTF-8 y con CRLF; y el FAT, bien. (La imagen de la etapa 5
+  # arranca sin «registro»: allí no debe estar.)
+  "$AQUI/imagen.sh" "$T/ureg" prueba "apagar registro sinmusl" > "$T/imgreg.txt" 2>&1 \
+    || ko "imagen.sh (el registro) no hace la imagen: $(tail -2 "$T/imgreg.txt" | paste -sd ' ')"
+  rm -f "$T/ureg.txt"; cp $OVMF_V "$T/varsr.fd"
+  timeout 300 qemu-system-x86_64 -machine q35 -drive if=pflash,format=raw,readonly=on,file=$OVMF_C -drive if=pflash,format=raw,file="$T/varsr.fd" \
+    -drive file="$T/ureg/hispa64.img",if=none,id=b0,format=raw -device ide-hd,drive=b0,bus=ide.0 -m 512 -smp 4 \
+    -display none -serial file:"$T/ureg.txt" -monitor none $DBG -no-reboot -nic none > /dev/null 2>&1; c=$?
+  read -r r2 g2 <<< "$(sgdisk -i 2 "$T/ureg/hispa64.img" | awk '/First sector/ {a=$3} /Last sector/ {b=$3} END {print a, b}')"
+  mtype -i "$T/ureg/hispa64.img@@$((r2 * 512))" ::/ARRANQUE.TXT > "$T/ARRANQUE.TXT" 2> /dev/null
+  A=$(sed '1s/^\xEF\xBB\xBF//' "$T/ARRANQUE.TXT" | tr -d '\r')
+  if [ $c = 85 ] && hay "$T/ureg.txt" "^Registro: lo de arriba, en ARRANQUE.TXT de /sata0p2$" \
+     && [ "$(head -c 3 "$T/ARRANQUE.TXT" | od -An -tx1 | tr -d ' ')" = efbbbf ] && grep -q $'\r$' "$T/ARRANQUE.TXT" \
+     && grep -q "^Línea de órdenes: apagar registro sinmusl$" <<< "$A" && grep -q "^Hispa-64 etapa 11: todo en orden.$" <<< "$A" \
+     && [ "$(tail -1 <<< "$A")" = "(el arranque, entero)" ] \
+     && [ "$(serie "$T/ureg.txt" | sed -n '/Hispa-64 0.11.* Copyright/,/^Hispa-64 etapa 11/p' | wc -l)" = "$(sed -n '/^Hispa-64 0.11.* Copyright/,/^Hispa-64 etapa 11/p' <<< "$A" | wc -l)" ] \
+     && fsck_bien "$T/ureg/hispa64.img" "$r2" $(( g2 - r2 + 1 )) \
+     && ! mdir -i "$T/uefi5/hispa64.img@@$((i2 * 512))" ::/ARRANQUE.TXT > /dev/null 2>&1; then
+    ok "[etapa 10 e] el registro del arranque: ARRANQUE.TXT en /sata0p2 (la de pruebas del disco del que arranca), $(wc -l < "$T/ARRANQUE.TXT") líneas, las mismas que por el puerto serie, en UTF-8 y con CRLF; fsck.fat, bien; sin «registro» y con puerto serie, no se escribe"
+  else ko "[etapa 10 e] el registro del arranque no sale (código $c): $(serie "$T/ureg.txt" | grep -E '^Registro|parado|MAL' | paste -sd '|'); $(wc -c < "$T/ARRANQUE.TXT") octetos; $(fsck_dice)"; fi
   # [etapa 4] el CD (grub-mkrescue): por BIOS (-cdrom) y por UEFI
   if command -v grub-mkrescue > /dev/null && CD=1 "$AQUI/imagen.sh" "$T/cd" prueba > "$T/cd.txt" 2>&1 && [ -s "$T/cd/hispa64-cd.iso" ]; then
     rm -f "$T/cd-bios.txt"

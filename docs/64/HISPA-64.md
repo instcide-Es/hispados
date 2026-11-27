@@ -4197,6 +4197,24 @@ primero mira en su memoria (la misma).
   descriptores que no ha pedido; sin close_range lo hace leyendo
   `/proc/self/fd`, que no hay: TestAK no podía lanzar sus grupos
   (`Cannot start the suite`). Con CLOSE_RANGE_CLOEXEC, solo los marca.
+- **El registro del arranque, ARRANQUE.TXT** (`registro64.cas`, lo pidió
+  Carlos para el primer arranque en un equipo de verdad: sin puerto serie,
+  lo que dice el núcleo solo se veía en fotos): todo lo que se escribe
+  (también lo de los programas) se apunta además en memoria (32 KB hasta el
+  montón; luego 1 MB, reservado después de su prueba) por la misma puerta
+  que la consola (`C_consola`: `apunta_letra`, que lo pasa a la pantalla si
+  la hay), y se guarda en la memoria USB (o el disco) de la que ha arrancado:
+  en su partición de pruebas (la de HISPA64.PRB, la que Windows enseña con
+  letra) o, si no, en la EFI (la de `/boot/HISPA64.BIN`), en la raíz,
+  **en UTF-8 y con CRLF** (de la 437 de casa a Unicode, con su BOM). Solo
+  esa partición se deja escribir, el rato de guardarlo (el disco y el
+  montaje vuelven a como estaban; con fsync). Dos veces: con los discos ya
+  vistos (si se queda después, ya hay algo) y al acabar las pruebas (con la
+  última línea «(el arranque, entero)»). Con puerto serie (QEMU, VirtualBox
+  con él puesto) no se guarda, salvo con `registro`; con `sinregistro`,
+  nunca. Su prueba: por UEFI desde la imagen en SATA con `registro`: el
+  archivo en /sata0p2, las mismas líneas que el puerto serie, el FAT bien
+  (fsck.fat) y, en la imagen de la etapa 5 (sin `registro`), ningún archivo.
 - **TestAK es lento en Hispa-64** (en Linux, 1,7 s; con KVM, 23 s; con TCG
   y 4 procesadores, 211 s): lanza un proceso de 5 MB por grupo (85), y cada
   arranque de un programa grande cuesta (con TCG, de 0,1 a 2 s; muy
@@ -4226,6 +4244,7 @@ primero mira en su memoria (la misma).
 | `programas/cxx/hazcxx.sh` | los llama, después de ICU |
 | `prmusl64.cas`, `hispa64.cas` | MIMG, MLIBS, MSKIA y MAK en cada arranque con musl («MAK todas» con `ak=todas`) |
 | `vfs64.cas`, `procesos.cas` | `vfs_entero_o_unidad`: execve de la unidad sin copiar |
+| `registro64.cas`, `hispa64.cas` | el registro del arranque, ARRANQUE.TXT |
 | `sistema.cas`, `procesos.cas` | preadv, pwritev, preadv2, pwritev2, fchown y close_range; `/proc/self/exe` (`exe` en Proceso) |
 | `terceros/` | skia, zlib, libpng, libjpeg-turbo, libwebp, simdutf, fast_float, zmij, mimalloc, sqlite, woff2, wuffs, dav1d, libavif, libpsl, simdjson, zstd, tiff, ladybird y llvm-libc, cada una con su LEEME.txt (versión, de dónde, SHA-256, licencia, qué se ha quitado) |
 
@@ -4282,6 +4301,9 @@ sobre ICU), y lo guarda en `/tmp/mskia.png`, que lee otra vez.
   no correría en el `qemu64` de QEMU sin KVM (sí en VirtualBox y en los
   equipos de verdad de 2009 en adelante). Para las pruebas, sin él.
 - El SIMD de libjpeg-turbo (NASM) y el ensamblador de dav1d.
+- **ARRANQUE.TXT cuando el sistema se para** (una excepción, el vigilante):
+  hoy se guarda con los discos vistos y al acabar; guardarlo también al
+  pararse (con cuidado: el disco, desde la parada).
 - **La memoria mínima por UEFI**: con los 45 MB de la unidad (eran 23),
   GRUB ya no carga todos los módulos con 128 MB (los dos últimos se quedaban
   fuera): la prueba, con 192 MB (por multiboot, 128 siguen valiendo). Cargar
