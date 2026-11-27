@@ -1,0 +1,16 @@
+libwebp 1.6.0 (https://developers.google.com/speed/webp), con la licencia
+BSD de 3 cláusulas (compatible con la GPL) y la concesión de patentes de
+Google: ver COPYING y PATENTS.
+  libwebp-1.6.0.tar.gz  (storage.googleapis.com/downloads.webmproject.org/releases/webp)
+  SHA-256: e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564
+
+Lo usa Hispa-64 desde la etapa 10 e (docs/64/HISPA-64.md, sección 22): leer y
+escribir WebP (también las animaciones: demux y mux, lo que pide Ladybird
+con «anim» y «libwebpmux») en Skia y en Ladybird (la versión, la de su
+vcpkg.json). Aquí va, sin cambiar nada, src/ (dec, dsp, enc, utils, demux,
+mux y las cabeceras de webp/) y sharpyuv/, sin lo de NEON, MSA ni MIPS, sin
+las órdenes (cwebp, dwebp...), examples, extras ni imageio.
+src/webp/config.h es el que saca su CMake para el compilador cruzado (SSE2,
+SSE4.1 y AVX2: los dos últimos, solo si los tiene el procesador, que se mira
+al arrancar; con hilos). Se compila un archivo cada vez (castel/nucleo64/
+programas/libs/hazimg.sh: build/libwebp-obj/libwebp.a).

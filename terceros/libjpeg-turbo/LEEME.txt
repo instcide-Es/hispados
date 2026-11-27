@@ -1,0 +1,16 @@
+libjpeg-turbo 3.2.1 (https://libjpeg-turbo.org/), con sus licencias: la de
+IJG (la de libjpeg), la BSD de 3 cláusulas (la de libjpeg-turbo) y la de
+zlib, las tres permisivas y compatibles con la GPL: ver LICENSE.md y
+README.ijg.
+  libjpeg-turbo-3.2.1.tar.gz  (github.com/libjpeg-turbo/libjpeg-turbo/releases)
+  SHA-256: c27ad72a68da151177929aa969ae773a2da5ac2af9ce946079314fdac8cece7f
+
+Lo usa Hispa-64 desde la etapa 10 e (docs/64/HISPA-64.md, sección 22): leer y
+escribir JPEG en Skia y en Ladybird (la versión, la de su vcpkg.json). Aquí
+va, sin cambiar nada, lo de la biblioteca libjpeg de src/ (con src/wrapper:
+los mismos archivos compilados para 8, 12 y 16 bits), sin TurboJPEG, sin las
+órdenes (cjpeg, djpeg, jpegtran...), sin spng ni md5 y sin el SIMD (simd/,
+con NASM: más adelante). config/ son jconfig.h, jconfigint.h y jversion.h
+tal como los saca su CMake para el compilador cruzado con -DWITH_SIMD=0.
+Se compila un archivo cada vez (castel/nucleo64/programas/libs/hazimg.sh:
+build/libjpeg-obj/libjpeg.a).

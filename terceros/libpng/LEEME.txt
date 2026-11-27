@@ -1,0 +1,14 @@
+libpng 1.6.59 (http://www.libpng.org/pub/png/libpng.html), con la licencia
+de libpng (la «PNG Reference Library License version 2», permisiva y
+compatible con la GPL): ver LICENSE.
+  libpng-1.6.59.tar.xz  (download.sourceforge.net/libpng)
+  SHA-256: d80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389
+
+Lo usa Hispa-64 desde la etapa 10 e (docs/64/HISPA-64.md, sección 22): leer y
+escribir PNG en Skia y en Ladybird (la versión, la de su vcpkg.json). Aquí
+van, sin cambiar nada, los png*.c y png*.h de la biblioteca (sin pngtest.c,
+contrib, ni lo de ARM, MIPS, PowerPC, LoongArch, RISC-V ni el SSE de Intel:
+PNG_INTEL_SSE sin poner), pnglibconf.h (scripts/pnglibconf.h.prebuilt, tal
+cual) y pngtest.png (la imagen de prueba de libpng: la lee MIMG y la dibuja
+MSKIA). Se compila con el compilador cruzado, un archivo cada vez
+(castel/nucleo64/programas/libs/hazimg.sh: build/libpng-obj/libpng.a).
